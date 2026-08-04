@@ -16,6 +16,18 @@
 台詞・効果音・音楽を分けているのは、最終ミックスでもステムとして別々に保つ必要があるから
 （音楽だけ差し替える、台詞を抜いた版を作る、といった要求に作り直しなしで応えられる）。
 
+## 採用テイク（`trailer/voice/`）
+
+| ファイル | 話者 | ボイス | 状態 |
+|---|---|---|---|
+| `pa-announcement-ict-respond.wav` | 院内放送 | 未記録 | 確定 |
+| `director-welcome-umbriel.wav` | 院長 | Umbriel | 確定 |
+| `administrative-director-signature-lapetus.wav` | 事務長 | Iapetus | 確定（テイクは1本のみ） |
+| `nursing-director-start-now-kore.wav` | 看護部長 | Kore | **暫定**。他テイクと迷いあり |
+
+不採用テイクは `test/voice/` に残してある。差し替えは `trailer/voice/` の該当ファイルを
+入れ替えるだけでよい。
+
 ## 音声（`test/voice/`）
 
 Google AI Studio の Gemini 3.1 Flash TTS Preview で生成。ファイル名の末尾は使用したボイス名。
