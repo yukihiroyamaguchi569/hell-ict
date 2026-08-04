@@ -26,10 +26,11 @@ Google AI Studio の Gemini 3.1 Flash TTS Preview で生成。ファイル名の
 | `director-welcome-{schedar,umbriel,zuben}.wav` | 院長 | ようこそ、聖クロノス病院へ。優秀なICTの諸君。 | 14〜17秒 |
 | `administrative-director-signature-lapetus.wav` | 事務長 | 署名だけで結構です。 | 17〜20秒 |
 | `nursing-director-start-now-{autonoe,gacrux,kore}.wav` | 看護部長 | 説明は終わりです。今すぐ始めてください。 | 20〜23秒 |
-| `unsorted-generated-2303.wav` | **要確認** | 不明（院内放送か初期テストか未判別） | — |
+| `pa-announcement-ict-respond.wav` | 院内放送 | 感染制御チーム、至急応答してください。 | 2〜5秒 |
 
-院内放送「感染制御チーム、至急応答してください。」（2〜5秒）は、上記の要確認ファイルが該当するか、
-未取得かを判別すること。
+院内放送のみ使用ボイス名を記録していない。再生成が必要になった場合は
+`[事務的に][抑揚を抑えて]` を付けて作り直す。スピーカー越しの歪みは編集時に付ける
+（EQ で低域と高域を削り、軽く歪ませる）。
 
 ## 効果音（`test/sfx/`）
 
