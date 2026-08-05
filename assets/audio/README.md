@@ -20,15 +20,32 @@
 
 ### 台詞（`trailer/voice/`）
 
-| ファイル | 話者 | ボイス | 状態 |
+**4本すべて確定。** トレイラーの完成版に使用しているもの。
+
+| ファイル | 話者 | ボイス | 特性 |
 |---|---|---|---|
-| `pa-announcement-ict-respond.wav` | 院内放送 | 未記録 | 確定 |
-| `director-welcome-umbriel.wav` | 院長 | Umbriel | 確定 |
-| `administrative-director-signature-lapetus.wav` | 事務長 | Iapetus | 確定（テイクは1本のみ） |
-| `nursing-director-start-now-kore.wav` | 看護部長 | Kore | **暫定**。他テイクと迷いあり |
+| `pa-announcement-ict-respond.wav` | 院内放送 | 未記録 | — |
+| `director-welcome-schedar.wav` | 院長 | **Schedar** | Even・男性寄り |
+| `administrative-director-signature-achird.wav` | 事務長 | **Achird** | Friendly・低め中音 |
+| `nursing-director-start-now-kore.wav` | 看護部長 | **Kore** | Firm・女性 |
 
 不採用テイクは `test/voice/` に残してある。差し替えは `trailer/voice/` の該当ファイルを
 入れ替えるだけでよい。
+
+### 男性2役はボイスを選び直している
+
+院長は当初 **Umbriel**、事務長は **Iapetus** を採用していたが、**書き出した完成版で二人とも声が軽かった**。
+どちらも Gemini TTS のボイス一覧で**女性寄りに分類される**もので、低域が足りず、
+縞スーツの大男にも酷薄な病院長にも重みが出なかった。
+
+ここから得た教訓が2つある。
+
+**単体で聴き比べた判断は、画と全体のミックスに乗せると変わる。** 院長は無音の状態では Umbriel が
+良く聞こえ、実際それで一度確定させていた。音楽とテロップが乗った完成形で初めて軽さが露呈した。
+
+**男性キャラクターには男性寄りに分類されるボイスを選ぶ。** 特性（Even / Clear など）だけで選ぶと、
+低域の不足に後から気づくことになる。男性寄りとされるのは **Schedar・Gacrux** など。
+女性寄りとされるのは Umbriel・Iapetus・Kore・Autonoe・Zubenelgenubi など。
 
 ### 効果音（`trailer/sfx/`）
 
@@ -54,7 +71,7 @@ Google AI Studio の Gemini 3.1 Flash TTS Preview で生成。ファイル名の
 | ファイル | 話者 | 台詞 | 使用箇所 |
 |---|---|---|---|
 | `director-welcome-{schedar,umbriel,zuben}.wav` | 院長 | ようこそ、聖クロノス病院へ。優秀なICTの諸君。 | 14〜17秒 |
-| `administrative-director-signature-lapetus.wav` | 事務長 | 署名だけで結構です。 | 17〜20秒 |
+| `administrative-director-signature-{achird,lapetus}.wav` | 事務長 | 署名だけで結構です。 | 17〜20秒 |
 | `nursing-director-start-now-{autonoe,gacrux,kore}.wav` | 看護部長 | 説明は終わりです。今すぐ始めてください。 | 20〜23秒 |
 | `pa-announcement-ict-respond.wav` | 院内放送 | 感染制御チーム、至急応答してください。 | 2〜5秒 |
 
