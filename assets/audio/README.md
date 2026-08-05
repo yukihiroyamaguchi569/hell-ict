@@ -33,8 +33,12 @@
 入れ替えるだけでよい。
 
 看護部長は当初 Kore（Firm・女性）で確定としていたが、完成版に乗せた判断で Gacrux に変更した。
-`nursing-director-start-now-gacrux.wav`（初回バッチ）とは別テイクのため、
-採用分は末尾に日付を付けて `-gacrux-0805` としている。
+**あわせて台詞を「説明は終わりです。今すぐ始めてください。」から「今すぐ始めてください。」へ短縮している。**
+前半は赤ペンを突きつける画で既に伝わっており、削った方が「冷たく断ち切る」性格に近くなる。
+
+`nursing-director-start-now-gacrux.wav`（初回バッチ・旧台詞）とは別テイクのため、
+採用分は末尾に日付を付けて `-gacrux-0805` としている。**旧台詞のテイク3本は尺が異なる**
+（3.96〜5.00秒 / 採用分は 2.20秒）ので、差し戻す場合は配置し直しが必要。
 
 ### 男性2役はボイスを選び直している
 
@@ -76,7 +80,8 @@ Google AI Studio の Gemini 3.1 Flash TTS Preview で生成。ファイル名の
 |---|---|---|---|
 | `director-welcome-{schedar,umbriel,zuben}.wav` | 院長 | ようこそ、聖クロノス病院へ。優秀なICTの諸君。 | 14〜17秒 |
 | `administrative-director-signature-{achird,lapetus}.wav` | 事務長 | 署名だけで結構です。 | 17〜20秒 |
-| `nursing-director-start-now-{autonoe,gacrux,gacrux-0805,kore}.wav` | 看護部長 | 説明は終わりです。今すぐ始めてください。 | 20〜23秒 |
+| `nursing-director-start-now-gacrux-0805.wav` | 看護部長 | **今すぐ始めてください。**（採用） | 20〜23秒 |
+| `nursing-director-start-now-{autonoe,gacrux,kore}.wav` | 看護部長 | 説明は終わりです。今すぐ始めてください。（旧台詞） | — |
 | `pa-announcement-ict-respond.wav` | 院内放送 | 感染制御チーム、至急応答してください。 | 2〜5秒 |
 
 院内放送のみ使用ボイス名を記録していない。再生成が必要になった場合は
