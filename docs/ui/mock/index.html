@@ -1,0 +1,1077 @@
+<meta charset="utf-8">
+<title>地獄のICT — UIモック（00 共通シェル / 01 Prologue / 02 Stage 1）</title>
+
+<style>
+/* =========================================================================
+   地獄のICT UIモック
+   docs/ui/00_共通シェルと通奏低音.md で定義したトークンをそのまま使う。
+   モック自体は捨てる前提だが、このトークン命名は React 実装へ持ち越す。
+   ========================================================================= */
+
+/* --- 書体の3役 -------------------------------------------------------- */
+/* アプリのシェル＝今日のもの／病院から届くもの＝2003年／数字＝計器 */
+:root {
+  --font-ui: system-ui, -apple-system, "Hiragino Kaku Gothic ProN",
+             "Yu Gothic Medium", "Noto Sans JP", sans-serif;
+  --font-legacy: "ＭＳ ゴシック", "MS Gothic", "Osaka－等幅", "Osaka-Mono",
+                 "Hiragino Kaku Gothic ProN", monospace;
+  --font-num: ui-monospace, SFMono-Regular, Menlo, "Courier New", monospace;
+
+  /* 全モード共通 — AIチャットだけは、暗い病院の中で常に明るい */
+  --ai-surface: #f7f9fa;
+  --ai-surface-2: #eaeef1;
+  --ai-fg: #1a1d20;
+  --ai-muted: #656d74;
+  --ai-rule: #d4dbe0;
+  --phs: #1f6b3f;
+}
+
+/* --- テーマモード ------------------------------------------------------ */
+/* 転調は「赤い帯を足す」ではなく、器の色そのものを差し替えることで起こす。 */
+[data-mode="peace"] {
+  --bg: #f5f1e8;  --surface: #fffdf8; --surface-2: #efe9dc;
+  --fg: #2b2724;  --fg-muted: #6f6559;
+  --accent: #3f7d78; --rule: #ddd5c6;
+  --ok: #3f7d78;  --warn: #b8862b;
+}
+[data-mode="alert"] {
+  --bg: #14171a;  --surface: #1e2226; --surface-2: #272c31;
+  --fg: #e8ecef;  --fg-muted: #8d979f;
+  --accent: #c1121f; --rule: #2c3238;
+  --ok: #3fa66b;  --warn: #d99a1f;
+}
+[data-mode="crisis"] {
+  --bg: #08090a;  --surface: #101112; --surface-2: #17191b;
+  --fg: #d8dce0;  --fg-muted: #6b7176;
+  --accent: #e01e2b; --rule: #1e2022;
+  --ok: #3fa66b;  --warn: #d99a1f;
+}
+
+/* =========================================================================
+   モックの台紙（＝製品ではない部分）
+   ========================================================================= */
+.page {
+  min-height: 100vh;
+  background: #0d0f11;
+  color: #cbd2d8;
+  font-family: var(--font-ui);
+  padding: 20px clamp(12px, 3vw, 32px) 48px;
+  display: flex; flex-direction: column; gap: 18px;
+}
+
+.masthead { display: flex; flex-direction: column; gap: 6px; }
+.masthead h1 {
+  font-size: 19px; font-weight: 700; letter-spacing: .02em;
+  color: #eef2f5; margin: 0; text-wrap: balance;
+}
+.masthead p { margin: 0; font-size: 13px; color: #7d868e; max-width: 68ch; line-height: 1.7; }
+
+/* 開発用スイッチャ — 製品の一部ではないことが一目で分かる見た目にする */
+.devbar {
+  border: 1px dashed #39424a; background: #14181b;
+  padding: 12px 14px; display: flex; flex-wrap: wrap;
+  align-items: center; gap: 10px;
+}
+.devbar .tag {
+  font-family: var(--font-num); font-size: 10px; letter-spacing: .16em;
+  color: #6c757d; border: 1px solid #39424a; padding: 3px 7px;
+}
+.devbar .grp { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; }
+.devbar .sep { width: 1px; align-self: stretch; background: #2a3137; margin: 0 4px; }
+.devbar button {
+  font-family: var(--font-ui); font-size: 13px;
+  background: #1e2429; color: #b9c2c9; border: 1px solid #39424a;
+  padding: 7px 12px; cursor: pointer;
+}
+.devbar button:hover { background: #262e34; color: #e6ecf1; }
+.devbar button[aria-pressed="true"] { background: #c1121f; border-color: #c1121f; color: #fff; }
+.devbar button:focus-visible,
+.screen button:focus-visible,
+.screen input:focus-visible,
+.screen textarea:focus-visible,
+.screen [tabindex]:focus-visible { outline: 2px solid #7fb2ff; outline-offset: 2px; }
+
+.stage-wrap { position: relative; }
+.stage-fit { transform-origin: top left; }
+
+.caption { font-size: 12px; color: #6b747c; line-height: 1.8; max-width: 78ch; }
+.caption b { color: #9aa4ac; font-weight: 600; }
+
+/* =========================================================================
+   ここから下が製品の画面（1280×720 固定で設計する）
+   ========================================================================= */
+.screen {
+  width: 1280px; height: 720px; position: relative; overflow: hidden;
+  background: var(--bg); color: var(--fg);
+  font-family: var(--font-ui); font-size: 16px; line-height: 1.6;
+  display: flex; flex-direction: column;
+  transition: background-color .78s ease, color .78s ease;
+}
+.screen *, .screen *::before, .screen *::after { box-sizing: border-box; }
+.screen button { font-family: inherit; cursor: pointer; }
+
+/* --- ヘッダー h56 ------------------------------------------------------ */
+.hdr {
+  height: 56px; flex: 0 0 56px; display: flex; align-items: center;
+  gap: 20px; padding: 0 18px;
+  background: var(--surface); border-bottom: 1px solid var(--rule);
+  transition: background-color .78s ease, border-color .78s ease;
+}
+.hdr .brand { font-size: 15px; font-weight: 700; letter-spacing: .02em; white-space: nowrap; }
+.hdr .brand span { color: var(--fg-muted); font-weight: 500; }
+
+/* 院内状況インジケータ ＝ 通奏低音の実体。
+   平時の指標に紛れ込ませる。単独で置いたら気づかれてしまう。 */
+.vitals {
+  font-family: var(--font-num); font-size: 14px; color: var(--fg-muted);
+  font-variant-numeric: tabular-nums; display: flex; gap: 10px; align-items: center;
+  transition: color .78s ease;
+}
+.vitals .dot { opacity: .45; }
+.vitals .fever { transition: color .5s ease, opacity .5s ease; }
+.vitals.crescendo .plain { opacity: 0; }
+.vitals.crescendo .fever { color: var(--accent); font-weight: 700; }
+@keyframes tick { 0%,100% { opacity: 1; } 40% { opacity: .25; } }
+.vitals .fever.bumped { animation: tick .5s ease 2; }
+
+.hdr .spacer { flex: 1; }
+.clock {
+  font-family: var(--font-num); font-size: 32px; font-weight: 600;
+  font-variant-numeric: tabular-nums; letter-spacing: -.01em; line-height: 1;
+}
+.clock.idle { color: var(--fg-muted); }
+.team {
+  font-size: 15px; font-weight: 700; padding: 5px 11px;
+  border: 1px solid var(--rule); color: var(--fg-muted);
+  transition: border-color .78s ease, color .78s ease;
+}
+
+/* --- 本体3ペイン ------------------------------------------------------- */
+.body { flex: 1; display: flex; min-height: 0; }
+.pane-l { flex: 0 0 260px; border-right: 1px solid var(--rule); display: flex; flex-direction: column; min-height: 0; }
+.pane-c { flex: 1; min-width: 0; display: flex; flex-direction: column; min-height: 0; }
+.pane-r { flex: 0 0 380px; border-left: 1px solid var(--rule); display: flex; flex-direction: column; min-height: 0; }
+.pane-l, .pane-r { transition: border-color .78s ease; }
+.hide { display: none !important; }
+
+.pane-hd {
+  flex: 0 0 auto; padding: 11px 14px; font-size: 13px; font-weight: 700;
+  letter-spacing: .06em; color: var(--fg-muted);
+  border-bottom: 1px solid var(--rule); display: flex; align-items: center; gap: 8px;
+  transition: color .78s ease, border-color .78s ease;
+}
+.pane-hd .count {
+  font-family: var(--font-num); background: var(--accent); color: #fff;
+  padding: 1px 7px; font-size: 12px; font-weight: 700;
+}
+
+/* --- 受信トレイ -------------------------------------------------------- */
+.mails { overflow-y: auto; flex: 1; }
+.mail {
+  width: 100%; text-align: left; background: none; border: 0;
+  border-bottom: 1px solid var(--rule); padding: 11px 14px;
+  color: var(--fg); display: block; transition: border-color .78s ease;
+}
+.mail:hover { background: var(--surface-2); }
+.mail[aria-current="true"] { background: var(--surface); box-shadow: inset 3px 0 0 var(--accent); }
+.mail .from { font-size: 14px; font-weight: 700; display: flex; align-items: center; gap: 6px; }
+.mail .from::before { content: "●"; font-size: 9px; color: var(--accent); }
+.mail.read .from { font-weight: 500; color: var(--fg-muted); }
+.mail.read .from::before { content: "○"; color: var(--fg-muted); }
+.mail .subj { font-size: 13px; color: var(--fg-muted); margin-top: 2px; line-height: 1.45; }
+/* ファイル名は省略しない。最新版(2)_コピー が笑いどころなので全部見せる。 */
+.mail .attach {
+  font-family: var(--font-legacy); font-size: 12px; color: var(--fg-muted);
+  margin-top: 6px; word-break: break-all; line-height: 1.5;
+}
+@keyframes land {
+  0% { transform: translateX(-14px); opacity: 0; }
+  55% { transform: translateX(4px); opacity: 1; }
+  70% { transform: translateX(-3px); }
+  85% { transform: translateX(2px); }
+  100% { transform: translateX(0); }
+}
+.mail.landing { animation: land .55s ease-out; }
+
+/* --- 病院から届くものは 2003年の書式で描く ----------------------------- */
+.legacy { font-family: var(--font-legacy); font-size: 15px; line-height: 1.9; }
+.reader { flex: 1; overflow-y: auto; padding: 22px 28px; }
+.reader .rule { border-top: 1px solid var(--rule); margin: 12px 0; transition: border-color .78s ease; }
+.reader .meta { font-family: var(--font-legacy); font-size: 13px; color: var(--fg-muted); }
+.reader h2 { font-family: var(--font-legacy); font-size: 17px; font-weight: 700; margin: 0; }
+.reader p { margin: 0 0 1.1em; max-width: 62ch; }
+.reader p:last-child { margin-bottom: 0; }
+
+/* --- ワークスペース ---------------------------------------------------- */
+.work { flex: 1; overflow-y: auto; padding: 22px 28px; display: flex; flex-direction: column; gap: 18px; }
+.stage-title { font-size: 20px; font-weight: 700; display: flex; align-items: center; gap: 9px; }
+.stage-title::before { content: "▸"; color: var(--accent); }
+.brief { font-size: 18px; line-height: 1.75; max-width: 60ch; }
+.cols {
+  font-family: var(--font-num); font-size: 13px; color: var(--fg-muted);
+  border-left: 2px solid var(--rule); padding-left: 12px; line-height: 1.9;
+}
+.box { border: 1px solid var(--rule); background: var(--surface); transition: background-color .78s ease, border-color .78s ease; }
+.box > .hd {
+  padding: 8px 13px; font-size: 13px; font-weight: 700; letter-spacing: .05em;
+  color: var(--fg-muted); border-bottom: 1px solid var(--rule);
+}
+.submit-area {
+  width: 100%; min-height: 132px; resize: vertical; display: block;
+  background: transparent; color: var(--fg); border: 0; padding: 13px;
+  font-family: var(--font-num); font-size: 14px; line-height: 1.7;
+}
+.submit-area::placeholder { color: var(--fg-muted); }
+.recog {
+  font-family: var(--font-num); font-size: 13px; color: var(--fg-muted);
+  padding: 0 13px 11px; min-height: 1.4em;
+}
+/* 提出したらフォームを1行に畳む。1画面を全員で囲むので、
+   判定結果を見るのにスクロールさせるわけにいかない。 */
+.folded {
+  display: flex; align-items: center; gap: 14px;
+  border: 1px solid var(--rule); background: var(--surface);
+  padding: 11px 13px; font-family: var(--font-num); font-size: 14px; color: var(--fg-muted);
+}
+.folded .grow { flex: 1; }
+/* 提出ボタンは中央ペインの中に置く。監査役が「待って」と言える距離に。 */
+.row-end { display: flex; justify-content: flex-end; gap: 10px; align-items: center; }
+.btn {
+  background: var(--accent); color: #fff; border: 1px solid var(--accent);
+  padding: 11px 26px; font-size: 16px; font-weight: 700; letter-spacing: .04em;
+}
+.btn:hover { filter: brightness(1.12); }
+.btn.ghost { background: transparent; color: var(--fg); border-color: var(--rule); font-weight: 500; }
+.btn.ghost:hover { background: var(--surface-2); filter: none; }
+
+/* --- 判定：1項目ずつ点いていく2秒間 ------------------------------------ */
+.verdict { display: flex; flex-direction: column; gap: 9px; }
+.verdict .lead { font-size: 15px; color: var(--fg-muted); }
+.check {
+  display: flex; gap: 11px; align-items: flex-start; font-size: 16px;
+  opacity: 0; transform: translateY(3px); transition: opacity .22s ease, transform .22s ease;
+}
+.check.on { opacity: 1; transform: none; }
+.check .mark { font-family: var(--font-num); font-weight: 700; flex: 0 0 auto; }
+.check.pass .mark { color: var(--ok); }
+.check.fail .mark { color: var(--warn); }
+.check.halt { color: var(--fg-muted); }
+.check .why {
+  display: block; font-size: 14px; color: var(--warn);
+  font-family: var(--font-legacy); margin-top: 4px;
+}
+.verdict .done { font-size: 17px; font-weight: 700; color: var(--ok); padding-top: 6px; }
+
+/* --- AIチャット：暗い病院の中で、ここだけが白い ------------------------ */
+.ai { background: var(--ai-surface); color: var(--ai-fg); display: flex; flex-direction: column; min-height: 0; }
+.ai .tabs { display: flex; align-items: stretch; border-bottom: 1px solid var(--ai-rule); background: var(--ai-surface-2); }
+.ai .tab {
+  background: var(--ai-surface); border: 0; border-right: 1px solid var(--ai-rule);
+  padding: 9px 18px; font-size: 14px; font-weight: 600; color: var(--ai-fg);
+}
+.ai .tab.add { background: transparent; color: var(--ai-muted); font-size: 17px; padding: 9px 14px; }
+.ai .log { flex: 1; overflow-y: auto; padding: 18px 16px; display: flex; flex-direction: column; gap: 14px; }
+.ai .empty { color: var(--ai-muted); font-size: 15px; }
+.ai .compose { border-top: 1px solid var(--ai-rule); padding: 11px 12px; display: flex; gap: 9px; align-items: flex-end; }
+.ai .compose textarea {
+  flex: 1; resize: none; height: 44px; max-height: 84px; padding: 11px 12px;
+  border: 1px solid var(--ai-rule); background: #fff; color: var(--ai-fg);
+  font-family: var(--font-ui); font-size: 15px; line-height: 1.5;
+}
+.ai .compose button {
+  border: 0; background: var(--ai-fg); color: #fff; padding: 12px 17px;
+  font-size: 15px; font-weight: 700;
+}
+.bubble { font-size: 16px; line-height: 1.7; }
+.bubble .who { font-size: 12px; font-weight: 700; letter-spacing: .1em; color: var(--ai-muted); margin-bottom: 5px; }
+.bubble.me .body { background: var(--ai-surface-2); padding: 11px 13px; }
+.fold {
+  font-family: var(--font-num); font-size: 13px; color: var(--ai-muted);
+  border: 1px solid var(--ai-rule); background: #fff; padding: 8px 11px; width: 100%; text-align: left;
+}
+
+/* --- リーダーボード帯 h48 ---------------------------------------------- */
+.board {
+  height: 48px; flex: 0 0 48px; background: var(--surface);
+  border-top: 1px solid var(--rule); padding: 0 22px;
+  display: flex; align-items: center; gap: 18px;
+  transition: transform .5s cubic-bezier(.2,.7,.3,1), background-color .78s ease, border-color .78s ease;
+}
+.board.down { transform: translateY(100%); }
+.board .track { flex: 1; position: relative; height: 100%; }
+/* 駅名は上段、チームのマーカーは下段。重ねない。 */
+.board .stops {
+  position: absolute; left: 0; right: 0; top: 7px; display: flex;
+  justify-content: space-between; font-family: var(--font-num);
+  font-size: 11px; color: var(--fg-muted); letter-spacing: .04em;
+  transition: color .78s ease;
+}
+.board .marks { position: absolute; left: 0; right: 0; bottom: 6px; height: 18px; }
+.mark-t {
+  position: absolute; bottom: 0; transform: translateX(-50%);
+  font-size: 12px; color: var(--fg-muted); transition: left .9s cubic-bezier(.4,0,.2,1);
+  display: flex; align-items: center; gap: 5px; white-space: nowrap;
+}
+.mark-t.me { color: var(--accent); font-weight: 700; font-size: 14px; }
+.mark-t.lead { color: var(--fg); }
+.mark-t .nm { font-family: var(--font-ui); font-size: 12px; }
+
+/* --- 院内連絡先：浮く別ウィンドウ（AIと同じ吹き出しを共用しない） ------
+   AIチャットの上には重ねない。重ねると入力欄を塞ぐうえ、
+   「AIと先輩が同じ場所にいる」ように見えてテーマが濁る。 */
+.phs { position: absolute; right: 400px; bottom: 62px; z-index: 40; font-family: var(--font-legacy); }
+.phs .bar {
+  width: 220px; height: 44px; background: var(--phs); color: #fff;
+  display: flex; align-items: center; gap: 8px; padding: 0 12px;
+  font-size: 14px; border: 0; text-align: left;
+}
+.phs .bar .grow { flex: 1; }
+.phs .badge {
+  background: #d81f2a; color: #fff; font-family: var(--font-num);
+  font-size: 12px; font-weight: 700; padding: 1px 7px;
+}
+@keyframes pulse { 0%,100% { opacity: 1; } 50% { opacity: .25; } }
+.phs .badge.blink { animation: pulse 1.1s ease-in-out infinite; }
+.phs .win { width: 320px; background: #fff; color: #16181a; border: 1px solid var(--phs); border-top: 0; }
+.phs .win .who { padding: 8px 12px; font-size: 13px; border-bottom: 1px solid #cfd6d1; background: #eef3ef; }
+.phs .win .log { height: 232px; overflow-y: auto; padding: 12px; font-size: 14px; line-height: 1.85; }
+.phs .win .log p { margin: 0 0 10px; }
+.phs .win .log .wait { color: #6b736e; }
+.phs .win .cmp { display: flex; border-top: 1px solid #cfd6d1; }
+.phs .win .cmp input { flex: 1; border: 0; padding: 10px; font-family: var(--font-legacy); font-size: 14px; background: #fff; color: #16181a; }
+.phs .win .cmp button { border: 0; border-left: 1px solid #cfd6d1; background: #eef3ef; color: #16181a; padding: 10px 15px; font-family: var(--font-legacy); font-size: 14px; }
+
+/* --- オーバーレイ ------------------------------------------------------ */
+.veil { position: absolute; inset: 0; z-index: 60; display: flex; align-items: center; justify-content: center; }
+
+/* 入室 */
+.entry { background: var(--bg); flex-direction: column; gap: 26px; transition: background-color .78s ease; }
+.entry .logo { text-align: center; }
+.entry .logo .h { font-size: 26px; font-weight: 700; letter-spacing: .04em; }
+.entry .logo .s { font-size: 17px; color: var(--fg-muted); margin-top: 5px; }
+.entry .lab { font-size: 15px; color: var(--fg-muted); text-align: center; }
+.entry .code { display: flex; gap: 9px; justify-content: center; }
+.entry .code input {
+  width: 54px; height: 68px; text-align: center; background: var(--surface);
+  border: 1px solid var(--rule); color: var(--fg);
+  font-family: var(--font-num); font-size: 32px; font-weight: 600;
+}
+
+/* ウェルカム */
+.welcome { padding: 40px 60px; overflow-y: auto; }
+.welcome .inner { max-width: 780px; margin: 0 auto; display: flex; flex-direction: column; gap: 24px; }
+.welcome h2 { font-size: 25px; font-weight: 700; margin: 0; text-wrap: balance; }
+.welcome .say { font-size: 18px; line-height: 1.85; max-width: 58ch; }
+.welcome .roles-lab { font-size: 15px; color: var(--fg-muted); text-align: center; }
+.roles { display: flex; gap: 13px; }
+.role { flex: 1; border: 1px solid var(--rule); background: var(--surface); padding: 14px 12px; text-align: center; }
+.role .ic { font-size: 24px; }
+.role .nm { font-size: 15px; font-weight: 700; margin: 5px 0 10px; }
+.role input {
+  width: 100%; background: transparent; border: 0; border-bottom: 1px solid var(--rule);
+  color: var(--fg); font-family: var(--font-ui); font-size: 15px; padding: 5px 2px; text-align: center;
+}
+.role.opt { opacity: .62; }
+.welcome .note { font-size: 14px; color: var(--fg-muted); line-height: 1.8; }
+
+/* 急変：赤帯は3秒で消える。赤は使い減りする資源として扱う。 */
+.redband {
+  position: absolute; left: 0; right: 0; top: 56px; z-index: 55;
+  background: var(--accent); color: #fff;
+  font-size: 22px; font-weight: 700; letter-spacing: .04em;
+  padding: 15px 24px; transform: translateX(-100%);
+}
+.redband.in { animation: bandIn .28s ease-out forwards; }
+.redband.out { animation: bandOut .4s ease-in forwards; }
+@keyframes bandIn { to { transform: translateX(0); } }
+@keyframes bandOut { from { transform: translateX(0); opacity: 1; } to { transform: translateX(0); opacity: 0; } }
+
+/* 解錠 */
+.unlock { background: rgba(8,9,10,.72); flex-direction: column; gap: 14px; }
+.unlock .bar {
+  height: 4px; width: 0; background: var(--ok);
+  animation: sweep .5s ease-out forwards;
+}
+@keyframes sweep { to { width: 460px; } }
+.unlock .t { font-size: 30px; font-weight: 700; color: #fff; letter-spacing: .05em; }
+.unlock .s { font-size: 16px; color: #b9c2c9; }
+
+/* 教材ビューア：見た目を整えない。汚いまま出す。
+   これはアプリの画面ではなく病院から届いた「ファイル」なので、
+   テーマに追従させず白い紙として固定する。 */
+.viewer { background: rgba(8,9,10,.6); padding: 46px; }
+.viewer .win {
+  width: 100%; max-width: 900px; background: #fbfbf8; color: #16181a;
+  border: 1px solid #9aa0a6; display: flex; flex-direction: column; max-height: 100%;
+}
+.viewer .tb {
+  display: flex; align-items: center; gap: 10px; padding: 9px 12px;
+  border-bottom: 1px solid #c8ccc4;
+  font-family: var(--font-legacy); font-size: 13px; word-break: break-all;
+}
+.viewer .tb .grow { flex: 1; }
+.viewer .tb button { background: #f0f1ec; border: 1px solid #b3b8b0; color: #16181a; font-size: 13px; padding: 5px 11px; font-family: var(--font-ui); }
+.viewer .tb button:hover { background: #e3e5df; }
+.viewer .sheet { overflow: auto; padding: 14px; }
+.viewer pre { margin: 0; font-family: var(--font-legacy); font-size: 13px; line-height: 1.95; white-space: pre; }
+
+@media (prefers-reduced-motion: reduce) {
+  .screen, .screen *, .stage-fit { transition-duration: .001ms !important; animation-duration: .001ms !important; animation-iteration-count: 1 !important; }
+}
+</style>
+
+<div class="page">
+
+  <div class="masthead">
+    <h1>地獄のICT — UIモック</h1>
+    <p>
+      <code>docs/ui/</code> の設計書3本を、実際に見て判断できる形にしたもの。1280×720 固定で設計している。
+      文言はダミーではなく <code>docs/scenario/</code> に書かれている実物を入れてあるので、画面と一緒に文言の善し悪しも判断できる。
+      音は入れていない。<b>このモックは捨てる前提</b>で、実装へ持ち越すのは CSS カスタムプロパティの命名だけ。
+    </p>
+  </div>
+
+  <div class="devbar">
+    <span class="tag">開発用スイッチャ</span>
+    <div class="grp" id="steps"></div>
+    <div class="sep"></div>
+    <div class="grp">
+      <button id="btn-transition">急変を再生</button>
+      <button id="btn-verdict-ok" aria-pressed="true">判定：通過</button>
+      <button id="btn-verdict-ng">判定：差し戻し</button>
+      <button id="btn-phs">田所さんから着信</button>
+    </div>
+  </div>
+
+  <div class="stage-wrap" id="wrap">
+    <div class="stage-fit" id="fit">
+
+      <!-- =============== 製品の画面 ここから =============== -->
+      <div class="screen" id="screen" data-mode="peace">
+
+        <!-- ヘッダー -->
+        <div class="hdr">
+          <div class="brand">🏥 聖クロノス総合病院 <span>感染制御チーム</span></div>
+          <div class="vitals" id="vitals">
+            <span class="plain">在院 398/400</span><span class="dot plain">・</span>
+            <span class="plain">空床 2</span><span class="dot plain">・</span>
+            <span class="plain">本日入院 7</span><span class="dot plain">・</span>
+            <span class="fever">原因不明の発熱 <b id="fever">3</b></span>
+          </div>
+          <div class="spacer"></div>
+          <div class="clock idle" id="clock">--:--</div>
+          <div class="team">B班</div>
+        </div>
+
+        <!-- 赤帯（急変時に3秒だけ出る） -->
+        <div class="redband hide" id="redband">5A病棟より緊急連絡。MRSA疑い、拡大の可能性。</div>
+
+        <!-- 3ペイン -->
+        <div class="body">
+
+          <!-- 左：受信トレイ -->
+          <div class="pane-l hide" id="pane-l">
+            <div class="pane-hd">受信トレイ <span class="count" id="unread">3</span></div>
+            <div class="mails" id="mails"></div>
+          </div>
+
+          <!-- 中央：ウェルカム／メール本文／ワークスペース -->
+          <div class="pane-c" id="pane-c"></div>
+
+          <!-- 右：AIチャット -->
+          <div class="pane-r ai hide" id="pane-r">
+            <div class="tabs">
+              <button class="tab">メイン</button>
+              <button class="tab add" title="スレッドを追加">＋</button>
+            </div>
+            <div class="log" id="ai-log">
+              <div class="empty">（まだ何もありません）</div>
+            </div>
+            <div class="compose">
+              <textarea placeholder="" aria-label="AIへの指示"></textarea>
+              <button>送信</button>
+            </div>
+          </div>
+        </div>
+
+        <!-- リーダーボード帯 -->
+        <div class="board down" id="board">
+          <div class="track">
+            <div class="stops">
+              <span>Prologue</span><span>S1</span><span>S2</span><span>S3</span>
+              <span>S4</span><span>S5</span><span>Final</span>
+            </div>
+            <div class="marks" id="marks"></div>
+          </div>
+        </div>
+
+        <!-- 院内連絡先（別ウィンドウ） -->
+        <div class="phs hide" id="phs">
+          <div class="win hide" id="phs-win">
+            <div class="who">情シス　田所</div>
+            <div class="log" id="phs-log"></div>
+            <div class="cmp">
+              <input aria-label="院内連絡先への相談" placeholder="">
+              <button>送信</button>
+            </div>
+          </div>
+          <button class="bar" id="phs-bar">
+            <span>📞</span><span class="grow">院内連絡先</span>
+            <span class="badge blink hide" id="phs-badge">1</span>
+          </button>
+        </div>
+
+        <!-- オーバーレイ群 -->
+        <div class="veil entry hide" id="ov-entry">
+          <div class="logo">
+            <div class="h">🏥 聖クロノス総合病院</div>
+            <div class="s">感染制御チーム</div>
+          </div>
+          <div class="lab">チームコードを入力</div>
+          <div class="code" id="code"></div>
+          <button class="btn" id="btn-enter">入室する</button>
+        </div>
+
+        <div class="veil viewer hide" id="ov-viewer">
+          <div class="win">
+            <div class="tb">
+              <span class="grow">5A病棟_MRSA_記録_最新版(2)_コピー.xlsx</span>
+              <button id="btn-copy">コピー</button>
+              <button>ダウンロード</button>
+              <button id="btn-viewer-close">閉じる</button>
+            </div>
+            <div class="sheet"><pre id="sheet"></pre></div>
+          </div>
+        </div>
+
+        <div class="veil unlock hide" id="ov-unlock">
+          <div class="bar"></div>
+          <div class="t">Stage 2 を解錠しました</div>
+          <div class="s">二正面 — 同時多発</div>
+        </div>
+
+      </div>
+      <!-- =============== 製品の画面 ここまで =============== -->
+
+    </div>
+  </div>
+
+  <p class="caption" id="note"></p>
+</div>
+
+<script>
+(() => {
+  "use strict";
+
+  const $ = (id) => document.getElementById(id);
+  const screenEl = $("screen");
+  const paneL = $("pane-l"), paneC = $("pane-c"), paneR = $("pane-r");
+  const reduce = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+  const wait = (ms) => new Promise((r) => setTimeout(r, reduce ? 0 : ms));
+  let timers = [];
+  const later = (fn, ms) => { timers.push(setTimeout(fn, reduce ? 0 : ms)); };
+  const clearLater = () => { timers.forEach(clearTimeout); timers = []; };
+
+  /* ------------------------------------------------------------------ */
+  /* シナリオの実文言（docs/scenario/ より）                              */
+  /* ------------------------------------------------------------------ */
+  const MAILS = [
+    {
+      from: "人事課", subj: "【ようこそ】着任おめでとうございます",
+      body: [
+        "ICTの皆様、着任おめでとうございます。当院は400床、地域の中核を担う病院です。",
+        "電子カルテは……少々年季が入っておりますが（2003年製）、じきに慣れます。ご活躍を期待しています。"
+      ]
+    },
+    {
+      from: "前任ICN", subj: "引き継ぎメモ（大したことないです）",
+      body: [
+        "昨日まで担当していた者です。特に大きな問題はありません。",
+        "5A病棟の師長さんは少し気が短いですが、いい人です。困ったら頼ってください。ではお元気で。"
+      ]
+    },
+    {
+      // 種。太字にしない・色を変えない・囲まない。段落の途中に置く。
+      from: "夜勤師長", subj: "昨夜の申し送り",
+      body: [
+        "お疲れさまです。昨夜は平穏でした。インフルの疑い患者もゼロです。",
+        "なお、ここ数日、原因不明の発熱の患者さんが数名出ていますが、まあ夏風邪でしょう。特に対応は不要かと。",
+        "それでは、よい一日を。"
+      ]
+    }
+  ];
+
+  const MAIL_S1 = {
+    from: "5A病棟 師長", subj: "至急！！MRSAのやつまとめて",
+    attach: "5A病棟_MRSA_記録_最新版(2)_コピー.xlsx",
+    body: [
+      "新しいICTの方ですよね。悪いけど急ぎで。",
+      "5A病棟でMRSA疑いが出てます。とりあえず手元の記録、そのままのExcelで送ります。",
+      "これ、感染対策の会議で使える形にキレイにまとめてください。日付とかバラバラですみません、私が作ったんじゃないので。",
+      "朝の申し送りまでに疫学曲線の材料も要るそうです。よろしく！"
+    ]
+  };
+
+  const MAIL_UNLOCK = {
+    from: "5A病棟 師長", subj: "Re: 至急！！MRSAのやつまとめて",
+    body: ["え、もう？　…助かる。あなた達、話が早いわね。"]
+  };
+
+  /* 配布版の教材。設計用の ★ 目印は消してある。 */
+  const SHEET = [
+    "※このファイルは5A病棟師長が個人的につけている記録です。正式なものではありません。",
+    "5A病棟の状況　7月分",
+    "",
+    "患者ＩＤ  なまえ        びょうとう  採取日       MRSA   発熱     メモ",
+    "００１     佐藤　一郎    5A病棟      7/3         陽性   あり     個室へ",
+    "id-2      鈴木  花子                7月3日      (+)    38.2℃",
+    "no.3      高橋健        （結合）    R8.7.3      ポジ   なし",
+    "４番      田中　みゆき              さんにち     ＋     あり     家族面会あり",
+    "005       渡辺 三郎     5A          7.3         陰性   37.9℃   熱が続く",
+    "6         いとう                    2026/07/04  －     あり",
+    "007       山本　和子    5A病棟      7/4         陰性   なし",
+    "008       中村太郎                  ７月４日     ネガ   38.5℃",
+    "",
+    "009       小林　愛      5A          7/5         陽性   あり     接触者調査中"
+  ].join("\n");
+  $("sheet").textContent = SHEET;
+
+  const PHS_LINES = [
+    "〔田所〕また師長のExcelですか。あれ、日付の書き方が5種類くらいありますよね。",
+    "〔田所〕そういうの、手で直すもんじゃないですよ。……で、そっちにAIあるんでしょ？ うちには無いのに。"
+  ];
+
+  /* ------------------------------------------------------------------ */
+  /* 状態                                                                */
+  /* ------------------------------------------------------------------ */
+  let mailState = MAILS.map(() => false);   // 既読フラグ
+  let readS1 = false, readU = false;
+  let openIdx = null;
+  let hasS1Mail = false;
+  let hasUnlockMail = false;
+  let verdictPasses = true;
+
+  /* 6桁コード入力欄 */
+  $("code").innerHTML = "";
+  "482103".split("").forEach((ch) => {
+    const i = document.createElement("input");
+    i.maxLength = 1; i.value = ch; i.setAttribute("aria-label", "チームコード");
+    $("code").appendChild(i);
+  });
+
+  /* リーダーボードのマーカー。下位チームは匿名。晒さない。 */
+  const TEAMS = [
+    { pos: 1, kind: "other" }, { pos: 1, kind: "other" },
+    { pos: 1, kind: "me", nm: "B班" },
+    { pos: 2, kind: "other" }, { pos: 3, kind: "lead", nm: "D班" },
+    { pos: 1, kind: "other" }
+  ];
+  function drawMarks() {
+    const el = $("marks"); el.innerHTML = "";
+    // 同じ停留所に複数チームがいるときは横に散らす。重ねると誰がどこか読めない。
+    const byPos = new Map();
+    TEAMS.forEach((t) => {
+      if (!byPos.has(t.pos)) byPos.set(t.pos, []);
+      byPos.get(t.pos).push(t);
+    });
+    byPos.forEach((group, pos) => {
+      // 匿名を先に、名前付きを後ろに並べてから散らす
+      group.sort((a, b) => (a.nm ? 1 : 0) - (b.nm ? 1 : 0));
+      group.forEach((t, k) => {
+        const d = document.createElement("div");
+        d.className = "mark-t " + (t.kind === "me" ? "me" : t.kind === "lead" ? "lead" : "");
+        d.style.left = (pos * (100 / 6) + (k - (group.length - 1) / 2) * 3.4) + "%";
+        d.innerHTML = (t.kind === "me" ? "◆" : t.kind === "lead" ? "●" : "○") +
+                      (t.nm ? '<span class="nm">' + t.nm + "</span>" : "");
+        el.appendChild(d);
+      });
+    });
+  }
+  drawMarks();
+
+  /* 経過時間 */
+  let clockOn = false, elapsed = 0, clockTimer = null;
+  function startClock() {
+    if (clockOn) return;
+    clockOn = true; $("clock").classList.remove("idle");
+    clockTimer = setInterval(() => {
+      elapsed++;
+      const m = String(Math.floor(elapsed / 60)).padStart(2, "0");
+      const s = String(elapsed % 60).padStart(2, "0");
+      $("clock").textContent = m + ":" + s;
+    }, 1000);
+  }
+  function stopClock() {
+    clockOn = false; clearInterval(clockTimer);
+    $("clock").textContent = "--:--"; $("clock").classList.add("idle");
+  }
+
+  /* ------------------------------------------------------------------ */
+  /* 受信トレイ                                                          */
+  /* ------------------------------------------------------------------ */
+  function renderMails(landing) {
+    const box = $("mails"); box.innerHTML = "";
+    const list = [];
+    if (hasUnlockMail) list.push({ m: MAIL_UNLOCK, key: "u", read: readU });
+    if (hasS1Mail) list.push({ m: MAIL_S1, key: "s1", read: readS1 });
+    MAILS.forEach((m, i) => list.push({ m, key: i, read: mailState[i] }));
+
+    list.forEach((it) => {
+      const b = document.createElement("button");
+      b.className = "mail" + (it.read ? " read" : "") + (landing === it.key ? " landing" : "");
+      b.setAttribute("aria-current", String(openIdx === it.key));
+      b.innerHTML =
+        '<div class="from">' + it.m.from + "</div>" +
+        '<div class="subj">' + it.m.subj + "</div>" +
+        (it.m.attach ? '<div class="attach">📎 ' + it.m.attach + "</div>" : "");
+      b.addEventListener("click", () => {
+        if (typeof it.key === "number") mailState[it.key] = true;
+        else if (it.key === "s1") readS1 = true;
+        else if (it.key === "u") readU = true;
+        openIdx = it.key;
+        if (view === "inbox") renderInbox(); else renderMails();
+        if (view === "inbox") readerFor(it.m);
+      });
+      box.appendChild(b);
+    });
+    const unread = list.filter((it) => !it.read).length;
+    $("unread").textContent = String(unread);
+    $("unread").classList.toggle("hide", unread === 0);
+  }
+
+  function mailBodyHTML(m) {
+    return '<div class="legacy">' +
+      '<h2>件名: ' + m.subj + "</h2>" +
+      '<div class="meta">差出人: ' + m.from + "</div>" +
+      '<div class="rule"></div>' +
+      m.body.map((p) => "<p>" + p + "</p>").join("") +
+      (m.attach ? '<div class="rule"></div><div class="meta">📎 ' + m.attach + "</div>" : "") +
+      "</div>";
+  }
+
+  function readerFor(m) {
+    paneC.innerHTML = '<div class="reader">' + mailBodyHTML(m) + "</div>";
+  }
+
+  /* ------------------------------------------------------------------ */
+  /* 画面（ビュー）                                                      */
+  /* ------------------------------------------------------------------ */
+  let view = "entry";
+
+  function hideOverlays() {
+    ["ov-entry", "ov-viewer", "ov-unlock"].forEach((id) => $(id).classList.add("hide"));
+  }
+
+  function renderEntry() {
+    hideOverlays();
+    $("ov-entry").classList.remove("hide");
+    paneL.classList.add("hide"); paneR.classList.add("hide");
+    paneC.innerHTML = "";
+  }
+
+  function renderWelcome() {
+    hideOverlays();
+    paneL.classList.add("hide"); paneR.classList.add("hide");
+    paneC.innerHTML =
+      '<div class="welcome"><div class="inner">' +
+        "<h2>聖クロノス総合病院 感染制御チーム（ICT）へようこそ</h2>" +
+        '<div class="say">本日より着任される皆さんです。まずは落ち着いて、届いているメールに目を通してください。' +
+        "何も起きていません。いい一日になりますように。</div>" +
+        '<div class="roles-lab">＼ 今日のあなたのチーム ／</div>' +
+        '<div class="roles">' +
+          role("🧠", "司令塔", "") + role("⌨️", "手", "") +
+          role("🔍", "監査役", "") + role("🎲", "遊撃", " opt") +
+        "</div>" +
+        '<div class="note">役割はステージごとに交代します。PCはこの1台だけ、触れるのは「手」の1人です。' +
+        "（3人チームは「遊撃」を空欄のままで進めます）</div>" +
+        '<div class="row-end"><button class="btn" id="btn-inbox">受信トレイへ</button></div>' +
+      "</div></div>";
+    $("btn-inbox").addEventListener("click", () => go("inbox"));
+  }
+  function role(ic, nm, cls) {
+    return '<div class="role' + cls + '"><div class="ic">' + ic + "</div>" +
+           '<div class="nm">' + nm + '</div><input aria-label="' + nm + 'の担当者"></div>';
+  }
+
+  function renderInbox() {
+    hideOverlays();
+    paneL.classList.remove("hide"); paneR.classList.remove("hide");
+    renderMails();
+    if (openIdx === null) {
+      paneC.innerHTML = '<div class="reader"><div class="legacy" style="color:var(--fg-muted)">' +
+        "左の一覧からメールを開いてください。</div></div>";
+    }
+  }
+
+  function renderStage1() {
+    hideOverlays();
+    paneL.classList.remove("hide"); paneR.classList.remove("hide");
+    hasS1Mail = true; openIdx = "s1"; readS1 = true;
+    renderMails();
+    paneC.innerHTML =
+      '<div class="work">' +
+        '<div class="stage-title">Stage 1　火の手</div>' +
+        // 正規化ルールの表は出さない。要件の言語化そのものが学習目標だから。
+        '<div class="brief">統一されたラインリストに整形し、疫学曲線の材料を提出せよ。</div>' +
+        '<div class="cols">提出する列：患者ID / 氏名 / 病棟 / 採取日 / MRSA結果 / 発熱 / 備考</div>' +
+        '<div class="box" id="submit-box">' +
+          '<div class="hd">提出</div>' +
+          '<textarea class="submit-area" id="submit" placeholder="整形後の表を貼り付け（CSV / TSV / 表のコピーを受け付けます）"></textarea>' +
+          '<div class="recog" id="recog"></div>' +
+        "</div>" +
+        '<div class="folded hide" id="folded">' +
+          '<span class="grow" id="folded-t"></span>' +
+          '<button class="btn ghost hide" id="btn-reopen">提出に戻る</button>' +
+        "</div>" +
+        '<div class="row-end" id="actions">' +
+          '<button class="btn ghost" id="btn-open-viewer">添付を開く</button>' +
+          '<button class="btn" id="btn-submit">提出する</button>' +
+        "</div>" +
+        '<div id="verdict"></div>' +
+      "</div>";
+
+    $("btn-open-viewer").addEventListener("click", () => $("ov-viewer").classList.remove("hide"));
+    $("btn-submit").addEventListener("click", runVerdict);
+    $("btn-reopen").addEventListener("click", () => {
+      $("submit-box").classList.remove("hide");
+      $("actions").classList.remove("hide");
+      $("folded").classList.add("hide");
+      $("verdict").innerHTML = "";
+    });
+    const ta = $("submit");
+    ta.addEventListener("input", () => {
+      const t = ta.value.trim();
+      if (!t) { $("recog").textContent = ""; return; }
+      const rows = t.split("\n").filter((r) => r.trim() !== "");
+      const cols = Math.max(...rows.map((r) => r.split(/\t|,/).length));
+      // 提出前に監査役が数えられるようにする。判定を待たせない。
+      $("recog").textContent = rows.length + "行 × " + cols + "列 を認識しました";
+    });
+  }
+
+  /* ------------------------------------------------------------------ */
+  /* 判定：1項目ずつ点いていく2秒間                                       */
+  /* ------------------------------------------------------------------ */
+  const CHECKS = [
+    "必須列がすべて存在する",
+    "採取日が YYYY-MM-DD に統一",
+    "MRSA結果が 陽性/陰性 の2値",
+    "行数が元データと一致（20行）"
+  ];
+
+  let verdicting = false;
+  async function runVerdict() {
+    const v = $("verdict");
+    if (!v || verdicting) return;   // 連打で判定が二重に走らないようにする
+    verdicting = true;
+    // 提出フォームを1行に畳み、判定を画面内に収める
+    $("folded-t").textContent = "提出しました　" + ($("recog").textContent || "0行 × 0列 を認識しました").replace("を認識しました", "");
+    $("submit-box").classList.add("hide");
+    $("actions").classList.add("hide");
+    $("folded").classList.remove("hide");
+    $("btn-reopen").classList.add("hide");
+    v.innerHTML = '<div class="verdict"><div class="lead">提出を確認しています…</div></div>';
+    const box = v.firstElementChild;
+    const failAt = verdictPasses ? -1 : 2;
+
+    for (let i = 0; i < CHECKS.length; i++) {
+      await wait(i === 0 ? 200 : 600);
+      const failed = i === failAt;
+      const halted = failAt >= 0 && i > failAt;
+      const row = document.createElement("div");
+      row.className = "check " + (halted ? "halt" : failed ? "fail" : "pass");
+      row.innerHTML =
+        '<span class="mark">' + (halted ? "─" : failed ? "✗" : "✓") + "</span>" +
+        "<span>" + (halted ? CHECKS[i] + " の確認は中断しました" : CHECKS[i]) +
+        // 何行目の何がダメかを具体的に言う。「形式が不正です」で突き放さない。
+        (failed ? '<span class="why">→ 3行目に「ポジ」、5行目に「(+)」が残っています</span>' : "") +
+        "</span>";
+      box.appendChild(row);
+      requestAnimationFrame(() => row.classList.add("on"));
+      if (halted) break;
+    }
+
+    await wait(400);
+    verdicting = false;
+    if (verdictPasses) {
+      const d = document.createElement("div");
+      d.className = "done"; d.textContent = "Stage 2 を解錠しました";
+      box.appendChild(d);
+      unlockSequence();
+    } else {
+      const d = document.createElement("div");
+      d.className = "lead";
+      d.textContent = "直して、もう一度提出してください。回数の制限はありません。";
+      box.appendChild(d);
+      $("btn-reopen").classList.remove("hide");
+    }
+  }
+
+  async function unlockSequence() {
+    $("ov-unlock").classList.remove("hide");
+    await wait(1900);
+    $("ov-unlock").classList.add("hide");
+    // 承認だけが報酬。スコアも星も出さない。
+    hasUnlockMail = true; renderMails("u");
+    // 自チームのマーカーが S2 へ滑る
+    TEAMS[2].pos = 2; drawMarks();
+    await wait(700);
+    // 解錠の喜びの陰で、誰も見ていない数字が増える。演出はつけない。
+    $("fever").textContent = "5";
+  }
+
+  /* ------------------------------------------------------------------ */
+  /* 急変：段階的に重ねる。同時に全部起こさない。                          */
+  /* ------------------------------------------------------------------ */
+  async function transition() {
+    clearLater();
+    go("inbox", true);
+    await wait(400);
+
+    // 120ms: 器の色そのものを差し替える（900ms かけて補間）
+    later(() => { screenEl.dataset.mode = "alert"; }, 120);
+
+    // 300ms: 赤帯がスライドイン
+    later(() => {
+      const b = $("redband");
+      b.classList.remove("hide", "out"); b.classList.add("in");
+    }, 300);
+
+    // 500ms: Stage 1 のメールが着弾し、1回だけ震える
+    later(() => { hasS1Mail = true; renderMails("s1"); }, 500);
+
+    // 700ms: リーダーボードが下からせり上がる ＝ レース開始
+    later(() => { $("board").classList.remove("down"); }, 700);
+
+    // 900ms: 転調完了。時間が動き出す。
+    later(() => { startClock(); }, 900);
+
+    // 赤は使い減りする資源。3秒で引き上げる。
+    later(() => {
+      const b = $("redband");
+      b.classList.remove("in"); b.classList.add("out");
+      later(() => b.classList.add("hide"), 400);
+    }, 3300);
+  }
+
+  /* ------------------------------------------------------------------ */
+  /* 院内連絡先：自動で開かない。バッジが光るだけ。                        */
+  /* ------------------------------------------------------------------ */
+  let phsOpen = false, phsShown = 0;
+  function phsRing() {
+    $("phs").classList.remove("hide");
+    $("phs-badge").classList.remove("hide");
+    $("phs-badge").textContent = String(++phsShown);
+  }
+  $("phs-bar").addEventListener("click", () => {
+    phsOpen = !phsOpen;
+    $("phs-win").classList.toggle("hide", !phsOpen);
+    if (!phsOpen) return;
+    $("phs-badge").classList.add("hide");
+    const log = $("phs-log");
+    if (log.childElementCount) return;
+    // 待たされることがヒントのコスト。開いてもまだ返事は来ていない。
+    log.innerHTML = '<p class="wait">〔田所〕今、別病棟対応中。あとで。</p>';
+    later(() => { log.insertAdjacentHTML("beforeend", "<p>" + PHS_LINES[0] + "</p>"); }, 1400);
+    later(() => { log.insertAdjacentHTML("beforeend", "<p>" + PHS_LINES[1] + "</p>"); }, 2600);
+  });
+
+  /* ------------------------------------------------------------------ */
+  /* スイッチャ                                                          */
+  /* ------------------------------------------------------------------ */
+  const STEPS = [
+    { id: "entry",   label: "① 入室",       mode: "peace", note: "企画書§7「なしログイン。6桁チームコード入室」。数字が32pxなのは、ファシリテーターの読み上げを部屋の後ろから聞きながら打つため。" },
+    { id: "welcome", label: "② ウェルカム",  mode: "peace", note: "操作説明を一切しない。AI初体験は Stage 1 に取ってある。ヘッダーの「原因不明の発熱 3」はこの最初の画面から居座っていて、誰も気に留めない。" },
+    { id: "inbox",   label: "③ 受信トレイ",  mode: "peace", note: "3通目の夜勤師長メールが未知ウイルスの種。太字にせず、色も変えず、段落の途中に置いてある。ここで警戒させたら設計失敗。" },
+    { id: "s1",      label: "④ Stage 1",   mode: "alert", note: "3ペインが初めて全部埋まる。左＝2003年の書式で届くもの、右＝暗い病院で唯一明るいAI。「添付を開く」→［コピー］がこのステージの生命線で、そこから先は自分で言語化させる。" },
+    { id: "unlock",  label: "⑤ 解錠",       mode: "alert", note: "報酬は師長の承認だけ。スコアも星も出さない。同時に「原因不明の発熱」が 3→5 に静かに変わる——解錠の喜びの陰で、誰も見ていない数字が増える。" }
+  ];
+
+  function go(id, keepMode) {
+    clearLater();
+    verdicting = false;
+    view = id;
+    const step = STEPS.find((s) => s.id === id) || STEPS[0];
+    if (!keepMode) screenEl.dataset.mode = step.mode;
+
+    // 画面ごとの初期化
+    $("redband").classList.add("hide");
+    $("phs").classList.add("hide");
+    $("phs-win").classList.add("hide");
+    $("phs-log").innerHTML = "";
+    phsOpen = false; phsShown = 0;
+    $("ai-log").innerHTML = '<div class="empty">（まだ何もありません）</div>';
+
+    if (id === "entry" || id === "welcome" || id === "inbox") {
+      $("board").classList.add("down");
+      stopClock();
+      hasS1Mail = false; hasUnlockMail = false; readS1 = false; readU = false;
+      $("fever").textContent = "3";
+      $("vitals").classList.remove("crescendo");
+      TEAMS[2].pos = 1; drawMarks();
+    } else {
+      $("board").classList.remove("down");
+      startClock();
+      $("phs").classList.remove("hide");
+    }
+
+    if (id === "entry") { mailState = MAILS.map(() => false); readS1 = readU = false; openIdx = null; renderEntry(); }
+    else if (id === "welcome") renderWelcome();
+    else if (id === "inbox") { openIdx = null; renderInbox(); }
+    else if (id === "s1") { hasUnlockMail = false; $("fever").textContent = "3"; renderStage1(); }
+    else if (id === "unlock") {
+      hasUnlockMail = false; readU = false; $("fever").textContent = "3";
+      renderStage1();
+      const ta = $("submit");
+      ta.value = "患者ID,氏名,病棟,採取日,MRSA結果,発熱,備考\n001,佐藤 一郎,5A,2026-07-03,陽性,あり,個室へ";
+      ta.dispatchEvent(new Event("input"));
+      verdictPasses = true; syncVerdictButtons();
+      later(runVerdict, 300);
+    }
+
+    $("steps").querySelectorAll("button").forEach((b) => {
+      b.setAttribute("aria-pressed", String(b.dataset.id === id));
+    });
+    $("note").innerHTML = "<b>" + step.label + "</b>　" + step.note;
+  }
+
+  STEPS.forEach((s) => {
+    const b = document.createElement("button");
+    b.textContent = s.label; b.dataset.id = s.id;
+    b.addEventListener("click", () => go(s.id));
+    $("steps").appendChild(b);
+  });
+
+  function syncVerdictButtons() {
+    $("btn-verdict-ok").setAttribute("aria-pressed", String(verdictPasses));
+    $("btn-verdict-ng").setAttribute("aria-pressed", String(!verdictPasses));
+  }
+  $("btn-verdict-ok").addEventListener("click", () => { verdictPasses = true; syncVerdictButtons(); });
+  $("btn-verdict-ng").addEventListener("click", () => { verdictPasses = false; syncVerdictButtons(); });
+  $("btn-transition").addEventListener("click", transition);
+  $("btn-phs").addEventListener("click", () => {
+    if (view !== "s1" && view !== "unlock") go("s1");
+    phsRing();
+  });
+  $("btn-enter").addEventListener("click", () => go("welcome"));
+  $("btn-viewer-close").addEventListener("click", () => $("ov-viewer").classList.add("hide"));
+  $("btn-copy").addEventListener("click", () => {
+    const btn = $("btn-copy");
+    if (navigator.clipboard) navigator.clipboard.writeText(SHEET).catch(() => {});
+    btn.textContent = "コピーしました";
+    later(() => { btn.textContent = "コピー"; }, 1400);
+  });
+
+  /* 1280×720 を、置かれた幅に合わせて縮める */
+  function fit() {
+    const w = $("wrap").clientWidth;
+    const s = Math.min(1, w / 1280);
+    $("fit").style.transform = "scale(" + s + ")";
+    $("wrap").style.height = (720 * s) + "px";
+  }
+  window.addEventListener("resize", fit);
+  fit();
+
+  go("entry");
+})();
+</script>
