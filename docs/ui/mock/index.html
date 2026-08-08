@@ -147,11 +147,14 @@
 }
 
 /* --- 本体3ペイン ------------------------------------------------------- */
-.body { flex: 1; display: flex; min-height: 0; }
+.body { flex: 1; display: flex; min-height: 0; overflow: hidden; }
 .pane-l { flex: 0 0 260px; border-right: 1px solid var(--rule); display: flex; flex-direction: column; min-height: 0; }
 .pane-c { flex: 1; min-width: 0; display: flex; flex-direction: column; min-height: 0; }
 .pane-r { flex: 0 0 380px; border-left: 1px solid var(--rule); display: flex; flex-direction: column; min-height: 0; }
-.pane-l, .pane-r { transition: border-color .78s ease; }
+.pane-l { transition: border-color .78s ease; }
+/* AIペインは畳んだ状態から右へ逃がしておく。出現は右から滑り込む。 */
+.pane-r { transition: border-color .78s ease, margin-right .42s cubic-bezier(.2,.72,.28,1), opacity .34s ease; }
+.pane-r.collapsed { margin-right: -380px; opacity: 0; pointer-events: none; }
 .hide { display: none !important; }
 
 .pane-hd {
@@ -762,6 +765,26 @@
     ["ov-entry", "ov-viewer", "ov-unlock"].forEach((id) => $(id).classList.add("hide"));
   }
 
+  /* AIチャットは最初から画面にいない。
+     汚いExcelを一度見せ、ビューアを閉じた瞬間に右から滑り込む。
+     道具が先にあると「AIがあるから使う」になり、要件を言語化する動機が痩せる。 */
+  let aiRevealed = false;
+  function revealAI(instant) {
+    if (aiRevealed) return;
+    aiRevealed = true;
+    if (instant) {
+      paneR.style.transition = "none";
+      paneR.classList.remove("collapsed");
+      void paneR.offsetWidth;
+      paneR.style.transition = "";
+      $("phs").classList.remove("hide");
+      return;
+    }
+    paneR.classList.remove("collapsed");
+    // 田所さんはAIより後に現れる。「そっちにAIあるんでしょ？」が先に来ては成立しない。
+    later(() => $("phs").classList.remove("hide"), 520);
+  }
+
   function renderEntry() {
     hideOverlays();
     $("ov-entry").classList.remove("hide");
@@ -795,7 +818,9 @@
 
   function renderInbox() {
     hideOverlays();
+    // 受信トレイの間、右ペインは無い。中央が右端まで伸びている。
     paneL.classList.remove("hide"); paneR.classList.remove("hide");
+    paneR.classList.add("collapsed");
     renderMails();
     if (openIdx === null) {
       paneC.innerHTML = '<div class="reader"><div class="legacy" style="color:var(--fg-muted)">' +
@@ -807,6 +832,8 @@
     hideOverlays();
     paneL.classList.remove("hide"); paneR.classList.remove("hide");
     hasS1Mail = true; openIdx = "s1"; readS1 = true;
+    // 添付を見終えるまで、道具はまだ現れない。
+    later(() => revealAI(), 90000);  // 詰み防止の安全弁
     renderMails();
     paneC.innerHTML =
       '<div class="work">' +
@@ -959,6 +986,7 @@
   /* ------------------------------------------------------------------ */
   let phsOpen = false, phsShown = 0;
   function phsRing() {
+    revealAI(true);  // 田所さんはAIの存在を前提に喋る。先回りさせない。
     $("phs").classList.remove("hide");
     $("phs-badge").classList.remove("hide");
     $("phs-badge").textContent = String(++phsShown);
@@ -982,8 +1010,8 @@
   const STEPS = [
     { id: "entry",   label: "① 入室",       mode: "peace", note: "企画書§7「なしログイン。6桁チームコード入室」。数字が32pxなのは、ファシリテーターの読み上げを部屋の後ろから聞きながら打つため。" },
     { id: "welcome", label: "② ウェルカム",  mode: "peace", note: "操作説明を一切しない。AI初体験は Stage 1 に取ってある。ヘッダーの「原因不明の発熱 3」はこの最初の画面から居座っていて、誰も気に留めない。" },
-    { id: "inbox",   label: "③ 受信トレイ",  mode: "peace", note: "3通目の夜勤師長メールが未知ウイルスの種。太字にせず、色も変えず、段落の途中に置いてある。ここで警戒させたら設計失敗。" },
-    { id: "s1",      label: "④ Stage 1",   mode: "alert", note: "3ペインが初めて全部埋まる。左＝2003年の書式で届くもの、右＝暗い病院で唯一明るいAI。「添付を開く」→［コピー］がこのステージの生命線で、そこから先は自分で言語化させる。" },
+    { id: "inbox",   label: "③ 受信トレイ",  mode: "peace", note: "右ペインはまだ無く、中央が右端まで伸びている。読ませたいのはメールだけ。3通目の夜勤師長メールが未知ウイルスの種で、太字にせず、色も変えず、段落の途中に置いてある。ここで警戒させたら設計失敗。" },
+    { id: "s1",      label: "④ Stage 1",   mode: "alert", note: "まだ2ペイン。「添付を開く」で汚いExcelを見せ、閉じた瞬間に右からAIペインが滑り込む——問題を見てから道具が来る順序にしてある。［コピー］がこのステージの生命線で、そこから先は自分で言語化させる。" },
     { id: "unlock",  label: "⑤ 解錠",       mode: "alert", note: "報酬は師長の承認だけ。スコアも星も出さない。同時に「原因不明の発熱」が 3→5 に静かに変わる——解錠の喜びの陰で、誰も見ていない数字が増える。" }
   ];
 
@@ -996,6 +1024,7 @@
 
     // 画面ごとの初期化
     $("redband").classList.add("hide");
+    aiRevealed = false; paneR.classList.add("collapsed");
     $("phs").classList.add("hide");
     $("phs-win").classList.add("hide");
     $("phs-log").innerHTML = "";
@@ -1012,7 +1041,6 @@
     } else {
       $("board").classList.remove("down");
       startClock();
-      $("phs").classList.remove("hide");
     }
 
     if (id === "entry") { mailState = MAILS.map(() => false); readS1 = readU = false; openIdx = null; renderEntry(); }
@@ -1022,6 +1050,7 @@
     else if (id === "unlock") {
       hasUnlockMail = false; readU = false; $("fever").textContent = "3";
       renderStage1();
+      revealAI(true);  // 解錠まで来たチームは当然AIを出している
       const ta = $("submit");
       ta.value = "患者ID,氏名,病棟,採取日,MRSA結果,発熱,備考\n001,佐藤 一郎,5A,2026-07-03,陽性,あり,個室へ";
       ta.dispatchEvent(new Event("input"));
@@ -1054,7 +1083,10 @@
     phsRing();
   });
   $("btn-enter").addEventListener("click", () => go("welcome"));
-  $("btn-viewer-close").addEventListener("click", () => $("ov-viewer").classList.add("hide"));
+  $("btn-viewer-close").addEventListener("click", () => {
+    $("ov-viewer").classList.add("hide");
+    revealAI();  // 中身を見た直後に道具が来る。この順序が Stage 1 の入口になる。
+  });
   $("btn-copy").addEventListener("click", () => {
     const btn = $("btn-copy");
     if (navigator.clipboard) navigator.clipboard.writeText(SHEET).catch(() => {});
