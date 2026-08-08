@@ -442,7 +442,7 @@
       <button id="btn-transition">急変を再生</button>
       <button id="btn-verdict-ok" aria-pressed="true">判定：通過</button>
       <button id="btn-verdict-ng">判定：差し戻し</button>
-      <button id="btn-phs">田所さんから着信</button>
+      <button id="btn-phs">苅部さんから着信</button>
     </div>
   </div>
 
@@ -511,7 +511,7 @@
         <!-- 院内連絡先（別ウィンドウ） -->
         <div class="phs hide" id="phs">
           <div class="win hide" id="phs-win">
-            <div class="who">情シス　田所</div>
+            <div class="who">情シス　苅部</div>
             <div class="log" id="phs-log"></div>
             <div class="cmp">
               <input aria-label="院内連絡先への相談" placeholder="">
@@ -640,8 +640,8 @@
   $("sheet").textContent = SHEET;
 
   const PHS_LINES = [
-    "〔田所〕また師長のExcelですか。あれ、日付の書き方が5種類くらいありますよね。",
-    "〔田所〕そういうの、手で直すもんじゃないですよ。……で、そっちにAIあるんでしょ？ うちには無いのに。"
+    "〔苅部〕また師長のExcelですか。あれ、日付の書き方が5種類くらいありますよね。",
+    "〔苅部〕そういうの、手で直すもんじゃないですよ。……で、そっちにAIあるんでしょ？ うちには無いのに。"
   ];
 
   /* ------------------------------------------------------------------ */
@@ -781,7 +781,7 @@
       return;
     }
     paneR.classList.remove("collapsed");
-    // 田所さんはAIより後に現れる。「そっちにAIあるんでしょ？」が先に来ては成立しない。
+    // 苅部さんはAIより後に現れる。「そっちにAIあるんでしょ？」が先に来ては成立しない。
     later(() => $("phs").classList.remove("hide"), 520);
   }
 
@@ -986,7 +986,7 @@
   /* ------------------------------------------------------------------ */
   let phsOpen = false, phsShown = 0;
   function phsRing() {
-    revealAI(true);  // 田所さんはAIの存在を前提に喋る。先回りさせない。
+    revealAI(true);  // 苅部さんはAIの存在を前提に喋る。先回りさせない。
     $("phs").classList.remove("hide");
     $("phs-badge").classList.remove("hide");
     $("phs-badge").textContent = String(++phsShown);
@@ -999,7 +999,7 @@
     const log = $("phs-log");
     if (log.childElementCount) return;
     // 待たされることがヒントのコスト。開いてもまだ返事は来ていない。
-    log.innerHTML = '<p class="wait">〔田所〕今、別病棟対応中。あとで。</p>';
+    log.innerHTML = '<p class="wait">〔苅部〕今、別病棟対応中。あとで。</p>';
     later(() => { log.insertAdjacentHTML("beforeend", "<p>" + PHS_LINES[0] + "</p>"); }, 1400);
     later(() => { log.insertAdjacentHTML("beforeend", "<p>" + PHS_LINES[1] + "</p>"); }, 2600);
   });
