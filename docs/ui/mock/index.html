@@ -904,22 +904,23 @@
   /* ------------------------------------------------------------------ */
   /* Stage 1：火の手 —— 受信トレイ地獄                                    */
   /*                                                                    */
-  /* 全通が本物。読まなくていいノイズは無い。1通ごとの締切が並走する中、  */
-  /* 手で全部を追うのは難しい。45秒で苅部さんが固定タイミングで現れ、    */
-  /* 強制的にAIを渡す。以降は「要点→AIに下書きさせる→送信」で捌ける。    */
+  /* 1回目：AI無しで10通に挑む。全通が本物、ノイズは無い。督促は来ない。   */
+  /*        時間切れは二度と返信できない——一発勝負。                     */
+  /*        1回目が終わって全通は捌けていなければ、そこで初めて          */
+  /*        苅部さんが割り込み、強制的にAIを渡す（進捗に関係ない固定      */
+  /*        タイマーではなく「失敗した」という結果がトリガー）。          */
+  /* 2回目：新しい10通で再挑戦。AIは既にある。「要点→AIに下書きさせる→   */
+  /*        送信」で捌ける。締切は1回目と同じく1通ごとに並走する。       */
   /*                                                                    */
-  /* 手動で全通さばき切れても構わない——ボタンの使用を強制する判定は      */
-  /* 置かない（Stage 3・4 も「操作したか」ではなく「結果」で判定してきた  */
-  /* のと同じ流儀）。並行する締切そのものが難度になる。                  */
+  /* 手動で1回目を全通さばき切れても構わない——ボタンの使用を強制する     */
+  /* 判定は置かない（Stage 3・4 も「操作したか」ではなく「結果」で判定    */
+  /* してきたのと同じ流儀）。その場合は苅部さんの出番なくクリアになる。   */
   /* ------------------------------------------------------------------ */
   const S1_LIMIT   = 60;   // 1通あたりの持ち時間（秒）
-  const S1_RESEND  = 25;   // 後回し・時間切れが督促として戻るまで
-  const S1_AGAIN   = 45;   // 戻ってきた分の持ち時間
-  const S1_AI_AT   = 45;   // 苅部さんがAIを渡す固定タイミング（秒）。進捗に関係なく発火
-  const S1_SAFETY  = 240;  // 詰み防止の安全弁（秒）。ここまでに終わらなければ強制クリア
+  const S1_SAFETY  = 240;  // 2回目の詰み防止の安全弁（秒）
   const S1_MIN_LEN = 12;   // 一言で時間稼ぎさせないための最低文字数
 
-  const S1_MAILS = [
+  const S1_MAILS_R1 = [
     { id: "m1", at: 0, from: "3B病棟 看護師", subj: "サージカルマスクの在庫について",
       body: ["いつもお世話になっております。", "3Bのマスク在庫が残り少ないのですが、追加はどちらに申請すればよいでしょうか。", "お手すきの際にご返信いただければ助かります。"],
       draft: ["3B病棟 各位", "マスクの追加分は総務課の物品担当（内線1180）へ申請してください。", "当面は在庫を病棟間で融通しますので、不足分は看護部にもご相談ください。", "感染制御チーム"] },
@@ -952,52 +953,84 @@
       draft: ["ご連絡ありがとうございます。", "今のところ何とか対応できています。分からないことが出てきたらまたご相談させてください。"] }
   ];
 
-  // 苅部さんの最初のひとこと。強制イベント専用で、通常の PHS_LINES とは別に持つ。
+  // 2回目：苅部さんの助けを得たあとの新しい10通。1回目と同じ件名は使わない
+  // （同じ件名が2回出ると「督促が来た」と誤解される）。
+  const S1_MAILS_R2 = [
+    { id: "r1", at: 0, from: "3B病棟 看護師", subj: "防護ガウンの在庫について",
+      body: ["立て続けにすみません。", "ガウンも残りが少なくなってきました。追加の申請先を教えてください。"],
+      draft: ["3B病棟 各位", "ガウンもマスクと同じく総務課の物品担当（内線1180）へお願いします。", "在庫状況は毎朝共有しますので、そちらもご確認ください。"] },
+    { id: "r2", at: 4, from: "事務当直", subj: "夜間の問い合わせ、どこにすればいいですか",
+      body: ["夜間・休日にICT宛の問い合わせが来た場合、当直としてどこに繋げばよいですか。", "窓口を明確にしておきたいです。"],
+      draft: ["事務当直 各位", "夜間・休日は当直医経由でICT携帯（内線9120）へお願いします。", "緊急でない場合は翌朝の申し送りで結構です。"] },
+    { id: "r3", at: 8, from: "5A病棟 師長", subj: "接触者リストの提出期限について",
+      body: ["接触者リストの提出、いつまでにお願いすればいいか教えてください。", "病棟でも準備を進めたいです。"],
+      draft: ["5A病棟 師長", "本日18時までにお願いします。", "様式は昨日お渡ししたものと同じで結構です。"] },
+    { id: "r4", at: 13, from: "検査科", subj: "検体ラベルの記載ミスがありました",
+      body: ["先ほど届いた検体のラベル、患者IDと病棟が食い違っているものが1件ありました。", "どう扱えばよいですか。"],
+      draft: ["検査科 各位", "該当検体は一旦保留にしてください。", "病棟に確認のうえ、正しいラベルを貼り直して再提出します。少々お待ちください。"] },
+    { id: "r5", at: 18, from: "総務課", subj: "掲示物のポスター、いつ届きますか",
+      body: ["面会制限のポスター、各病棟から催促が来ています。", "いつ頃お渡しできそうですか。"],
+      draft: ["総務課 各位", "本日中にデータをお渡しできる見込みです。", "印刷・掲示は各病棟にお願いする形で進めてください。"] },
+    { id: "r6", at: 23, from: "地域連携室", subj: "受け入れ先の病院から追加で聞かれています",
+      body: ["先方から「保菌状況の確定はいつ頃か」と追加で聞かれました。", "回答してよい内容か確認させてください。"],
+      draft: ["地域連携室 各位", "確定は明日中を見込んでいます。その旨だけお伝えください。", "詳しい経緯はこちらから直接ご説明します。"] },
+    { id: "r7", at: 29, from: "薬剤部", subj: "手指消毒液のディスペンサー、増設できますか",
+      body: ["5A病棟の出入口、消毒液の設置台数を増やしたほうがよいでしょうか。", "判断をお願いします。"],
+      draft: ["薬剤部 各位", "出入口2箇所への増設をお願いします。", "対応ありがとうございます。"] },
+    { id: "r8", at: 35, from: "給食課", subj: "アレルギー対応の食材、変更ありますか",
+      body: ["個室対応の患者さんが増えていますが、アレルギー食の対応に変更はありますか。", "確認させてください。"],
+      draft: ["給食課 各位", "アレルギー対応自体に変更はありません。配膳順のみ、先にお伝えしたとおりでお願いします。"] },
+    { id: "r9", at: 41, from: "医事課", subj: "診断書の記載について確認したいです",
+      body: ["ご家族から診断書を求められています。", "感染症名の記載方法、指定はありますか。"],
+      draft: ["医事課 各位", "病名の記載は主治医の判断に従ってください。ICTから記載内容を指定することはありません。", "ご不明点があれば主治医にご確認をお願いします。"] },
+    { id: "r10", at: 47, from: "前任ICN", subj: "落ち着きましたか、心配しています",
+      body: ["立て続けに大変そうで心配しています。", "無理せず、頼れるところは頼ってくださいね。"],
+      draft: ["ご心配ありがとうございます。", "苅部さんに助けてもらって、なんとか流れが掴めてきました。落ち着いたらまたご連絡します。"] }
+  ];
+
+  // 苅部さんの最初のひとこと。1回目の失敗という結果を受けての台詞。
   const S1_KARUBE_INTRO = [
-    "〔苅部〕……もう手で書いてます? 無理でしょう、この同時進行の数。",
-    "〔苅部〕うち、AI入ってます。要点だけ伝えれば下書きしてくれますよ。"
+    "〔苅部〕……全部は無理でしたね。1人でやる量じゃないです。",
+    "〔苅部〕うち、AI入ってます。要点だけ伝えれば下書きしてくれますよ。もう一度いきましょう。"
   ];
 
   let s1 = null, s1Tick = null;
   const s1Now = () => (Date.now() - s1.t0) / 1000;
+  const s1Defs = () => (s1.round === 1 ? S1_MAILS_R1 : S1_MAILS_R2);
 
   function s1Init() {
-    S1_MAILS.forEach((d) => { d._landed = false; });
-    s1 = { t0: Date.now(), items: [], open: null, aiReady: false, doneIds: new Set(),
-           total: S1_MAILS.length, log: [], n: 0, cleared: false, autoCleared: false };
+    S1_MAILS_R1.forEach((d) => { d._landed = false; });
+    S1_MAILS_R2.forEach((d) => { d._landed = false; });
+    s1 = { t0: Date.now(), round: 1, items: [], open: null, aiReady: false,
+           doneIds: new Set(), log: [], n: 0, roundDone: false, interstitial: false, cleared: false, result: null };
     s1Stop();
     s1Tick = setInterval(s1Frame, 250);
-    // 苅部さんは進捗に関係なく固定タイミングで必ず現れる。避けようのないスクリプトイベント。
-    later(() => s1DeliverAI(), S1_AI_AT * 1000);
-    // 詰み防止の安全弁。ここまでに終わらなければ強制的に先へ進める。
-    later(() => { if (s1 && !s1.cleared) s1Clear(true); }, S1_SAFETY * 1000);
   }
   function s1Stop() { if (s1Tick) { clearInterval(s1Tick); s1Tick = null; } }
 
-  function s1Land(def, tag, limit) {
-    s1.items.push({
-      def, key: def.id + "#" + (++s1.n), tag: tag || null,
-      due: s1Now() + (limit || S1_LIMIT), state: "live", point: "", bodyDraft: ""
-    });
+  function s1Land(def) {
+    s1.items.push({ def, key: def.id + "#" + (++s1.n), due: s1Now() + S1_LIMIT, state: "live", point: "", bodyDraft: "" });
   }
   function s1Say(text, cost) { s1.log.unshift({ text, cost: !!cost }); }
 
   function s1Frame() {
-    if (!s1 || view !== "s1") return;
+    if (!s1 || view !== "s1" || s1.cleared || s1.interstitial) return;
     const t = s1Now();
-    if (!s1.cleared) {
-      S1_MAILS.forEach((d) => { if (!d._landed && t >= d.at) { d._landed = true; s1Land(d); } });
-    }
+    const defs = s1Defs();
+    defs.forEach((d) => { if (!d._landed && t >= d.at) { d._landed = true; s1Land(d); } });
     s1.items.forEach((it) => {
       if (it.state !== "live" || t <= it.due) return;
-      // 消えてはくれない。時間切れは督促として戻ってくる。
-      it.state = "expired";
-      s1Say("時間切れ　" + it.def.subj, true);
-      later(() => { if (s1 && !s1.cleared && !s1.doneIds.has(it.def.id)) s1Land(it.def, "督促", S1_AGAIN); }, S1_RESEND * 1000);
+      // 督促は無い。時間切れは、もう二度と返信できない——一発勝負。
+      it.state = "missed";
+      s1Say("時間切れ（もう返信できません）　" + it.def.subj, true);
       if (s1.open === it.key) s1.open = null;
       s1Center();
     });
     s1List();
+    // ラウンド終了判定：全通が着弾済みで、まだ live のものが無い。
+    const allLanded = defs.every((d) => d._landed);
+    const anyLive = s1.items.some((it) => it.state === "live");
+    if (allLanded && !anyLive) s1RoundComplete();
     const tm = $("s1-timer");
     if (tm) {
       const cur = s1.items.find((x) => x.key === s1.open);
@@ -1014,9 +1047,8 @@
     const keep = box.scrollTop;
     const t = s1Now();
     box.innerHTML = "";
-    // 締め切りが近い順。督促は新着より上に来るので、戻ってきたことが必ず目に入る。
-    const live = s1.items.filter((it) => it.state !== "expired")
-      .sort((a, b) => (a.state === "live" ? 0 : 1) - (b.state === "live" ? 0 : 1) || a.due - b.due);
+    // 締め切りが近い順。上から潰せばよい形にしておく。
+    const live = s1.items.slice().sort((a, b) => (a.state === "live" ? 0 : 1) - (b.state === "live" ? 0 : 1) || a.due - b.due);
     live.forEach((it) => {
       const left = it.due - t, hot = it.state === "live" && left <= 15;
       const b = document.createElement("button");
@@ -1024,11 +1056,11 @@
       b.setAttribute("aria-current", String(s1.open === it.key));
       b.innerHTML =
         '<div class="from">' + it.def.from + "</div>" +
-        '<div class="subj">' + (it.tag ? '<span class="tag">' + it.tag + "</span>" : "") + it.def.subj + "</div>" +
+        '<div class="subj">' + it.def.subj + "</div>" +
         (it.state === "live"
           ? '<div class="due"><span>' + mmss(left) + '</span><span class="bar"><i style="width:' +
             Math.max(0, Math.min(100, (left / S1_LIMIT) * 100)) + '%"></i></span></div>'
-          : '<div class="due"><span>返信済み</span></div>');
+          : '<div class="due"><span>' + (it.state === "missed" ? "時間切れ・返信不可" : "返信済み") + "</span></div>");
       b.addEventListener("click", () => {
         if (it.state !== "live") return;
         s1.open = it.key; s1Center(); s1List();
@@ -1049,28 +1081,39 @@
   }
 
   function s1Center() {
+    const defs = s1Defs();
+    const doneThisRound = defs.filter((d) => s1.doneIds.has(d.id)).length;
     const cur = s1.items.find((x) => x.key === s1.open && x.state === "live");
     const head =
-      '<div class="stage-title">Stage 1　火の手</div>' +
+      '<div class="stage-title">Stage 1　火の手' + (s1.round === 2 ? "　（2回目・AIあり）" : "") + "</div>" +
       '<div class="s2-hd">' +
-        '<div class="s2-count">返信済み　<b>' + s1.doneIds.size + " / " + s1.total + "</b></div>" +
+        '<div class="s2-count">返信済み　<b>' + doneThisRound + " / " + defs.length + "</b></div>" +
         '<div class="grow"></div>' +
         (cur ? '<div class="s2-timer" id="s1-timer">' + mmss(cur.due - s1Now()) + "</div>" : "") +
       "</div>";
 
+    if (s1.interstitial) {
+      paneC.innerHTML = '<div class="work">' + head +
+        '<div class="box"><div class="hd">1回目、終了</div>' +
+        '<div style="padding:16px 18px" class="s2-note">' +
+          doneThisRound + " / " + defs.length + " 件しか返せませんでした。手だけでは間に合いません。" +
+        "</div></div>" + s1LogHTML() + "</div>";
+      return;
+    }
     if (s1.cleared) {
+      const msg = s1.result === "manual"
+        ? "全通に返信しました。苅部さんの手を借りず、この数を自力で捌き切りました。見事です。"
+        : s1.result === "partial"
+        ? "苅部さんのAIを使っても、一部は時間切れになりました。届いた分で次へ進みます。"
+        : "苅部さんに渡されたAIで、全通に返信しました。1人でやる量ではなかったはずです。";
       paneC.innerHTML = '<div class="work">' + head +
         '<div class="box"><div class="hd">受信トレイが落ち着きました</div>' +
-        '<div style="padding:16px 18px" class="s2-note">' +
-          (s1.autoCleared
-            ? "時間切れです。残りは苅部さんが巻き取りました。次からはもっと早く頼ってください。"
-            : "全通に返信しました。苅部さんに渡されたAIが無ければ、この数は捌けなかったはずです。") +
-        "</div></div>" + s1LogHTML() + "</div>";
+        '<div style="padding:16px 18px" class="s2-note">' + msg + "</div></div>" + s1LogHTML() + "</div>";
       return;
     }
     if (!cur) {
       paneC.innerHTML = '<div class="work">' + head +
-        '<div class="s2-note">左の一覧からメールを開いてください。<br>全通、いずれ返信が必要です。</div>' +
+        '<div class="s2-note">左の一覧からメールを開いてください。<br>時間切れになったメールは、もう返信できません。</div>' +
         s1LogHTML() + "</div>";
       return;
     }
@@ -1097,7 +1140,7 @@
     paneC.innerHTML = '<div class="work" style="padding:14px 24px;gap:10px">' + head +
       '<div class="reader" style="padding:0;overflow-y:auto;max-height:104px;flex:0 0 auto">' + mailBodyHTML(cur.def) + "</div>" +
       replyHTML +
-      '<div class="row-end"><button class="btn ghost" id="s1-later">後回し</button><button class="btn" id="s1-send">送信する</button></div>' +
+      '<div class="row-end"><button class="btn" id="s1-send">送信する</button></div>' +
       s1LogHTML() + "</div>";
 
     $("s1-body").addEventListener("input", () => { cur.bodyDraft = $("s1-body").value; });
@@ -1105,14 +1148,14 @@
       $("s1-point").addEventListener("input", () => { cur.point = $("s1-point").value; });
       $("s1-draft").addEventListener("click", () => s1Draft(cur));
     }
-    $("s1-later").addEventListener("click", () => s1Later(cur));
     $("s1-send").addEventListener("click", () => s1Send(cur));
   }
 
   function s1Draft(it) {
     const btn = $("s1-draft");
     if (!btn) return;
-    // 実際に生成するわけではない。モックなので固定ダミー文で足りる。
+    // 実際に生成するわけではない。モックなので固定ダミー文で足りる
+    // （要点欄に何を書いても、この固定文に置き換わる）。
     btn.textContent = "下書き中…"; btn.disabled = true;
     later(() => { it.bodyDraft = it.def.draft.join("\n"); if (s1.open === it.key) s1Center(); }, 1100);
   }
@@ -1135,19 +1178,35 @@
     s1Close(it);
     s1.doneIds.add(it.def.id);
     s1Say("返信した　" + it.def.subj);
-    if (s1.doneIds.size >= s1.total) s1Clear(false);
     s1Center(); s1List();
   }
 
-  function s1Later(it) {
-    s1Close(it);
-    s1Say("後回し　" + it.def.subj, true);
-    later(() => { if (s1 && !s1.cleared && !s1.doneIds.has(it.def.id)) s1Land(it.def, "督促", S1_AGAIN); }, S1_RESEND * 1000);
-    s1Center(); s1List();
+  function s1RoundComplete() {
+    // 自然完了と2回目の安全弁タイマーが競合しても二重処理しない。
+    if (s1.cleared || s1.interstitial) return;
+    s1.roundDone = true;
+    const defs = s1Defs();
+    const doneThisRound = defs.filter((d) => s1.doneIds.has(d.id)).length;
+
+    if (doneThisRound >= defs.length) {
+      // 手動で全通さばき切った。ボタンの使用は強制しない——力量として認める。
+      s1Result("manual");
+      return;
+    }
+    if (s1.round === 1) {
+      // 1回目は失敗前提。ここで初めて苅部さんが割り込む
+      // （進捗に関係ない固定タイマーではなく、「失敗した」という結果がトリガー）。
+      s1.interstitial = true;
+      s1Center();
+      later(() => s1DeliverAIAndRetry(), 1700);
+    } else {
+      // 2回目も時間切れがあった。詰み防止のため、届いた分で先へ進める。
+      s1Result("partial");
+    }
   }
 
-  function s1DeliverAI() {
-    if (!s1 || s1.aiReady || s1.cleared) return;
+  function s1DeliverAIAndRetry() {
+    s1.interstitial = false;
     s1.aiReady = true;
     phsIntroPending = true;  // 次に開いたとき、苅部さんの最初のひとことを見せる
     revealAI();
@@ -1156,11 +1215,18 @@
       $("phs-badge").classList.remove("hide");
       $("phs-badge").textContent = "1";
     }, 560);
-    s1Center();
+    s1.round = 2;
+    s1.t0 = Date.now();
+    s1.items = [];
+    s1.open = null;
+    s1.roundDone = false;
+    // 2回目も詰んだままにしない、最終の安全弁。
+    later(() => { if (s1 && s1.round === 2 && !s1.cleared) s1RoundComplete(); }, S1_SAFETY * 1000);
+    s1Center(); s1List();
   }
 
-  function s1Clear(auto) {
-    s1.cleared = true; s1.autoCleared = !!auto;
+  function s1Result(kind) {
+    s1.cleared = true; s1.result = kind;
     s1.items.forEach((x) => { if (x.state === "live") x.state = "done"; });
     TEAMS[2].pos = 2; drawMarks();
     s1Center(); s1List();
@@ -1583,7 +1649,7 @@
     { id: "entry",   label: "① 入室",       mode: "peace", note: "企画書§7「なしログイン。6桁チームコード入室」。数字が32pxなのは、ファシリテーターの読み上げを部屋の後ろから聞きながら打つため。" },
     { id: "welcome", label: "② ウェルカム",  mode: "peace", note: "操作説明を一切しない。AI初体験は Stage 1 に取ってある。ヘッダーの「原因不明の発熱 3」はこの最初の画面から居座っていて、誰も気に留めない。" },
     { id: "inbox",   label: "③ 受信トレイ",  mode: "peace", note: "右ペインはまだ無く、中央が右端まで伸びている。読ませたいのはメールだけ。3通目の夜勤師長メールが未知ウイルスの種で、太字にせず、色も変えず、段落の途中に置いてある。ここで警戒させたら設計失敗。" },
-    { id: "s1",      label: "④ Stage 1",   mode: "alert", note: "全通が本物。1通ごとの締切が並走し、AIはまだ無い。45秒で苅部さんが固定タイミングで現れ、強制的にAIを渡す——以降は「要点→AIに下書きさせる→送信」で捌ける。手動で全通さばき切っても構わない、ボタンの使用は強制しない。並行する締切そのものが難度になる設計。" },
+    { id: "s1",      label: "④ Stage 1",   mode: "alert", note: "1回目：全通が本物、AIは無い。1通ごとの締切が並走し、督促は来ない——時間切れは二度と返信できない一発勝負。1回目が終わって全通捌けていなければ、そこで初めて苅部さんが割り込みAIを渡す（固定タイマーではなく「失敗した」が発火条件）。2回目：新しい10通に「要点→AIに下書きさせる→送信」で再挑戦。手動で1回目を全通さばき切っても構わない、ボタンの使用は強制しない。" },
     { id: "s2",      label: "⑤ Stage 2",   mode: "alert", note: "元のExcel整形課題（旧Stage1の内容）。AIはStage 1から持ち越して既にある。「添付を開く」→［コピー］→AIへ貼り付け→提出、そこから先は自分で言語化させる。" },
     { id: "unlock",  label: "⑥ 解錠",       mode: "alert", note: "報酬は師長の承認だけ。スコアも星も出さない。同時に「原因不明の発熱」が 3→5 に静かに変わる——解錠の喜びの陰で、誰も見ていない数字が増える。" }
   ];
