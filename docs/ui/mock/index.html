@@ -196,6 +196,37 @@
 }
 .mail.landing { animation: land .55s ease-out; }
 
+/* --- Stage 2：1通ごとに締め切りが走る ---------------------------------- */
+/* 締め切りは一覧の側に出す。開かないと分からないのでは、優先順位を付けられない。 */
+.mail .due {
+  font-family: var(--font-num); font-size: 12px; margin-top: 7px;
+  display: flex; align-items: center; gap: 8px; color: var(--fg-muted);
+  font-variant-numeric: tabular-nums;
+}
+.mail .due .bar { flex: 1; height: 3px; background: var(--surface-2); position: relative; }
+.mail .due .bar i { position: absolute; top: 0; bottom: 0; left: 0; background: var(--ok); }
+.mail.hot .due { color: var(--warn); font-weight: 700; }
+.mail.hot .due .bar i { background: var(--warn); }
+.mail .tag {
+  font-family: var(--font-ui); font-size: 11px; font-weight: 700;
+  padding: 1px 6px; margin-right: 6px; background: var(--warn); color: #14171a;
+}
+.mail.done { opacity: .38; }
+
+.s2-hd { display: flex; align-items: center; gap: 16px; flex-wrap: wrap; }
+.s2-hd .grow { flex: 1; }
+.s2-count { font-family: var(--font-num); font-size: 14px; color: var(--fg-muted); }
+.s2-count b { color: var(--fg); font-size: 19px; font-weight: 700; }
+.s2-timer {
+  font-family: var(--font-num); font-size: 26px; font-weight: 600;
+  font-variant-numeric: tabular-nums; line-height: 1;
+}
+.s2-timer.hot { color: var(--warn); }
+.s2-note { font-size: 14px; color: var(--fg-muted); line-height: 1.8; max-width: 62ch; }
+.s2-log { font-size: 13px; color: var(--fg-muted); line-height: 2; }
+.s2-log b { color: var(--fg); font-weight: 600; }
+.s2-log .cost { color: var(--warn); }
+
 /* --- 病院から届くものは 2003年の書式で描く ----------------------------- */
 .legacy { font-family: var(--font-legacy); font-size: 15px; line-height: 1.9; }
 .reader { flex: 1; overflow-y: auto; padding: 22px 28px; }
@@ -639,6 +670,47 @@
   ].join("\n");
   $("sheet").textContent = SHEET;
 
+  /* Stage 2「二正面」——受信トレイに次々着弾する。
+     本命は3通だけで、あとはノイズ。全部丁寧に返すと確実に溢れる。
+     速度だけでなく「捨てる判断」を問うのがこのステージの主題。 */
+  const S2_MAILS = [
+    { id: "n1", at: 0, from: "3B病棟 看護師", subj: "マスクの在庫がないんですが",
+      body: ["いつもお世話になっております。",
+             "3Bのサージカルマスク、残り2箱です。発注ってICTさんですよね？",
+             "違ったらすみません。誰に言えばいいのか分からなくて。"] },
+    { id: "t1", at: 3, from: "看護部長", subj: "【至急】職員向け通知の起案をお願いします",
+      body: ["7B病棟でノロ疑いの集団発生。全職員への緊急通知を今夜中に出します。",
+             "吐物処理手順の再周知を含めてください。前回の通知は誰も読まなかったそうです。",
+             "文面はそちらで。私は会議に入ります。"], task: "職員向け緊急通知" },
+    { id: "n2", at: 7, from: "人事課", subj: "先月の研修の出席簿がまだ提出されていません",
+      body: ["標記の件、提出期限を3週間過ぎております。",
+             "お忙しいところ恐れ入りますが、本日中にご提出をお願いいたします。",
+             "なお、様式は昨年度から変更されておりますのでご注意ください。"] },
+    { id: "t2", at: 11, from: "院長室", subj: "保健所への第一報、下書きを至急",
+      body: ["保健所に第一報を入れます。院長が「まず紙をくれ」と言っています。",
+             "発生状況・患者数・現時点の対応をまとめてください。",
+             "確定していないことは書かないように。あとで必ず聞かれます。"], task: "保健所への第一報" },
+    { id: "n3", at: 15, from: "3B病棟 師長", subj: "院内ネットがとにかく遅いです",
+      body: ["午前中から電子カルテが重くて業務になりません。",
+             "ICTさんって、こういうのも見てくださるんですよね？",
+             "情報のほうのICTだと思っていました。すみません。"] },
+    { id: "t3", at: 20, from: "5B病棟 師長", subj: "ご家族への説明文をお願いできますか",
+      body: ["5Bに入院中の患者さんのご家族が、日本語をあまり話されません。",
+             "面会制限の説明文を、やさしい日本語と英語で用意していただけますか。",
+             "ご家族は明日の朝いらっしゃいます。"], task: "外国人家族への説明文" },
+    { id: "n4", at: 25, from: "総務課", subj: "職員駐車場の抽選結果について",
+      body: ["標記の件、抽選の結果をお知らせいたします。",
+             "貴部署の割当は今年度も第3駐車場（正門から徒歩12分）となりました。",
+             "ご不明な点は総務課までお問い合わせください。"] },
+    { id: "n5", at: 31, from: "広報課", subj: "テレビ局から取材の申し込みが来ています",
+      body: ["地元局から「院内感染について取材したい」と連絡がありました。",
+             "現時点で何をお答えしてよいか、ICTさんのご意見を伺えますか。",
+             "先方は明日の朝までに回答がほしいそうです。"] },
+    { id: "n6", at: 38, from: "給食課", subj: "今週の献立表のご確認をお願いします",
+      body: ["今週分の献立表を添付……し忘れました。改めてお送りします。",
+             "アレルギー対応の欄に変更がありますのでご確認ください。"] }
+  ];
+
   const PHS_LINES = [
     "〔苅部〕また師長のExcelですか。あれ、日付の書き方が5種類くらいありますよね。",
     "〔苅部〕そういうの、手で直すもんじゃないですよ。……で、そっちにAIあるんでしょ？ うちには無いのに。"
@@ -948,6 +1020,217 @@
   }
 
   /* ------------------------------------------------------------------ */
+  /* Stage 2：二正面 —— 鳴り止まない受信トレイ                            */
+  /*                                                                    */
+  /* 本命は3通だけ。残りはノイズで、全部丁寧に返すと確実に溢れる。          */
+  /* 罰は時間（企画書§6）なので、捌けなかったメールは消えず督促で戻る。    */
+  /* ------------------------------------------------------------------ */
+  const S2_LIMIT  = 60;   // 1通あたりの持ち時間（秒）
+  const S2_RESEND = 30;   // 後回し・時間切れが督促として戻るまで
+  const S2_BOUNCE = 20;   // 本命を転送したとき差し戻されるまで
+  const S2_AGAIN  = 45;   // 戻ってきた分の持ち時間。最初より短い
+
+  let s2 = null, s2Tick = null;
+  const s2Now = () => (Date.now() - s2.t0) / 1000;
+  const mmss = (s) => {
+    s = Math.max(0, Math.ceil(s));
+    return String(Math.floor(s / 60)).padStart(2, "0") + ":" + String(s % 60).padStart(2, "0");
+  };
+
+  function s2Init() {
+    S2_MAILS.forEach((d) => { d._landed = false; });
+    s2 = { t0: Date.now(), items: [], open: null, replying: false, done: 0, noise: 0, log: [], n: 0, cleared: false };
+    s2Stop();
+    s2Tick = setInterval(s2Frame, 250);
+  }
+  function s2Stop() { if (s2Tick) { clearInterval(s2Tick); s2Tick = null; } }
+
+  function s2Land(def, tag, limit) {
+    s2.items.push({
+      def, key: def.id + "#" + (++s2.n), tag: tag || null,
+      due: s2Now() + (limit || S2_LIMIT), state: "live"
+    });
+  }
+  function s2Say(text, cost) { s2.log.unshift({ text, cost: !!cost }); }
+
+  function s2Frame() {
+    if (!s2 || view !== "s2") return;
+    const t = s2Now();
+    if (!s2.cleared) {
+      S2_MAILS.forEach((d) => { if (!d._landed && t >= d.at) { d._landed = true; s2Land(d); } });
+    }
+    s2.items.forEach((it) => {
+      if (it.state !== "live" || t <= it.due) return;
+      // 消えてはくれない。時間切れは督促として戻ってくる。
+      it.state = "expired";
+      s2Say("時間切れ　" + it.def.subj, true);
+      later(() => { if (s2 && !s2.cleared) s2Land(it.def, "督促", S2_AGAIN); }, S2_RESEND * 1000);
+      if (s2.open === it.key) { s2.open = null; s2.replying = false; }
+      s2Center();
+    });
+    s2List();
+    const tm = $("s2-timer");
+    if (tm) {
+      const cur = s2.items.find((x) => x.key === s2.open);
+      if (cur) {
+        const left = cur.due - t;
+        tm.textContent = mmss(left);
+        tm.classList.toggle("hot", left <= 15);
+      }
+    }
+  }
+
+  function s2List() {
+    const box = $("mails");
+    const keep = box.scrollTop;
+    const t = s2Now();
+    box.innerHTML = "";
+    // 締め切りが近い順に並べる。上から潰せばよい形にしておくと、
+    // 1台を3〜4人で囲んでいても「次はこれ」を指差しで共有できる。
+    // 督促（45秒）は新着（60秒）より上に来るので、戻ってきたことが必ず目に入る。
+    const live = s2.items.filter((it) => it.state !== "expired")
+      .sort((a, b) => (a.state === "live" ? 0 : 1) - (b.state === "live" ? 0 : 1) || a.due - b.due);
+    live.forEach((it) => {
+      const left = it.due - t, hot = it.state === "live" && left <= 15;
+      const b = document.createElement("button");
+      b.className = "mail" + (it.state === "live" ? "" : " done read") + (hot ? " hot" : "");
+      b.setAttribute("aria-current", String(s2.open === it.key));
+      b.innerHTML =
+        '<div class="from">' + it.def.from + "</div>" +
+        '<div class="subj">' + (it.tag ? '<span class="tag">' + it.tag + "</span>" : "") + it.def.subj + "</div>" +
+        (it.state === "live"
+          ? '<div class="due"><span>' + mmss(left) + '</span><span class="bar"><i style="width:' +
+            Math.max(0, Math.min(100, (left / S2_LIMIT) * 100)) + '%"></i></span></div>'
+          : '<div class="due"><span>' + (it.state === "left" ? "未処理のまま" : "処理済み") + "</span></div>");
+      b.addEventListener("click", () => {
+        if (it.state !== "live") return;
+        s2.open = it.key; s2.replying = false; s2Center(); s2List();
+      });
+      box.appendChild(b);
+    });
+    box.scrollTop = keep;
+    const n = live.filter((it) => it.state === "live").length;
+    $("unread").textContent = String(n);
+    $("unread").classList.toggle("hide", n === 0);
+  }
+
+  function s2Center() {
+    const cur = s2.items.find((x) => x.key === s2.open && x.state === "live");
+    const head =
+      '<div class="stage-title">Stage 2　二正面</div>' +
+      '<div class="s2-hd">' +
+        '<div class="s2-count">提出　<b>' + s2.done + " / 3</b></div>" +
+        '<div class="grow"></div>' +
+        (cur ? '<div class="s2-timer" id="s2-timer">' + mmss(cur.due - s2Now()) + "</div>" : "") +
+      "</div>";
+
+    if (s2.cleared) {
+      paneC.innerHTML = '<div class="work">' + head +
+        '<div class="box"><div class="hd">3件とも提出しました</div>' +
+        '<div style="padding:16px 18px" class="s2-note">' +
+          "本命は3通だけでした。ICTの仕事でないものに返信したのは <b>" + s2.noise + "</b> 通、" +
+          "手を付けずに置いていったのは <b>" + (s2.left || 0) + "</b> 通。<br>" +
+          "全部に丁寧に答えていたら、朝までに終わりません。<b>置いていくのが正解です。</b>" +
+        "</div></div>" + s2LogHTML() + "</div>";
+      return;
+    }
+    if (!cur) {
+      paneC.innerHTML = '<div class="work">' + head +
+        '<div class="s2-note">左の一覧からメールを開いてください。<br>' +
+        "本命がどれかは書いてありません。</div>" + s2LogHTML() + "</div>";
+      return;
+    }
+
+    paneC.innerHTML = '<div class="work">' + head +
+      // 本文を伸ばさない。伸ばすとボタンが画面下端まで落ち、院内連絡先ウィンドウに隠れる。
+      // 判断する対象のすぐ下に操作を置く。
+      '<div class="reader" style="padding:0;overflow:visible;flex:0 0 auto">' + mailBodyHTML(cur.def) + "</div>" +
+      (s2.replying
+        ? '<div class="box"><div class="hd">返信</div>' +
+          '<textarea class="submit-area" id="s2-reply" placeholder="返信文を貼り付け"></textarea></div>' +
+          '<div class="row-end"><button class="btn ghost" id="s2-cancel">やめる</button>' +
+          '<button class="btn" id="s2-send">送信する</button></div>'
+        : '<div class="row-end">' +
+          '<button class="btn ghost" id="s2-fwd">転送</button>' +
+          '<button class="btn ghost" id="s2-later">後回し</button>' +
+          '<button class="btn" id="s2-reply-btn">今返信する</button></div>') +
+      s2LogHTML() + "</div>";
+
+    if (s2.replying) {
+      $("s2-cancel").addEventListener("click", () => { s2.replying = false; s2Center(); });
+      $("s2-send").addEventListener("click", () => s2Send(cur));
+    } else {
+      $("s2-reply-btn").addEventListener("click", () => { s2.replying = true; s2Center(); });
+      $("s2-later").addEventListener("click", () => s2Later(cur));
+      $("s2-fwd").addEventListener("click", () => s2Fwd(cur));
+    }
+  }
+
+  function s2LogHTML() {
+    if (!s2.log.length) return "";
+    return '<div class="s2-log">' +
+      s2.log.slice(0, 8).map((l) => '<div class="' + (l.cost ? "cost" : "") + '">' + l.text + "</div>").join("") +
+      "</div>";
+  }
+
+  function s2Close(it) { it.state = "done"; s2.open = null; s2.replying = false; }
+
+  function s2Send(it) {
+    s2Close(it);
+    if (it.def.task) {
+      s2.done++;
+      s2Say("提出　<b>" + it.def.task + "</b>");
+      if (s2.done >= 3) s2Clear();
+    } else {
+      s2.noise++;
+      s2Say("返信した　" + it.def.subj + "（ICTの仕事ではない）", true);
+    }
+    s2Center(); s2List();
+  }
+
+  function s2Later(it) {
+    s2Close(it);
+    s2Say("後回し　" + it.def.subj, true);
+    later(() => { if (s2 && !s2.cleared) s2Land(it.def, "督促", S2_AGAIN); }, S2_RESEND * 1000);
+    s2Center(); s2List();
+  }
+
+  function s2Fwd(it) {
+    s2Close(it);
+    if (it.def.task) {
+      // 本命を投げ返すと、時間だけ失って戻ってくる。
+      s2Say("転送　" + it.def.subj, true);
+      later(() => { if (s2 && !s2.cleared) s2Land(it.def, "差戻し", S2_AGAIN); }, S2_BOUNCE * 1000);
+    } else {
+      s2Say("転送　" + it.def.subj);
+      if (it.def.id === "n3") later(phsRing, 1800);   // ネットが遅い件は苅部さんへ回ることになる
+    }
+    s2Center(); s2List();
+  }
+
+  function s2Clear() {
+    s2.cleared = true;
+    // 触らずに残ったものを「処理済み」と書いたら嘘になる。
+    // 置いていったことが見えるほうが、このステージの主題に合う。
+    s2.left = 0;
+    s2.items.forEach((x) => { if (x.state === "live") { x.state = "left"; s2.left++; } });
+    TEAMS[2].pos = 3; drawMarks();
+    // 通奏低音は Stage 2 で 9 名（docs/ui/00 §4）。1回だけ薄く光らせる。
+    const f = $("fever");
+    f.textContent = "9"; f.classList.add("bumped");
+    later(() => f.classList.remove("bumped"), 1200);
+  }
+
+  function renderStage2() {
+    hideOverlays();
+    paneL.classList.remove("hide"); paneR.classList.remove("hide");
+    revealAI(true);
+    s2Init();
+    $("fever").textContent = "5";
+    s2List(); s2Center();
+  }
+
+  /* ------------------------------------------------------------------ */
   /* 急変：段階的に重ねる。同時に全部起こさない。                          */
   /* ------------------------------------------------------------------ */
   async function transition() {
@@ -1012,12 +1295,14 @@
     { id: "welcome", label: "② ウェルカム",  mode: "peace", note: "操作説明を一切しない。AI初体験は Stage 1 に取ってある。ヘッダーの「原因不明の発熱 3」はこの最初の画面から居座っていて、誰も気に留めない。" },
     { id: "inbox",   label: "③ 受信トレイ",  mode: "peace", note: "右ペインはまだ無く、中央が右端まで伸びている。読ませたいのはメールだけ。3通目の夜勤師長メールが未知ウイルスの種で、太字にせず、色も変えず、段落の途中に置いてある。ここで警戒させたら設計失敗。" },
     { id: "s1",      label: "④ Stage 1",   mode: "alert", note: "まだ2ペイン。「添付を開く」で汚いExcelを見せ、閉じた瞬間に右からAIペインが滑り込む——問題を見てから道具が来る順序にしてある。［コピー］がこのステージの生命線で、そこから先は自分で言語化させる。" },
-    { id: "unlock",  label: "⑤ 解錠",       mode: "alert", note: "報酬は師長の承認だけ。スコアも星も出さない。同時に「原因不明の発熱」が 3→5 に静かに変わる——解錠の喜びの陰で、誰も見ていない数字が増える。" }
+    { id: "unlock",  label: "⑤ 解錠",       mode: "alert", note: "報酬は師長の承認だけ。スコアも星も出さない。同時に「原因不明の発熱」が 3→5 に静かに変わる——解錠の喜びの陰で、誰も見ていない数字が増える。" },
+    { id: "s2",      label: "⑥ Stage 2",   mode: "alert", note: "受信トレイに次々着弾し、1通ごとに60秒が走る。本命は3通だけで、どれが本命かは書いていない。後回しも時間切れも消えず「督促」で戻ってくる——罰は減点ではなく時間だから。全部丁寧に返したチームが溢れる。" }
   ];
 
   function go(id, keepMode) {
     clearLater();
     verdicting = false;
+    s2Stop();
     view = id;
     const step = STEPS.find((s) => s.id === id) || STEPS[0];
     if (!keepMode) screenEl.dataset.mode = step.mode;
@@ -1057,6 +1342,7 @@
       verdictPasses = true; syncVerdictButtons();
       later(runVerdict, 300);
     }
+    else if (id === "s2") renderStage2();
 
     $("steps").querySelectorAll("button").forEach((b) => {
       b.setAttribute("aria-pressed", String(b.dataset.id === id));
