@@ -606,6 +606,9 @@
   let timers = [];
   const later = (fn, ms) => { timers.push(setTimeout(fn, reduce ? 0 : ms)); };
   const clearLater = () => { timers.forEach(clearTimeout); timers = []; };
+  // textarea の値を innerHTML に埋め戻す箇所（Stage 1 の下書き代筆）専用。
+  // 直接埋め込むと </textarea> を含む入力でDOMを破壊できてしまう。
+  const esc = (s) => (s || "").replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
 
   /* ------------------------------------------------------------------ */
   /* シナリオの実文言（docs/scenario/ より）                              */
@@ -1002,7 +1005,7 @@
     S1_MAILS_R1.forEach((d) => { d._landed = false; });
     S1_MAILS_R2.forEach((d) => { d._landed = false; });
     s1 = { t0: Date.now(), round: 1, items: [], open: null, aiReady: false,
-           doneIds: new Set(), log: [], n: 0, roundDone: false, interstitial: false, cleared: false, result: null };
+           doneIds: new Set(), log: [], n: 0, interstitial: false, cleared: false, result: null };
     s1Stop();
     s1Tick = setInterval(s1Frame, 250);
   }
@@ -1018,14 +1021,16 @@
     const t = s1Now();
     const defs = s1Defs();
     defs.forEach((d) => { if (!d._landed && t >= d.at) { d._landed = true; s1Land(d); } });
+    let expired = false;
     s1.items.forEach((it) => {
       if (it.state !== "live" || t <= it.due) return;
       // 督促は無い。時間切れは、もう二度と返信できない——一発勝負。
       it.state = "missed";
       s1Say("時間切れ（もう返信できません）　" + it.def.subj, true);
       if (s1.open === it.key) s1.open = null;
-      s1Center();
+      expired = true;
     });
+    if (expired) s1Center();
     s1List();
     // ラウンド終了判定：全通が着弾済みで、まだ live のものが無い。
     const allLanded = defs.every((d) => d._landed);
@@ -1119,17 +1124,19 @@
     }
 
     // 警告は専用の行を持たせず送信ボタンのテキストを一時的に差し替えて表示する。
+    // textarea の中身は esc() を通す。生で埋め込むと </textarea> を含む入力で
+    // 再描画のたびにDOMを壊せてしまう（CodeRabbit指摘）。
     const replyHTML = !s1.aiReady
       ? '<div class="box"><div class="hd">返信</div>' +
-        '<textarea class="submit-area" id="s1-body" style="min-height:56px" placeholder="本文を入力">' + (cur.bodyDraft || "") + "</textarea></div>"
+        '<textarea class="submit-area" id="s1-body" style="min-height:56px" placeholder="本文を入力">' + esc(cur.bodyDraft) + "</textarea></div>"
       : '<div class="box">' +
         '<div class="hd" style="display:flex;align-items:center;justify-content:space-between;gap:8px">' +
           '<span>要点（箇条書きでOK）</span>' +
           '<button class="btn ghost" id="s1-draft" style="padding:5px 13px;font-size:13px">AIに下書きさせる</button>' +
         "</div>" +
-        '<textarea class="submit-area" id="s1-point" style="min-height:30px" placeholder="・在庫は総務課の発注担当へ">' + (cur.point || "") + "</textarea></div>" +
+        '<textarea class="submit-area" id="s1-point" style="min-height:30px" placeholder="・在庫は総務課の発注担当へ">' + esc(cur.point) + "</textarea></div>" +
         '<div class="box"><div class="hd">本文（下書き・編集してから送信）</div>' +
-        '<textarea class="submit-area" id="s1-body" style="min-height:46px" placeholder="下書きさせるとここに入ります">' + (cur.bodyDraft || "") + "</textarea></div>";
+        '<textarea class="submit-area" id="s1-body" style="min-height:46px" placeholder="下書きさせるとここに入ります">' + esc(cur.bodyDraft) + "</textarea></div>";
 
     // .work をスクロールさせず（overflow:hidden）、メール本文だけを内部スクロールにする。
     // 返信欄と送信ボタンは残りの高さぶんだけ自然に下へ寄る＝画面下部に固定される。
@@ -1184,7 +1191,6 @@
   function s1RoundComplete() {
     // 自然完了と2回目の安全弁タイマーが競合しても二重処理しない。
     if (s1.cleared || s1.interstitial) return;
-    s1.roundDone = true;
     const defs = s1Defs();
     const doneThisRound = defs.filter((d) => s1.doneIds.has(d.id)).length;
 
@@ -1219,7 +1225,6 @@
     s1.t0 = Date.now();
     s1.items = [];
     s1.open = null;
-    s1.roundDone = false;
     // 2回目も詰んだままにしない、最終の安全弁。
     later(() => { if (s1 && s1.round === 2 && !s1.cleared) s1RoundComplete(); }, S1_SAFETY * 1000);
     s1Center(); s1List();
