@@ -196,6 +196,38 @@
 }
 .mail.landing { animation: land .55s ease-out; }
 
+/* --- 1通ごとに締め切りが走る（Stage 1 が使用。s2系のクラス名だが       */
+/*     PR #23 由来の命名を引き継いでいるだけで、Stage 2 専用ではない）    */
+/* 締め切りは一覧の側に出す。開かないと分からないのでは、優先順位を付けられない。 */
+.mail .due {
+  font-family: var(--font-num); font-size: 12px; margin-top: 7px;
+  display: flex; align-items: center; gap: 8px; color: var(--fg-muted);
+  font-variant-numeric: tabular-nums;
+}
+.mail .due .bar { flex: 1; height: 3px; background: var(--surface-2); position: relative; }
+.mail .due .bar i { position: absolute; top: 0; bottom: 0; left: 0; background: var(--ok); }
+.mail.hot .due { color: var(--warn); font-weight: 700; }
+.mail.hot .due .bar i { background: var(--warn); }
+.mail .tag {
+  font-family: var(--font-ui); font-size: 11px; font-weight: 700;
+  padding: 1px 6px; margin-right: 6px; background: var(--warn); color: #14171a;
+}
+.mail.done { opacity: .38; }
+
+.s2-hd { display: flex; align-items: center; gap: 16px; flex-wrap: wrap; }
+.s2-hd .grow { flex: 1; }
+.s2-count { font-family: var(--font-num); font-size: 14px; color: var(--fg-muted); }
+.s2-count b { color: var(--fg); font-size: 19px; font-weight: 700; }
+.s2-timer {
+  font-family: var(--font-num); font-size: 26px; font-weight: 600;
+  font-variant-numeric: tabular-nums; line-height: 1;
+}
+.s2-timer.hot { color: var(--warn); }
+.s2-note { font-size: 14px; color: var(--fg-muted); line-height: 1.8; max-width: 62ch; }
+.s2-log { font-size: 13px; color: var(--fg-muted); line-height: 2; }
+.s2-log b { color: var(--fg); font-weight: 600; }
+.s2-log .cost { color: var(--warn); }
+
 /* --- 病院から届くものは 2003年の書式で描く ----------------------------- */
 .legacy { font-family: var(--font-legacy); font-size: 15px; line-height: 1.9; }
 .reader { flex: 1; overflow-y: auto; padding: 22px 28px; }
@@ -459,7 +491,7 @@
             <span class="plain">在院 398/400</span><span class="dot plain">・</span>
             <span class="plain">空床 2</span><span class="dot plain">・</span>
             <span class="plain">本日入院 7</span><span class="dot plain">・</span>
-            <span class="fever">原因不明の発熱 <b id="fever">3</b></span>
+            <span class="fever">発熱 <b id="fever">3</b></span>
           </div>
           <div class="spacer"></div>
           <div class="clock idle" id="clock">--:--</div>
@@ -549,8 +581,8 @@
 
         <div class="veil unlock hide" id="ov-unlock">
           <div class="bar"></div>
-          <div class="t">Stage 2 を解錠しました</div>
-          <div class="s">二正面 — 同時多発</div>
+          <div class="t">Stage 3 を解錠しました</div>
+          <div class="s">嘘 — ハルシネーションの罠</div>
         </div>
 
       </div>
@@ -574,6 +606,9 @@
   let timers = [];
   const later = (fn, ms) => { timers.push(setTimeout(fn, reduce ? 0 : ms)); };
   const clearLater = () => { timers.forEach(clearTimeout); timers = []; };
+  // textarea の値を innerHTML に埋め戻す箇所（Stage 1 の下書き代筆）専用。
+  // 直接埋め込むと </textarea> を含む入力でDOMを破壊できてしまう。
+  const esc = (s) => (s || "").replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
 
   /* ------------------------------------------------------------------ */
   /* シナリオの実文言（docs/scenario/ より）                              */
@@ -638,6 +673,47 @@
     "009       小林　愛      5A          7/5         陽性   あり     接触者調査中"
   ].join("\n");
   $("sheet").textContent = SHEET;
+
+  /* Stage 2「二正面」——受信トレイに次々着弾する。
+     本命は3通だけで、あとはノイズ。全部丁寧に返すと確実に溢れる。
+     速度だけでなく「捨てる判断」を問うのがこのステージの主題。 */
+  const S2_MAILS = [
+    { id: "n1", at: 0, from: "3B病棟 看護師", subj: "マスクの在庫がないんですが",
+      body: ["いつもお世話になっております。",
+             "3Bのサージカルマスク、残り2箱です。発注ってICTさんですよね？",
+             "違ったらすみません。誰に言えばいいのか分からなくて。"] },
+    { id: "t1", at: 3, from: "看護部長", subj: "【至急】職員向け通知の起案をお願いします",
+      body: ["7B病棟でノロ疑いの集団発生。全職員への緊急通知を今夜中に出します。",
+             "吐物処理手順の再周知を含めてください。前回の通知は誰も読まなかったそうです。",
+             "文面はそちらで。私は会議に入ります。"], task: "職員向け緊急通知" },
+    { id: "n2", at: 7, from: "人事課", subj: "先月の研修の出席簿がまだ提出されていません",
+      body: ["標記の件、提出期限を3週間過ぎております。",
+             "お忙しいところ恐れ入りますが、本日中にご提出をお願いいたします。",
+             "なお、様式は昨年度から変更されておりますのでご注意ください。"] },
+    { id: "t2", at: 11, from: "院長室", subj: "保健所への第一報、下書きを至急",
+      body: ["保健所に第一報を入れます。院長が「まず紙をくれ」と言っています。",
+             "発生状況・患者数・現時点の対応をまとめてください。",
+             "確定していないことは書かないように。あとで必ず聞かれます。"], task: "保健所への第一報" },
+    { id: "n3", at: 15, from: "3B病棟 師長", subj: "院内ネットがとにかく遅いです",
+      body: ["午前中から電子カルテが重くて業務になりません。",
+             "ICTさんって、こういうのも見てくださるんですよね？",
+             "情報のほうのICTだと思っていました。すみません。"] },
+    { id: "t3", at: 20, from: "5B病棟 師長", subj: "ご家族への説明文をお願いできますか",
+      body: ["5Bに入院中の患者さんのご家族が、日本語をあまり話されません。",
+             "面会制限の説明文を、やさしい日本語と英語で用意していただけますか。",
+             "ご家族は明日の朝いらっしゃいます。"], task: "外国人家族への説明文" },
+    { id: "n4", at: 25, from: "総務課", subj: "職員駐車場の抽選結果について",
+      body: ["標記の件、抽選の結果をお知らせいたします。",
+             "貴部署の割当は今年度も第3駐車場（正門から徒歩12分）となりました。",
+             "ご不明な点は総務課までお問い合わせください。"] },
+    { id: "n5", at: 31, from: "広報課", subj: "テレビ局から取材の申し込みが来ています",
+      body: ["地元局から「院内感染について取材したい」と連絡がありました。",
+             "現時点で何をお答えしてよいか、ICTさんのご意見を伺えますか。",
+             "先方は明日の朝までに回答がほしいそうです。"] },
+    { id: "n6", at: 38, from: "給食課", subj: "今週の献立表のご確認をお願いします",
+      body: ["今週分の献立表を添付……し忘れました。改めてお送りします。",
+             "アレルギー対応の欄に変更がありますのでご確認ください。"] }
+  ];
 
   const PHS_LINES = [
     "〔苅部〕また師長のExcelですか。あれ、日付の書き方が5種類くらいありますよね。",
@@ -828,16 +904,362 @@
     }
   }
 
-  function renderStage1() {
+  /* ------------------------------------------------------------------ */
+  /* Stage 1：火の手 —— 受信トレイ地獄                                    */
+  /*                                                                    */
+  /* 1回目：AI無しで10通に挑む。全通が本物、ノイズは無い。督促は来ない。   */
+  /*        時間切れは二度と返信できない——一発勝負。                     */
+  /*        1回目が終わって全通は捌けていなければ、そこで初めて          */
+  /*        苅部さんが割り込み、強制的にAIを渡す（進捗に関係ない固定      */
+  /*        タイマーではなく「失敗した」という結果がトリガー）。          */
+  /* 2回目：新しい10通で再挑戦。AIは既にある。「要点→AIに下書きさせる→   */
+  /*        送信」で捌ける。締切は1回目と同じく1通ごとに並走する。       */
+  /*                                                                    */
+  /* 手動で1回目を全通さばき切れても構わない——ボタンの使用を強制する     */
+  /* 判定は置かない（Stage 3・4 も「操作したか」ではなく「結果」で判定    */
+  /* してきたのと同じ流儀）。その場合は苅部さんの出番なくクリアになる。   */
+  /* ------------------------------------------------------------------ */
+  const S1_LIMIT   = 60;   // 1通あたりの持ち時間（秒）
+  const S1_SAFETY  = 240;  // 2回目の詰み防止の安全弁（秒）
+  const S1_MIN_LEN = 12;   // 一言で時間稼ぎさせないための最低文字数
+
+  const S1_MAILS_R1 = [
+    { id: "m1", at: 0, from: "3B病棟 看護師", subj: "サージカルマスクの在庫について",
+      body: ["いつもお世話になっております。", "3Bのマスク在庫が残り少ないのですが、追加はどちらに申請すればよいでしょうか。", "お手すきの際にご返信いただければ助かります。"],
+      draft: ["3B病棟 各位", "マスクの追加分は総務課の物品担当（内線1180）へ申請してください。", "当面は在庫を病棟間で融通しますので、不足分は看護部にもご相談ください。", "感染制御チーム"] },
+    { id: "m2", at: 4, from: "人事課", subj: "先月の研修、出席されていますか",
+      body: ["標記の件、着任されたばかりの皆様のお名前が出席簿に見当たりません。", "出席・欠席の別をご確認のうえご返信ください。"],
+      draft: ["ご連絡ありがとうございます。", "着任日の関係で該当の研修は未受講です。次回開催分での受講を予定しております。", "よろしくお願いいたします。"] },
+    { id: "m3", at: 8, from: "5A病棟 師長", subj: "個室、あと何床空いてますか",
+      body: ["MRSA疑いの患者が増えていて、個室が足りるか心配です。", "現時点で空いている個室、何床か教えてもらえますか。"],
+      draft: ["5A病棟 師長", "現時点で運用可能な個室は2床です。", "追加が必要な場合は病床管理担当と調整しますので、状況が変わり次第ご連絡ください。"] },
+    { id: "m4", at: 13, from: "薬剤部", subj: "消毒用アルコールの追加発注、必要ですか",
+      body: ["感染対策で使用量が増えていると聞きました。", "追加発注をかけてよいか、ICTのご判断を伺いたいです。"],
+      draft: ["薬剤部 各位", "追加発注をお願いします。当面は通常の1.5倍程度の使用量を見込んでいます。", "ご対応ありがとうございます。"] },
+    { id: "m5", at: 18, from: "地域連携室", subj: "転院予定の患者、そのまま送り出して大丈夫ですか",
+      body: ["来週転院予定の患者さんがいますが、MRSA疑いの件は先方に伝えるべきでしょうか。", "判断を仰ぎたいです。"],
+      draft: ["地域連携室 各位", "保菌状況が確定するまで転院は見合わせてください。", "結果が出次第、先方への申し送り内容も含めてこちらからご連絡します。"] },
+    { id: "m6", at: 23, from: "検査科", subj: "追加の検体、必要でしょうか",
+      body: ["5A病棟からの検体、何名分まで受け付ければよいですか。", "本日中に何名分か教えてください。"],
+      draft: ["検査科 各位", "対象病棟の入院患者全員分をお願いします。目安は10〜15名程度です。", "急ぎの対応、ありがとうございます。"] },
+    { id: "m7", at: 29, from: "総務課", subj: "面会制限、何時から始めますか",
+      body: ["面会制限を始めるとのことですが、開始時刻を各所に周知したいので教えてください。"],
+      draft: ["総務課 各位", "本日17時からの開始でお願いします。", "掲示物は追ってこちらから共有します。"] },
+    { id: "m8", at: 35, from: "医事課", subj: "ご家族への説明、どちらが行いますか",
+      body: ["患者さんのご家族から説明を求められています。", "病棟が対応するのか、ICTが対応するのか教えてください。"],
+      draft: ["医事課 各位", "一次対応は病棟看護師にお願いし、詳細な質問が出た場合はICTが引き継ぎます。", "窓口が分かるよう病棟にも共有します。"] },
+    { id: "m9", at: 41, from: "給食課", subj: "個室患者さんの配膳、動線を変えたほうがいいですか",
+      body: ["個室が増えているので、配膳の順番を変えたほうが良いか確認したいです。"],
+      draft: ["給食課 各位", "個室患者さんへの配膳は最後の順番でお願いします。", "トレーの回収時も同様の順でお願いできると助かります。"] },
+    { id: "m10", at: 47, from: "前任ICN", subj: "引き継ぎ、大丈夫そうですか",
+      body: ["急に忙しくなってしまってすみません。", "何か分からないことがあれば遠慮なく聞いてください。"],
+      draft: ["ご連絡ありがとうございます。", "今のところ何とか対応できています。分からないことが出てきたらまたご相談させてください。"] }
+  ];
+
+  // 2回目：苅部さんの助けを得たあとの新しい10通。1回目と同じ件名は使わない
+  // （同じ件名が2回出ると「督促が来た」と誤解される）。
+  const S1_MAILS_R2 = [
+    { id: "r1", at: 0, from: "3B病棟 看護師", subj: "防護ガウンの在庫について",
+      body: ["立て続けにすみません。", "ガウンも残りが少なくなってきました。追加の申請先を教えてください。"],
+      draft: ["3B病棟 各位", "ガウンもマスクと同じく総務課の物品担当（内線1180）へお願いします。", "在庫状況は毎朝共有しますので、そちらもご確認ください。"] },
+    { id: "r2", at: 4, from: "事務当直", subj: "夜間の問い合わせ、どこにすればいいですか",
+      body: ["夜間・休日にICT宛の問い合わせが来た場合、当直としてどこに繋げばよいですか。", "窓口を明確にしておきたいです。"],
+      draft: ["事務当直 各位", "夜間・休日は当直医経由でICT携帯（内線9120）へお願いします。", "緊急でない場合は翌朝の申し送りで結構です。"] },
+    { id: "r3", at: 8, from: "5A病棟 師長", subj: "接触者リストの提出期限について",
+      body: ["接触者リストの提出、いつまでにお願いすればいいか教えてください。", "病棟でも準備を進めたいです。"],
+      draft: ["5A病棟 師長", "本日18時までにお願いします。", "様式は昨日お渡ししたものと同じで結構です。"] },
+    { id: "r4", at: 13, from: "検査科", subj: "検体ラベルの記載ミスがありました",
+      body: ["先ほど届いた検体のラベル、患者IDと病棟が食い違っているものが1件ありました。", "どう扱えばよいですか。"],
+      draft: ["検査科 各位", "該当検体は一旦保留にしてください。", "病棟に確認のうえ、正しいラベルを貼り直して再提出します。少々お待ちください。"] },
+    { id: "r5", at: 18, from: "総務課", subj: "掲示物のポスター、いつ届きますか",
+      body: ["面会制限のポスター、各病棟から催促が来ています。", "いつ頃お渡しできそうですか。"],
+      draft: ["総務課 各位", "本日中にデータをお渡しできる見込みです。", "印刷・掲示は各病棟にお願いする形で進めてください。"] },
+    { id: "r6", at: 23, from: "地域連携室", subj: "受け入れ先の病院から追加で聞かれています",
+      body: ["先方から「保菌状況の確定はいつ頃か」と追加で聞かれました。", "回答してよい内容か確認させてください。"],
+      draft: ["地域連携室 各位", "確定は明日中を見込んでいます。その旨だけお伝えください。", "詳しい経緯はこちらから直接ご説明します。"] },
+    { id: "r7", at: 29, from: "薬剤部", subj: "手指消毒液のディスペンサー、増設できますか",
+      body: ["5A病棟の出入口、消毒液の設置台数を増やしたほうがよいでしょうか。", "判断をお願いします。"],
+      draft: ["薬剤部 各位", "出入口2箇所への増設をお願いします。", "対応ありがとうございます。"] },
+    { id: "r8", at: 35, from: "給食課", subj: "アレルギー対応の食材、変更ありますか",
+      body: ["個室対応の患者さんが増えていますが、アレルギー食の対応に変更はありますか。", "確認させてください。"],
+      draft: ["給食課 各位", "アレルギー対応自体に変更はありません。配膳順のみ、先にお伝えしたとおりでお願いします。"] },
+    { id: "r9", at: 41, from: "医事課", subj: "診断書の記載について確認したいです",
+      body: ["ご家族から診断書を求められています。", "感染症名の記載方法、指定はありますか。"],
+      draft: ["医事課 各位", "病名の記載は主治医の判断に従ってください。ICTから記載内容を指定することはありません。", "ご不明点があれば主治医にご確認をお願いします。"] },
+    { id: "r10", at: 47, from: "前任ICN", subj: "落ち着きましたか、心配しています",
+      body: ["立て続けに大変そうで心配しています。", "無理せず、頼れるところは頼ってくださいね。"],
+      draft: ["ご心配ありがとうございます。", "苅部さんに助けてもらって、なんとか流れが掴めてきました。落ち着いたらまたご連絡します。"] }
+  ];
+
+  // 苅部さんの最初のひとこと。1回目の失敗という結果を受けての台詞。
+  const S1_KARUBE_INTRO = [
+    "〔苅部〕……全部は無理でしたね。1人でやる量じゃないです。",
+    "〔苅部〕うち、AI入ってます。要点だけ伝えれば下書きしてくれますよ。もう一度いきましょう。"
+  ];
+
+  let s1 = null, s1Tick = null;
+  const s1Now = () => (Date.now() - s1.t0) / 1000;
+  const s1Defs = () => (s1.round === 1 ? S1_MAILS_R1 : S1_MAILS_R2);
+
+  function s1Init() {
+    S1_MAILS_R1.forEach((d) => { d._landed = false; });
+    S1_MAILS_R2.forEach((d) => { d._landed = false; });
+    s1 = { t0: Date.now(), round: 1, items: [], open: null, aiReady: false,
+           doneIds: new Set(), log: [], n: 0, interstitial: false, cleared: false, result: null };
+    s1Stop();
+    s1Tick = setInterval(s1Frame, 250);
+  }
+  function s1Stop() { if (s1Tick) { clearInterval(s1Tick); s1Tick = null; } }
+
+  function s1Land(def) {
+    s1.items.push({ def, key: def.id + "#" + (++s1.n), due: s1Now() + S1_LIMIT, state: "live", point: "", bodyDraft: "" });
+  }
+  function s1Say(text, cost) { s1.log.unshift({ text, cost: !!cost }); }
+
+  function s1Frame() {
+    if (!s1 || view !== "s1" || s1.cleared || s1.interstitial) return;
+    const t = s1Now();
+    const defs = s1Defs();
+    defs.forEach((d) => { if (!d._landed && t >= d.at) { d._landed = true; s1Land(d); } });
+    let expired = false;
+    s1.items.forEach((it) => {
+      if (it.state !== "live" || t <= it.due) return;
+      // 督促は無い。時間切れは、もう二度と返信できない——一発勝負。
+      it.state = "missed";
+      s1Say("時間切れ（もう返信できません）　" + it.def.subj, true);
+      if (s1.open === it.key) s1.open = null;
+      expired = true;
+    });
+    if (expired) s1Center();
+    s1List();
+    // ラウンド終了判定：全通が着弾済みで、まだ live のものが無い。
+    const allLanded = defs.every((d) => d._landed);
+    const anyLive = s1.items.some((it) => it.state === "live");
+    if (allLanded && !anyLive) s1RoundComplete();
+    const tm = $("s1-timer");
+    if (tm) {
+      const cur = s1.items.find((x) => x.key === s1.open);
+      if (cur) {
+        const left = cur.due - t;
+        tm.textContent = mmss(left);
+        tm.classList.toggle("hot", left <= 15);
+      }
+    }
+  }
+
+  function s1List() {
+    const box = $("mails");
+    const keep = box.scrollTop;
+    const t = s1Now();
+    box.innerHTML = "";
+    // 締め切りが近い順。上から潰せばよい形にしておく。
+    const live = s1.items.slice().sort((a, b) => (a.state === "live" ? 0 : 1) - (b.state === "live" ? 0 : 1) || a.due - b.due);
+    live.forEach((it) => {
+      const left = it.due - t, hot = it.state === "live" && left <= 15;
+      const b = document.createElement("button");
+      b.className = "mail" + (it.state === "live" ? "" : " done read") + (hot ? " hot" : "");
+      b.setAttribute("aria-current", String(s1.open === it.key));
+      b.innerHTML =
+        '<div class="from">' + it.def.from + "</div>" +
+        '<div class="subj">' + it.def.subj + "</div>" +
+        (it.state === "live"
+          ? '<div class="due"><span>' + mmss(left) + '</span><span class="bar"><i style="width:' +
+            Math.max(0, Math.min(100, (left / S1_LIMIT) * 100)) + '%"></i></span></div>'
+          : '<div class="due"><span>' + (it.state === "missed" ? "時間切れ・返信不可" : "返信済み") + "</span></div>");
+      b.addEventListener("click", () => {
+        if (it.state !== "live") return;
+        s1.open = it.key; s1Center(); s1List();
+      });
+      box.appendChild(b);
+    });
+    box.scrollTop = keep;
+    const n = live.filter((it) => it.state === "live").length;
+    $("unread").textContent = String(n);
+    $("unread").classList.toggle("hide", n === 0);
+  }
+
+  function s1LogHTML() {
+    if (!s1.log.length) return "";
+    return '<div class="s2-log">' +
+      s1.log.slice(0, 8).map((l) => '<div class="' + (l.cost ? "cost" : "") + '">' + l.text + "</div>").join("") +
+      "</div>";
+  }
+
+  function s1Center() {
+    const defs = s1Defs();
+    const doneThisRound = defs.filter((d) => s1.doneIds.has(d.id)).length;
+    const cur = s1.items.find((x) => x.key === s1.open && x.state === "live");
+    const head =
+      '<div class="stage-title">Stage 1　火の手' + (s1.round === 2 ? "　（2回目・AIあり）" : "") + "</div>" +
+      '<div class="s2-hd">' +
+        '<div class="s2-count">返信済み　<b>' + doneThisRound + " / " + defs.length + "</b></div>" +
+        '<div class="grow"></div>' +
+        (cur ? '<div class="s2-timer" id="s1-timer">' + mmss(cur.due - s1Now()) + "</div>" : "") +
+      "</div>";
+
+    if (s1.interstitial) {
+      paneC.innerHTML = '<div class="work">' + head +
+        '<div class="box"><div class="hd">1回目、終了</div>' +
+        '<div style="padding:16px 18px" class="s2-note">' +
+          doneThisRound + " / " + defs.length + " 件しか返せませんでした。手だけでは間に合いません。" +
+        "</div></div>" + s1LogHTML() + "</div>";
+      return;
+    }
+    if (s1.cleared) {
+      const msg = s1.result === "manual"
+        ? "全通に返信しました。苅部さんの手を借りず、この数を自力で捌き切りました。見事です。"
+        : s1.result === "partial"
+        ? "苅部さんのAIを使っても、一部は時間切れになりました。届いた分で次へ進みます。"
+        : "苅部さんに渡されたAIで、全通に返信しました。1人でやる量ではなかったはずです。";
+      paneC.innerHTML = '<div class="work">' + head +
+        '<div class="box"><div class="hd">受信トレイが落ち着きました</div>' +
+        '<div style="padding:16px 18px" class="s2-note">' + msg + "</div></div>" + s1LogHTML() + "</div>";
+      return;
+    }
+    if (!cur) {
+      paneC.innerHTML = '<div class="work">' + head +
+        '<div class="s2-note">左の一覧からメールを開いてください。<br>時間切れになったメールは、もう返信できません。</div>' +
+        s1LogHTML() + "</div>";
+      return;
+    }
+
+    // 警告は専用の行を持たせず送信ボタンのテキストを一時的に差し替えて表示する。
+    // textarea の中身は esc() を通す。生で埋め込むと </textarea> を含む入力で
+    // 再描画のたびにDOMを壊せてしまう（CodeRabbit指摘）。
+    const replyHTML = !s1.aiReady
+      ? '<div class="box"><div class="hd">返信</div>' +
+        '<textarea class="submit-area" id="s1-body" style="min-height:56px" placeholder="本文を入力">' + esc(cur.bodyDraft) + "</textarea></div>"
+      : '<div class="box">' +
+        '<div class="hd" style="display:flex;align-items:center;justify-content:space-between;gap:8px">' +
+          '<span>要点（箇条書きでOK）</span>' +
+          '<button class="btn ghost" id="s1-draft" style="padding:5px 13px;font-size:13px">AIに下書きさせる</button>' +
+        "</div>" +
+        '<textarea class="submit-area" id="s1-point" style="min-height:30px" placeholder="・在庫は総務課の発注担当へ">' + esc(cur.point) + "</textarea></div>" +
+        '<div class="box"><div class="hd">本文（下書き・編集してから送信）</div>' +
+        '<textarea class="submit-area" id="s1-body" style="min-height:46px" placeholder="下書きさせるとここに入ります">' + esc(cur.bodyDraft) + "</textarea></div>";
+
+    // .work をスクロールさせず（overflow:hidden）、メール本文だけを内部スクロールにする。
+    // 返信欄と送信ボタンは残りの高さぶんだけ自然に下へ寄る＝画面下部に固定される。
+    // 下に確保している78pxは、院内連絡先ウィンドウ（.phs、right:400px;bottom:62px、
+    // 高さ44px）を送信ボタンが隠さないための実測クリアランス。ログは行数が読めず
+    // ここに置くと再びボタンを押し出すので、この画面では出さない
+    // （ログは未開封・クリア後の画面でのみ表示する）。
+    paneC.innerHTML = '<div class="work" style="padding:14px 24px 78px;gap:8px;overflow:hidden">' + head +
+      '<div class="reader" style="padding:0;overflow-y:auto;flex:1 1 auto;min-height:0">' + mailBodyHTML(cur.def) + "</div>" +
+      replyHTML +
+      '<div class="row-end" style="flex:0 0 auto"><button class="btn" id="s1-send">送信する</button></div>' +
+      "</div>";
+
+    $("s1-body").addEventListener("input", () => { cur.bodyDraft = $("s1-body").value; });
+    if (s1.aiReady) {
+      $("s1-point").addEventListener("input", () => { cur.point = $("s1-point").value; });
+      $("s1-draft").addEventListener("click", () => s1Draft(cur));
+    }
+    $("s1-send").addEventListener("click", () => s1Send(cur));
+  }
+
+  function s1Draft(it) {
+    const btn = $("s1-draft");
+    if (!btn) return;
+    // 実際に生成するわけではない。モックなので固定ダミー文で足りる
+    // （要点欄に何を書いても、この固定文に置き換わる）。
+    btn.textContent = "下書き中…"; btn.disabled = true;
+    later(() => { it.bodyDraft = it.def.draft.join("\n"); if (s1.open === it.key) s1Center(); }, 1100);
+  }
+
+  function s1Close(it) { it.state = "done"; s1.open = null; }
+
+  function s1Send(it) {
+    const body = ($("s1-body").value || "").trim();
+    if (body.length < S1_MIN_LEN) {
+      // 一言で時間稼ぎする抜け道を塞ぐ、最低限の質チェック。
+      // 専用の行は作らず、ボタンのテキストを一時的に差し替えて知らせる。
+      const btn = $("s1-send");
+      if (btn) {
+        const orig = btn.textContent;
+        btn.textContent = "もう少し具体的に…";
+        later(() => { if ($("s1-send")) $("s1-send").textContent = orig; }, 1600);
+      }
+      return;
+    }
+    s1Close(it);
+    s1.doneIds.add(it.def.id);
+    s1Say("返信した　" + it.def.subj);
+    s1Center(); s1List();
+  }
+
+  function s1RoundComplete() {
+    // 自然完了と2回目の安全弁タイマーが競合しても二重処理しない。
+    if (s1.cleared || s1.interstitial) return;
+    const defs = s1Defs();
+    const doneThisRound = defs.filter((d) => s1.doneIds.has(d.id)).length;
+
+    if (doneThisRound >= defs.length) {
+      // 手動で全通さばき切った。ボタンの使用は強制しない——力量として認める。
+      s1Result("manual");
+      return;
+    }
+    if (s1.round === 1) {
+      // 1回目は失敗前提。ここで初めて苅部さんが割り込む
+      // （進捗に関係ない固定タイマーではなく、「失敗した」という結果がトリガー）。
+      s1.interstitial = true;
+      s1Center();
+      later(() => s1DeliverAIAndRetry(), 1700);
+    } else {
+      // 2回目も時間切れがあった。詰み防止のため、届いた分で先へ進める。
+      s1Result("partial");
+    }
+  }
+
+  function s1DeliverAIAndRetry() {
+    s1.interstitial = false;
+    s1.aiReady = true;
+    phsIntroPending = true;  // 次に開いたとき、苅部さんの最初のひとことを見せる
+    revealAI();
+    // revealAI() 自身の遅延（520ms）の後にバッジを光らせる。自動では開かない。
+    later(() => {
+      $("phs-badge").classList.remove("hide");
+      $("phs-badge").textContent = "1";
+    }, 560);
+    s1.round = 2;
+    s1.t0 = Date.now();
+    s1.items = [];
+    s1.open = null;
+    // 2回目も詰んだままにしない、最終の安全弁。
+    later(() => { if (s1 && s1.round === 2 && !s1.cleared) s1RoundComplete(); }, S1_SAFETY * 1000);
+    s1Center(); s1List();
+  }
+
+  function s1Result(kind) {
+    s1.cleared = true; s1.result = kind;
+    s1.items.forEach((x) => { if (x.state === "live") x.state = "done"; });
+    TEAMS[2].pos = 2; drawMarks();
+    s1Center(); s1List();
+    later(() => go("s2"), 1100);
+  }
+
+  function renderStage1Flood() {
+    hideOverlays();
+    paneL.classList.remove("hide"); paneR.classList.remove("hide");
+    s1Init();
+    s1List(); s1Center();
+  }
+
+  /* ------------------------------------------------------------------ */
+  /* Stage 2：Excel整形課題（旧Stage1の内容をそのまま使う）                */
+  /*                                                                    */
+  /* AIは Stage 1 から持ち越して既にある。「添付を開く」→［コピー］→     */
+  /* AIへ貼り付け→提出、という流れそのものは変えていない。               */
+  /* ------------------------------------------------------------------ */
+  function renderStage2Excel() {
     hideOverlays();
     paneL.classList.remove("hide"); paneR.classList.remove("hide");
     hasS1Mail = true; openIdx = "s1"; readS1 = true;
-    // 添付を見終えるまで、道具はまだ現れない。
-    later(() => revealAI(), 90000);  // 詰み防止の安全弁
     renderMails();
     paneC.innerHTML =
       '<div class="work">' +
-        '<div class="stage-title">Stage 1　火の手</div>' +
+        // タイトルは仮。正典の Stage 名は §5 の書き直し（プランC）で確定させる。
+        '<div class="stage-title">Stage 2　ラインリスト整形</div>' +
         // 正規化ルールの表は出さない。要件の言語化そのものが学習目標だから。
         '<div class="brief">統一されたラインリストに整形し、疫学曲線の材料を提出せよ。</div>' +
         '<div class="cols">提出する列：患者ID / 氏名 / 病棟 / 採取日 / MRSA結果 / 発熱 / 備考</div>' +
@@ -922,7 +1344,7 @@
     verdicting = false;
     if (verdictPasses) {
       const d = document.createElement("div");
-      d.className = "done"; d.textContent = "Stage 2 を解錠しました";
+      d.className = "done"; d.textContent = "Stage 3 を解錠しました";
       box.appendChild(d);
       unlockSequence();
     } else {
@@ -940,11 +1362,222 @@
     $("ov-unlock").classList.add("hide");
     // 承認だけが報酬。スコアも星も出さない。
     hasUnlockMail = true; renderMails("u");
-    // 自チームのマーカーが S2 へ滑る
-    TEAMS[2].pos = 2; drawMarks();
+    // 自チームのマーカーが S3 へ滑る
+    TEAMS[2].pos = 3; drawMarks();
     await wait(700);
     // 解錠の喜びの陰で、誰も見ていない数字が増える。演出はつけない。
     $("fever").textContent = "5";
+  }
+
+  /* ------------------------------------------------------------------ */
+  /* Stage 2：二正面 —— 鳴り止まない受信トレイ                            */
+  /*                                                                    */
+  /* 本命は3通だけ。残りはノイズで、全部丁寧に返すと確実に溢れる。          */
+  /* 罰は時間（企画書§6）なので、捌けなかったメールは消えず督促で戻る。    */
+  /* ------------------------------------------------------------------ */
+  const S2_LIMIT  = 60;   // 1通あたりの持ち時間（秒）
+  const S2_RESEND = 30;   // 後回し・時間切れが督促として戻るまで
+  const S2_BOUNCE = 20;   // 本命を転送したとき差し戻されるまで
+  const S2_AGAIN  = 45;   // 戻ってきた分の持ち時間。最初より短い
+
+  let s2 = null, s2Tick = null;
+  const s2Now = () => (Date.now() - s2.t0) / 1000;
+  const mmss = (s) => {
+    s = Math.max(0, Math.ceil(s));
+    return String(Math.floor(s / 60)).padStart(2, "0") + ":" + String(s % 60).padStart(2, "0");
+  };
+
+  function s2Init() {
+    S2_MAILS.forEach((d) => { d._landed = false; });
+    s2 = { t0: Date.now(), items: [], open: null, replying: false, done: 0, noise: 0, log: [], n: 0, cleared: false };
+    s2Stop();
+    s2Tick = setInterval(s2Frame, 250);
+  }
+  function s2Stop() { if (s2Tick) { clearInterval(s2Tick); s2Tick = null; } }
+
+  function s2Land(def, tag, limit) {
+    s2.items.push({
+      def, key: def.id + "#" + (++s2.n), tag: tag || null,
+      due: s2Now() + (limit || S2_LIMIT), state: "live"
+    });
+  }
+  function s2Say(text, cost) { s2.log.unshift({ text, cost: !!cost }); }
+
+  function s2Frame() {
+    if (!s2 || view !== "s2") return;
+    const t = s2Now();
+    if (!s2.cleared) {
+      S2_MAILS.forEach((d) => { if (!d._landed && t >= d.at) { d._landed = true; s2Land(d); } });
+    }
+    s2.items.forEach((it) => {
+      if (it.state !== "live" || t <= it.due) return;
+      // 消えてはくれない。時間切れは督促として戻ってくる。
+      it.state = "expired";
+      s2Say("時間切れ　" + it.def.subj, true);
+      later(() => { if (s2 && !s2.cleared) s2Land(it.def, "督促", S2_AGAIN); }, S2_RESEND * 1000);
+      if (s2.open === it.key) { s2.open = null; s2.replying = false; }
+      s2Center();
+    });
+    s2List();
+    const tm = $("s2-timer");
+    if (tm) {
+      const cur = s2.items.find((x) => x.key === s2.open);
+      if (cur) {
+        const left = cur.due - t;
+        tm.textContent = mmss(left);
+        tm.classList.toggle("hot", left <= 15);
+      }
+    }
+  }
+
+  function s2List() {
+    const box = $("mails");
+    const keep = box.scrollTop;
+    const t = s2Now();
+    box.innerHTML = "";
+    // 締め切りが近い順に並べる。上から潰せばよい形にしておくと、
+    // 1台を3〜4人で囲んでいても「次はこれ」を指差しで共有できる。
+    // 督促（45秒）は新着（60秒）より上に来るので、戻ってきたことが必ず目に入る。
+    const live = s2.items.filter((it) => it.state !== "expired")
+      .sort((a, b) => (a.state === "live" ? 0 : 1) - (b.state === "live" ? 0 : 1) || a.due - b.due);
+    live.forEach((it) => {
+      const left = it.due - t, hot = it.state === "live" && left <= 15;
+      const b = document.createElement("button");
+      b.className = "mail" + (it.state === "live" ? "" : " done read") + (hot ? " hot" : "");
+      b.setAttribute("aria-current", String(s2.open === it.key));
+      b.innerHTML =
+        '<div class="from">' + it.def.from + "</div>" +
+        '<div class="subj">' + (it.tag ? '<span class="tag">' + it.tag + "</span>" : "") + it.def.subj + "</div>" +
+        (it.state === "live"
+          ? '<div class="due"><span>' + mmss(left) + '</span><span class="bar"><i style="width:' +
+            Math.max(0, Math.min(100, (left / S2_LIMIT) * 100)) + '%"></i></span></div>'
+          : '<div class="due"><span>' + (it.state === "left" ? "未処理のまま" : "処理済み") + "</span></div>");
+      b.addEventListener("click", () => {
+        if (it.state !== "live") return;
+        s2.open = it.key; s2.replying = false; s2Center(); s2List();
+      });
+      box.appendChild(b);
+    });
+    box.scrollTop = keep;
+    const n = live.filter((it) => it.state === "live").length;
+    $("unread").textContent = String(n);
+    $("unread").classList.toggle("hide", n === 0);
+  }
+
+  function s2Center() {
+    const cur = s2.items.find((x) => x.key === s2.open && x.state === "live");
+    const head =
+      '<div class="stage-title">Stage 2　二正面</div>' +
+      '<div class="s2-hd">' +
+        '<div class="s2-count">提出　<b>' + s2.done + " / 3</b></div>" +
+        '<div class="grow"></div>' +
+        (cur ? '<div class="s2-timer" id="s2-timer">' + mmss(cur.due - s2Now()) + "</div>" : "") +
+      "</div>";
+
+    if (s2.cleared) {
+      paneC.innerHTML = '<div class="work">' + head +
+        '<div class="box"><div class="hd">3件とも提出しました</div>' +
+        '<div style="padding:16px 18px" class="s2-note">' +
+          "本命は3通だけでした。ICTの仕事でないものに返信したのは <b>" + s2.noise + "</b> 通、" +
+          "手を付けずに置いていったのは <b>" + (s2.left || 0) + "</b> 通。<br>" +
+          "全部に丁寧に答えていたら、朝までに終わりません。<b>置いていくのが正解です。</b>" +
+        "</div></div>" + s2LogHTML() + "</div>";
+      return;
+    }
+    if (!cur) {
+      paneC.innerHTML = '<div class="work">' + head +
+        '<div class="s2-note">左の一覧からメールを開いてください。<br>' +
+        "本命がどれかは書いてありません。</div>" + s2LogHTML() + "</div>";
+      return;
+    }
+
+    paneC.innerHTML = '<div class="work">' + head +
+      // 本文を伸ばさない。伸ばすとボタンが画面下端まで落ち、院内連絡先ウィンドウに隠れる。
+      // 判断する対象のすぐ下に操作を置く。
+      '<div class="reader" style="padding:0;overflow:visible;flex:0 0 auto">' + mailBodyHTML(cur.def) + "</div>" +
+      (s2.replying
+        ? '<div class="box"><div class="hd">返信</div>' +
+          '<textarea class="submit-area" id="s2-reply" placeholder="返信文を貼り付け"></textarea></div>' +
+          '<div class="row-end"><button class="btn ghost" id="s2-cancel">やめる</button>' +
+          '<button class="btn" id="s2-send">送信する</button></div>'
+        : '<div class="row-end">' +
+          '<button class="btn ghost" id="s2-fwd">転送</button>' +
+          '<button class="btn ghost" id="s2-later">後回し</button>' +
+          '<button class="btn" id="s2-reply-btn">今返信する</button></div>') +
+      s2LogHTML() + "</div>";
+
+    if (s2.replying) {
+      $("s2-cancel").addEventListener("click", () => { s2.replying = false; s2Center(); });
+      $("s2-send").addEventListener("click", () => s2Send(cur));
+    } else {
+      $("s2-reply-btn").addEventListener("click", () => { s2.replying = true; s2Center(); });
+      $("s2-later").addEventListener("click", () => s2Later(cur));
+      $("s2-fwd").addEventListener("click", () => s2Fwd(cur));
+    }
+  }
+
+  function s2LogHTML() {
+    if (!s2.log.length) return "";
+    return '<div class="s2-log">' +
+      s2.log.slice(0, 8).map((l) => '<div class="' + (l.cost ? "cost" : "") + '">' + l.text + "</div>").join("") +
+      "</div>";
+  }
+
+  function s2Close(it) { it.state = "done"; s2.open = null; s2.replying = false; }
+
+  function s2Send(it) {
+    s2Close(it);
+    if (it.def.task) {
+      s2.done++;
+      s2Say("提出　<b>" + it.def.task + "</b>");
+      if (s2.done >= 3) s2Clear();
+    } else {
+      s2.noise++;
+      s2Say("返信した　" + it.def.subj + "（ICTの仕事ではない）", true);
+    }
+    s2Center(); s2List();
+  }
+
+  function s2Later(it) {
+    s2Close(it);
+    s2Say("後回し　" + it.def.subj, true);
+    later(() => { if (s2 && !s2.cleared) s2Land(it.def, "督促", S2_AGAIN); }, S2_RESEND * 1000);
+    s2Center(); s2List();
+  }
+
+  function s2Fwd(it) {
+    s2Close(it);
+    if (it.def.task) {
+      // 本命を投げ返すと、時間だけ失って戻ってくる。
+      s2Say("転送　" + it.def.subj, true);
+      later(() => { if (s2 && !s2.cleared) s2Land(it.def, "差戻し", S2_AGAIN); }, S2_BOUNCE * 1000);
+    } else {
+      s2Say("転送　" + it.def.subj);
+      if (it.def.id === "n3") later(phsRing, 1800);   // ネットが遅い件は苅部さんへ回ることになる
+    }
+    s2Center(); s2List();
+  }
+
+  function s2Clear() {
+    s2.cleared = true;
+    // 触らずに残ったものを「処理済み」と書いたら嘘になる。
+    // 置いていったことが見えるほうが、このステージの主題に合う。
+    s2.left = 0;
+    s2.items.forEach((x) => { if (x.state === "live") { x.state = "left"; s2.left++; } });
+    TEAMS[2].pos = 3; drawMarks();
+    // 通奏低音は Stage 2 で 9 名（docs/ui/00 §4）。1回だけ薄く光らせる。
+    const f = $("fever");
+    f.textContent = "9"; f.classList.add("bumped");
+    later(() => f.classList.remove("bumped"), 1200);
+  }
+
+  function renderStage2() {
+    hideOverlays();
+    paneL.classList.remove("hide"); paneR.classList.remove("hide");
+    revealAI(true);
+    s2Init();
+    $("fever").textContent = "5";
+    s2List(); s2Center();
   }
 
   /* ------------------------------------------------------------------ */
@@ -985,6 +1618,9 @@
   /* 院内連絡先：自動で開かない。バッジが光るだけ。                        */
   /* ------------------------------------------------------------------ */
   let phsOpen = false, phsShown = 0;
+  // Stage 1 の強制イベントで苅部さんが現れたときだけ立つフラグ。
+  // 通常の「待たされる」やり取りとは別に、最初のひとことを即座に見せる。
+  let phsIntroPending = false;
   function phsRing() {
     revealAI(true);  // 苅部さんはAIの存在を前提に喋る。先回りさせない。
     $("phs").classList.remove("hide");
@@ -998,6 +1634,13 @@
     $("phs-badge").classList.add("hide");
     const log = $("phs-log");
     if (log.childElementCount) return;
+    if (phsIntroPending) {
+      // Stage 1 の強制イベント。待たされずに、すぐ用件へ入る。
+      phsIntroPending = false;
+      log.innerHTML = "<p>" + S1_KARUBE_INTRO[0] + "</p>";
+      later(() => { log.insertAdjacentHTML("beforeend", "<p>" + S1_KARUBE_INTRO[1] + "</p>"); }, 900);
+      return;
+    }
     // 待たされることがヒントのコスト。開いてもまだ返事は来ていない。
     log.innerHTML = '<p class="wait">〔苅部〕今、別病棟対応中。あとで。</p>';
     later(() => { log.insertAdjacentHTML("beforeend", "<p>" + PHS_LINES[0] + "</p>"); }, 1400);
@@ -1009,15 +1652,17 @@
   /* ------------------------------------------------------------------ */
   const STEPS = [
     { id: "entry",   label: "① 入室",       mode: "peace", note: "企画書§7「なしログイン。6桁チームコード入室」。数字が32pxなのは、ファシリテーターの読み上げを部屋の後ろから聞きながら打つため。" },
-    { id: "welcome", label: "② ウェルカム",  mode: "peace", note: "操作説明を一切しない。AI初体験は Stage 1 に取ってある。ヘッダーの「原因不明の発熱 3」はこの最初の画面から居座っていて、誰も気に留めない。" },
+    { id: "welcome", label: "② ウェルカム",  mode: "peace", note: "操作説明を一切しない。AI初体験は Stage 1 に取ってある。ヘッダーの「発熱 3」はこの最初の画面から居座っていて、他の在院・空床の数字に紛れて誰も気に留めない（「原因不明の発熱」だと臨床職には露骨すぎるため、ラベルは一般的な語にとどめてある）。" },
     { id: "inbox",   label: "③ 受信トレイ",  mode: "peace", note: "右ペインはまだ無く、中央が右端まで伸びている。読ませたいのはメールだけ。3通目の夜勤師長メールが未知ウイルスの種で、太字にせず、色も変えず、段落の途中に置いてある。ここで警戒させたら設計失敗。" },
-    { id: "s1",      label: "④ Stage 1",   mode: "alert", note: "まだ2ペイン。「添付を開く」で汚いExcelを見せ、閉じた瞬間に右からAIペインが滑り込む——問題を見てから道具が来る順序にしてある。［コピー］がこのステージの生命線で、そこから先は自分で言語化させる。" },
-    { id: "unlock",  label: "⑤ 解錠",       mode: "alert", note: "報酬は師長の承認だけ。スコアも星も出さない。同時に「原因不明の発熱」が 3→5 に静かに変わる——解錠の喜びの陰で、誰も見ていない数字が増える。" }
+    { id: "s1",      label: "④ Stage 1",   mode: "alert", note: "1回目：全通が本物、AIは無い。1通ごとの締切が並走し、督促は来ない——時間切れは二度と返信できない一発勝負。1回目が終わって全通捌けていなければ、そこで初めて苅部さんが割り込みAIを渡す（固定タイマーではなく「失敗した」が発火条件）。2回目：新しい10通に「要点→AIに下書きさせる→送信」で再挑戦。手動で1回目を全通さばき切っても構わない、ボタンの使用は強制しない。" },
+    { id: "s2",      label: "⑤ Stage 2",   mode: "alert", note: "元のExcel整形課題（旧Stage1の内容）。AIはStage 1から持ち越して既にある。「添付を開く」→［コピー］→AIへ貼り付け→提出、そこから先は自分で言語化させる。" },
+    { id: "unlock",  label: "⑥ 解錠",       mode: "alert", note: "報酬は師長の承認だけ。スコアも星も出さない。同時に「発熱」が 3→5 に静かに変わる——解錠の喜びの陰で、誰も見ていない数字が増える。" }
   ];
 
   function go(id, keepMode) {
     clearLater();
     verdicting = false;
+    s1Stop(); s2Stop();
     view = id;
     const step = STEPS.find((s) => s.id === id) || STEPS[0];
     if (!keepMode) screenEl.dataset.mode = step.mode;
@@ -1028,7 +1673,7 @@
     $("phs").classList.add("hide");
     $("phs-win").classList.add("hide");
     $("phs-log").innerHTML = "";
-    phsOpen = false; phsShown = 0;
+    phsOpen = false; phsShown = 0; phsIntroPending = false;
     $("ai-log").innerHTML = '<div class="empty">（まだ何もありません）</div>';
 
     if (id === "entry" || id === "welcome" || id === "inbox") {
@@ -1046,11 +1691,21 @@
     if (id === "entry") { mailState = MAILS.map(() => false); readS1 = readU = false; openIdx = null; renderEntry(); }
     else if (id === "welcome") renderWelcome();
     else if (id === "inbox") { openIdx = null; renderInbox(); }
-    else if (id === "s1") { hasUnlockMail = false; $("fever").textContent = "3"; renderStage1(); }
+    else if (id === "s1") {
+      hasS1Mail = false; hasUnlockMail = false; $("fever").textContent = "3";
+      TEAMS[2].pos = 1; drawMarks();
+      renderStage1Flood();
+    }
+    else if (id === "s2") {
+      hasUnlockMail = false; $("fever").textContent = "3";
+      TEAMS[2].pos = 2; drawMarks();
+      revealAI(true);  // Stage 1 から持ち越したAIは、当然ここでも使える
+      renderStage2Excel();
+    }
     else if (id === "unlock") {
       hasUnlockMail = false; readU = false; $("fever").textContent = "3";
-      renderStage1();
-      revealAI(true);  // 解錠まで来たチームは当然AIを出している
+      revealAI(true);
+      renderStage2Excel();
       const ta = $("submit");
       ta.value = "患者ID,氏名,病棟,採取日,MRSA結果,発熱,備考\n001,佐藤 一郎,5A,2026-07-03,陽性,あり,個室へ";
       ta.dispatchEvent(new Event("input"));
@@ -1079,7 +1734,9 @@
   $("btn-verdict-ng").addEventListener("click", () => { verdictPasses = false; syncVerdictButtons(); });
   $("btn-transition").addEventListener("click", transition);
   $("btn-phs").addEventListener("click", () => {
-    if (view !== "s1" && view !== "unlock") go("s1");
+    // Stage 1 の初回登場は固定タイマー任せ（s1DeliverAI）。この開発ボタンは
+    // Stage 2 以降の「通常の苅部さん」（待たされる遅延あり）を試すためのもの。
+    if (view !== "s2" && view !== "unlock") go("s2");
     phsRing();
   });
   $("btn-enter").addEventListener("click", () => go("welcome"));
