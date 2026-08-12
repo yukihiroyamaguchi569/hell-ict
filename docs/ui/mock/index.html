@@ -491,7 +491,7 @@
             <span class="plain">在院 398/400</span><span class="dot plain">・</span>
             <span class="plain">空床 2</span><span class="dot plain">・</span>
             <span class="plain">本日入院 7</span><span class="dot plain">・</span>
-            <span class="fever">原因不明の発熱 <b id="fever">3</b></span>
+            <span class="fever">発熱 <b id="fever">3</b></span>
           </div>
           <div class="spacer"></div>
           <div class="clock idle" id="clock">--:--</div>
@@ -1118,11 +1118,7 @@
       return;
     }
 
-    // 要点欄のボタンはヘッダー行に同居させ、本文欄も控えめな高さにする。
-    // 縦に積みすぎると、院内連絡先ウィンドウにボタンが隠れる
-    // （実機確認で見つかった事故。Stage 2 のExcel課題でも同じ理由で本文を伸ばさなかった）。
-    // 警告は専用の行を持たせず送信ボタンのテキストを一時的に差し替えて表示する
-    // （行を1本増やすだけで院内連絡先ウィンドウに再び隠れるため）。
+    // 警告は専用の行を持たせず送信ボタンのテキストを一時的に差し替えて表示する。
     const replyHTML = !s1.aiReady
       ? '<div class="box"><div class="hd">返信</div>' +
         '<textarea class="submit-area" id="s1-body" style="min-height:56px" placeholder="本文を入力">' + (cur.bodyDraft || "") + "</textarea></div>"
@@ -1135,13 +1131,17 @@
         '<div class="box"><div class="hd">本文（下書き・編集してから送信）</div>' +
         '<textarea class="submit-area" id="s1-body" style="min-height:46px" placeholder="下書きさせるとここに入ります">' + (cur.bodyDraft || "") + "</textarea></div>";
 
-    // .work の余白そのものも詰める。Stage 1 は要素数が多いので、他画面と同じ
-    // 余白のままだと院内連絡先ウィンドウにボタンが隠れる（実機確認で判明）。
-    paneC.innerHTML = '<div class="work" style="padding:14px 24px;gap:10px">' + head +
-      '<div class="reader" style="padding:0;overflow-y:auto;max-height:104px;flex:0 0 auto">' + mailBodyHTML(cur.def) + "</div>" +
+    // .work をスクロールさせず（overflow:hidden）、メール本文だけを内部スクロールにする。
+    // 返信欄と送信ボタンは残りの高さぶんだけ自然に下へ寄る＝画面下部に固定される。
+    // 下に確保している78pxは、院内連絡先ウィンドウ（.phs、right:400px;bottom:62px、
+    // 高さ44px）を送信ボタンが隠さないための実測クリアランス。ログは行数が読めず
+    // ここに置くと再びボタンを押し出すので、この画面では出さない
+    // （ログは未開封・クリア後の画面でのみ表示する）。
+    paneC.innerHTML = '<div class="work" style="padding:14px 24px 78px;gap:8px;overflow:hidden">' + head +
+      '<div class="reader" style="padding:0;overflow-y:auto;flex:1 1 auto;min-height:0">' + mailBodyHTML(cur.def) + "</div>" +
       replyHTML +
-      '<div class="row-end"><button class="btn" id="s1-send">送信する</button></div>' +
-      s1LogHTML() + "</div>";
+      '<div class="row-end" style="flex:0 0 auto"><button class="btn" id="s1-send">送信する</button></div>' +
+      "</div>";
 
     $("s1-body").addEventListener("input", () => { cur.bodyDraft = $("s1-body").value; });
     if (s1.aiReady) {
@@ -1647,11 +1647,11 @@
   /* ------------------------------------------------------------------ */
   const STEPS = [
     { id: "entry",   label: "① 入室",       mode: "peace", note: "企画書§7「なしログイン。6桁チームコード入室」。数字が32pxなのは、ファシリテーターの読み上げを部屋の後ろから聞きながら打つため。" },
-    { id: "welcome", label: "② ウェルカム",  mode: "peace", note: "操作説明を一切しない。AI初体験は Stage 1 に取ってある。ヘッダーの「原因不明の発熱 3」はこの最初の画面から居座っていて、誰も気に留めない。" },
+    { id: "welcome", label: "② ウェルカム",  mode: "peace", note: "操作説明を一切しない。AI初体験は Stage 1 に取ってある。ヘッダーの「発熱 3」はこの最初の画面から居座っていて、他の在院・空床の数字に紛れて誰も気に留めない（「原因不明の発熱」だと臨床職には露骨すぎるため、ラベルは一般的な語にとどめてある）。" },
     { id: "inbox",   label: "③ 受信トレイ",  mode: "peace", note: "右ペインはまだ無く、中央が右端まで伸びている。読ませたいのはメールだけ。3通目の夜勤師長メールが未知ウイルスの種で、太字にせず、色も変えず、段落の途中に置いてある。ここで警戒させたら設計失敗。" },
     { id: "s1",      label: "④ Stage 1",   mode: "alert", note: "1回目：全通が本物、AIは無い。1通ごとの締切が並走し、督促は来ない——時間切れは二度と返信できない一発勝負。1回目が終わって全通捌けていなければ、そこで初めて苅部さんが割り込みAIを渡す（固定タイマーではなく「失敗した」が発火条件）。2回目：新しい10通に「要点→AIに下書きさせる→送信」で再挑戦。手動で1回目を全通さばき切っても構わない、ボタンの使用は強制しない。" },
     { id: "s2",      label: "⑤ Stage 2",   mode: "alert", note: "元のExcel整形課題（旧Stage1の内容）。AIはStage 1から持ち越して既にある。「添付を開く」→［コピー］→AIへ貼り付け→提出、そこから先は自分で言語化させる。" },
-    { id: "unlock",  label: "⑥ 解錠",       mode: "alert", note: "報酬は師長の承認だけ。スコアも星も出さない。同時に「原因不明の発熱」が 3→5 に静かに変わる——解錠の喜びの陰で、誰も見ていない数字が増える。" }
+    { id: "unlock",  label: "⑥ 解錠",       mode: "alert", note: "報酬は師長の承認だけ。スコアも星も出さない。同時に「発熱」が 3→5 に静かに変わる——解錠の喜びの陰で、誰も見ていない数字が増える。" }
   ];
 
   function go(id, keepMode) {
