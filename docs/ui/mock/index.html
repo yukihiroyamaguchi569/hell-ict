@@ -415,6 +415,11 @@
   color: var(--fg-muted); padding: 12px 14px; white-space: pre-wrap;
 }
 .briefing .row-end { width: 100%; }
+/* 段落は順に現れる。既存の .msg と同じ持ち上げ量に揃えてある。
+   prefers-reduced-motion では transition も later() も 0 になるので、
+   結果として全部が最初から出ている状態になる（意図通り）。 */
+.briefing .beat { opacity: 0; transform: translateY(4px); transition: opacity .42s ease, transform .42s ease; }
+.briefing .beat.on { opacity: 1; transform: none; }
 
 /* ウェルカム */
 .welcome { padding: 40px 60px; overflow-y: auto; }
@@ -595,24 +600,36 @@
         <!-- 幹部ブリーフィング：急変直後、Stage 1 の冒頭。事務長が一方向で告げるだけで、
              相談はできない＝院内連絡先ウィンドウ（苅部さん窓口）とは別枠
              （docs/character/00_お助けキャラの原則.md「窓口は一つ、中の人は増えてよい」）。 -->
+        <!-- 台詞は一度に出さず、段落単位（.beat）で順に出す。丁寧な口調の
+             気持ち悪さは「間」で効く——全部を一度に置くと、ただの説明文になる。
+             タイミングは BRIEF_BEATS で定数化してある。 -->
         <div class="veil briefing hide" id="ov-brief">
           <div class="inner">
-            <div class="who">病院執行部　<b>事務長</b></div>
-            <div class="say">
-              ——ああ、派遣の皆さん。5Aの件はお聞きになりましたか。大変ですね。<br>
+            <div class="who beat">病院執行部　<b>事務長</b></div>
+            <div class="say beat">
+              ——ああ、派遣の皆さん。5Aの件はお聞きになりましたか。大変ですね。
+            </div>
+            <div class="say beat">
               それはそれとして、まずはメール処理をお願いします。<br>
-              現場から問い合わせが山ほど来ていますので。感染対策は、その後で結構です。<br><br>
-              あ、ひとつだけ。うちのメールは、返信しないと消えます。<br>
-              <em>他の職員は5分ですが</em>——優秀な皆さんなら、1分もあれば十分でしょう？<br><br>
+              現場から問い合わせが山ほど来ていますので。感染対策は、その後で結構です。
+            </div>
+            <div class="say beat">
+              あ、ひとつだけ。うちのメールは、返信しないと消えます。
+            </div>
+            <!-- ここが一番の落差。前の段落から一拍おいて、橙で出す。 -->
+            <div class="say beat">
+              <em>他の職員は5分ですが</em>——優秀な皆さんなら、1分もあれば十分でしょう？
+            </div>
+            <div class="say beat">
               では、よろしくお願いします。
             </div>
-            <div class="notice">院内メールシステムのご利用について（総務課）
+            <div class="notice beat">院内メールシステムのご利用について（総務課）
 
 ・受信から60秒を経過したメールは自動的に削除されます。
 ・削除されたメールへの返信はできません。
 ・督促および再送は行いません。
 ※上記は外部支援スタッフ向けの設定値です。</div>
-            <div class="row-end"><button class="btn" id="btn-brief">了解しました</button></div>
+            <div class="row-end beat"><button class="btn" id="btn-brief">了解しました</button></div>
           </div>
         </div>
 
@@ -1291,6 +1308,25 @@
     later(() => go("s2"), 1100);
   }
 
+  // 段落が出る時刻（ms）。.beat の並び順とそのまま対応する。
+  // 最後の2拍——通達枠とボタン——だけ間を空けてある。事務長が話し終えた後に
+  // 総務課の文書が置かれ、そこで初めて押せるようになる、という順序。
+  const BRIEF_BEATS = [0, 400, 1200, 2400, 3200, 3900, 4300, 4900];
+
+  function s1BriefBeats() {
+    const beats = [].slice.call($("ov-brief").querySelectorAll(".beat"));
+    beats.forEach((el) => el.classList.remove("on"));
+    beats.forEach((el, i) => {
+      later(() => el.classList.add("on"), BRIEF_BEATS[i] || 0);
+    });
+  }
+
+  // 読むのが速いチームを待たせない。画面のどこかを押せば残りが即座に出る。
+  // レースなので、演出を見せるために数秒奪うのは割に合わない。
+  function s1BriefAll() {
+    $("ov-brief").querySelectorAll(".beat").forEach((el) => el.classList.add("on"));
+  }
+
   function renderStage1Flood(skipBrief) {
     hideOverlays();
     paneL.classList.remove("hide"); paneR.classList.remove("hide");
@@ -1299,6 +1335,7 @@
     // 幹部の話を読んでいる間はオーバーレイ（z-index:60）が画面全体を覆うので、
     // 下地のメール一覧やタイマーが透けて見える心配もない。
     $("ov-brief").classList.remove("hide");
+    s1BriefBeats();
   }
 
   // ブリーフィングの [了解しました]。ここで初めて s1Init() が t0 を打つ——
@@ -1812,6 +1849,11 @@
   });
   $("btn-enter").addEventListener("click", () => go("welcome"));
   $("btn-brief").addEventListener("click", s1Begin);
+  // 段落待ちの早送り。[了解しました] 自身は s1Begin へ抜けるので拾わない。
+  $("ov-brief").addEventListener("click", (e) => {
+    if (e.target.closest("#btn-brief")) return;
+    s1BriefAll();
+  });
   $("btn-viewer-close").addEventListener("click", () => {
     $("ov-viewer").classList.add("hide");
     revealAI();  // 中身を見た直後に道具が来る。この順序が Stage 1 の入口になる。
