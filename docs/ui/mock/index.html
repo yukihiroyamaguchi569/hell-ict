@@ -392,6 +392,30 @@
   font-family: var(--font-num); font-size: 32px; font-weight: 600;
 }
 
+/* 幹部ブリーフィング — 急変直後、Stage 1 の冒頭。.entry と同じく不透明で
+   下地を完全に隠す（ヘッダーの時計もリーダーボードも見せない）。
+   締切のカウント開始（s1Init）はこの画面を閉じた瞬間に遅らせてあるので、
+   ここで読んでいる時間は参加者の持ち時間を一切削らない。
+   クラス名は .brief ではなく .briefing にする——.brief は既に
+   Stage 2 の課題文（「統一されたラインリストに…」）で使っており、
+   max-width:60ch がそのまま漏れて全画面オーバーレイの幅を潰すため。 */
+.briefing { background: var(--bg); flex-direction: column; align-items: flex-start; padding: 46px 72px; overflow-y: auto; transition: background-color .78s ease; }
+.briefing .inner { max-width: 720px; display: flex; flex-direction: column; gap: 20px; }
+.briefing .who { font-size: 15px; color: var(--fg-muted); letter-spacing: .06em; }
+.briefing .who b { color: var(--fg); font-size: 19px; font-weight: 700; letter-spacing: .02em; }
+.briefing .say { font-size: 19px; line-height: 1.95; }
+/* 「1分」の一句だけ橙にする。赤は使い減りする資源で、赤帯と罠に取ってある。 */
+.briefing .say em { font-style: normal; font-weight: 700; color: var(--warn); }
+/* 通達は台詞ではなく院内文書として提示する（2003年書式）。
+   「アプリの説明」に見せないための、docs/ui/02_Stage1.md の
+   「チュートリアルを置かない」方針との折り合い。 */
+.briefing .notice {
+  border: 1px solid var(--rule); background: var(--surface);
+  font-family: var(--font-legacy); font-size: 14px; line-height: 1.9;
+  color: var(--fg-muted); padding: 12px 14px; white-space: pre-wrap;
+}
+.briefing .row-end { width: 100%; }
+
 /* ウェルカム */
 .welcome { padding: 40px 60px; overflow-y: auto; }
 .welcome .inner { max-width: 780px; margin: 0 auto; display: flex; flex-direction: column; gap: 24px; }
@@ -475,6 +499,7 @@
       <button id="btn-verdict-ok" aria-pressed="true">判定：通過</button>
       <button id="btn-verdict-ng">判定：差し戻し</button>
       <button id="btn-phs">苅部さんから着信</button>
+      <button id="btn-s1-nobrief">Stage 1（説明を飛ばす）</button>
     </div>
   </div>
 
@@ -567,6 +592,30 @@
           <button class="btn" id="btn-enter">入室する</button>
         </div>
 
+        <!-- 幹部ブリーフィング：急変直後、Stage 1 の冒頭。事務長が一方向で告げるだけで、
+             相談はできない＝院内連絡先ウィンドウ（苅部さん窓口）とは別枠
+             （docs/character/00_お助けキャラの原則.md「窓口は一つ、中の人は増えてよい」）。 -->
+        <div class="veil briefing hide" id="ov-brief">
+          <div class="inner">
+            <div class="who">病院執行部　<b>事務長</b></div>
+            <div class="say">
+              ——ああ、派遣の皆さん。5Aの件はお聞きになりましたか。大変ですね。<br>
+              それはそれとして、まずはメール処理をお願いします。<br>
+              現場から問い合わせが山ほど来ていますので。感染対策は、その後で結構です。<br><br>
+              あ、ひとつだけ。うちのメールは、返信しないと消えます。<br>
+              <em>他の職員は5分ですが</em>——優秀な皆さんなら、1分もあれば十分でしょう？<br><br>
+              では、よろしくお願いします。
+            </div>
+            <div class="notice">院内メールシステムのご利用について（総務課）
+
+・受信から60秒を経過したメールは自動的に削除されます。
+・削除されたメールへの返信はできません。
+・督促および再送は行いません。
+※上記は外部支援スタッフ向けの設定値です。</div>
+            <div class="row-end"><button class="btn" id="btn-brief">了解しました</button></div>
+          </div>
+        </div>
+
         <div class="veil viewer hide" id="ov-viewer">
           <div class="win">
             <div class="tb">
@@ -615,9 +664,10 @@
   /* ------------------------------------------------------------------ */
   const MAILS = [
     {
-      from: "人事課", subj: "【ようこそ】着任おめでとうございます",
+      from: "人事課", subj: "【受け入れのご案内】本日からよろしくお願いします",
       body: [
-        "ICTの皆様、着任おめでとうございます。当院は400床、地域の中核を担う病院です。",
+        "ICTの皆様、本日はご足労いただきありがとうございます。当院は400床、地域の中核を担う病院です。",
+        "前任者の急な退職に伴い、貴チームにご支援をお願いすることになりました。契約期間中、どうぞよろしくお願いいたします。",
         "電子カルテは……少々年季が入っておりますが（2003年製）、じきに慣れます。ご活躍を期待しています。"
       ]
     },
@@ -838,7 +888,7 @@
   let view = "entry";
 
   function hideOverlays() {
-    ["ov-entry", "ov-viewer", "ov-unlock"].forEach((id) => $(id).classList.add("hide"));
+    ["ov-entry", "ov-brief", "ov-viewer", "ov-unlock"].forEach((id) => $(id).classList.add("hide"));
   }
 
   /* AIチャットは最初から画面にいない。
@@ -874,7 +924,7 @@
     paneC.innerHTML =
       '<div class="welcome"><div class="inner">' +
         "<h2>聖クロノス総合病院 感染制御チーム（ICT）へようこそ</h2>" +
-        '<div class="say">本日より着任される皆さんです。まずは落ち着いて、届いているメールに目を通してください。' +
+        '<div class="say">本日より支援に入っていただく皆さんです。まずは落ち着いて、届いているメールに目を通してください。' +
         "何も起きていません。いい一日になりますように。</div>" +
         '<div class="roles-lab">＼ 今日のあなたのチーム ／</div>' +
         '<div class="roles">' +
@@ -992,12 +1042,15 @@
   ];
 
   // 苅部さんの最初のひとこと。1回目の失敗という結果を受けての台詞。
+  // 2行目は「5分ルール」の実在を認める——推測ではなく、彼が知っている院内制度の歴史として。
   const S1_KARUBE_INTRO = [
     "〔苅部〕……全部は無理でしたね。1人でやる量じゃないです。",
+    "〔苅部〕……ああ、あれ本当ですよ。派遣の方だけ1分。去年、事務長が決めました。",
     "〔苅部〕うち、AI入ってます。要点だけ伝えれば下書きしてくれますよ。もう一度いきましょう。"
   ];
 
   let s1 = null, s1Tick = null;
+  let s1SkipBrief = false;  // 開発用ワンショット。devbar の「説明を飛ばす」ボタンが立てる
   const s1Now = () => (Date.now() - s1.t0) / 1000;
   const s1Defs = () => (s1.round === 1 ? S1_MAILS_R1 : S1_MAILS_R2);
 
@@ -1238,9 +1291,21 @@
     later(() => go("s2"), 1100);
   }
 
-  function renderStage1Flood() {
+  function renderStage1Flood(skipBrief) {
     hideOverlays();
     paneL.classList.remove("hide"); paneR.classList.remove("hide");
+    if (skipBrief) { s1Begin(); return; }
+    // まだ s1 は無く、setInterval も始めていないので時間は1秒も進まない。
+    // 幹部の話を読んでいる間はオーバーレイ（z-index:60）が画面全体を覆うので、
+    // 下地のメール一覧やタイマーが透けて見える心配もない。
+    $("ov-brief").classList.remove("hide");
+  }
+
+  // ブリーフィングの [了解しました]。ここで初めて s1Init() が t0 を打つ——
+  // 先に打つと、幹部の話を読んでいる間に1通目の60秒が減っていき、
+  // 「1分以内」と告げた本人の言葉が最初に破られることになる。
+  function s1Begin() {
+    $("ov-brief").classList.add("hide");
     s1Init();
     s1List(); s1Center();
   }
@@ -1597,9 +1662,6 @@
       b.classList.remove("hide", "out"); b.classList.add("in");
     }, 300);
 
-    // 500ms: Stage 1 のメールが着弾し、1回だけ震える
-    later(() => { hasS1Mail = true; renderMails("s1"); }, 500);
-
     // 700ms: リーダーボードが下からせり上がる ＝ レース開始
     later(() => { $("board").classList.remove("down"); }, 700);
 
@@ -1612,6 +1674,11 @@
       b.classList.remove("in"); b.classList.add("out");
       later(() => b.classList.add("hide"), 400);
     }, 3300);
+
+    // 赤帯が引いてから一拍おいて Stage 1 へ。出てくるのは対策の指示ではなく
+    // 事務長のメール処理依頼——その間そのものが、この研修の主題（組織の理不尽）。
+    // keepMode:true は既に alert なので、器の色を再補間させないため。
+    later(() => go("s1", true), 4200);
   }
 
   /* ------------------------------------------------------------------ */
@@ -1639,6 +1706,7 @@
       phsIntroPending = false;
       log.innerHTML = "<p>" + S1_KARUBE_INTRO[0] + "</p>";
       later(() => { log.insertAdjacentHTML("beforeend", "<p>" + S1_KARUBE_INTRO[1] + "</p>"); }, 900);
+      later(() => { log.insertAdjacentHTML("beforeend", "<p>" + S1_KARUBE_INTRO[2] + "</p>"); }, 1800);
       return;
     }
     // 待たされることがヒントのコスト。開いてもまだ返事は来ていない。
@@ -1654,7 +1722,7 @@
     { id: "entry",   label: "① 入室",       mode: "peace", note: "企画書§7「なしログイン。6桁チームコード入室」。数字が32pxなのは、ファシリテーターの読み上げを部屋の後ろから聞きながら打つため。" },
     { id: "welcome", label: "② ウェルカム",  mode: "peace", note: "操作説明を一切しない。AI初体験は Stage 1 に取ってある。ヘッダーの「発熱 3」はこの最初の画面から居座っていて、他の在院・空床の数字に紛れて誰も気に留めない（「原因不明の発熱」だと臨床職には露骨すぎるため、ラベルは一般的な語にとどめてある）。" },
     { id: "inbox",   label: "③ 受信トレイ",  mode: "peace", note: "右ペインはまだ無く、中央が右端まで伸びている。読ませたいのはメールだけ。3通目の夜勤師長メールが未知ウイルスの種で、太字にせず、色も変えず、段落の途中に置いてある。ここで警戒させたら設計失敗。" },
-    { id: "s1",      label: "④ Stage 1",   mode: "alert", note: "1回目：全通が本物、AIは無い。1通ごとの締切が並走し、督促は来ない——時間切れは二度と返信できない一発勝負。1回目が終わって全通捌けていなければ、そこで初めて苅部さんが割り込みAIを渡す（固定タイマーではなく「失敗した」が発火条件）。2回目：新しい10通に「要点→AIに下書きさせる→送信」で再挑戦。手動で1回目を全通さばき切っても構わない、ボタンの使用は強制しない。" },
+    { id: "s1",      label: "④ Stage 1",   mode: "alert", note: "冒頭に事務長のブリーフィングが入る。「派遣は1分、他の職員は5分」——バグではなく人が決めた基準だと本人の口から告げる。[了解しました] を押した瞬間に締切のカウントが始まる（読んでいる時間は減らない）。1回目：全通が本物、AIは無い。1通ごとの締切が並走し、督促は来ない——時間切れは二度と返信できない一発勝負。1回目が終わって全通捌けていなければ、そこで初めて苅部さんが割り込みAIを渡す（固定タイマーではなく「失敗した」が発火条件、5分ルールの実在も認める）。2回目：新しい10通に「要点→AIに下書きさせる→送信」で再挑戦。手動で1回目を全通さばき切っても構わない、ボタンの使用は強制しない。" },
     { id: "s2",      label: "⑤ Stage 2",   mode: "alert", note: "元のExcel整形課題（旧Stage1の内容）。AIはStage 1から持ち越して既にある。「添付を開く」→［コピー］→AIへ貼り付け→提出、そこから先は自分で言語化させる。" },
     { id: "unlock",  label: "⑥ 解錠",       mode: "alert", note: "報酬は師長の承認だけ。スコアも星も出さない。同時に「発熱」が 3→5 に静かに変わる——解錠の喜びの陰で、誰も見ていない数字が増える。" }
   ];
@@ -1694,7 +1762,7 @@
     else if (id === "s1") {
       hasS1Mail = false; hasUnlockMail = false; $("fever").textContent = "3";
       TEAMS[2].pos = 1; drawMarks();
-      renderStage1Flood();
+      renderStage1Flood(s1SkipBrief);
     }
     else if (id === "s2") {
       hasUnlockMail = false; $("fever").textContent = "3";
@@ -1733,6 +1801,9 @@
   $("btn-verdict-ok").addEventListener("click", () => { verdictPasses = true; syncVerdictButtons(); });
   $("btn-verdict-ng").addEventListener("click", () => { verdictPasses = false; syncVerdictButtons(); });
   $("btn-transition").addEventListener("click", transition);
+  // 開発用。Stage 1 の中身を何度も見るとき、毎回ブリーフィングを閉じずに済ませる。
+  // 参加者が実際に見る順序（go("s1") は常にブリーフィングを出す）とはずらさない。
+  $("btn-s1-nobrief").addEventListener("click", () => { s1SkipBrief = true; go("s1"); s1SkipBrief = false; });
   $("btn-phs").addEventListener("click", () => {
     // Stage 1 の初回登場は固定タイマー任せ（s1DeliverAI）。この開発ボタンは
     // Stage 2 以降の「通常の苅部さん」（待たされる遅延あり）を試すためのもの。
@@ -1740,6 +1811,7 @@
     phsRing();
   });
   $("btn-enter").addEventListener("click", () => go("welcome"));
+  $("btn-brief").addEventListener("click", s1Begin);
   $("btn-viewer-close").addEventListener("click", () => {
     $("ov-viewer").classList.add("hide");
     revealAI();  // 中身を見た直後に道具が来る。この順序が Stage 1 の入口になる。
@@ -1761,6 +1833,12 @@
   window.addEventListener("resize", fit);
   fit();
 
-  go("entry");
+  // 開発用：ヘッドレスChromeなどで特定画面を直接開けるよう、URLハッシュで
+  // 初期画面を選べるようにしておく（例: #s1、ブリーフィングを飛ばすなら #s1-nobrief）。
+  // 製品には持ち込まない（本番はサーバのステージ進行が初期画面を決める）。
+  const boot = location.hash.slice(1);
+  if (boot === "s1-nobrief") { s1SkipBrief = true; go("s1"); s1SkipBrief = false; }
+  else if (STEPS.some((s) => s.id === boot)) go(boot);
+  else go("entry");
 })();
 </script>
