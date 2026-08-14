@@ -415,6 +415,16 @@
   color: var(--fg-muted); padding: 12px 14px; white-space: pre-wrap;
 }
 .briefing .row-end { width: 100%; }
+/* 段落は順に現れる。既存の .msg と同じ持ち上げ量に揃えてある。
+   prefers-reduced-motion では transition も later() も 0 になるので、
+   結果として全部が最初から出ている状態になる（意図通り）。 */
+/* 出ていないビートは「見えない」だけでなく「触れない」。opacity だけだと
+   透明のボタンがクリックもキーボードフォーカスも受けてしまい、話の途中で
+   [了解しました] が押せてしまう（ボタンは .row-end.beat の中にある）。
+   フォーカスの遮断は pointer-events では足りないので、btn-brief 自体を
+   disabled にする（s1BriefBeats / s1BriefAll）。 */
+.briefing .beat { opacity: 0; transform: translateY(4px); pointer-events: none; transition: opacity .42s ease, transform .42s ease; }
+.briefing .beat.on { opacity: 1; transform: none; pointer-events: auto; }
 
 /* ウェルカム */
 .welcome { padding: 40px 60px; overflow-y: auto; }
@@ -595,24 +605,38 @@
         <!-- 幹部ブリーフィング：急変直後、Stage 1 の冒頭。事務長が一方向で告げるだけで、
              相談はできない＝院内連絡先ウィンドウ（苅部さん窓口）とは別枠
              （docs/character/00_お助けキャラの原則.md「窓口は一つ、中の人は増えてよい」）。 -->
+        <!-- 台詞は一度に出さず、段落単位（.beat）で順に出す。丁寧な口調の
+             気持ち悪さは「間」で効く——全部を一度に置くと、ただの説明文になる。
+             タイミングは BRIEF_BEATS で定数化してある。 -->
         <div class="veil briefing hide" id="ov-brief">
           <div class="inner">
-            <div class="who">病院執行部　<b>事務長</b></div>
-            <div class="say">
-              ——ああ、派遣の皆さん。5Aの件はお聞きになりましたか。大変ですね。<br>
-              それはそれとして、まずはメール処理をお願いします。<br>
-              現場から問い合わせが山ほど来ていますので。感染対策は、その後で結構です。<br><br>
-              あ、ひとつだけ。うちのメールは、返信しないと消えます。<br>
-              <em>他の職員は5分ですが</em>——優秀な皆さんなら、1分もあれば十分でしょう？<br><br>
+            <div class="who beat">病院執行部　<b>事務長</b></div>
+            <!-- この時点でアウトブレイクはまだ起きていない。何も起きていないのに
+                 ICTの本業を後回しにさせる——平時から優先順位が壊れている、を先に見せる。 -->
+            <div class="say beat">
+              ——ああ、派遣の皆さん。本日からでしたね。ご足労さまです。
+            </div>
+            <div class="say beat">
+              さっそくですが、まずはメール処理をお願いします。<br>
+              現場から問い合わせが山ほど来ていますので。感染対策は、その後で結構です。
+            </div>
+            <div class="say beat">
+              あ、ひとつだけ。うちのメールは、返信しないと消えます。
+            </div>
+            <!-- ここが一番の落差。前の段落から一拍おいて、橙で出す。 -->
+            <div class="say beat">
+              <em>他の職員は5分ですが</em>——優秀な皆さんなら、1分もあれば十分でしょう？
+            </div>
+            <div class="say beat">
               では、よろしくお願いします。
             </div>
-            <div class="notice">院内メールシステムのご利用について（総務課）
+            <div class="notice beat">院内メールシステムのご利用について（総務課）
 
 ・受信から60秒を経過したメールは自動的に削除されます。
 ・削除されたメールへの返信はできません。
 ・督促および再送は行いません。
 ※上記は外部支援スタッフ向けの設定値です。</div>
-            <div class="row-end"><button class="btn" id="btn-brief">了解しました</button></div>
+            <div class="row-end beat"><button class="btn" id="btn-brief">了解しました</button></div>
           </div>
         </div>
 
@@ -1288,7 +1312,34 @@
     s1.items.forEach((x) => { if (x.state === "live") x.state = "done"; });
     TEAMS[2].pos = 2; drawMarks();
     s1Center(); s1List();
-    later(() => go("s2"), 1100);
+    // Stage 2 へは直接飛ばさない。片付いたと思った一拍のあとに急変が来る。
+    later(() => transition(), 1100);
+  }
+
+  // 段落が出る時刻（ms）。.beat の並び順とそのまま対応する。
+  // 最後の2拍——通達枠とボタン——だけ間を空けてある。事務長が話し終えた後に
+  // 総務課の文書が置かれ、そこで初めて押せるようになる、という順序。
+  const BRIEF_BEATS = [0, 400, 1200, 2400, 3200, 3900, 4300, 4900];
+
+  function s1BriefBeats() {
+    const beats = [].slice.call($("ov-brief").querySelectorAll(".beat"));
+    beats.forEach((el) => el.classList.remove("on"));
+    // 最後のビート（ボタン）が出るまでは押させない。透明なだけの状態で
+    // Tab キーが届くと、話を1行も読まないまま Stage 1 が始まってしまう。
+    $("btn-brief").disabled = true;
+    beats.forEach((el, i) => {
+      later(() => {
+        el.classList.add("on");
+        if (el.contains($("btn-brief"))) $("btn-brief").disabled = false;
+      }, BRIEF_BEATS[i] || 0);
+    });
+  }
+
+  // 読むのが速いチームを待たせない。画面のどこかを押せば残りが即座に出る。
+  // レースなので、演出を見せるために数秒奪うのは割に合わない。
+  function s1BriefAll() {
+    $("ov-brief").querySelectorAll(".beat").forEach((el) => el.classList.add("on"));
+    $("btn-brief").disabled = false;
   }
 
   function renderStage1Flood(skipBrief) {
@@ -1299,13 +1350,18 @@
     // 幹部の話を読んでいる間はオーバーレイ（z-index:60）が画面全体を覆うので、
     // 下地のメール一覧やタイマーが透けて見える心配もない。
     $("ov-brief").classList.remove("hide");
+    s1BriefBeats();
   }
 
   // ブリーフィングの [了解しました]。ここで初めて s1Init() が t0 を打つ——
   // 先に打つと、幹部の話を読んでいる間に1通目の60秒が減っていき、
   // 「1分以内」と告げた本人の言葉が最初に破られることになる。
+  // レース（経過時間とリーダーボード）もこの瞬間から始まる。押した本人は
+  // 「了解」しただけのつもりだが、押した時点で競争に入っている。
   function s1Begin() {
     $("ov-brief").classList.add("hide");
+    $("board").classList.remove("down");
+    startClock();
     s1Init();
     s1List(); s1Center();
   }
@@ -1648,9 +1704,11 @@
   /* ------------------------------------------------------------------ */
   /* 急変：段階的に重ねる。同時に全部起こさない。                          */
   /* ------------------------------------------------------------------ */
+  // 急変は Stage 1 を終えた画面の上で起こる。メールを片付けて一息ついた、
+  // その画面がそのまま崩れていく——go() で画面を差し替えてから転調させると
+  // 「別の場面が始まった」に見えてしまうので、ここでは画面を切り替えない。
   async function transition() {
     clearLater();
-    go("inbox", true);
     await wait(400);
 
     // 120ms: 器の色そのものを差し替える（900ms かけて補間）
@@ -1662,11 +1720,8 @@
       b.classList.remove("hide", "out"); b.classList.add("in");
     }, 300);
 
-    // 700ms: リーダーボードが下からせり上がる ＝ レース開始
-    later(() => { $("board").classList.remove("down"); }, 700);
-
-    // 900ms: 転調完了。時間が動き出す。
-    later(() => { startClock(); }, 900);
+    // レースはこの時点で既に走っている（Stage 1 の [了解しました] から）。
+    // 転調で始めるのはもう「色」だけ。
 
     // 赤は使い減りする資源。3秒で引き上げる。
     later(() => {
@@ -1675,10 +1730,10 @@
       later(() => b.classList.add("hide"), 400);
     }, 3300);
 
-    // 赤帯が引いてから一拍おいて Stage 1 へ。出てくるのは対策の指示ではなく
-    // 事務長のメール処理依頼——その間そのものが、この研修の主題（組織の理不尽）。
+    // 赤帯が引いてから一拍おいて Stage 2 へ。ここで初めて MRSA の名前が出て、
+    // 直後に師長から「至急！！MRSAのやつまとめて」が届く。
     // keepMode:true は既に alert なので、器の色を再補間させないため。
-    later(() => go("s1", true), 4200);
+    later(() => go("s2", true), 4200);
   }
 
   /* ------------------------------------------------------------------ */
@@ -1722,8 +1777,8 @@
     { id: "entry",   label: "① 入室",       mode: "peace", note: "企画書§7「なしログイン。6桁チームコード入室」。数字が32pxなのは、ファシリテーターの読み上げを部屋の後ろから聞きながら打つため。" },
     { id: "welcome", label: "② ウェルカム",  mode: "peace", note: "操作説明を一切しない。AI初体験は Stage 1 に取ってある。ヘッダーの「発熱 3」はこの最初の画面から居座っていて、他の在院・空床の数字に紛れて誰も気に留めない（「原因不明の発熱」だと臨床職には露骨すぎるため、ラベルは一般的な語にとどめてある）。" },
     { id: "inbox",   label: "③ 受信トレイ",  mode: "peace", note: "右ペインはまだ無く、中央が右端まで伸びている。読ませたいのはメールだけ。3通目の夜勤師長メールが未知ウイルスの種で、太字にせず、色も変えず、段落の途中に置いてある。ここで警戒させたら設計失敗。" },
-    { id: "s1",      label: "④ Stage 1",   mode: "alert", note: "冒頭に事務長のブリーフィングが入る。「派遣は1分、他の職員は5分」——バグではなく人が決めた基準だと本人の口から告げる。[了解しました] を押した瞬間に締切のカウントが始まる（読んでいる時間は減らない）。1回目：全通が本物、AIは無い。1通ごとの締切が並走し、督促は来ない——時間切れは二度と返信できない一発勝負。1回目が終わって全通捌けていなければ、そこで初めて苅部さんが割り込みAIを渡す（固定タイマーではなく「失敗した」が発火条件、5分ルールの実在も認める）。2回目：新しい10通に「要点→AIに下書きさせる→送信」で再挑戦。手動で1回目を全通さばき切っても構わない、ボタンの使用は強制しない。" },
-    { id: "s2",      label: "⑤ Stage 2",   mode: "alert", note: "元のExcel整形課題（旧Stage1の内容）。AIはStage 1から持ち越して既にある。「添付を開く」→［コピー］→AIへ貼り付け→提出、そこから先は自分で言語化させる。" },
+    { id: "s1",      label: "④ Stage 1",   mode: "peace", note: "画面はまだ明るい（peace）。アウトブレイクはまだ起きていない——起きていないのに、着任初日のICTが1分刻みのメール処理をやらされる。急変はこのステージを終えた後に来る。冒頭に事務長のブリーフィングが入る。「派遣は1分、他の職員は5分」——バグではなく人が決めた基準だと本人の口から告げる。[了解しました] を押した瞬間に締切のカウントが始まる（読んでいる時間は減らない）。1回目：全通が本物、AIは無い。1通ごとの締切が並走し、督促は来ない——時間切れは二度と返信できない一発勝負。1回目が終わって全通捌けていなければ、そこで初めて苅部さんが割り込みAIを渡す（固定タイマーではなく「失敗した」が発火条件、5分ルールの実在も認める）。2回目：新しい10通に「要点→AIに下書きさせる→送信」で再挑戦。手動で1回目を全通さばき切っても構わない、ボタンの使用は強制しない。" },
+    { id: "s2",      label: "⑤ Stage 2",   mode: "alert", note: "直前に急変（赤帯・転調）が入る。ここで初めて「5A病棟でMRSA疑い」が明かされ、器の色が peace から alert へ落ちる。メールを片付けて一息ついた瞬間に世界が変わる——段階を追って追い詰めるための順序。元のExcel整形課題（旧Stage1の内容）。AIはStage 1から持ち越して既にある。「添付を開く」→［コピー］→AIへ貼り付け→提出、そこから先は自分で言語化させる。" },
     { id: "unlock",  label: "⑥ 解錠",       mode: "alert", note: "報酬は師長の承認だけ。スコアも星も出さない。同時に「発熱」が 3→5 に静かに変わる——解錠の喜びの陰で、誰も見ていない数字が増える。" }
   ];
 
@@ -1751,6 +1806,12 @@
       $("fever").textContent = "3";
       $("vitals").classList.remove("crescendo");
       TEAMS[2].pos = 1; drawMarks();
+    } else if (id === "s1") {
+      // レースが始まるのは事務長の [了解しました] から（s1Begin）。
+      // 話を読んでいる間はボードも時計も出さない——他チームの位置が見えたら、
+      // 読んでいる数秒が焦りに変わってしまう。
+      $("board").classList.add("down");
+      stopClock();
     } else {
       $("board").classList.remove("down");
       startClock();
@@ -1812,6 +1873,11 @@
   });
   $("btn-enter").addEventListener("click", () => go("welcome"));
   $("btn-brief").addEventListener("click", s1Begin);
+  // 段落待ちの早送り。[了解しました] 自身は s1Begin へ抜けるので拾わない。
+  $("ov-brief").addEventListener("click", (e) => {
+    if (e.target.closest("#btn-brief")) return;
+    s1BriefAll();
+  });
   $("btn-viewer-close").addEventListener("click", () => {
     $("ov-viewer").classList.add("hide");
     revealAI();  // 中身を見た直後に道具が来る。この順序が Stage 1 の入口になる。
