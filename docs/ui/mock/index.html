@@ -261,6 +261,64 @@
   font-family: var(--font-num); font-size: 13px; color: var(--fg-muted);
   padding: 0 13px 11px; min-height: 1.4em;
 }
+
+/* --- 締切：課題カードの中に1本だけ ------------------------------------- */
+/* Stage 1 は1通ごとに10本の砂時計が落ちる画面だったが、ここは課題が1つ
+   なので1本。超えても提出は止めない——止めた瞬間「詰まらせない」が壊れる。 */
+.s2-dl {
+  display: flex; align-items: center; gap: 12px;
+  font-family: var(--font-num); font-size: 14px; color: var(--fg-muted);
+}
+.s2-dl .bar { flex: 0 0 190px; height: 5px; background: var(--surface-2); position: relative; }
+.s2-dl .bar i { position: absolute; inset: 0 auto 0 0; background: var(--ok); transition: width .25s linear; }
+/* 締切が迫っても橙まで。赤は急変に取ってある。 */
+.s2-dl.hot { color: var(--warn); font-weight: 700; }
+.s2-dl.hot .bar i { background: var(--warn); }
+.s2-dl.over .bar { display: none; }
+
+/* --- 提出グリッド：手作業ルートの実体 ----------------------------------- */
+/* テキストエリアだと手作業が「20行を全部打ち直す」になり、企画書の
+   「手作業25分」に実体がなくなる。直せるからこそ、直しきれないことが分かる。 */
+.grid { max-height: 268px; overflow: auto; }
+.grid table { border-collapse: collapse; width: 100%; font-family: var(--font-num); font-size: 13px; }
+.grid th, .grid td { border: 1px solid var(--rule); padding: 0; }
+.grid th {
+  position: sticky; top: 0; z-index: 1; background: var(--surface-2);
+  font-size: 12px; font-weight: 700; color: var(--fg-muted);
+  padding: 5px 7px; text-align: left; white-space: nowrap;
+}
+.grid td input {
+  width: 100%; background: transparent; color: var(--fg); border: 0;
+  padding: 5px 7px; font-family: inherit; font-size: inherit;
+}
+.grid td input:focus { outline: 2px solid var(--accent); outline-offset: -2px; }
+/* NG のセルはここで光る。行番号で説明する代わりに、そのセル自体を指せる。
+   橙のまま——感嘆符もアイコンも音も付けない。「直せ」であって「間違えた」ではない。 */
+.grid td.hot { background: color-mix(in srgb, var(--warn) 22%, transparent); }
+.grid td.hot input { font-weight: 700; }
+.grid .n { width: 1%; white-space: nowrap; background: var(--surface-2); }
+.grid .n button {
+  background: transparent; border: 0; color: var(--fg-muted);
+  font-family: var(--font-num); font-size: 12px; padding: 4px 6px; letter-spacing: .06em;
+}
+.grid .n button:hover { color: var(--warn); }
+.grid tfoot button {
+  background: transparent; border: 0; color: var(--fg-muted);
+  font-family: var(--font-num); font-size: 13px; padding: 7px 9px;
+}
+.grid tfoot button:hover { color: var(--fg); }
+/* 貼り付けの確認バー。AIの出力がここでグリッドに合流する。 */
+.paste-bar {
+  display: flex; align-items: center; gap: 12px;
+  border-top: 1px solid var(--rule); padding: 9px 13px;
+  font-family: var(--font-num); font-size: 13px;
+}
+.paste-bar .grow { flex: 1; }
+.paste-bar button {
+  background: transparent; border: 1px solid var(--rule); color: var(--fg);
+  font-size: 13px; padding: 5px 13px;
+}
+.paste-bar button.go { background: var(--accent); border-color: var(--accent); color: #fff; font-weight: 700; }
 /* 提出したらフォームを1行に畳む。1画面を全員で囲むので、
    判定結果を見るのにスクロールさせるわけにいかない。 */
 .folded {
@@ -565,8 +623,8 @@
     <div class="sep"></div>
     <div class="grp">
       <button id="btn-transition">急変を再生</button>
-      <button id="btn-verdict-ok" aria-pressed="true">判定：通過</button>
-      <button id="btn-verdict-ng">判定：差し戻し</button>
+      <button id="btn-fill-ok">グリッドに正解を流し込む</button>
+      <button id="btn-fill-raw">グリッドを汚いまま戻す</button>
       <button id="btn-phs">苅部さんから着信</button>
       <button id="btn-s1-nobrief">Stage 1（説明を飛ばす）</button>
     </div>
@@ -745,7 +803,8 @@
         <div class="veil viewer hide" id="ov-viewer">
           <div class="win">
             <div class="tb">
-              <span class="grow">5A病棟_MRSA_記録_最新版(2)_コピー.xlsx</span>
+              <span class="grow" id="viewer-name">5A病棟_MRSA_記録_最新版(2)_コピー.xlsx</span>
+              <button class="hide" id="btn-take">作業エリアに追加</button>
               <button id="btn-copy">コピー</button>
               <button>ダウンロード</button>
               <button id="btn-viewer-close">閉じる</button>
@@ -822,7 +881,17 @@
       "新しいICTの方ですよね。悪いけど急ぎで。",
       "5A病棟でMRSA疑いが出てます。とりあえず手元の記録、そのままのExcelで送ります。",
       "これ、感染対策の会議で使える形にキレイにまとめてください。日付とかバラバラですみません、私が作ったんじゃないので。",
-      "朝の申し送りまでに疫学曲線の材料も要るそうです。よろしく！"
+      "7時の申し送りまでに疫学曲線の材料も要るそうです。よろしく！"
+    ]
+  };
+
+  /* 締切超過で着弾する。罠ではないので、暗転も警報も出さない——
+     増えるのはメール1通と未読バッジだけ。罰の通貨は時間であって、演出ではない。 */
+  const MAIL_S1_ADD = {
+    from: "5A病棟 師長", subj: "すみません追加で",
+    attach: "5A病棟_MRSA_記録_最新版(2)_コピー_追加分.xlsx",
+    body: [
+      "あ、ごめんなさい。副師長が別につけてた分が出てきました。これも一緒にお願いします。"
     ]
   };
 
@@ -831,24 +900,88 @@
     body: ["え、もう？　…助かる。あなた達、話が早いわね。"]
   };
 
-  /* 配布版の教材。設計用の ★ 目印は消してある。 */
-  const SHEET = [
-    "※このファイルは5A病棟師長が個人的につけている記録です。正式なものではありません。",
-    "5A病棟の状況　7月分",
-    "",
-    "患者ＩＤ  なまえ        びょうとう  採取日       MRSA   発熱     メモ",
-    "００１     佐藤　一郎    5A病棟      7/3         陽性   あり     個室へ",
-    "id-2      鈴木  花子                7月3日      (+)    38.2℃",
-    "no.3      高橋健        （結合）    R8.7.3      ポジ   なし",
-    "４番      田中　みゆき              さんにち     ＋     あり     家族面会あり",
-    "005       渡辺 三郎     5A          7.3         陰性   37.9℃   熱が続く",
-    "6         いとう                    2026/07/04  －     あり",
-    "007       山本　和子    5A病棟      7/4         陰性   なし",
-    "008       中村太郎                  ７月４日     ネガ   38.5℃",
-    "",
-    "009       小林　愛      5A          7/5         陽性   あり     接触者調査中"
-  ].join("\n");
-  $("sheet").textContent = SHEET;
+  /* ------------------------------------------------------------------ */
+  /* Stage 2 の教材（配布版）                                            */
+  /*                                                                    */
+  /* 正典は docs/materials/stage2_linelist.tsv。ここはその写し。         */
+  /* 設計用の annotated 版（伏線3名に ★ が付いている）は絶対に持ち込まない。*/
+  /*                                                                    */
+  /* 先頭3行はノイズ行（注釈・タイトル・途中の空行）で、1列目にしか値が    */
+  /* ない。参加者が削除すべき行であり、判定「行数が一致」はこの削除操作を  */
+  /* 見ている。元ファイルのヘッダ行はグリッドの列見出しに吸収されるので    */
+  /* データ行としては持たない（添付ビューアの表示にだけ現れる）。          */
+  /* ------------------------------------------------------------------ */
+  const S2_COLS = ["患者ID", "氏名", "病棟", "採取日", "MRSA結果", "発熱", "備考"];
+  const S2_HEAD_DIRTY = ["患者ＩＤ", "なまえ", "びょうとう", "採取日", "MRSA", "発熱", "メモ"];
+
+  const S2_SHEET_ROWS = [
+    ["※このファイルは5A病棟師長が個人的につけている記録です。正式なものではありません。", "", "", "", "", "", ""],
+    ["5A病棟の状況　7月分", "", "", "", "", "", ""],
+    ["００１", "佐藤　一郎", "5A病棟", "7/3", "陽性", "あり", "個室へ"],
+    ["id-2", "鈴木  花子", "", "7月3日", "(+)", "38.2℃", ""],
+    ["no.3", "高橋健", "", "R8.7.3", "ポジ", "なし", ""],
+    ["４番", "田中　みゆき", "", "さんにち", "＋", "あり", "家族面会あり"],
+    ["005", "渡辺 三郎", "5A", "7.3", "陰性", "37.9℃", ""],
+    ["6", "いとう", "", "2026/07/04", "－", "あり", ""],
+    ["007", "山本　和子", "5A病棟", "7/4", "陰性", "なし", ""],
+    ["008", "中村太郎", "", "７月４日", "ネガ", "38.5℃", ""],
+    ["", "", "", "", "", "", ""],
+    ["009", "小林　愛", "5A", "7/5", "陽性", "あり", "接触者調査中"],
+    ["10", "加藤  健二", "", "7-5", "(+)", "なし", ""],
+    ["No.011", "吉田　さくら", "５Ａ", "R8/7/5", "陰性", "なし", ""],
+    ["０１２", "山田　太一", "", "7月6日", "ポジ", "38.0℃", "個室へ"],
+    ["id-13", "佐々木　みどり", "5a", "7/6", "＋", "あり", ""],
+    ["14", "松本 淳", "", "7-6", "陰性", "なし", ""],
+    ["015", "いのうえ　まさこ", "5A病棟", "2026/07/06", "(-)", "なし", ""],
+    ["１６", "木村　大輔", "", "7.7", "陽性", "あり", "個室へ"],
+    ["no.17", "林　ゆかり", "5A", "７月７日", "ネガ", "なし", ""],
+    ["018", "清水  健一", "", "7/7", "陰性", "なし", ""],
+    ["19番", "森　あゆみ", "5A病棟", "R8.7.8", "－", "なし", ""],
+    ["０２０", "池田　浩", "", "7/8", "＋", "38.1℃", "接触者調査中"]
+  ];
+
+  /* 締切超過で着弾する追加分。汚れは同じ全部盛りだが、伏線（MRSA陰性なのに
+     発熱あり）は1名も入れない——追加分は遅れたチームにしか届かないので、
+     ここに種を置くと Stage 3 の回収が全チームに等しく刺さらなくなる。 */
+  const S2_ADDENDUM_ROWS = [
+    ["021", "岡田　里美", "5A病棟", "7/8", "陽性", "あり", ""],
+    ["no.22", "はしもと", "", "R8.7.8", "(+)", "38.3℃", "個室へ"],
+    ["０２３", "石川  剛", "5A", "７月８日", "陰性", "なし", ""],
+    ["24番", "前田　千鶴", "", "7.8", "ネガ", "なし", ""],
+    ["id-25", "藤田　健太", "５Ａ", "2026/07/09", "＋", "あり", "接触者調査中"],
+    ["026", "おおにし　ひろし", "", "7/9", "(-)", "なし", ""],
+    ["２７", "中島　彩", "5a", "7-9", "陽性", "38.7℃", "個室へ"],
+    ["no.28", "小川 雅史", "", "R8/7/9", "－", "なし", ""],
+    ["029", "村上　あかね", "5A病棟", "7月9日", "ポジ", "あり", ""],
+    ["０３０", "斉藤　勇", "", "7/10", "陰性", "なし", "退院予定"]
+  ];
+
+  /* 期待行数。ノイズ行を除いた患者行の数。追加分を取り込むと 30 になる。 */
+  const S2_ROWS = 20;
+  const S2_ROWS_ADD = S2_ROWS + S2_ADDENDUM_ROWS.length;
+  /* 締切。師長メールの「7時の申し送りまで」に対応する（P0の実測で動かす）。 */
+  const S2_DEADLINE = 300;
+
+  /* 添付ビューア用のテキスト。グリッドと同じデータから組み立てる——
+     2箇所に別々の教材を持つと、直したつもりが片方だけ直っている事故になる。
+     全角は2セル分の幅を取るので、表示幅で桁を揃える。 */
+  const WIDE = /[ᄀ-ᅟ℃⺀-꓏가-힣豈-﫿︰-﹯＀-｠￠-￦]/;
+  const dispW = (s) => [...s].reduce((n, c) => n + (WIDE.test(c) ? 2 : 1), 0);
+  const padTo = (s, w) => s + " ".repeat(Math.max(1, w - dispW(s)));
+  const COLW = [10, 17, 12, 13, 7, 9, 0];
+  function sheetText(rows) {
+    const line = (r) =>
+      r.slice(1).every((c) => c === "")
+        ? r[0]
+        : r.map((c, i) => (COLW[i] ? padTo(c, COLW[i]) : c)).join("").trimEnd();
+    const out = rows.map(line);
+    // 元ファイルのヘッダ行は、注釈行とタイトル行のあとに現れる。
+    const at = rows.findIndex((r) => r[1] !== "");
+    out.splice(at < 0 ? out.length : at, 0, "", line(S2_HEAD_DIRTY));
+    return out.join("\n");
+  }
+  const SHEET = sheetText(S2_SHEET_ROWS);
+  const SHEET_ADD = sheetText(S2_ADDENDUM_ROWS);
 
   /* ⚠️ 未配置の素材：「二正面」——受信トレイに次々着弾し、本命は3通だけ。
      全部丁寧に返すと確実に溢れる。速度ではなく「捨てる判断」を問う設計。
@@ -905,11 +1038,11 @@
   /* 状態                                                                */
   /* ------------------------------------------------------------------ */
   let mailState = MAILS.map(() => false);   // 既読フラグ
-  let readS1 = false, readU = false;
+  let readS1 = false, readS1A = false, readU = false;
   let openIdx = null;
   let hasS1Mail = false;
+  let hasS1AddMail = false;   // 締切超過で着弾する追加分
   let hasUnlockMail = false;
-  let verdictPasses = true;
 
   /* 6桁コード入力欄 */
   $("code").innerHTML = "";
@@ -973,6 +1106,7 @@
     const box = $("mails"); box.innerHTML = "";
     const list = [];
     if (hasUnlockMail) list.push({ m: MAIL_UNLOCK, key: "u", read: readU });
+    if (hasS1AddMail) list.push({ m: MAIL_S1_ADD, key: "s1a", read: readS1A });
     if (hasS1Mail) list.push({ m: MAIL_S1, key: "s1", read: readS1 });
     MAILS.forEach((m, i) => list.push({ m, key: i, read: mailState[i] }));
 
@@ -987,10 +1121,13 @@
       b.addEventListener("click", () => {
         if (typeof it.key === "number") mailState[it.key] = true;
         else if (it.key === "s1") readS1 = true;
+        else if (it.key === "s1a") readS1A = true;
         else if (it.key === "u") readU = true;
         openIdx = it.key;
         if (view === "inbox") renderInbox(); else renderMails();
         if (view === "inbox") readerFor(it.m);
+        // 添付を持つメールを開くと教材ビューアが中央ペインの上に開く（ui/03 §1）。
+        else if (it.m.attach) openViewer(it.key === "s1a" ? "add" : "main");
       });
       box.appendChild(b);
     });
@@ -1586,25 +1723,45 @@
   }
 
   /* ------------------------------------------------------------------ */
-  /* Stage 2：Excel整形課題（旧Stage1の内容をそのまま使う）                */
+  /* Stage 2：ラインリスト整形課題                                        */
   /*                                                                    */
   /* AIは Stage 1 から持ち越して既にある。「添付を開く」→［コピー］→     */
-  /* AIへ貼り付け→提出、という流れそのものは変えていない。               */
+  /* AIへ貼り付け→提出、という流れは変えていない。変えたのは提出先で、    */
+  /* テキストエリアではなく編集可能グリッドにした。手作業ルートを実在      */
+  /* させるため——直せるからこそ、直しきれないことが分かる。              */
   /* ------------------------------------------------------------------ */
+  let s2Grid = [];        // グリッドの中身（7列の配列の配列）
+  let s2Hot = [];         // 判定NGで光らせるセル（"行-列"）
+  let s2AddTaken = false; // 追加分を作業エリアに取り込んだか
+  let s2AddLanded = false;// 追加分が着弾したか
+  let s2T0 = 0, s2Timer = 0;
+
+  const expectedRows = () => (s2AddTaken ? S2_ROWS_ADD : S2_ROWS);
+  const clone = (rows) => rows.map((r) => r.slice());
+
   function renderStage2Excel() {
     hideOverlays();
     paneL.classList.remove("hide"); paneR.classList.remove("hide");
     hasS1Mail = true; openIdx = "s1"; readS1 = true;
     renderMails();
+    s2Grid = clone(S2_SHEET_ROWS);
+    s2Hot = []; s2AddTaken = false; s2AddLanded = false;
     paneC.innerHTML =
       '<div class="work">' +
         '<div class="stage-title">Stage 2　火の手</div>' +
         // 正規化ルールの表は出さない。要件の言語化そのものが学習目標だから。
         '<div class="brief">統一されたラインリストに整形し、疫学曲線の材料を提出せよ。</div>' +
-        '<div class="cols">提出する列：患者ID / 氏名 / 病棟 / 採取日 / MRSA結果 / 発熱 / 備考</div>' +
+        // 締切は課題カードの中に1本。ヘッダーに逃がすと判定と同じ画面に収まらない。
+        '<div class="s2-dl" id="s2-dl"><span>7:00 申し送りまで</span>' +
+          '<b id="s2-dl-t">05:00</b><span class="bar"><i id="s2-dl-b" style="width:100%"></i></span></div>' +
         '<div class="box" id="submit-box">' +
           '<div class="hd">提出</div>' +
-          '<textarea class="submit-area" id="submit" placeholder="整形後の表を貼り付け（CSV / TSV / 表のコピーを受け付けます）"></textarea>' +
+          '<div class="grid" id="grid"></div>' +
+          '<div class="paste-bar hide" id="paste-bar">' +
+            '<span class="grow" id="paste-t"></span>' +
+            '<button class="go" id="btn-paste-go">取り込む</button>' +
+            '<button id="btn-paste-no">やめる</button>' +
+          "</div>" +
           '<div class="recog" id="recog"></div>' +
         "</div>" +
         '<div class="folded hide" id="folded">' +
@@ -1613,54 +1770,278 @@
         "</div>" +
         '<div class="row-end" id="actions">' +
           '<button class="btn ghost" id="btn-open-viewer">添付を開く</button>' +
+          '<button class="btn ghost" id="btn-reset">最初の状態に戻す</button>' +
           '<button class="btn" id="btn-submit">提出する</button>' +
         "</div>" +
         '<div id="verdict"></div>' +
       "</div>";
 
-    $("btn-open-viewer").addEventListener("click", () => $("ov-viewer").classList.remove("hide"));
+    $("btn-open-viewer").addEventListener("click", () => openViewer("main"));
     $("btn-submit").addEventListener("click", runVerdict);
+    $("btn-reset").addEventListener("click", () => {
+      // 手で壊してからAIに逃げるチームの逃げ道。取り込んだ追加分は残す。
+      if (!confirm("グリッドを最初の状態に戻します。よろしいですか？")) return;
+      s2Grid = clone(S2_SHEET_ROWS).concat(s2AddTaken ? clone(S2_ADDENDUM_ROWS) : []);
+      drawGrid();
+    });
     $("btn-reopen").addEventListener("click", () => {
       $("submit-box").classList.remove("hide");
       $("actions").classList.remove("hide");
       $("folded").classList.add("hide");
       $("verdict").innerHTML = "";
     });
-    const ta = $("submit");
-    ta.addEventListener("input", () => {
-      const t = ta.value.trim();
-      if (!t) { $("recog").textContent = ""; return; }
-      const rows = t.split("\n").filter((r) => r.trim() !== "");
-      const cols = Math.max(...rows.map((r) => r.split(/\t|,/).length));
-      // 提出前に監査役が数えられるようにする。判定を待たせない。
-      $("recog").textContent = rows.length + "行 × " + cols + "列 を認識しました";
+    $("btn-paste-go").addEventListener("click", () => {
+      if (pendingPaste) { s2Grid = pendingPaste; drawGrid(); }
+      closePasteBar();
+    });
+    $("btn-paste-no").addEventListener("click", closePasteBar);
+    drawGrid();
+    s2StartDeadline();
+  }
+
+  function closePasteBar() {
+    pendingPaste = null;
+    if ($("paste-bar")) $("paste-bar").classList.add("hide");
+  }
+
+  /* --- グリッドの描画 ------------------------------------------------- */
+  /* 毎回作り直す。20〜30行なので速さは問題にならず、行削除で番号がずれる
+     ような不整合を持ち込まずに済む。 */
+  function drawGrid() {
+    const g = $("grid");
+    if (!g) return;
+    const focus = document.activeElement;
+    const at = focus && focus.dataset && focus.dataset.r
+      ? [focus.dataset.r, focus.dataset.c] : null;
+    g.innerHTML =
+      "<table><thead><tr><th></th>" +
+        S2_COLS.map((c) => "<th>" + c + "</th>").join("") +
+      "</tr></thead><tbody>" +
+      s2Grid.map((row, r) =>
+        '<tr><td class="n"><button data-del="' + r + '" title="この行を削除">✕ ' + (r + 1) + "</button></td>" +
+        row.map((v, c) =>
+          '<td class="' + (s2Hot.includes(r + "-" + c) ? "hot" : "") + '">' +
+          '<input data-r="' + r + '" data-c="' + c + '" value="' + esc(v) + '"></td>'
+        ).join("") + "</tr>"
+      ).join("") +
+      '</tbody><tfoot><tr><td colspan="8"><button id="btn-add-row">＋ 行を追加</button></td></tr></tfoot></table>';
+
+    g.querySelectorAll("input").forEach((inp) => {
+      inp.addEventListener("input", () => {
+        s2Grid[inp.dataset.r][inp.dataset.c] = inp.value;
+        // 直した瞬間にハイライトが消える。直したことが即座に画面に返る。
+        inp.parentElement.classList.remove("hot");
+      });
+      inp.addEventListener("keydown", (e) => {
+        if (e.key !== "Enter") return;   // 移動は Tab と Enter だけ。矢印は作らない。
+        e.preventDefault();
+        const next = g.querySelector('input[data-r="' + (+inp.dataset.r + 1) + '"][data-c="' + inp.dataset.c + '"]');
+        if (next) next.focus();
+      });
+    });
+    g.querySelectorAll("button[data-del]").forEach((b) => {
+      b.addEventListener("click", () => { s2Grid.splice(+b.dataset.del, 1); drawGrid(); });
+    });
+    $("btn-add-row").addEventListener("click", () => { s2Grid.push(["", "", "", "", "", "", ""]); drawGrid(); });
+
+    if (at) {
+      const back = g.querySelector('input[data-r="' + at[0] + '"][data-c="' + at[1] + '"]');
+      if (back) back.focus();
+    }
+    updateRecog();
+  }
+
+  function updateRecog() {
+    // 提出前に監査役が数えられるようにする。判定を待たせない。
+    if ($("recog")) $("recog").textContent = s2Grid.length + "行 × " + S2_COLS.length + "列";
+  }
+
+  /* --- 貼り付け＝AIルートの合流点 ------------------------------------- */
+  /* GPT-4o の出力形は安定しない。CSV で返すことも、Markdown の表で返すことも、
+     ``` で囲んで返すこともある。どれを貼っても通ること——ここが落ちると
+     AIルートごと死ぬ。 */
+  function parseTable(text) {
+    let t = text.replace(/\r\n?/g, "\n").trim();
+    t = t.replace(/^```[^\n]*\n/, "").replace(/\n```$/, "");   // コードフェンスを剥がす
+    const lines = t.split("\n").filter((l) => l.trim() !== "");
+    if (lines.length < 2) return null;
+
+    const isMd = lines[0].trim().startsWith("|");
+    let rows = lines.map((l) => {
+      if (isMd) return l.replace(/^\s*\|/, "").replace(/\|\s*$/, "").split("|").map((c) => c.trim());
+      if (l.includes("\t")) return l.split("\t").map((c) => c.trim());
+      return l.split(",").map((c) => c.trim());
+    });
+    if (isMd) rows = rows.filter((r) => !r.every((c) => /^:?-{2,}:?$/.test(c)));
+    // 見出し行が付いてきたら落とす。列はこちらで固定しているので要らない。
+    if (rows.length > 1 && rows[0].some((c) => S2_COLS.includes(c.replace(/\s/g, "")))) rows.shift();
+    if (!rows.length) return null;
+    return rows.map((r) => {
+      const row = r.slice(0, S2_COLS.length);
+      while (row.length < S2_COLS.length) row.push("");
+      return row;
     });
   }
+
+  /* --- 締切と追加データの着弾 ----------------------------------------- */
+  /* Stage 1 の締切は「機会が消える」だったが、ここでの超過は「仕事が増える」。
+     提出は一切ロックしない——止めた瞬間、企画書§5「Stage 2 では詰まらせない」
+     が壊れる。罰の通貨はあくまで時間。 */
+  function s2StartDeadline() {
+    clearInterval(s2Timer);
+    s2T0 = Date.now();
+    s2Timer = setInterval(s2DeadlineFrame, 250);
+    s2DeadlineFrame();
+  }
+  function s2StopDeadline() { clearInterval(s2Timer); s2Timer = 0; }
+
+  function s2DeadlineFrame() {
+    const el = $("s2-dl");
+    if (!el) { s2StopDeadline(); return; }
+    const left = S2_DEADLINE - Math.floor((Date.now() - s2T0) / 1000);
+    if (left <= 0) {
+      // 超過は残す。消すと「無かったこと」になる（Stage 1 の残骸を見せる原則）。
+      el.classList.remove("hot"); el.classList.add("over");
+      $("s2-dl-t").textContent = "締切超過";
+      if (!s2AddLanded) { s2AddLanded = true; s2LandAddendum(); }
+      return;
+    }
+    // 締切が迫っても橙まで。赤は急変に取ってある。
+    el.classList.toggle("hot", left <= 15);
+    $("s2-dl-t").textContent =
+      String(Math.floor(left / 60)).padStart(2, "0") + ":" + String(left % 60).padStart(2, "0");
+    $("s2-dl-b").style.width = (left / S2_DEADLINE * 100) + "%";
+  }
+
+  /* 罠ではないので、暗転も警報も赤もオーバーレイも出さない。
+     増えるのはメール1通と未読バッジだけ。派手にすると Stage 3 の罠と
+     見分けがつかなくなり、「このステージに罠は無い」という約束が壊れる。 */
+  function s2LandAddendum() {
+    hasS1AddMail = true;
+    renderMails("s1a");
+  }
+
+  /* --- 添付ビューア：本編と追加分を切り替える -------------------------- */
+  /* ビューアは「届いた添付ファイル」、グリッドは「自分の作業ファイル」。
+     この2つを混ぜない。ビューアは読むだけで、編集はできない。 */
+  function openViewer(which) {
+    const add = which === "add";
+    $("viewer-name").textContent = add ? MAIL_S1_ADD.attach : MAIL_S1.attach;
+    $("sheet").textContent = add ? SHEET_ADD : SHEET;
+    // [作業エリアに追加] は追加分の添付にだけ置く。最初の添付は既にグリッドに
+    // 入っているので不要だし、押せると二重取り込みが起きる。
+    $("btn-take").classList.toggle("hide", !add || s2AddTaken);
+    $("ov-viewer").dataset.which = which;
+    $("ov-viewer").classList.remove("hide");
+  }
+
+  let pendingPaste = null;
+  document.addEventListener("paste", (e) => {
+    if (!$("grid") || !$("grid").contains(e.target)) return;
+    const text = (e.clipboardData || window.clipboardData).getData("text");
+    if (!text || !/\n/.test(text.trim())) return;   // 1行はセル貼り付けとして素通し
+    const rows = parseTable(text);
+    if (!rows) return;
+    e.preventDefault();
+    pendingPaste = rows;
+    $("paste-t").textContent = rows.length + "行 × " + S2_COLS.length + "列 として取り込みます";
+    $("paste-bar").classList.remove("hide");
+  });
 
   /* ------------------------------------------------------------------ */
   /* 判定：1項目ずつ点いていく2秒間                                       */
   /* ------------------------------------------------------------------ */
-  const CHECKS = [
-    "必須列がすべて存在する",
-    "採取日が YYYY-MM-DD に統一",
-    "MRSA結果が 陽性/陰性 の2値",
-    "行数が元データと一致（20行）"
-  ];
+  /* 判定はルールベースのみ。グリッドのセル値を直接読むので、どれも数行で書ける。
+     LLMを呼ばない＝速い＝解錠が気持ちいい。品質は一切採点しない。
+     発熱列の中身も見ない——伏線をデータに温存するため、存在だけが必須。 */
+  const ISO = /^\d{4}-\d{2}-\d{2}$/;
+
+  function checkGrid() {
+    const hot = [];   // 光らせるセル（"r-c"）
+    const rows = s2Grid;
+
+    // ① 必須列に値が入っているか。列はグリッドで固定なので、見ているのは空セル。
+    //    備考（6列目）は空でよい。
+    rows.forEach((r, i) => r.slice(0, 6).forEach((v, c) => {
+      if (v.trim() === "") hot.push(i + "-" + c);
+    }));
+    if (hot.length) return { at: 0, why: hot.length + "件の空欄が残っています", hot };
+
+    // ② 採取日が ISO。判別不能なもの（さんにち）は「要確認」1件まで許容。
+    let vague = 0;
+    rows.forEach((r, i) => {
+      const v = r[3].trim();
+      if (ISO.test(v)) return;
+      if (v === "要確認" && vague++ === 0) return;
+      hot.push(i + "-3");
+    });
+    if (hot.length) return { at: 1, why: hot.length + "件が YYYY-MM-DD になっていません", hot };
+
+    // ③ MRSA結果が2値。(+) ポジ ＋ ネガ 等が残っていたらNG。
+    rows.forEach((r, i) => {
+      if (r[4].trim() !== "陽性" && r[4].trim() !== "陰性") hot.push(i + "-4");
+    });
+    if (hot.length) return { at: 2, why: hot.length + "件残っています（下で光っている分）", hot };
+
+    // ④ 行数。期待値は追加分を取り込んだかで動く。
+    if (rows.length !== expectedRows()) {
+      return { at: 3, why: expectedRows() + "行のはずが " + rows.length + "行です", hot: [] };
+    }
+    return null;
+  }
+
+  /* 模範解答。開発用ボタンから呼ぶだけで、参加者の画面には出てこない。
+     参加者がAIに言語化させる内容がここに書いてある——だからこそ、
+     正規化ルールの表は画面に出さない（ui/03 §2）。 */
+  const zen2han = (s) => s.replace(/[０-９]/g, (c) => String.fromCharCode(c.charCodeAt(0) - 0xfee0));
+  const p2 = (n) => String(n).padStart(2, "0");
+  function isoDate(v) {
+    // 年号（R8.）を落とし、年月日の区切りを揃えてから数字だけ拾う。
+    const s = zen2han(v).replace(/[年月]/g, "/").replace(/日/g, "").replace(/^[RrHh]\d+[./\-]/, "");
+    const n = (s.match(/\d+/g) || []).map(Number);
+    if (n.length >= 3) return n[0] + "-" + p2(n[1]) + "-" + p2(n[2]);
+    if (n.length === 2) return "2026-" + p2(n[0]) + "-" + p2(n[1]);
+    return "要確認";   // 「さんにち」。判別不能は1件だけ許容される。
+  }
+  function normalizeRows(rows) {
+    return rows
+      .filter((r) => r.slice(1).some((c) => c !== ""))   // ノイズ行（1列目だけの行）を落とす
+      .map((r) => [
+        zen2han(r[0]).replace(/\D/g, "").padStart(3, "0"),
+        r[1].replace(/[\s　]+/g, " ").trim(),
+        "5A",
+        isoDate(r[3]),
+        /陽性|\(\+\)|ポジ|＋/.test(r[4]) ? "陽性" : "陰性",
+        r[5].trim() === "なし" ? "なし" : "あり",   // 体温が書いてあるものは「あり」
+        r[6]
+      ]);
+  }
 
   let verdicting = false;
+
   async function runVerdict() {
     const v = $("verdict");
     if (!v || verdicting) return;   // 連打で判定が二重に走らないようにする
     verdicting = true;
-    // 提出フォームを1行に畳み、判定を画面内に収める
-    $("folded-t").textContent = "提出しました　" + ($("recog").textContent || "0行 × 0列 を認識しました").replace("を認識しました", "");
+    closePasteBar();
+    const bad = checkGrid();
+    const CHECKS = [
+      "必須列がすべて埋まっている",
+      "採取日が YYYY-MM-DD に統一",
+      "MRSA結果が 陽性/陰性 の2値",
+      "行数が" + expectedRows() + "行"   // 追加分を取り込むと 30 になる
+    ];
+
+    // 提出フォームを1行に畳み、判定を画面内に収める。グリッドは20行以上あるので、
+    // 畳まないと判定が確実に画面の外へ出る。
+    $("folded-t").textContent = "提出しました　" + $("recog").textContent;
     $("submit-box").classList.add("hide");
     $("actions").classList.add("hide");
     $("folded").classList.remove("hide");
     $("btn-reopen").classList.add("hide");
     v.innerHTML = '<div class="verdict"><div class="lead">提出を確認しています…</div></div>';
     const box = v.firstElementChild;
-    const failAt = verdictPasses ? -1 : 2;
+    const failAt = bad ? bad.at : -1;
 
     for (let i = 0; i < CHECKS.length; i++) {
       await wait(i === 0 ? 200 : 600);
@@ -1671,8 +2052,8 @@
       row.innerHTML =
         '<span class="mark">' + (halted ? "─" : failed ? "✗" : "✓") + "</span>" +
         "<span>" + (halted ? CHECKS[i] + " の確認は中断しました" : CHECKS[i]) +
-        // 何行目の何がダメかを具体的に言う。「形式が不正です」で突き放さない。
-        (failed ? '<span class="why">→ 3行目に「ポジ」、5行目に「(+)」が残っています</span>' : "") +
+        // 「形式が不正です」で突き放さない。件数を言い、場所はグリッドのセルで指す。
+        (failed ? '<span class="why">→ ' + bad.why + "</span>" : "") +
         "</span>";
       box.appendChild(row);
       requestAnimationFrame(() => row.classList.add("on"));
@@ -1681,12 +2062,18 @@
 
     await wait(400);
     verdicting = false;
-    if (verdictPasses) {
+    if (!bad) {
+      s2Hot = [];
+      s2StopDeadline();
       const d = document.createElement("div");
       d.className = "done"; d.textContent = "Stage 3 を解錠しました";
       box.appendChild(d);
       unlockSequence();
     } else {
+      // 該当セルを光らせておく。[提出に戻る] でグリッドが開いた瞬間に、
+      // 直すべき場所が既に指されている。探す時間がゼロになる。
+      s2Hot = bad.hot;
+      drawGrid();
       const d = document.createElement("div");
       d.className = "lead";
       d.textContent = "直して、もう一度提出してください。回数の制限はありません。";
@@ -2004,7 +2391,8 @@
   function go(id, keepMode) {
     clearLater();
     verdicting = false;
-    s1Stop(); s2Stop();
+    s1Stop(); s2Stop(); s2StopDeadline();
+    hasS1AddMail = false; readS1A = false;   // 追加分は締切超過で改めて着弾する
     view = id;
     const step = STEPS.find((s) => s.id === id) || STEPS[0];
     if (!keepMode) screenEl.dataset.mode = step.mode;
@@ -2036,7 +2424,7 @@
       startClock();
     }
 
-    if (id === "entry") { mailState = MAILS.map(() => false); readS1 = readU = false; openIdx = null; renderEntry(); }
+    if (id === "entry") { mailState = MAILS.map(() => false); readS1 = readS1A = readU = false; openIdx = null; renderEntry(); }
     else if (id === "welcome") renderWelcome();
     else if (id === "inbox") { openIdx = null; renderInbox(); }
     else if (id === "s1") {
@@ -2054,10 +2442,9 @@
       hasUnlockMail = false; readU = false; $("fever").textContent = "3";
       revealAI(true);
       renderStage2Excel();
-      const ta = $("submit");
-      ta.value = "患者ID,氏名,病棟,採取日,MRSA結果,発熱,備考\n001,佐藤 一郎,5A,2026-07-03,陽性,あり,個室へ";
-      ta.dispatchEvent(new Event("input"));
-      verdictPasses = true; syncVerdictButtons();
+      // 解錠演出だけを見るためのステップ。グリッドを正解で埋めてから提出する。
+      s2Grid = normalizeRows(s2Grid);
+      drawGrid();
       later(runVerdict, 300);
     }
 
@@ -2074,12 +2461,19 @@
     $("steps").appendChild(b);
   });
 
-  function syncVerdictButtons() {
-    $("btn-verdict-ok").setAttribute("aria-pressed", String(verdictPasses));
-    $("btn-verdict-ng").setAttribute("aria-pressed", String(!verdictPasses));
-  }
-  $("btn-verdict-ok").addEventListener("click", () => { verdictPasses = true; syncVerdictButtons(); });
-  $("btn-verdict-ng").addEventListener("click", () => { verdictPasses = false; syncVerdictButtons(); });
+  /* 開発用。判定はグリッドの実データで走るので、通過を見るには本来23行を
+     直さなければならない。それを1クリックで済ませるためのボタン。
+     normalizeRows() は「模範解答」そのもの——判定が何を通すかがコードで読める。 */
+  $("btn-fill-ok").addEventListener("click", () => {
+    if (!$("grid")) return;
+    s2Grid = normalizeRows(s2Grid);
+    s2Hot = []; drawGrid();
+  });
+  $("btn-fill-raw").addEventListener("click", () => {
+    if (!$("grid")) return;
+    s2Grid = clone(S2_SHEET_ROWS).concat(s2AddTaken ? clone(S2_ADDENDUM_ROWS) : []);
+    s2Hot = []; drawGrid();
+  });
   $("btn-transition").addEventListener("click", transition);
   // 開発用。Stage 1 の中身を何度も見るとき、毎回ブリーフィングを閉じずに済ませる。
   // 参加者が実際に見る順序（go("s1") は常にブリーフィングを出す）とはずらさない。
@@ -2103,9 +2497,20 @@
   });
   $("btn-copy").addEventListener("click", () => {
     const btn = $("btn-copy");
-    if (navigator.clipboard) navigator.clipboard.writeText(SHEET).catch(() => {});
+    const txt = $("ov-viewer").dataset.which === "add" ? SHEET_ADD : SHEET;
+    if (navigator.clipboard) navigator.clipboard.writeText(txt).catch(() => {});
     btn.textContent = "コピーしました";
     later(() => { btn.textContent = "コピー"; }, 1400);
+  });
+  /* 追加分は押されて初めてグリッドに入る。自動追記は事故のもと——
+     手作業中のセルが勝手に動く。 */
+  $("btn-take").addEventListener("click", () => {
+    if (s2AddTaken) return;
+    s2AddTaken = true;
+    s2Grid = s2Grid.concat(clone(S2_ADDENDUM_ROWS));
+    $("btn-take").classList.add("hide");
+    $("ov-viewer").classList.add("hide");
+    drawGrid();   // 行数表示が変わることが通知。トーストは出さない。
   });
 
   /* 1280×720 を、置かれた幅に合わせて縮める */
