@@ -319,6 +319,9 @@
   font-size: 13px; padding: 5px 13px;
 }
 .paste-bar button.go { background: var(--accent); border-color: var(--accent); color: #fff; font-weight: 700; }
+/* 貼り付けが表として読めなかった／壊れていたときの表示。橙止まりで、
+   セルのNGハイライトと同じ色に揃える（--accent は急変専用）。 */
+.paste-bar.err .grow { color: var(--warn); }
 /* 提出したらフォームを1行に畳む。1画面を全員で囲むので、
    判定結果を見るのにスクロールさせるわけにいかない。 */
 .folded {
@@ -842,7 +845,8 @@
   const clearLater = () => { timers.forEach(clearTimeout); timers = []; };
   // textarea の値を innerHTML に埋め戻す箇所（Stage 1 の下書き代筆）専用。
   // 直接埋め込むと </textarea> を含む入力でDOMを破壊できてしまう。
-  const esc = (s) => (s || "").replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
+  const esc = (s) => (s || "").replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;")
+    .replace(/"/g, "&quot;");
 
   /* ------------------------------------------------------------------ */
   /* シナリオの実文言（docs/scenario/ より）                              */
@@ -1736,7 +1740,9 @@
   let s2AddLanded = false;// 追加分が着弾したか
   let s2T0 = 0, s2Timer = 0;
 
-  const expectedRows = () => (s2AddTaken ? S2_ROWS_ADD : S2_ROWS);
+  // 期待行数は「取り込んだか」ではなく「着弾したか」で決まる。取り込まずに
+  // 元の行数のまま提出できてしまうと、締切超過のペナルティが消える。
+  const expectedRows = () => (s2AddLanded ? S2_ROWS_ADD : S2_ROWS);
   const clone = (rows) => rows.map((r) => r.slice());
 
   function renderStage2Excel() {
@@ -1782,6 +1788,7 @@
       // 手で壊してからAIに逃げるチームの逃げ道。取り込んだ追加分は残す。
       if (!confirm("グリッドを最初の状態に戻します。よろしいですか？")) return;
       s2Grid = clone(S2_SHEET_ROWS).concat(s2AddTaken ? clone(S2_ADDENDUM_ROWS) : []);
+      s2Hot = [];   // 別データになるので、古いハイライトを持ち越さない
       drawGrid();
     });
     $("btn-reopen").addEventListener("click", () => {
@@ -1791,7 +1798,7 @@
       $("verdict").innerHTML = "";
     });
     $("btn-paste-go").addEventListener("click", () => {
-      if (pendingPaste) { s2Grid = pendingPaste; drawGrid(); }
+      if (pendingPaste) { s2Grid = pendingPaste; s2Hot = []; drawGrid(); }
       closePasteBar();
     });
     $("btn-paste-no").addEventListener("click", closePasteBar);
@@ -1802,6 +1809,8 @@
   function closePasteBar() {
     pendingPaste = null;
     if ($("paste-bar")) $("paste-bar").classList.add("hide");
+    if ($("paste-bar")) $("paste-bar").classList.remove("err");
+    if ($("btn-paste-go")) $("btn-paste-go").classList.remove("hide");
   }
 
   /* --- グリッドの描画 ------------------------------------------------- */
@@ -1830,6 +1839,9 @@
       inp.addEventListener("input", () => {
         s2Grid[inp.dataset.r][inp.dataset.c] = inp.value;
         // 直した瞬間にハイライトが消える。直したことが即座に画面に返る。
+        // s2Hot 配列からも消しておかないと、次の drawGrid() で復活する。
+        const key = inp.dataset.r + "-" + inp.dataset.c;
+        s2Hot = s2Hot.filter((hot) => hot !== key);
         inp.parentElement.classList.remove("hot");
       });
       inp.addEventListener("keydown", (e) => {
@@ -1840,7 +1852,17 @@
       });
     });
     g.querySelectorAll("button[data-del]").forEach((b) => {
-      b.addEventListener("click", () => { s2Grid.splice(+b.dataset.del, 1); drawGrid(); });
+      b.addEventListener("click", () => {
+        const del = +b.dataset.del;
+        s2Grid.splice(del, 1);
+        // 行が詰まるとハイライトの座標もずれる。消した行の分は捨て、下は繰り下げる。
+        s2Hot = s2Hot.reduce((acc, k) => {
+          const [r, c] = k.split("-").map(Number);
+          if (r !== del) acc.push((r > del ? r - 1 : r) + "-" + c);
+          return acc;
+        }, []);
+        drawGrid();
+      });
     });
     $("btn-add-row").addEventListener("click", () => { s2Grid.push(["", "", "", "", "", "", ""]); drawGrid(); });
 
@@ -1860,27 +1882,69 @@
   /* GPT-4o の出力形は安定しない。CSV で返すことも、Markdown の表で返すことも、
      ``` で囲んで返すこともある。どれを貼っても通ること——ここが落ちると
      AIルートごと死ぬ。 */
+
+  /* RFC4180 相当の最小CSVパーサ。引用符内のカンマ・改行・"" エスケープを解す。
+     行ごとに split(",") すると、備考に読点混じりの文が入った瞬間に列がずれ、
+     slice() で末尾が黙って落ちる。AIルートの合流点なので、ここは堅く作る。 */
+  function parseCsv(text) {
+    const rows = []; let row = [], cell = "", q = false;
+    for (let i = 0; i < text.length; i++) {
+      const ch = text[i];
+      if (q) {
+        if (ch !== '"') { cell += ch; continue; }
+        if (text[i + 1] === '"') { cell += '"'; i++; continue; }
+        q = false;
+      } else if (ch === '"' && cell === "") { q = true; }
+      else if (ch === ",") { row.push(cell); cell = ""; }
+      else if (ch === "\n") { row.push(cell); rows.push(row); row = []; cell = ""; }
+      else cell += ch;
+    }
+    if (q) return null;   // 引用符が閉じていない＝壊れたCSV
+    row.push(cell); rows.push(row);
+    return rows.map((r) => r.map((c) => c.trim())).filter((r) => r.some((c) => c !== ""));
+  }
+
+  /* 戻り値は { rows } / { error } / null の3値。
+     null＝表として読めない（1行貼り付け等）→ 従来どおり素通し。
+     error＝表のつもりだが取り込めない→確認バーで理由を示し、取り込ませない。 */
   function parseTable(text) {
     let t = text.replace(/\r\n?/g, "\n").trim();
     t = t.replace(/^```[^\n]*\n/, "").replace(/\n```$/, "");   // コードフェンスを剥がす
-    const lines = t.split("\n").filter((l) => l.trim() !== "");
-    if (lines.length < 2) return null;
+    if (!/\n/.test(t)) return null;
 
-    const isMd = lines[0].trim().startsWith("|");
-    let rows = lines.map((l) => {
-      if (isMd) return l.replace(/^\s*\|/, "").replace(/\|\s*$/, "").split("|").map((c) => c.trim());
-      if (l.includes("\t")) return l.split("\t").map((c) => c.trim());
-      return l.split(",").map((c) => c.trim());
-    });
-    if (isMd) rows = rows.filter((r) => !r.every((c) => /^:?-{2,}:?$/.test(c)));
+    const isMd = t.trim().startsWith("|");
+    let rows;
+    if (isMd) {
+      rows = t.split("\n").filter((l) => l.trim() !== "").map((l) =>
+        l.replace(/^\s*\|/, "").replace(/\|\s*$/, "").split("|").map((c) => c.trim())
+      );
+      rows = rows.filter((r) => !r.every((c) => /^:?-{2,}:?$/.test(c)));
+    } else if (t.includes("\t")) {
+      rows = t.split("\n").filter((l) => l.trim() !== "").map((l) => l.split("\t").map((c) => c.trim()));
+    } else if (t.includes(",")) {
+      rows = parseCsv(t);
+      if (rows === null) return { error: "引用符が閉じていません" };
+    } else {
+      return null;   // タブ・カンマ・| のどれも無い＝表として読めない
+    }
+    if (!rows.length) return null;
     // 見出し行が付いてきたら落とす。列はこちらで固定しているので要らない。
     if (rows.length > 1 && rows[0].some((c) => S2_COLS.includes(c.replace(/\s/g, "")))) rows.shift();
     if (!rows.length) return null;
-    return rows.map((r) => {
-      const row = r.slice(0, S2_COLS.length);
-      while (row.length < S2_COLS.length) row.push("");
-      return row;
-    });
+
+    // 8列目以降に値がある行を無言で切り捨てない。取り込み前に拒否する。
+    const wide = rows.findIndex((r) => r.length > S2_COLS.length && r.slice(S2_COLS.length).some((c) => c !== ""));
+    if (wide !== -1) return { error: "列が" + S2_COLS.length + "つを超えています（" + (wide + 1) + "行目）" };
+    // 全行が1列しか取れなかった＝表の区切りが無い（固定幅テキストの誤貼り付け等）。
+    if (rows.every((r) => r.length <= 1)) return { error: "表として読めません（タブ・カンマ・|のいずれも見つかりません）" };
+
+    return {
+      rows: rows.map((r) => {
+        const row = r.slice(0, S2_COLS.length);
+        while (row.length < S2_COLS.length) row.push("");
+        return row;
+      })
+    };
   }
 
   /* --- 締切と追加データの着弾 ----------------------------------------- */
@@ -1904,6 +1968,7 @@
       el.classList.remove("hot"); el.classList.add("over");
       $("s2-dl-t").textContent = "締切超過";
       if (!s2AddLanded) { s2AddLanded = true; s2LandAddendum(); }
+      s2StopDeadline();   // 超過表示は残す。以降のフレームに意味は無いので回し続けない
       return;
     }
     // 締切が迫っても橙まで。赤は急変に取ってある。
@@ -1940,11 +2005,20 @@
     if (!$("grid") || !$("grid").contains(e.target)) return;
     const text = (e.clipboardData || window.clipboardData).getData("text");
     if (!text || !/\n/.test(text.trim())) return;   // 1行はセル貼り付けとして素通し
-    const rows = parseTable(text);
-    if (!rows) return;
+    const parsed = parseTable(text);
+    if (!parsed) return;
     e.preventDefault();
-    pendingPaste = rows;
-    $("paste-t").textContent = rows.length + "行 × " + S2_COLS.length + "列 として取り込みます";
+    if (parsed.error) {
+      // 不正・過幅な表は取り込み確認まで進ませない。理由だけ示して[取り込む]は隠す。
+      pendingPaste = null;
+      $("paste-t").textContent = parsed.error;
+      $("paste-bar").classList.add("err");
+      $("btn-paste-go").classList.add("hide");
+      $("paste-bar").classList.remove("hide");
+      return;
+    }
+    pendingPaste = parsed.rows;
+    $("paste-t").textContent = parsed.rows.length + "行 × " + S2_COLS.length + "列 として取り込みます";
     $("paste-bar").classList.remove("hide");
   });
 
@@ -1983,9 +2057,13 @@
     });
     if (hot.length) return { at: 2, why: hot.length + "件残っています（下で光っている分）", hot };
 
-    // ④ 行数。期待値は追加分を取り込んだかで動く。
+    // ④ 行数。期待値は追加分が着弾した時点で上がる。取り込みは必須。
     if (rows.length !== expectedRows()) {
-      return { at: 3, why: expectedRows() + "行のはずが " + rows.length + "行です", hot: [] };
+      const why = s2AddLanded && !s2AddTaken
+        ? "追加分" + S2_ADDENDUM_ROWS.length + "行がまだ作業エリアに入っていません"
+          + "（師長のメールの添付を開いて［作業エリアに追加］）"
+        : expectedRows() + "行のはずが " + rows.length + "行です";
+      return { at: 3, why, hot: [] };
     }
     return null;
   }
