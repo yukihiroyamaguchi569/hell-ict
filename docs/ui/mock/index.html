@@ -965,6 +965,10 @@
   const S2_ROWS_ADD = S2_ROWS + S2_ADDENDUM_ROWS.length;
   /* 締切。師長メールの「7時の申し送りまで」に対応する（P0の実測で動かす）。 */
   const S2_DEADLINE = 300;
+  /* 苅部さんがAIパネルを解禁するまでの待ち時間。6分の滞留トリガー（詰まっている
+     チームへの追加ヒント、未実装）とは別物——こちらは「AIの存在を早めに思い出させる」
+     ためだけの値。長いと「AIなら3分」の体験がまるごと潰れるので短くしてある。仮値、P0実測で確定。 */
+  const S2_KARUBE_DELAY = 45;
 
   /* 添付ビューア用のテキスト。グリッドと同じデータから組み立てる——
      2箇所に別々の教材を持つと、直したつもりが片方だけ直っている事故になる。
@@ -1035,7 +1039,8 @@
 
   const PHS_LINES = [
     "〔苅部〕また師長のExcelですか。あれ、日付の書き方が5種類くらいありますよね。",
-    "〔苅部〕そういうの、手で直すもんじゃないですよ。……で、そっちにAIあるんでしょ？ うちには無いのに。"
+    "〔苅部〕そういうの、手で直すもんじゃないですよ。……で、そっちにAIあるんでしょ？ うちには無いのに。",
+    "〔苅部〕……ほら、出しときました。それくらいはします。"
   ];
 
   /* ------------------------------------------------------------------ */
@@ -1163,8 +1168,9 @@
     ["ov-entry", "ov-brief", "ov-viewer", "ov-unlock", "ov-s1res"].forEach((id) => $(id).classList.add("hide"));
   }
 
-  /* AIチャットは最初から画面にいない。
-     汚いExcelを一度見せ、ビューアを閉じた瞬間に右から滑り込む。
+  /* AIチャットは最初から画面にいない。Stage 1 では中央ペインの下書きボタンだけを
+     渡し、右のこのパネルは一切出さない。Stage 2 で苅部さんが早めに一声かけ、
+     皮肉を言った直後に「送りました」と言う——その台詞と同時にここが呼ばれる。
      道具が先にあると「AIがあるから使う」になり、要件を言語化する動機が痩せる。 */
   let aiRevealed = false;
   function revealAI(instant) {
@@ -1178,9 +1184,10 @@
       $("phs").classList.remove("hide");
       return;
     }
+    // 呼び出し元（苅部さんのAI解禁トリガー）は #phs を既に表示済みなので、
+    // ここでの表示は保険。ここより後で phs が出ることは無い。
     paneR.classList.remove("collapsed");
-    // 苅部さんはAIより後に現れる。「そっちにAIあるんでしょ？」が先に来ては成立しない。
-    later(() => $("phs").classList.remove("hide"), 520);
+    $("phs").classList.remove("hide");
   }
 
   function renderEntry() {
@@ -1649,8 +1656,9 @@
     s1.interstitial = false;
     s1.aiReady = true;
     phsIntroPending = true;  // 次に開いたとき、苅部さんの最初のひとことを見せる
-    revealAI();
-    // revealAI() 自身の遅延（520ms）の後にバッジを光らせる。自動では開かない。
+    // 苅部さんがここで渡すのは中央ペインの下書きボタンだけ。右のAIチャットパネルは
+    // 別物で、Stage 2 で苅部さんが改めて鳴らすまで出さない（revealAI() は呼ばない）。
+    $("phs").classList.remove("hide");
     later(() => {
       $("phs-badge").classList.remove("hide");
       $("phs-badge").textContent = "1";
@@ -1804,6 +1812,9 @@
     $("btn-paste-no").addEventListener("click", closePasteBar);
     drawGrid();
     s2StartDeadline();
+    // 苅部さんが早めに一声かけて、AIパネルの存在を思い出させる（右パネルの初出現）。
+    // 自動でウィンドウは開かない——バッジが光るだけ。
+    later(() => { phsAIPending = true; phsRing(); }, S2_KARUBE_DELAY * 1000);
   }
 
   function closePasteBar() {
@@ -2427,8 +2438,10 @@
   // Stage 1 の強制イベントで苅部さんが現れたときだけ立つフラグ。
   // 通常の「待たされる」やり取りとは別に、最初のひとことを即座に見せる。
   let phsIntroPending = false;
+  // Stage 2 の苅部さんトリガーで立つフラグ。彼から鳴らしているので、
+  // Stage 1 と同じく待たせずにすぐ用件（皮肉→AI解禁）へ入る。
+  let phsAIPending = false;
   function phsRing() {
-    revealAI(true);  // 苅部さんはAIの存在を前提に喋る。先回りさせない。
     $("phs").classList.remove("hide");
     $("phs-badge").classList.remove("hide");
     $("phs-badge").textContent = String(++phsShown);
@@ -2448,6 +2461,18 @@
       later(() => { log.insertAdjacentHTML("beforeend", "<p>" + S1_KARUBE_INTRO[2] + "</p>"); }, 1800);
       return;
     }
+    if (phsAIPending) {
+      // Stage 2 の苅部さんトリガー。皮肉2行の後、3行目でAIパネルを解禁する。
+      // ここが右のAIチャットパネルの初出現——Stage 1 からの持ち越しは無い。
+      phsAIPending = false;
+      log.innerHTML = "<p>" + PHS_LINES[0] + "</p>";
+      later(() => { log.insertAdjacentHTML("beforeend", "<p>" + PHS_LINES[1] + "</p>"); }, 900);
+      later(() => {
+        log.insertAdjacentHTML("beforeend", "<p>" + PHS_LINES[2] + "</p>");
+        revealAI();
+      }, 2900);
+      return;
+    }
     // 待たされることがヒントのコスト。開いてもまだ返事は来ていない。
     log.innerHTML = '<p class="wait">〔苅部〕今、別病棟対応中。あとで。</p>';
     later(() => { log.insertAdjacentHTML("beforeend", "<p>" + PHS_LINES[0] + "</p>"); }, 1400);
@@ -2462,7 +2487,7 @@
     { id: "welcome", label: "② ウェルカム",  mode: "peace", note: "操作説明を一切しない。AI初体験は Stage 1 に取ってある。ヘッダーの「発熱 3」はこの最初の画面から居座っていて、他の在院・空床の数字に紛れて誰も気に留めない（「原因不明の発熱」だと臨床職には露骨すぎるため、ラベルは一般的な語にとどめてある）。" },
     { id: "inbox",   label: "③ 受信トレイ",  mode: "peace", note: "右ペインはまだ無く、中央が右端まで伸びている。読ませたいのはメールだけ。3通目の夜勤師長メールが未知ウイルスの種で、太字にせず、色も変えず、段落の途中に置いてある。ここで警戒させたら設計失敗。" },
     { id: "s1",      label: "④ Stage 1 平常運転", mode: "peace", note: "画面はまだ明るい（peace）。アウトブレイクは起きていない——起きていないのに、着任初日のICTが1分刻みのメール処理をやらされる。10通すべて平時の事務で、緊急のものは1通も無い。急変はこのステージを終えた後に来る。冒頭に事務長のブリーフィングが入る。「派遣は1分、他の職員は5分」——バグではなく人が決めた基準だと本人の口から告げる。[了解しました] を押した瞬間に締切のカウントとレースが始まる（読んでいる時間は減らない）。1回目：全通が本物、AIは無い。1通ごとの締切が並走し、督促は来ない——時間切れは二度と返信できない一発勝負。1回目が終わって全通捌けていなければ、そこで初めて苅部さんが割り込みAIを渡す（固定タイマーではなく「失敗した」が発火条件、5分ルールの実在も認める）。2回目：新しい10通に「要点→AIに下書きさせる→送信」で再挑戦。手動で1回目を全通さばき切っても構わない、ボタンの使用は強制しない。検査科メール（8通目）に未知ウイルスの種が1粒仕込んである。" },
-    { id: "s2",      label: "⑤ Stage 2 火の手",   mode: "alert", note: "直前に急変（赤帯・転調）が入る。ここで初めて「5A病棟でMRSA疑い」が明かされ、器の色が peace から alert へ落ちる。メールを片付けて一息ついた瞬間に世界が変わる——段階を追って追い詰めるための順序。課題は師長から届く汚いExcelのラインリスト整形。AIはStage 1から持ち越して既にある。「添付を開く」→［コピー］→AIへ貼り付け→提出、そこから先は自分で言語化させる。整形対象に MRSA陰性なのに発熱ありの3名（005/6/008）が紛れており、Stage 3 で回収される。" },
+    { id: "s2",      label: "⑤ Stage 2 火の手",   mode: "alert", note: "直前に急変（赤帯・転調）が入る。ここで初めて「5A病棟でMRSA疑い」が明かされ、器の色が peace から alert へ落ちる。メールを片付けて一息ついた瞬間に世界が変わる——段階を追って追い詰めるための順序。課題は師長から届く汚いExcelのラインリスト整形。右のAIチャットパネルはここが初出現——Stage 1で苅部さんが渡すのは中央ペインの下書きボタンだけ。Stage 2開始からS2_KARUBE_DELAY秒後、苅部さんが皮肉2行→「送りました」で解禁する。「添付を開く」→［コピー］→AIへ貼り付け→提出、そこから先は自分で言語化させる。整形対象に MRSA陰性なのに発熱ありの3名（005/6/008）が紛れており、Stage 3 で回収される。" },
     { id: "unlock",  label: "⑥ 解錠",       mode: "alert", note: "報酬は師長の承認だけ。スコアも星も出さない。同時に「発熱」が 3→5 に静かに変わる——解錠の喜びの陰で、誰も見ていない数字が増える。" }
   ];
 
@@ -2481,7 +2506,7 @@
     $("phs").classList.add("hide");
     $("phs-win").classList.add("hide");
     $("phs-log").innerHTML = "";
-    phsOpen = false; phsShown = 0; phsIntroPending = false;
+    phsOpen = false; phsShown = 0; phsIntroPending = false; phsAIPending = false;
     $("ai-log").innerHTML = '<div class="empty">（まだ何もありません）</div>';
 
     if (id === "entry" || id === "welcome" || id === "inbox") {
@@ -2513,7 +2538,8 @@
     else if (id === "s2") {
       hasUnlockMail = false; $("fever").textContent = "3";
       TEAMS[2].pos = 2; drawMarks();
-      revealAI(true);  // Stage 1 から持ち越したAIは、当然ここでも使える
+      // AIパネルはここでは出さない。Stage 2 独自の苅部さんトリガー
+      // （renderStage2Excel() 内で仕込む）が解禁する。
       renderStage2Excel();
     }
     else if (id === "unlock") {
@@ -2571,7 +2597,8 @@
   });
   $("btn-viewer-close").addEventListener("click", () => {
     $("ov-viewer").classList.add("hide");
-    revealAI();  // 中身を見た直後に道具が来る。この順序が Stage 1 の入口になる。
+    // ここでAIを出さない。早期に開閉しただけで解禁されると、苅部さんの
+    // トリガー（S2_KARUBE_DELAY秒後）がまるごとスキップされてしまう。
   });
   $("btn-copy").addEventListener("click", () => {
     const btn = $("btn-copy");
