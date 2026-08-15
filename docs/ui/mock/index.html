@@ -511,8 +511,9 @@
   padding: 11px 14px; display: flex; justify-content: flex-end;
 }
 
-/* 話者の肖像。実画像が入るまではプレースホルダ枠。
-   差し替えは .frame の中身を <img> に置き換えるだけ。 */
+/* 話者の肖像。宣伝トレイラー用に起こした画をそのまま使っている
+   （事務長は「組織の顔」として描く方針。docs/ui/02_Stage1.md §0）。
+   小さく置くと劇画の圧が落ち、2003年の院内システムに貼られた顔写真に見える。 */
 .sysdlg .por { flex: 0 0 138px; }
 .sysdlg .por .frame {
   width: 138px; height: 150px; border: 1px solid #b3b8b0; background: #f0f1ec;
@@ -673,10 +674,10 @@
               <span class="ctl">□ ✕</span>
             </div>
             <div class="bd">
-            <!-- 話者の肖像。実画像が入るまではプレースホルダ枠のまま。
-                 差し替えは .frame の中身を <img> にするだけで済む。 -->
+            <!-- 話者の肖像。名乗りより先に顔が出る（BRIEF_BEATS の第1拍）——
+                 この人物が何を言うかを、参加者は顔を見た時点で身構える。 -->
             <div class="por beat">
-              <div class="frame">写真<br>準備中</div>
+              <div class="frame"><img src="../../../assets/images/production/stage1-administrative-director.png" alt="事務長"></div>
               <div class="cap">病院執行部<br><b>事務長</b></div>
             </div>
             <div class="main">
@@ -733,7 +734,7 @@
             </div>
             <div class="bd">
               <div class="por">
-                <div class="frame">写真<br>準備中</div>
+                <div class="frame"><img src="../../../assets/images/production/stage1-administrative-director.png" alt="事務長"></div>
                 <div class="cap">病院執行部<br><b>事務長</b></div>
               </div>
               <div class="main" id="s1res-main"></div>
