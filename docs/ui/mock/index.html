@@ -2402,33 +2402,36 @@
   // 急変は Stage 1 を終えた画面の上で起こる。メールを片付けて一息ついた、
   // その画面がそのまま崩れていく——go() で画面を差し替えてから転調させると
   // 「別の場面が始まった」に見えてしまうので、ここでは画面を切り替えない。
-  async function transition() {
+  function transition() {
     clearLater();
-    await wait(400);
-
-    // 120ms: 器の色そのものを差し替える（900ms かけて補間）
-    later(() => { screenEl.dataset.mode = "alert"; }, 120);
-
-    // 300ms: 赤帯がスライドイン
+    // wait() は timers に登録されない生タイマーなので、go() の clearLater() では
+    // 途中キャンセルできない。以降の一連も later() に統一し、この 400ms の待機中に
+    // 別画面へ遷移しても最後の go("s2", true) が後から選択画面を上書きしないようにする。
     later(() => {
-      const b = $("redband");
-      b.classList.remove("hide", "out"); b.classList.add("in");
-    }, 300);
+      // 120ms: 器の色そのものを差し替える（900ms かけて補間）
+      later(() => { screenEl.dataset.mode = "alert"; }, 120);
 
-    // レースはこの時点で既に走っている（Stage 1 の [了解しました] から）。
-    // 転調で始めるのはもう「色」だけ。
+      // 300ms: 赤帯がスライドイン
+      later(() => {
+        const b = $("redband");
+        b.classList.remove("hide", "out"); b.classList.add("in");
+      }, 300);
 
-    // 赤は使い減りする資源。3秒で引き上げる。
-    later(() => {
-      const b = $("redband");
-      b.classList.remove("in"); b.classList.add("out");
-      later(() => b.classList.add("hide"), 400);
-    }, 3300);
+      // レースはこの時点で既に走っている（Stage 1 の [了解しました] から）。
+      // 転調で始めるのはもう「色」だけ。
 
-    // 赤帯が引いてから一拍おいて Stage 2 へ。ここで初めて MRSA の名前が出て、
-    // 直後に師長から「至急！！MRSAのやつまとめて」が届く。
-    // keepMode:true は既に alert なので、器の色を再補間させないため。
-    later(() => go("s2", true), 4200);
+      // 赤は使い減りする資源。3秒で引き上げる。
+      later(() => {
+        const b = $("redband");
+        b.classList.remove("in"); b.classList.add("out");
+        later(() => b.classList.add("hide"), 400);
+      }, 3300);
+
+      // 赤帯が引いてから一拍おいて Stage 2 へ。ここで初めて MRSA の名前が出て、
+      // 直後に師長から「至急！！MRSAのやつまとめて」が届く。
+      // keepMode:true は既に alert なので、器の色を再補間させないため。
+      later(() => go("s2", true), 4200);
+    }, 400);
   }
 
   /* ------------------------------------------------------------------ */
