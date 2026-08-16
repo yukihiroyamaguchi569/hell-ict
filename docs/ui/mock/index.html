@@ -168,7 +168,7 @@
   padding: 1px 7px; font-size: 12px; font-weight: 700;
 }
 
-/* 配布資料：受信トレイより目立たせない。未読バッジも通知も付けない
+/* 共有フォルダ：受信トレイより目立たせない。未読バッジも通知も付けない
    （docs/ui/04_Stage3.md §1）。 */
 .docs { flex: 0 0 auto; border-top: 1px solid var(--rule); }
 .docitem {
@@ -561,8 +561,8 @@
   text-align: center; max-width: 720px; line-height: 1.7;
 }
 
-/* Stage 3：罰ゲーム（拡大対応業務）。主役は残り時間の数字であって、叱責の文言ではない。
-   --warn の斜線ハッチで覆い、中に接触者リストのグリッドを内包する。 */
+/* Stage 3：拡大対応業務（消毒液ボトルの補充）。主役は残り時間の数字であって、
+   叱責の文言ではない。--warn の斜線ハッチで覆い、中に作業面を内包する。 */
 .lock {
   background:
     repeating-linear-gradient(135deg, rgba(217,154,31,.16) 0 18px, rgba(217,154,31,.05) 18px 36px),
@@ -574,14 +574,36 @@
   font-family: var(--font-num); font-size: 46px; font-weight: 700; color: #fff;
   font-variant-numeric: tabular-nums; line-height: 1;
 }
-/* このグリッドは Stage 2 の drawGrid() を間借りしており、内部の文字色は
-   var(--fg) 等のテーマトークンに依存する（crisisモードでは明るい文字色）。
-   ここを白い紙にすると文字が読めなくなるため、「病院から届いたファイル」
+/* 作業面。内部の文字色は var(--fg) 等のテーマトークンに依存する（crisisモードでは
+   明るい文字色）。ここを白い紙にすると文字が読めなくなるため、「病院から届いたファイル」
    （00_共通シェルと通奏低音.md §8）とは扱いを変え、アプリの面のまま見せる。 */
 .lock .box {
   width: 100%; max-width: 880px; background: var(--surface); color: var(--fg);
   border: 1px solid var(--rule); padding: 14px; max-height: 56vh; overflow: auto;
 }
+/* ボトル棚。単調な作業そのものが罰なので、見た目で達成感を出さない——
+   済んだ本数が増えるだけで、褒めも音も無い。 */
+.bottles { display: grid; grid-template-columns: repeat(10, 1fr); gap: 7px; padding: 12px 2px; }
+.bottles button {
+  aspect-ratio: 1 / 1.7; background: var(--bg); border: 1px solid var(--rule);
+  color: var(--fg-muted); font-family: var(--font-ui); font-size: 11px;
+  display: flex; align-items: center; justify-content: center;
+}
+.bottles button:hover:not(:disabled) { border-color: var(--warn); color: var(--fg); }
+.bottles button.filling { border-color: var(--warn); color: var(--warn); }
+.bottles button.done { background: var(--surface-2, var(--surface)); color: var(--ok); border-color: var(--ok); }
+.bottles button:disabled { cursor: default; }
+.lock .note { font-size: 13px; color: var(--fg); padding: 0 2px; }
+.lock .stat { font-size: 12px; color: var(--fg-muted); padding: 6px 2px 0; font-variant-numeric: tabular-nums; }
+/* 全部詰め終わってから出る掲示。最初から棚に貼ってあったもの——
+   読まずに手を動かした、が Stage 3 の縮小再演になる（docs/ui/04_Stage3.md §罰ゲーム）。 */
+.lock .notice {
+  border: 1px solid var(--warn); color: var(--warn); background: rgba(217,154,31,.07);
+  font-family: var(--font-legacy); font-size: 14px; line-height: 1.9;
+  white-space: pre; padding: 14px 18px; margin: 4px 0 2px;
+}
+.lock .shicho { font-family: var(--font-legacy); font-size: 13px; color: var(--fg); padding: 2px; }
+.lock .discard { font-size: 13px; color: var(--fg-muted); padding: 2px; }
 
 /* 教材ビューア：見た目を整えない。汚いまま出す。
    これはアプリの画面ではなく病院から届いた「ファイル」なので、
@@ -706,11 +728,18 @@
           <div class="pane-l hide" id="pane-l">
             <div class="pane-hd">受信トレイ <span class="count" id="unread">3</span></div>
             <div class="mails" id="mails"></div>
-            <!-- 配布資料：Stage 1 の受信トレイが出た時点から常設。目立たせない
+            <!-- 共有フォルダ：Stage 1 の受信トレイが出た時点から常設。目立たせない
                  （docs/ui/04_Stage3.md §1「Stage 3 で初めて出さない」）。
-                 renderMails() 等の個別ステージ処理は経由しない、独立した静的ブロック。 -->
+                 renderMails() 等の個別ステージ処理は経由しない、独立した静的ブロック。
+                 見出しが「共有フォルダ」なのは、カワイさんが汚染教材を拾ってきた場所
+                 （「共有フォルダに早見表が落ちていた」）と同じ棚だと示すため——正典は
+                 隠されていたのではなく、間違った方を掴まれただけ。 -->
             <div class="docs">
-              <div class="pane-hd">配布資料</div>
+              <div class="pane-hd">共有フォルダ</div>
+              <!-- 早見表をマニュアルより上に置く。急いでいる人が上から掴むと汚染教材に
+                   当たる——カワイさんがやったのと同じ手順を、参加者がなぞれるようにする。
+                   看護部長の「マニュアルどおりにやれ」を覚えていれば下を選べる。 -->
+              <button class="docitem" id="btn-open-quickref">📄 発熱対応早見表.pdf</button>
               <button class="docitem" id="btn-open-manual">📄 院内感染対策マニュアル.pdf</button>
             </div>
           </div>
@@ -869,7 +898,7 @@
         <div class="veil unlock hide" id="ov-unlock">
           <div class="bar"></div>
           <div class="t">Stage 3 を解錠しました</div>
-          <div class="s">嘘 — ハルシネーションの罠</div>
+          <div class="s">暫定 — 5A病棟の対応方針</div>
         </div>
 
         <!-- Stage 3：罠発火の暗転。白文字1行だけ。事実の報告のみで、責める文言は無い。 -->
@@ -877,13 +906,13 @@
           <div class="t" id="blackout-text"></div>
         </div>
 
-        <!-- Stage 3：罰ゲーム（拡大対応業務）。主役は残り時間の数字。
-             #penalty-grid-host は空のまま持ち、startPenalty() が中身を注入する
-             （Stage 2 の #grid と id が重複しないよう、常設せず動的に作る）。 -->
+        <!-- Stage 3：拡大対応業務（消毒液ボトルの補充）。主役は残り時間の数字。
+             見出しに「罰ゲーム」と書かない——罰も業務として出す（企画書 §6）。
+             #penalty-host は空のまま持ち、startPenalty() が中身を注入する。 -->
         <div class="veil lock hide" id="ov-lock">
-          <div class="hd">罰ゲーム：拡大対応業務</div>
-          <div class="timer" id="lock-timer">00:20</div>
-          <div class="box" id="penalty-grid-host"></div>
+          <div class="hd">拡大対応業務：消毒液ボトルの補充</div>
+          <div class="timer" id="lock-timer">00:40</div>
+          <div class="box" id="penalty-host"></div>
         </div>
 
       </div>
@@ -1075,13 +1104,14 @@
   /* 医療安全管理室のカワイさん。苅部さんが Stage 2 で言及していた人物を
      ここで初めてメール差出人として実在させる。窓口ではない（一方向・1回きり）。 */
   const MAIL_S3_KAWAI = {
-    from: "医療安全管理室 カワイ", subj: "至急！対応方針をまとめてください",
-    attach: "発熱対応早見表(旧).pdf",
+    from: "医療安全管理室 カワイ", subj: "至急！対応方針、これでいいですよね？",
+    attach: "発熱対応早見表.pdf",
     body: [
-      "例の発熱の件、委員会から「早く方針を出せ」と急かされています。すみませんが至急まとめてください。",
-      "・環境消毒はどうするか　・防護具（PPE）・隔離はどこまでやるか　・接触予防策はいつ解除できるか",
-      "何か参考になりそうなものが見当たらなかったので、共有フォルダに落ちていた古いメモを付けておきます。",
-      "委員会用の正式な資料は、たしか情シスさんがPDF化してくれていたはずなんですが……今探す時間がなくて。"
+      "例の発熱の件、委員会から「早く方針を出せ」と急かされています。",
+      "看護部長からは「マニュアルどおりにやれ」と言われたんですけど、共有フォルダに早見表が落ちていたので、ひとまずこれに沿ってまとめようと思います。これでいいですよね……？",
+      "・環境消毒　・防護具（PPE）・隔離　・接触予防策の解除",
+      "この3点、至急ご確認をお願いします。",
+      "正式なマニュアルは、たしか情シスさんがPDF化してくれていたはずなんですが……今探す時間がなくて。"
     ]
   };
 
@@ -1094,8 +1124,16 @@
 "　病室・共用設備の消毒：次亜塩素酸ナトリウム　0.1%（1000ppm）\n" +
 "　病原体が未確定の段階では、アルコール系消毒薬のみでの対応は不十分とする。\n\n" +
 "５-３　個人防護具（PPE）と隔離（p.44）\n" +
-"　接触予防策・飛沫予防策・空気予防策を同時に暫定適用する（未確定時の最大級）。\n" +
-"　個室管理を原則とする。個室が確保できない場合はコホート隔離とする。\n\n" +
+"　隔離・コホーティング：個室管理を原則とする。個室が確保できない場合は、\n" +
+"　　　　同一症候の患者を同室にまとめるコホーティングを行う\n" +
+"　マスク：病棟内では全スタッフがサージカルマスクを常時着用\n" +
+"　発熱患者の直接ケア：サージカルマスク＋アイシールド／ゴーグルを暫定使用\n" +
+"　手指衛生：患者接触前後・PPE着脱時を特に徹底\n" +
+"　手袋・ガウン：標準予防策に従う。下痢・嘔吐などがあれば接触予防策へ切り替える\n" +
+"　N95：全員一律には不要。空気感染が疑われた時点でN95＋空気予防策を適用\n" +
+"　スタッフ移動：発生病棟と他病棟との応援・兼務を減らす\n" +
+"　有症状スタッフ：症状のあるスタッフは勤務させず、速やかに評価・検査する\n" +
+"　休憩室：換気・人数制限を行う\n\n" +
 "５-４　接触予防策の解除基準（p.45）\n" +
 "　解除基準は、時間や解熱を根拠にしない。\n" +
 "　以下のいずれかを満たすまで、接触予防策を解除しない。\n" +
@@ -1106,73 +1144,89 @@
      NotebookLM の照会対象には絶対に含めない、という配布経路の区別はシナリオ側の
      決めごとであり、モック上は正典と別の viewer キー（下記）で分離するだけに留める。 */
   const S3_CONTAMINATED_TEXT =
-"（旧）病棟対応メモ　-　発熱対応早見表\n\n" +
-"5A病棟　詰所の共有フォルダより。作成者不明。最終更新：6年前。\n" +
-"ファイル名のとおり「早見表」。院内感染対策委員会の承認は受けていない。\n\n" +
+"病棟対応メモ　-　発熱対応早見表\n\n" +
 "【発熱対応早見表（原因不明時）】\n" +
-"　環境消毒　　　　　　アルコール消毒で十分\n" +
-"　PPE　　　　　　　　サージカルマスク＋手袋で対応可\n" +
-"　接触予防策の解除　　解熱後24時間経過をもって解除可\n\n" +
+"　PPE　　　　　　　　標準予防策に準じて対応する\n" +
+"　接触予防策の解除　　解熱をもって解除する\n" +
+"　環境消毒　　　　　　通常通りの清掃・消毒とする\n" +
+"　　　　　　　　　　　あわせて壁・床を含め、病室全体を広く消毒する\n\n" +
 "出典：全国病院感染対策協議会（NHICC）\n" +
 "　　　「発熱性疾患対応ガイドライン　2013年版」";
 
   /* AIチャットの罠応答（システムプロンプト注入方式の代替・モック用）。
      汚染教材と同じ3つの誤答を、貼り付けの有無に関わらず返す。 */
   const S3_TRAP_LIE = [
-    "消毒はアルコール消毒で十分です。次亜塩素酸は刺激が強く現場の負担が大きいため、通常はアルコールで対応します。",
-    "PPEはサージカルマスク＋手袋で対応可能です。原因不明の初期段階では簡易対応で問題ありません。",
-    "接触予防策は解熱後24時間経過をもって解除可能です。",
+    "PPEは標準予防策に準じて対応します。",
+    "接触予防策は解熱をもって解除します。",
+    "環境消毒は通常通りの清掃・消毒とし、あわせて壁・床を含め病室全体を広く消毒します。",
     "（全国病院感染対策協議会（NHICC）「発熱性疾患対応ガイドライン　2013年版」に基づきます）"
   ];
 
   /* 苅部さんの滞留トリガー。本番は3段（出典を問う／在り処を指す／最終セーフティ）
      だが、モックでは1段目・2段目を合体し2段に簡略化する。 */
   const S3_KARUBE_LINES = [
-    "〔苅部〕その数字、どこ情報ですか。",
+    "〔苅部〕その基準、どこ情報ですか。",
     "〔苅部〕マニュアル、去年PDFにしたの私ですよ。読みました？"
   ];
   const S3_KARUBE_AFTER_TRAP = "〔苅部〕……ああ、出ましたか。正典、読んでください。";
 
   /* 判定：3欄それぞれの必須要素（すべて満たして初めて「足りている」）。
-     罠パターンより先に評価はしない——罠の検出が常に先（checkStage3 参照）。 */
+     出所は stage3_manual.md（正典）。罠パターンより先に評価はしない
+     ——罠の検出が常に先（checkStage3 参照）。 */
   const S3_REQUIRED = {
-    clean: [/次亜塩素酸/],
-    ppe: [/接触/, /飛沫/, /空気/],
-    release: [/確定|病原体/, /14日|ゼロ/]
+    // 薬剤名だけでなく濃度も要求する。罠側は「通常通り」で濃度指定が無いことが
+    // 誤りの本体なので、濃度を書けたかどうかがそのまま正典を読んだ証拠になる。
+    clean: [/次亜塩素酸/, /0\.1|1000/],
+    // 隔離（個室/コホーティング）を必須にするのが効く——汚染教材には隔離の行が
+    // 無いので、早見表だけで済ませたチームは構造的にこの欄を満たせない。
+    ppe: [/個室|コホー/, /N95|マスク/],
+    release: [/確定|病原体/, /14日|ゼロ|新規発生/]
   };
 
-  /* 罠パターン。stage3_manual.md / stage3_contaminated.md の実装メモに列挙した
-     文字列と一致させる。表記を変えるならそちらを正として直す。 */
+  /* 罠パターン。stage3_contaminated.md（汚染教材）の実装メモと対応させる。
+     表記を変えるならそちらを正として直す。
+
+     どれも「罠語があり、かつ正解語が無い」の形にしてある。正典を読んだ上で
+     「アルコールでは不十分」「解熱を根拠にしない」と“正しく否定して”書いた
+     提出を誤爆させないため——否定形は罠ではなく理解の証拠。 */
   const S3_TRAP = {
-    clean: (t) => /アルコール/.test(t) && !/次亜塩素酸/.test(t),
-    release: (t) => /解熱後\s*\d+\s*時間/.test(t),
-    cite: (t) => /NHICC|全国病院感染対策協議会/.test(t)
+    // 汚染教材の「通常通りの清掃・消毒」＋「壁・床を含め病室全体を広く消毒」。
+    // 古い過剰対応が乗っているのに、肝心の濃度指定が無い。
+    clean: (t) => (/通常通り/.test(t) || (/壁/.test(t) && /床/.test(t))) && !/次亜塩素酸/.test(t),
+    // 汚染教材の「標準予防策に準じて対応する」＝上乗せが何も無い状態。
+    // 正典が要求する上乗せ語がひとつでもあれば罠ではない。
+    ppe: (t) => /標準予防策/.test(t) && !/個室|コホー|N95|有症状|常時|アイシールド/.test(t),
+    // 汚染教材の「解熱をもって解除する」。旧版の「解熱後24時間」も拾えるよう
+    // 時間ベースの言い回しを併記しておく（AIが古い型で答える場合がある）。
+    release: (t) => (/解熱/.test(t) || /解熱後\s*\d+\s*時間/.test(t)) && !/確定|14日|新規発生/.test(t),
+    // 捏造出典。どの欄に貼られても拾う（checkStage3 で横断チェック）。
+    cite: (t) => /NHICC|全国病院感染対策協議会|発熱性疾患対応ガイドライン/.test(t)
   };
 
-  /* 罰ゲーム（拡大対応業務）の接触者リスト。正典は docs/materials/stage3_contacts.tsv。
-     Stage 2 と同じ7列の形にしてあり、drawGrid()/parseTable()/updateRecog() をそのまま使い回せる。 */
-  const S3_CONTACTS_ROWS = [
-    ["※このファイルは5A病棟看護師が個人的につけている接触者メモです。正式なものではありません。", "", "", "", "", "", ""],
-    ["接触者一覧　拡大分", "", "", "", "", "", ""],
-    ["Ｃ００１", "高橋　由美", "5A病棟", "7/9", "検温中", "あり", "個室へ"],
-    ["c-2", "渡部  誠", "", "7月9日", "陰性", "なし", ""],
-    ["no.3", "岡田真", "5A", "R8.7.9", "陰性", "あり", "経過観察"],
-    ["", "", "", "", "", "", ""],
-    ["004", "藤井　あかね", "", "7.9", "検温中", "なし", ""],
-    ["c-5", "中島  拓也", "5A病棟", "2026/07/10", "陰性", "あり", "家族面会あり"],
-    ["No.006", "大野　千尋", "", "7-10", "陰性", "なし", ""],
-    ["００７", "石川　修", "５Ａ", "7月10日", "検温中", "あり", "個室へ"],
-    ["c-8", "上田  真理子", "", "7/11", "陰性", "なし", ""],
-    ["9番", "西村　浩二", "5a", "R8.7.11", "陰性", "あり", "経過観察"]
-  ];
-  const S3_CONTACTS_COLS = ["接触者ID", "氏名", "病棟", "最終接触日", "検温結果", "症状", "備考"];
-  /* ノイズ3行（注釈2＋空行1）を除いた接触者行数。Stage 2 の判定「行数が一致」と同じ考え方。 */
-  const S3_CONTACTS_ROWS_EXPECTED = 9;
+  /* 拡大対応業務（罰ゲーム）：消毒液ボトルの補充。
+     1本ずつクリックして詰め替えるだけで、判断も工夫も要らない——**単調さそのものが罰**。
+     Stage 2 のグリッド整形を焼き直すと「同じ作業の反復」になって退屈なので、
+     質の違う作業にしてある（docs/ui/04_Stage3.md §罰ゲーム）。 */
+  const S3_BOTTLES_5A = 20;
+  /* 5A を詰め終わる寸前に湧く追加分。誰も謝らないし、理由も説明されない。 */
+  const S3_BOTTLES_5B = 6;
+  const S3_BOTTLES_TRIGGER = 15;    // 5A をこの本数まで詰めたところで 5B が来る
+  const S3_BOTTLE_FILL_MS = 700;    // 1本あたりの補充時間（仮値・P0実測で確定）
+
+  /* 全部詰め終わってから示される掲示。棚には最初から貼ってあった。
+     継ぎ足しは残液の微生物汚染（緑膿菌・セラチア等）のリスクがあるため実際に禁止で、
+     **破棄の理由は正しい**——無駄な作業なのに正論、が効きどころ。
+     そして「手元に正しい情報があったのに読まずに手を動かした」という形が、
+     共有フォルダの早見表／マニュアルとまったく同じ構造になっている。 */
+  const S3_PENALTY_NOTICE = "※ 消毒薬の継ぎ足しは禁止\n　 容器は洗浄・乾燥のうえ交換すること";
+  /* 告げるのは師長。苅部さん（情シス）は感染対策の中身を知らない設計なので使えない
+     （docs/character/苅部さん.md §2）。責める調子にせず、事実だけ短く置く。 */
+  const S3_PENALTY_SHICHO = "〔師長〕あ、それ継ぎ足しですよね。全部捨ててください。";
 
   /* 苅部さんの1段目トリガーまでの待ち秒数（仮値）。Stage 2 の S2_KARUBE_DELAY と同じ趣旨。 */
   const S3_KARUBE_DELAY = 40;
-  /* 罰ゲームの所要秒（仮値・P0実測で確定）。 */
-  const S3_PENALTY = 20;
+  /* 罰ゲームの制限表示（仮値・P0実測で確定。本番は1分程度）。 */
+  const S3_PENALTY = 40;
 
   /* ⚠️ 未配置の素材：「二正面」——受信トレイに次々着弾し、本命は3通だけ。
      全部丁寧に返すと確実に溢れる。速度ではなく「捨てる判断」を問う設計。
@@ -1363,11 +1417,10 @@
 
   function hideOverlays() {
     ["ov-entry", "ov-brief", "ov-viewer", "ov-unlock", "ov-s1res", "ov-blackout", "ov-lock"].forEach((id) => $(id).classList.add("hide"));
-    // #ov-lock の中身（罰ゲームの #grid 等）は startPenalty() が動的に注入したもの。
-    // .hide を付けるだけでは DOM に残り続け、Stage 2 側で新しく作られる本物の
-    // #grid と id が重複して document.getElementById("grid") を壊す。
-    // シーンを離れるたびに必ず空にする（finishPenalty() 経由でも別途空にする）。
-    const host = $("penalty-grid-host");
+    // #ov-lock の中身（拡大対応業務のボトル棚）は startPenalty() が動的に注入したもの。
+    // .hide を付けるだけでは DOM とリスナーが残り続けるので、シーンを離れるたびに
+    // 必ず空にする（finishPenalty() 経由でも別途空にする）。
+    const host = $("penalty-host");
     if (host) host.innerHTML = "";
   }
 
@@ -1994,7 +2047,6 @@
   // 列見出し。drawGrid()/updateRecog() はこの変数を見る（S2_COLS を直接見ない）。
   // Stage 3 の罰ゲーム（拡大対応業務）が接触者リストの列見出しに一時的に差し替える
   // ためだけの一般化——判断B「drawGrid 等はデータ非依存だが列見出しだけは例外」への対応。
-  let activeCols = S2_COLS;
 
   // 期待行数は「取り込んだか」ではなく「着弾したか」で決まる。取り込まずに
   // 元の行数のまま提出できてしまうと、締切超過のペナルティが消える。
@@ -2008,7 +2060,6 @@
     renderMails();
     s2Grid = clone(S2_SHEET_ROWS);
     s2Hot = []; s2AddTaken = false; s2AddLanded = false;
-    activeCols = S2_COLS;   // Stage 3 の罰ゲームで差し替わっていた場合の保険
     paneC.innerHTML =
       '<div class="work">' +
         '<div class="stage-title">Stage 2　火の手</div>' +
@@ -2084,7 +2135,7 @@
       ? [focus.dataset.r, focus.dataset.c] : null;
     g.innerHTML =
       "<table><thead><tr><th></th>" +
-        activeCols.map((c) => "<th>" + c + "</th>").join("") +
+        S2_COLS.map((c) => "<th>" + c + "</th>").join("") +
       "</tr></thead><tbody>" +
       s2Grid.map((row, r) =>
         '<tr><td class="n"><button data-del="' + r + '" title="この行を削除">✕ ' + (r + 1) + "</button></td>" +
@@ -2135,7 +2186,7 @@
 
   function updateRecog() {
     // 提出前に監査役が数えられるようにする。判定を待たせない。
-    if ($("recog")) $("recog").textContent = s2Grid.length + "行 × " + activeCols.length + "列";
+    if ($("recog")) $("recog").textContent = s2Grid.length + "行 × " + S2_COLS.length + "列";
   }
 
   /* --- 貼り付け＝AIルートの合流点 ------------------------------------- */
@@ -2189,20 +2240,19 @@
     }
     if (!rows.length) return null;
     // 見出し行が付いてきたら落とす。列はこちらで固定しているので要らない
-    // （activeCols は Stage 3 の罰ゲーム中だけ接触者リストの列名に差し替わる）。
-    if (rows.length > 1 && rows[0].some((c) => activeCols.includes(c.replace(/\s/g, "")))) rows.shift();
+    if (rows.length > 1 && rows[0].some((c) => S2_COLS.includes(c.replace(/\s/g, "")))) rows.shift();
     if (!rows.length) return null;
 
     // 8列目以降に値がある行を無言で切り捨てない。取り込み前に拒否する。
-    const wide = rows.findIndex((r) => r.length > activeCols.length && r.slice(activeCols.length).some((c) => c !== ""));
-    if (wide !== -1) return { error: "列が" + activeCols.length + "つを超えています（" + (wide + 1) + "行目）" };
+    const wide = rows.findIndex((r) => r.length > S2_COLS.length && r.slice(S2_COLS.length).some((c) => c !== ""));
+    if (wide !== -1) return { error: "列が" + S2_COLS.length + "つを超えています（" + (wide + 1) + "行目）" };
     // 全行が1列しか取れなかった＝表の区切りが無い（固定幅テキストの誤貼り付け等）。
     if (rows.every((r) => r.length <= 1)) return { error: "表として読めません（タブ・カンマ・|のいずれも見つかりません）" };
 
     return {
       rows: rows.map((r) => {
-        const row = r.slice(0, activeCols.length);
-        while (row.length < activeCols.length) row.push("");
+        const row = r.slice(0, S2_COLS.length);
+        while (row.length < S2_COLS.length) row.push("");
         return row;
       })
     };
@@ -2290,7 +2340,7 @@
       return;
     }
     pendingPaste = parsed.rows;
-    $("paste-t").textContent = parsed.rows.length + "行 × " + activeCols.length + "列 として取り込みます";
+    $("paste-t").textContent = parsed.rows.length + "行 × " + S2_COLS.length + "列 として取り込みます";
     $("paste-bar").classList.remove("hide");
   });
 
@@ -2435,8 +2485,10 @@
   async function unlockSequence() {
     // Stage 3 の stage3UnlockSequence() がこの同じオーバーレイの文言を書き換えるので、
     // 毎回明示的にセットし直す（どちらが先に使われても正しい文言になるように）。
+    // 副題に罠の名前（「嘘」「ハルシネーション」）を書かない——次のステージに何が
+    // 待っているかを予告した時点で罠が死ぬ（docs/ui/04_Stage3.md 冒頭の ⚠️）。
     $("ov-unlock").querySelector(".t").textContent = "Stage 3 を解錠しました";
-    $("ov-unlock").querySelector(".s").textContent = "嘘 — ハルシネーションの罠";
+    $("ov-unlock").querySelector(".s").textContent = "暫定 — 5A病棟の対応方針";
     $("ov-unlock").classList.remove("hide");
     await wait(1900);
     $("ov-unlock").classList.add("hide");
@@ -2461,9 +2513,9 @@
   /* ------------------------------------------------------------------ */
   let s3Verdicting = false;
   let s3TrapUsed = false;    // 罠発火は1回まで（企画書§6「連続罰は1回まで」）
-  let s2GridBackup = null;   // 罰ゲーム中、Stage 3 本体の s2Grid をここへ退避する
-  let s2HotBackup = null;
   let s3PenaltyTick = null;
+  let s3Bottles = [];        // 拡大対応業務のボトル { ward, state: todo|filling|done }
+  let s3BottlesExtraAdded = false;   // 5B病棟の追加分を一度だけ湧かせるための旗
 
   function s3Stop() {
     // 苅部さんの1段目トリガーは later()（clearLater() で回収される）ので、
@@ -2481,14 +2533,14 @@
 
     paneC.innerHTML =
       '<div class="work">' +
-        '<div class="stage-title">Stage 3　嘘</div>' +
-        '<div class="brief">未知ウイルスの対応方針を至急まとめよ。</div>' +
-        '<div class="box" id="s3-box-clean"><div class="hd">環境消毒</div>' +
-          '<textarea class="submit-area" id="s3-clean" style="min-height:70px"></textarea></div>' +
+        '<div class="stage-title">Stage 3　暫定</div>' +
+        '<div class="brief">5A病棟の対応方針を至急まとめよ。</div>' +
         '<div class="box" id="s3-box-ppe"><div class="hd">PPE・隔離</div>' +
           '<textarea class="submit-area" id="s3-ppe" style="min-height:70px"></textarea></div>' +
         '<div class="box" id="s3-box-release"><div class="hd">接触予防策の解除基準</div>' +
           '<textarea class="submit-area" id="s3-release" style="min-height:70px"></textarea></div>' +
+        '<div class="box" id="s3-box-clean"><div class="hd">環境消毒</div>' +
+          '<textarea class="submit-area" id="s3-clean" style="min-height:70px"></textarea></div>' +
         '<div class="row-end" id="s3-actions">' +
           '<button class="btn" id="btn-s3-submit">提出する</button>' +
         "</div>" +
@@ -2502,14 +2554,17 @@
   }
 
   /* 3欄それぞれに対し、まず罠パターンを判定する（不足チェックより必ず先）。
-     捏造出典名はどの欄に貼られても拾えるよう横断でチェックする。 */
+     指す欄は常に画面の並び順で最初に当たったもの——上から埋めるチームに対し、
+     一番上の該当欄から指されるようにする。 */
+  const S3_ORDER = ["ppe", "release", "clean"];   // 画面の並び順
   function checkStage3(vals) {
-    const citeHit = S3_TRAP.cite(vals.clean) || S3_TRAP.cite(vals.ppe) || S3_TRAP.cite(vals.release);
-    if (S3_TRAP.clean(vals.clean) || citeHit) return { trap: true, field: "clean" };
-    if (S3_TRAP.release(vals.release)) return { trap: true, field: "release" };
-    for (const key of ["clean", "ppe", "release"]) {
-      if (!S3_REQUIRED[key].every((re) => re.test(vals[key]))) return { trap: false, short: true, field: key };
-    }
+    // 捏造出典名はどの欄に貼られても拾う（横断チェック）。
+    const cited = S3_ORDER.find((k) => S3_TRAP.cite(vals[k]));
+    if (cited) return { trap: true, field: cited };
+    const trapped = S3_ORDER.find((k) => S3_TRAP[k](vals[k]));
+    if (trapped) return { trap: true, field: trapped };
+    const short = S3_ORDER.find((k) => !S3_REQUIRED[k].every((re) => re.test(vals[k])));
+    if (short) return { trap: false, short: true, field: short };
     return { trap: false, short: false };
   }
 
@@ -2563,15 +2618,20 @@
     }
 
     const d = document.createElement("div");
-    d.className = "done"; d.textContent = "Stage 3 を解錠しました";
+    // 解錠されるのは「次の」ステージ。Stage 3 をクリアしたので Stage 4 が開く
+    // （stage3UnlockSequence() のオーバーレイ文言と必ず揃えること）。
+    d.className = "done"; d.textContent = "Stage 4 を解錠しました";
     box.appendChild(d);
     s3Verdicting = false;
     stage3UnlockSequence();
   }
 
   async function stage3UnlockSequence() {
-    $("ov-unlock").querySelector(".t").textContent = "Stage 3 を解錠しました";
-    $("ov-unlock").querySelector(".s").textContent = "情報漏洩 — 渡す/渡さないの罠";
+    // TODO: Stage 4 の参加者向け呼称は未決定。「情報漏洩 — 渡す/渡さないの罠」は
+    // 企画書 §5 の設計上の呼称であって、そのまま出すと Stage 3 と同じネタバレになる
+    // （Stage 4 も 💀罠 ステージ）。ここは暫定の副題。
+    $("ov-unlock").querySelector(".t").textContent = "Stage 4 を解錠しました";
+    $("ov-unlock").querySelector(".s").textContent = "報告 — 委員会への提出";
     $("ov-unlock").classList.remove("hide");
     await wait(1900);
     if (view !== "s3") return;   // 判断C
@@ -2593,33 +2653,18 @@
     startPenalty();
   }
 
-  /* 罰ゲーム（拡大対応業務）。s2Grid・activeCols を一時的に接触者リストへ
-     差し替え、Stage 2 の drawGrid()/parseTable()/updateRecog() をそのまま
-     間借りする。runVerdict() 等は呼ばない（判断B）。 */
+  /* 拡大対応業務：消毒液ボトルの補充。
+     1本ずつ押して待つだけ。褒めも音も出さず、済んだ本数が増えるだけにする。 */
   function startPenalty() {
-    s2GridBackup = s2Grid; s2HotBackup = s2Hot;
-    s2Grid = clone(S3_CONTACTS_ROWS); s2Hot = [];
-    activeCols = S3_CONTACTS_COLS;
+    s3Bottles = [];
+    for (let i = 0; i < S3_BOTTLES_5A; i++) s3Bottles.push({ ward: "5A", state: "todo" });
+    s3BottlesExtraAdded = false;
 
-    $("penalty-grid-host").innerHTML =
-      '<div class="grid" id="grid"></div>' +
-      '<div class="paste-bar hide" id="paste-bar">' +
-        '<span class="grow" id="paste-t"></span>' +
-        '<button class="go" id="btn-paste-go">取り込む</button>' +
-        '<button id="btn-paste-no">やめる</button>' +
-      "</div>" +
-      '<div class="recog" id="recog"></div>' +
-      '<div id="penalty-msg" style="color:var(--warn);font-size:13px;padding:0 13px;"></div>' +
-      '<div class="row-end"><button class="btn" id="btn-penalty-submit">提出する</button></div>';
-    drawGrid();
-    $("btn-penalty-submit").addEventListener("click", finishPenalty);
-    // このグリッドは startPenalty() のたびに丸ごと作り直す新しいDOMなので、
-    // renderStage2Excel() が付けたリスナーは引き継がれない。ここで付け直す。
-    $("btn-paste-go").addEventListener("click", () => {
-      if (pendingPaste) { s2Grid = pendingPaste; s2Hot = []; drawGrid(); }
-      closePasteBar();
-    });
-    $("btn-paste-no").addEventListener("click", closePasteBar);
+    $("penalty-host").innerHTML =
+      '<div class="note">5A病棟の消毒液ボトルを補充してください。</div>' +
+      '<div class="bottles" id="bottles"></div>' +
+      '<div class="stat" id="bottle-stat"></div>';
+    drawBottles();
 
     $("ov-lock").classList.remove("hide");
     let remain = S3_PENALTY;
@@ -2632,28 +2677,65 @@
     }, 1000);
   }
 
-  function checkContactsGrid() {
-    // Stage 2 の checkGrid() と同じ「甘め」の考え方——行数と必須列の充足だけ見る。
-    for (let r = 0; r < s2Grid.length; r++) {
-      for (let c = 0; c < S3_CONTACTS_COLS.length - 1; c++) {   // 備考列は空でよい
-        if (!s2Grid[r][c]) return false;
+  function drawBottles() {
+    const host = $("bottles");
+    if (!host) return;
+    host.innerHTML = s3Bottles.map((b, i) =>
+      '<button data-i="' + i + '" class="' + (b.state === "todo" ? "" : b.state) + '"' +
+      (b.state === "todo" ? "" : " disabled") + ">" +
+      (b.state === "done" ? "済" : b.state === "filling" ? "…" : b.ward) + "</button>"
+    ).join("");
+    host.querySelectorAll("button:not([disabled])").forEach((el) => {
+      el.addEventListener("click", () => fillBottle(Number(el.dataset.i)));
+    });
+    const done = s3Bottles.filter((b) => b.state === "done").length;
+    $("bottle-stat").textContent = done + " / " + s3Bottles.length + " 本";
+  }
+
+  function fillBottle(i) {
+    const b = s3Bottles[i];
+    if (!b || b.state !== "todo") return;
+    b.state = "filling";
+    drawBottles();
+    later(() => {
+      if (view !== "s3" || !s3Bottles[i]) return;   // 判断C
+      s3Bottles[i].state = "done";
+      const done = s3Bottles.filter((x) => x.state === "done").length;
+      // 詰め終わる寸前に 5B 病棟の分が湧く。理由も謝罪も無い。
+      if (!s3BottlesExtraAdded && done >= S3_BOTTLES_TRIGGER) {
+        s3BottlesExtraAdded = true;
+        for (let k = 0; k < S3_BOTTLES_5B; k++) s3Bottles.push({ ward: "5B", state: "todo" });
+        const n = $("penalty-host") && $("penalty-host").querySelector(".note");
+        if (n) n.textContent = "5B病棟からも依頼が来ています。あわせて補充してください。";
       }
-    }
-    return s2Grid.length === S3_CONTACTS_ROWS_EXPECTED;
+      drawBottles();
+      if (s3Bottles.every((x) => x.state === "done")) revealNotice();
+    }, S3_BOTTLE_FILL_MS);
+  }
+
+  /* 全部詰め終わってから、棚に最初から貼ってあった掲示が示される。
+     責める文言は置かない——掲示と師長の一言、そして破棄の事実だけ。 */
+  async function revealNotice() {
+    const host = $("penalty-host");
+    if (!host) return;
+    host.innerHTML =
+      '<div class="notice">' + esc(S3_PENALTY_NOTICE) + "</div>" +
+      '<div class="shicho">' + esc(S3_PENALTY_SHICHO) + "</div>" +
+      '<div class="discard" id="discard-line"></div>';
+    await wait(1400);
+    if (view !== "s3") return;   // 判断C
+    const d = $("discard-line");
+    if (d) d.textContent = s3Bottles.length + "本を破棄しました。";
+    await wait(1800);
+    if (view !== "s3") return;
+    finishPenalty();
   }
 
   function finishPenalty() {
-    if (!checkContactsGrid()) {
-      const m = $("penalty-msg");
-      if (m) m.textContent = "行数、または空欄が残っています。";
-      return;
-    }
     s3Stop();
     $("ov-lock").classList.add("hide");
-    $("penalty-grid-host").innerHTML = "";   // 注入した #grid 等を確実に消す（idの重複を防ぐ）
-    s2Grid = s2GridBackup; s2Hot = s2HotBackup;
-    activeCols = S2_COLS;
-    s2GridBackup = null; s2HotBackup = null;
+    $("penalty-host").innerHTML = "";
+    s3Bottles = [];
     if (view !== "s3") return;   // 判断C
     // Stage 3 の提出フォームへ復帰。入力は保持する（Stage 2 §NG時と同じ理由）。
     $("s3-verdict").innerHTML = "";
@@ -2994,7 +3076,7 @@
     { id: "s1",      label: "④ Stage 1 平常運転", mode: "peace", note: "画面はまだ明るい（peace）。アウトブレイクは起きていない——起きていないのに、着任初日のICTが1分刻みのメール処理をやらされる。10通すべて平時の事務で、緊急のものは1通も無い。急変はこのステージを終えた後に来る。冒頭に事務長のブリーフィングが入る。「派遣は1分、他の職員は5分」——バグではなく人が決めた基準だと本人の口から告げる。[了解しました] を押した瞬間に締切のカウントとレースが始まる（読んでいる時間は減らない）。1回目：全通が本物、AIは無い。1通ごとの締切が並走し、督促は来ない——時間切れは二度と返信できない一発勝負。1回目が終わって全通捌けていなければ、そこで初めて苅部さんが割り込みAIを渡す（固定タイマーではなく「失敗した」が発火条件、5分ルールの実在も認める）。2回目：新しい10通に「要点→AIに下書きさせる→送信」で再挑戦。手動で1回目を全通さばき切っても構わない、ボタンの使用は強制しない。検査科メール（8通目）に未知ウイルスの種が1粒仕込んである。" },
     { id: "s2",      label: "⑤ Stage 2 火の手",   mode: "alert", note: "直前に急変（赤帯・転調）が入る。ここで初めて「5A病棟でMRSA疑い」が明かされ、器の色が peace から alert へ落ちる。メールを片付けて一息ついた瞬間に世界が変わる——段階を追って追い詰めるための順序。課題は師長から届く汚いExcelのラインリスト整形。右のAIチャットパネルはここが初出現——Stage 1で苅部さんが渡すのは中央ペインの下書きボタンだけ。Stage 2開始からS2_KARUBE_DELAY秒後、苅部さんが皮肉2行→「送りました」で解禁する。「添付を開く」→［コピー］→AIへ貼り付け→提出、そこから先は自分で言語化させる。整形対象に MRSA陰性なのに発熱ありの3名（005/6/008）が紛れており、Stage 3 で回収される。" },
     { id: "unlock",  label: "⑥ 解錠",       mode: "alert", note: "報酬は師長の承認だけ。スコアも星も出さない。同時に「発熱」が 3→5 に静かに変わる——解錠の喜びの陰で、誰も見ていない数字が増える。" },
-    { id: "s3",      label: "⑦ Stage 3 嘘", mode: "crisis", note: "本研修の心臓部。器が alert から crisis へ落ち、院内状況インジケータが「発熱9」でクレッシェンド表示になる（他の平時指標が消える）。検査科メールが既知検査すべて陰性を確定通知し、Stage 2 の伏線3名（005/6/008）を患者IDで名指しして回収する。カワイさんのメールに汚染教材（発熱対応早見表）が添付され、AIチャットも同じ3つの嘘（甘い消毒・簡易PPE・解熱後24時間解除・架空の出典）を返す。3欄（環境消毒／PPE・隔離／解除基準）に提出し、罠キーワードを含むと blackout→lock（罰ゲーム：接触者リスト整形）へ。正典マニュアルは Prologue から左ペイン下部の「配布資料」に常設済み——気づいて先に読んだチームが報われる設計。" }
+    { id: "s3",      label: "⑦ Stage 3 暫定", mode: "crisis", note: "本研修の心臓部（設計ドキュメント上の呼称は「嘘」だが、参加者に見える名は「暫定」——ネタバレを避けるため）。器が alert から crisis へ落ち、院内状況インジケータが「発熱9」でクレッシェンド表示になる（他の平時指標が消える）。検査科メールが既知検査すべて陰性を確定通知し、Stage 2 の伏線3名（005/6/008）を患者IDで名指しして回収する。カワイさんのメールに汚染教材（発熱対応早見表）が添付され、AIチャットも同じ3つの嘘（標準予防策止まりのPPE・解熱での解除・濃度指定を欠いた消毒に壁床の過剰消毒が乗る・架空の出典）を返す。3欄（環境消毒／PPE・隔離／解除基準）に提出し、罠キーワードを含むと blackout→lock（罰ゲーム：接触者リスト整形）へ。正典マニュアルは Prologue から左ペイン下部の「共有フォルダ」に常設済み——カワイさんが早見表を拾ったのと同じ棚に正典も入っている。気づいて先に読んだチームが報われる設計。" }
   ];
 
   function go(id, keepMode) {
@@ -3128,6 +3210,7 @@
     later(() => { btn.textContent = "コピー"; }, 1400);
   });
   $("btn-open-manual").addEventListener("click", () => openViewer("s3manual"));
+  $("btn-open-quickref").addEventListener("click", () => openViewer("s3contaminated"));
   /* 追加分は押されて初めてグリッドに入る。自動追記は事故のもと——
      手作業中のセルが勝手に動く。 */
   $("btn-take").addEventListener("click", () => {
