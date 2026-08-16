@@ -40,7 +40,7 @@ JS 構造そのものは資産ではない。単一ファイル・フレーム�
 | Stage 2（火の手） | `renderStage2Excel()`（2281） | `s2Grid` / `s2Hot` / `s2T0` 等、モジュール変数に散在 |
 | Stage 2（二正面） | `renderStage2()`（3433） | **実装済みだがどこからも呼ばれない＝未配置**（企画書§5「未配置の素材」） |
 | Stage 3（暫定） | `renderStage3()`（2755） | 3欄のテキストエリア。判定は `checkStage3()`（2789）、罠発火は `triggerTrap()`（2874）→`startPenalty()`（2887）。苅部さんの3段トリガーは2段に簡略化（`phsS3Pending`） |
-| Stage 4（回答） | `renderStage4()`（3048） | 1欄のテキストエリア。判定は `checkStage4()`（3080）。罠は提出フォームではなく **`sendAI()` 内の送信前ゲート**にあり、検知すると `triggerLeak()`（3131）→`startS4Penalty()`（3142）。回答期限（`s4StartDeadline()`3013）超過で近藤さんの着信ポップアップが割り込む（`s4ShowCall()`3044）。苅部さんは1段のみ（`phsS4Pending`） |
+| Stage 4（回答） | `renderStage4()`（3049） | 1欄のテキストエリア。判定は `checkStage4()`（3081）。罠は提出フォームではなく **`sendAI()` 内の送信前ゲート**にあり、検知すると `triggerLeak()`（3133）→`startS4Penalty()`（3144）。回答期限（`s4StartDeadline()`3014）超過で近藤さんの着信ポップアップが割り込む（`s4ShowCall()`3045）。苅部さんは1段のみ（`phsS4Pending`） |
 
 > **参加者に見えるステージ名は「暫定」「回答」**。「嘘」「情報漏洩」は設計ドキュメント上の呼称で、画面に出すと罠を予告してしまう
 > （[../04_Stage3.md](../04_Stage3.md) 冒頭 ⚠️・[../05_Stage4.md](../05_Stage4.md) 冒頭 ⚠️）。`unlock` オーバーレイの副題も同じ理由で罠の名前を書かない。
@@ -73,10 +73,10 @@ Stage 2 のグリッド機構とは**もう一切関わらない**——1本ク�
 
 ## Stage 4：送信前ゲートと黒塗り
 
-Stage 3 と違い、**罠は提出フォームではなく AIチャットの送信前ゲートにある**。`sendAI()`（1662）が
+Stage 3 と違い、**罠は提出フォームではなく AIチャットの送信前ゲートにある**。`sendAI()`（1663）が
 Stage 4 のときだけ `S4_PII`（1343）で入力を検査し、ヒットすれば自分の吹き出しを出さずに `triggerLeak()`
-（3131）→ `startS4Penalty()`（3142）へ進む。ヒットしなければ従来どおり吹き出しを出し、`S4_REQUEST_TRIGGER`
-（1651）にマッチする内容だけ `S4_AI_REPLY` の台本を返す（Stage 3 の `S3_TRAP_TRIGGER` と同じ思想）。
+（3133）→ `startS4Penalty()`（3144）へ進む。ヒットしなければ従来どおり吹き出しを出し、`S4_REQUEST_TRIGGER`
+（1652）にマッチする内容だけ `S4_AI_REPLY` の台本を返す（Stage 3 の `S3_TRAP_TRIGGER` と同じ思想）。
 
 - **`S4_PATIENT`（1314）が唯一の情報源。** 検知パターン（`S4_PII`）・カルテ抜粋（`S4_CHART_TEXT`）・
   黒塗り下書き（`S4_REPORT`）の3箇所とも、ここから作った値だけを参照する。Stage 3 の負債（教材の文言と
@@ -84,20 +84,20 @@ Stage 4 のときだけ `S4_PII`（1343）で入力を検査し、ヒットす�
   カルテ抜粋は氏名・ID・生年月日・連絡先を独立した項目欄にせず、**経過欄の文中に織り込んである**——
   項目欄にまとめると個人情報だけが上に固まり、経過欄だけをコピーすればゲートを踏まずに正解ルートへ
   行けてしまうため（`docs/materials/stage4_chart.md` §抜粋の 📌）。
-- **罰ゲームは黒塗り（`drawRedact()`1169/`toggleRedact()`1182/`submitReport()`1189）。** `S4_REPORT`（1354）は
+- **罰ゲームは黒塗り（`drawRedact()`3171/`toggleRedact()`3184/`submitReport()`3191）。** `S4_REPORT`（1354）は
   `{ t, pii }` の配列——`pii: true` が塗るべきトークン、`pii: false` が塗ってはいけない一般語のトークン、
   `pii` キー無しはクリックできない地の文。**塗る前の見た目はすべて同じ**（`.tok` に統一）——スタイルで
   答えを教えない。
 - **AI使用ロックが罰の本体。** `startS4Penalty()` が `paneR.classList.add("locked")` を付け、
-  `finishS4Penalty()`（3205）と `hideOverlays()` の両方で外す（Stage 3 の `#penalty-host` 後始末と同じ二重の作法）。
-- 苅部さんは `S4_KARUBE_LINE`（1404・1行のみ）・`S4_KARUBE_DELAY`（短い・仮値12秒）。カルテ抜粋を `[コピー]`
+  `finishS4Penalty()`（3207）と `hideOverlays()` の両方で外す（Stage 3 の `#penalty-host` 後始末と同じ二重の作法）。
+- 苅部さんは `S4_KARUBE_LINE`（1405・1行のみ）・`S4_KARUBE_DELAY`（短い・仮値12秒）。カルテ抜粋を `[コピー]`
   した瞬間にも `phsS4Pending` が立つ（`btn-copy` ハンドラ）——時限トリガーとどちらか早い方。
 - `#ov-lock` は Stage 3 と共有する。見出し（`#lock-hd`）は `startPenalty()`/`startS4Penalty()` が
   **毎回明示的にセットし直す**（`unlock` オーバーレイと同じ流儀。後述の負債参照）。
-- **回答期限（`S4_DEADLINE`＝2分・1413）は Stage 4 だけ実際のカウントダウンにしてある。** `s4StartDeadline()`
-  （3013）/`s4StopDeadline()`/`s4DeadlineFrame()` は Stage 2 の `s2StartDeadline()` 系と1対1で対応する
+- **回答期限（`S4_DEADLINE`＝2分・1414）は Stage 4 だけ実際のカウントダウンにしてある。** `s4StartDeadline()`
+  （3014）/`s4StopDeadline()`/`s4DeadlineFrame()` は Stage 2 の `s2StartDeadline()` 系と1対1で対応する
   （課題カードに `#s4-dl`/`#s4-dl-t`/`#s4-dl-b` を持たせ、CSSクラス `.s2-dl` をそのまま再利用）。
-  超過すると `s4ShowCall()`（3044）が全画面オーバーレイ `#ov-s4call`（患者相談窓口・近藤さんの着信）を開く——
+  超過すると `s4ShowCall()`（3045）が全画面オーバーレイ `#ov-s4call`（患者相談窓口・近藤さんの着信）を開く——
   **メールの着弾ではなくポップアップにした**（devbar での指示変更。当初はメール3通目だったが、
   「焦りを即座に体感させたい」ため割り込み式に差し替えた）。事務長の Stage 1 ブリーフィングと同じ
   `.sysdlg` の窓を流用し、`.callin` 修飾クラスでタイトルバー文言とポートレートだけ差し替える。
