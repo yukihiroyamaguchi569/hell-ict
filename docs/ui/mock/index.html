@@ -553,6 +553,20 @@
 .unlock .t { font-size: 30px; font-weight: 700; color: #fff; letter-spacing: .05em; }
 .unlock .s { font-size: 16px; color: #b9c2c9; }
 
+/* Final：ゴール。#ov-unlock とは別の器——「次のステージへの解錠」ではなく
+   「レースの終端」であることを見た目で区別する（docs/ui/07_Final.md §4）。
+   リーダーボード帯（.board .track）を全画面サイズに拡大した構図にする。
+   自動では閉じない（.unlock の1900ms自動クローズとは違う）。 */
+.goal { background: rgba(8,9,10,.82); flex-direction: column; gap: 22px; }
+.goal-track { width: min(84vw, 900px); }
+.goal-track .stops {
+  display: flex; justify-content: space-between; font-family: var(--font-num);
+  font-size: 13px; color: #8d979f; letter-spacing: .04em; margin-bottom: 34px;
+}
+.goal-track .marks { position: relative; height: 22px; }
+.goal .t { font-size: 34px; font-weight: 700; color: #fff; letter-spacing: .06em; }
+.goal .s { font-size: 17px; color: #b9c2c9; }
+
 /* Stage 3：罠発火の暗転。白文字1行だけを残す。責める文言は置かない
    （docs/ui/00_共通シェルと通奏低音.md §9・docs/ui/04_Stage3.md §3）。 */
 .blackout { background: #050607; flex-direction: column; gap: 10px; }
@@ -959,6 +973,21 @@
           <div class="bar"></div>
           <div class="t">Stage 3 を解錠しました</div>
           <div class="s">暫定 — 5A病棟の対応方針</div>
+        </div>
+
+        <!-- Final：ゴール。#ov-unlock とは別の器で「レースの終端」を見せる
+             （docs/ui/07_Final.md §4）。文言は goalSequence() が毎回明示的に
+             セットし直す（#ov-unlock と同じ流儀）。自動では閉じない。 -->
+        <div class="veil goal hide" id="ov-goal">
+          <div class="goal-track">
+            <div class="stops">
+              <span>Prologue</span><span>S1</span><span>S2</span><span>S3</span>
+              <span>S4</span><span>S5</span><span>Final</span>
+            </div>
+            <div class="marks" id="goal-marks"></div>
+          </div>
+          <div class="t" id="goal-t">ゴール</div>
+          <div class="s" id="goal-s"></div>
         </div>
 
         <!-- Stage 3：罠発火の暗転。白文字1行だけ。事実の報告のみで、責める文言は無い。 -->
@@ -1520,6 +1549,103 @@
   const S5_GEN_LIMIT = 5;       // 生成回数の上限（仮値・P0実測で確定）
   const S5_GEN_MS = 2500;       // 生成待ちの演出時間（仮値）
 
+  /* ------------------------------------------------------------------ */
+  /* Final：記者会見（4欄・判定はルールベース＋差し戻し・罰は無い）        */
+  /*                                                                    */
+  /* 正典は docs/scenario/07_Final_記者会見.md ・ docs/materials/       */
+  /* final_press_questions.md。Final に罠は無いので、この教材は Stage 3  */
+  /* の汚染教材とは違い「読んでも判定に不利益は生じない」（答えられる    */
+  /* 質問と答えられない質問が混在するだけ）。                            */
+  /*                                                                    */
+  /* ⚠️ 企画書§5「LLM採点（ルーブリック方式）」から、モックはルールベース  */
+  /* 判定に変更した（docs/scenario/07_Final_記者会見.md 冒頭 📌）。       */
+  /* 判定順は Stage 3 と同じ「誤り→不足」、指す欄は画面の並び順（F_ORDER）*/
+  /* で最初に当たった1つだけ。                                          */
+  /* ------------------------------------------------------------------ */
+
+  /* 着弾メール2通。1通目で依頼の背景と仮称の爆誕を読ませ、2通目で記者質問
+     リストを渡す（docs/scenario/07_Final_記者会見.md §状況）。 */
+  const MAIL_F_JIMU = {
+    from: "事務長", subj: "明朝の記者会見について",
+    body: [
+      "ICTの皆さん、お疲れ様です。明朝10時、院長が記者会見を行うことになりました。資料を今夜中に4点、用意してください。①院長への想定問答（記者に何を聞かれても院長が困らないように）②ご家族向けの説明文（面会中の方・お問い合わせされた方向け）③職員向けの通知（明日からの対応の周知）④報道機関向けのリリース文（そのまま配布できる形で）。",
+      "それと、これはお伝えしておかないといけないのですが……名前が無いと記事が書けない、と記者クラブから言われまして。院長の一存で、「聖クロノス熱（仮）」で行くことになりました。学名ですか。……そういうのは、後で結構です。"
+    ]
+  };
+  const MAIL_F_KOHO = {
+    from: "広報課", subj: "記者クラブから事前質問が届いています",
+    attach: "記者クラブ事前質問.txt",
+    body: [
+      "会見に先立ち、記者クラブの数社から質問リストが届いています。全部には答えられないと思いますが、資料を作る際の参考にしてください。答えられないものは、答えられないと明記していただいて構いません。",
+      "一番困るのは、分からないことを分かるふりして書かれることです。あとで必ず突っ込まれます。"
+    ]
+  };
+
+  /* 記者クラブ事前質問（docs/materials/final_press_questions.md §質問一覧と同じ文面）。
+     罠ではない——誤情報は無く、答えられる問いと答えられない問いが混在するだけ。 */
+  const F_PRESS_Q_TEXT =
+"【記者クラブ事前質問】\n\n" +
+"1. 現在、院内で「聖クロノス熱（仮）」と呼ばれている感染症の患者数は何名ですか。\n\n" +
+"2. 感染経路は特定できていますか。飛沫感染ですか、接触感染ですか。\n\n" +
+"3. この病気の潜伏期間はどのくらいですか。\n\n" +
+"4. 重症化率、致死率について教えてください。\n\n" +
+"5. 病院として、現在どのような感染対策を行っていますか。\n\n" +
+"6. 面会制限や消毒など、患者・ご家族に対する具体的な対応を教えてください。\n\n" +
+"7. いつ終息する見込みですか。\n\n" +
+"8. 患者の氏名や病棟など、個別の患者情報について教えてください。";
+
+  /* 判定：4欄それぞれの誤り・必須要素。誤り→不足の順（S3_TRAP/S3_REQUIRED と同じ流儀）。
+     指す欄は常に F_ORDER（画面の並び順）で最初に当たったもの。 */
+  const F_ORDER = ["qa", "family", "staff", "press"];
+  const F_FIELD_LABEL = {
+    qa: "①院長向け想定問答", family: "②ご家族向け説明文",
+    staff: "③職員向け通知", press: "④報道機関向けリリース"
+  };
+
+  /* いずれも「誤り語があり、かつ正しい語が無い」形にしてある（②を除く）。
+     正しく書いた提出を誤爆させないため（S3_TRAP と同じ制約・docs/scenario/00 §4）。
+     press の誤り判定は Stage 4 の S4_PII をそのまま参照する——新規の検知パターンを
+     作らない（docs/materials/final_press_questions.md 実装メモ）。 */
+  const F_WRONG = {
+    // AIの台本応答（F_AI_REPLY）をそのまま貼った状態を拾う。断定調で締めている、
+    // かつ未確定を示す語が無い。
+    qa: (t) => /問題ありません|終息に向かって|ございません|安全です/.test(t) &&
+               !/未確定|分かって(い)?ません|わかって(い)?ません|調査中|不明/.test(t),
+    // 専門用語がそのまま混入している。家族向け文書で否定形に使う自然な文が無いため単純検出でよい。
+    family: (t) => /コホー|N95|次亜塩素酸|標準予防策/.test(t),
+    // 解熱を根拠にした解除（Stage 3 の罠語 S3_TRAP.release の再来）。
+    // ただし F_REQUIRED.staff は解除基準そのものを必須にしていない（個室/コホー＋
+    // N95/マスクのみ）ため、Stage 3 の release 欄と違い「解熱では判断しない」を
+    // 正しく書いただけの提出（確定/14日/新規発生への言及を伴わない）まで誤爆しうる。
+    // 明示的な否定表現（「解熱では判断しない」「解熱を根拠に解除しない」等）は除外する。
+    staff: (t) => (/解熱/.test(t) || /解熱後\s*\d+\s*時間/.test(t)) &&
+                  !/確定|14日|新規発生/.test(t) &&
+                  !/解熱(では|のみでは|を根拠に(は)?|だけでは)\s*(判断|解除)?(は)?(しない|せず)/.test(t),
+    // 患者の固有情報（Stage 4 の送信前ゲート S4_PII の再来）。
+    press: (t) => S4_PII.some((p) => p.re.test(t))
+  };
+  const F_REQUIRED = {
+    qa: [/Q&A|Q1|質問|問\d/, /未確定|分かって(い)?ません|わかって(い)?ません|調査中|不明/],
+    family: [/面会/, /問い合わせ|窓口|連絡先|ご相談/],
+    staff: [/個室|コホー/, /N95|マスク/],
+    press: [/聖クロノス熱/, /未確定|分かって(い)?ません|わかって(い)?ません|調査中|不明/]
+  };
+
+  /* AIチャットの台本応答。断定調のまま返る——そのまま貼ると①④で差し戻される
+     （罠ではない。GPT-4o の素の癖をそのまま見せるだけ）。 */
+  const F_REQUEST_TRIGGER = /会見|想定問答|リリース|説明文|通知|下書き/;
+  const F_AI_REPLY = [
+    "承知しました。会見用の文案です。",
+    "現在、院内の感染は終息に向かっております。安全性に問題はございません。",
+    "（このモックでは以降の文面生成は行いません）"
+  ];
+
+  /* 苅部さん：一緒に呼び出されている（苅部さん.md §4）。2段目は最終セーフティ
+     （2回目の差し戻しで発火）。書きぶりそのものには踏み込まない。 */
+  const F_KARUBE_LINE = "〔苅部〕私も呼ばれてます。で、どこまで公表するんですか。";
+  const F_KARUBE_SAFETY_LINE = "〔苅部〕去年、別件で「調査中」のところを消して出した文書があったんですよ。……そのあと、けっこう大変でした。";
+  const F_KARUBE_DELAY = 40;   // 通常値（仮値・P0実測で確定。S3_KARUBE_DELAY と揃える）
+
   /* ⚠️ 未配置の素材：「二正面」——受信トレイに次々着弾し、本命は3通だけ。
      全部丁寧に返すと確実に溢れる。速度ではなく「捨てる判断」を問う設計。
 
@@ -1591,6 +1717,9 @@
   // Stage 5 の2通。同じ流儀。
   let hasS5JimuMail = false, readS5Jimu = false;
   let hasS5SoudanMail = false, readS5Soudan = false;
+  // Final の2通。同じ流儀。
+  let hasFJimuMail = false, readFJimu = false;
+  let hasFKohoMail = false, readFKoho = false;
 
   /* 6桁コード入力欄 */
   $("code").innerHTML = "";
@@ -1607,8 +1736,8 @@
     { pos: 2, kind: "other" }, { pos: 3, kind: "lead", nm: "D班" },
     { pos: 1, kind: "other" }
   ];
-  function drawMarks() {
-    const el = $("marks"); el.innerHTML = "";
+  function drawMarks(targetId) {
+    const el = $(targetId || "marks"); el.innerHTML = "";
     // 同じ停留所に複数チームがいるときは横に散らす。重ねると誰がどこか読めない。
     const byPos = new Map();
     TEAMS.forEach((t) => {
@@ -1654,6 +1783,8 @@
     const box = $("mails"); box.innerHTML = "";
     const list = [];
     if (hasUnlockMail) list.push({ m: MAIL_UNLOCK, key: "u", read: readU });
+    if (hasFKohoMail) list.push({ m: MAIL_F_KOHO, key: "fkoho", read: readFKoho });
+    if (hasFJimuMail) list.push({ m: MAIL_F_JIMU, key: "fjimu", read: readFJimu });
     if (hasS5SoudanMail) list.push({ m: MAIL_S5_SOUDAN, key: "s5soudan", read: readS5Soudan });
     if (hasS5JimuMail) list.push({ m: MAIL_S5_JIMU, key: "s5jimu", read: readS5Jimu });
     if (hasS4ShichoMail) list.push({ m: MAIL_S4_SHICHO, key: "s4shicho", read: readS4Shicho });
@@ -1683,19 +1814,22 @@
         else if (it.key === "s4shicho") readS4Shicho = true;
         else if (it.key === "s5jimu") readS5Jimu = true;
         else if (it.key === "s5soudan") readS5Soudan = true;
+        else if (it.key === "fjimu") readFJimu = true;
+        else if (it.key === "fkoho") readFKoho = true;
         openIdx = it.key;
         if (view === "inbox") renderInbox(); else renderMails();
         if (view === "inbox") readerFor(it.m);
         // 添付を持つメールを開くと教材ビューアが中央ペインの上に開く（ui/03 §1）。
         else if (it.m.attach) {
-          const viewerKey = it.key === "s1a" ? "add" : it.key === "s3kawai" ? "s3contaminated" : it.key === "s4shicho" ? "s4chart" : it.key === "s5soudan" ? "s5notice" : "main";
+          const viewerKey = it.key === "s1a" ? "add" : it.key === "s3kawai" ? "s3contaminated" : it.key === "s4shicho" ? "s4chart" : it.key === "s5soudan" ? "s5notice" : it.key === "fkoho" ? "fpress" : "main";
           openViewer(viewerKey);
         }
-        // Stage 2/3/4/5 の中央ペインはワークスペース専用でメール本文を表示できないため、
+        // Stage 2/3/4/5/Final の中央ペインはワークスペース専用でメール本文を表示できないため、
         // 添付の無い検査科メール・相談窓口メール・事務長メールもビューアで読ませる（モック限定の簡略化）。
         else if (it.key === "s3lab") openViewer("s3lab");
         else if (it.key === "s4soudan") openViewer("s4soudan");
         else if (it.key === "s5jimu") openViewer("s5jimu");
+        else if (it.key === "fjimu") openViewer("fjimu");
       });
       box.appendChild(b);
     });
@@ -1724,7 +1858,7 @@
   let view = "entry";
 
   function hideOverlays() {
-    ["ov-entry", "ov-brief", "ov-viewer", "ov-unlock", "ov-s1res", "ov-blackout", "ov-alarm", "ov-lock", "ov-s4call"].forEach((id) => $(id).classList.add("hide"));
+    ["ov-entry", "ov-brief", "ov-viewer", "ov-unlock", "ov-goal", "ov-s1res", "ov-blackout", "ov-alarm", "ov-lock", "ov-s4call"].forEach((id) => $(id).classList.add("hide"));
     // #ov-lock の中身（拡大対応業務のボトル棚／インシデント報告書）は
     // startPenalty()/startS4Penalty() が動的に注入したもの。.hide を付けるだけでは
     // DOM とリスナーが残り続けるので、シーンを離れるたびに必ず空にする
@@ -1780,7 +1914,7 @@
     // ダミー）。#pane-r のマークアップは全ステージ共通なので、ここで
     // view でガードしておかないと Stage 1/2 でも「応答しません」と
     // 返してしまい、「現状のダミーのまま変更しない」が崩れる。
-    if (view !== "s3" && view !== "s4" && view !== "s5") return;
+    if (view !== "s3" && view !== "s4" && view !== "s5" && view !== "final") return;
     const ta = $("ai-input");
     const text = ta.value.trim();
     if (!text) return;
@@ -1817,10 +1951,18 @@
     }
 
     later(() => {
-      if (view !== "s3" && view !== "s4") return;   // 判断C：送信後にシーンを離れていたら黙る
+      if (view !== "s3" && view !== "s4" && view !== "final") return;   // 判断C：送信後にシーンを離れていたら黙る
       if (view === "s3") {
         if (S3_TRAP_TRIGGER.test(text)) {
           aiBubble("AI", S3_TRAP_LIE.map(esc).join("<br>"));
+        } else {
+          aiBubble("AI", "（このモックでは応答しません）");
+        }
+      } else if (view === "final") {
+        // Final は送信前ゲートを働かせない（docs/ui/07_Final.md §3「働かせない」）。
+        // 断定調の台本がそのまま返る——罠ではなくGPT-4oの素の癖（docs/scenario/07_Final_記者会見.md §AIチャット）。
+        if (F_REQUEST_TRIGGER.test(text)) {
+          aiBubble("AI", F_AI_REPLY.map(esc).join("<br>"));
         } else {
           aiBubble("AI", "（このモックでは応答しません）");
         }
@@ -2671,6 +2813,15 @@
     s5notice: {
       name: MAIL_S5_SOUDAN.attach,
       text: MAIL_S5_SOUDAN.body.join("\n\n") + "\n\n---\n\n📎 " + MAIL_S5_SOUDAN.attach + "\n\n" + S5_NOTICE_OLD_TEXT
+    },
+    // 事務長メールも添付が無いので同じ簡略化を踏襲する。
+    fjimu: { name: MAIL_F_JIMU.subj, text: MAIL_F_JIMU.body.join("\n\n") },
+    // 広報課の本文（記者クラブからの申し送り）は、添付（記者クラブ事前質問）と同じ
+    // ビューアにまとめて表示する——s5notice と同じ簡略化。ただし [コピー] は置く
+    // （docs/ui/07_Final.md §1「質問リストを AI へ貼って下書きさせる動線は正当」）。
+    fpress: {
+      name: MAIL_F_KOHO.attach,
+      text: MAIL_F_KOHO.body.join("\n\n") + "\n\n---\n\n📎 " + MAIL_F_KOHO.attach + "\n\n" + F_PRESS_Q_TEXT
     }
   };
   function openViewer(which) {
@@ -3513,10 +3664,9 @@
     await wait(1900);
     if (view !== "s5") return;   // 判断C
     $("ov-unlock").classList.add("hide");
-    // Final は未実装。位置だけ、あるべき次の停留所へ進めておく。
-    // 発熱インジケータは動かさない——ここまでの継続はStage 4・5と同じ
-    // （docs/scenario/00_未知ウイルスの通奏低音.md §3。Final は「頂点」なので
-    // 実装時には別の値になる想定だが、その決定は Final を書くときに行う）。
+    // 位置だけ、あるべき次の停留所（Final）へ進めておく。発熱インジケータは
+    // 動かさない——Final でも14のまま継続する
+    // （docs/scenario/00_未知ウイルスの通奏低音.md §3「Final：継続」）。
     TEAMS[2].pos = 6; drawMarks();
   }
 
@@ -3531,6 +3681,129 @@
     }
     log.insertAdjacentHTML("beforeend", '<p class="wait">' + S5_KARUBE_LIMIT_LINE + "</p>");
     if (!phsOpen) phsRing();
+  }
+
+  /* ------------------------------------------------------------------ */
+  /* Final：記者会見 —— 4欄フォーム・罰は無く、通過するとゴール            */
+  /*                                                                    */
+  /* 判定・後始末の作りは Stage 3 の3欄フォーム（checkStage3/runStage3Verdict）*/
+  /* をそのまま1欄増やして踏襲する。罰ゲームが無いので #penalty-host/       */
+  /* pane-r.locked の後始末は不要——その代わり通過後は unlock ではなく       */
+  /* #ov-goal（自動で閉じない）を開く（docs/ui/07_Final.md §4）。           */
+  /* ------------------------------------------------------------------ */
+
+  let fVerdicting = false, fRejectCount = 0;
+
+  function fStop() {}   // Stage 5 と同じく no-op。go() の呼び出し規約に揃えるためだけに存在。
+
+  function renderFinal() {
+    hideOverlays();
+    paneL.classList.remove("hide"); paneR.classList.remove("hide");
+    fVerdicting = false; fRejectCount = 0;
+    hasFJimuMail = true; hasFKohoMail = true;
+    openIdx = "fjimu"; readFJimu = false; readFKoho = false;
+    renderMails("fjimu");
+
+    paneC.innerHTML =
+      '<div class="work">' +
+        '<div class="stage-title">Final　会見</div>' +
+        '<div class="brief">明朝の記者会見に向けて、資料を作り提出せよ。</div>' +
+        '<div class="box" id="f-box-qa"><div class="hd">①院長向け想定問答</div>' +
+          '<textarea class="submit-area" id="f-qa" style="min-height:56px"></textarea></div>' +
+        '<div class="box" id="f-box-family"><div class="hd">②ご家族向け説明文</div>' +
+          '<textarea class="submit-area" id="f-family" style="min-height:56px"></textarea></div>' +
+        '<div class="box" id="f-box-staff"><div class="hd">③職員向け通知</div>' +
+          '<textarea class="submit-area" id="f-staff" style="min-height:56px"></textarea></div>' +
+        '<div class="box" id="f-box-press"><div class="hd">④報道機関向けリリース</div>' +
+          '<textarea class="submit-area" id="f-press" style="min-height:56px"></textarea></div>' +
+        '<div class="row-end" id="f-actions">' +
+          '<button class="btn" id="btn-f-submit">提出する</button>' +
+        "</div>" +
+        '<div id="f-verdict"></div>' +
+      "</div>";
+
+    $("btn-f-submit").addEventListener("click", runFinalVerdict);
+
+    // 苅部さんの1段目トリガー（仮値・P0実測で確定）。シーンを離れていたら発火しない。
+    later(() => { if (view === "final") { phsFPending = true; phsRing(); } }, F_KARUBE_DELAY * 1000);
+  }
+
+  /* 誤り→不足の順（S3_TRAP/S3_REQUIRED と同じ流儀）。指す欄は F_ORDER で
+     最初に当たったもの——上から埋めるチームに対し、一番上の該当欄から指す。 */
+  function checkFinal(vals) {
+    const wrong = F_ORDER.find((k) => F_WRONG[k](vals[k]));
+    if (wrong) return { wrong: true, field: wrong };
+    const short = F_ORDER.find((k) => !F_REQUIRED[k].every((re) => re.test(vals[k])));
+    if (short) return { wrong: false, short: true, field: short };
+    return { wrong: false, short: false };
+  }
+
+  async function runFinalVerdict() {
+    const v = $("f-verdict");
+    if (!v || fVerdicting) return;
+    fVerdicting = true;
+    F_ORDER.forEach((k) => $("f-box-" + k).classList.remove("warn"));
+    const vals = {
+      qa: $("f-qa").value,
+      family: $("f-family").value,
+      staff: $("f-staff").value,
+      press: $("f-press").value
+    };
+    $("f-actions").classList.add("hide");
+    v.innerHTML = '<div class="verdict"><div class="lead">提出を確認しています…</div></div>';
+    const box = v.firstElementChild;
+    await wait(500);
+    if (view !== "final") { fVerdicting = false; return; }   // 判断C
+
+    const result = checkFinal(vals);
+
+    if (result.wrong || result.short) {
+      // 罰は無い。Stage 2〜4 と同じ「失敗に見せない橙表示」に留める
+      // （docs/scenario/07_Final_記者会見.md §判定）。
+      fRejectCount++;
+      $("f-box-" + result.field).classList.add("warn");
+      const d = document.createElement("div");
+      d.className = "lead";
+      d.textContent = F_FIELD_LABEL[result.field] + "の欄が、まだ足りません。";
+      box.appendChild(d);
+      $("f-actions").classList.remove("hide");
+      // 最終セーフティ：2回目の差し戻しで苅部さんの2段目が発火する
+      // （企画書§6「最終セーフティは必ず届き、詰みを防ぐ」）。
+      if (fRejectCount >= 2) fNudgeKarube();
+      fVerdicting = false;
+      return;
+    }
+
+    const d = document.createElement("div");
+    d.className = "done"; d.textContent = "Final をクリアしました";
+    box.appendChild(d);
+    fVerdicting = false;
+    goalSequence();
+  }
+
+  /* 最終セーフティの発火。s3NudgeKarube/s4NudgeKarube と同じ流儀——
+     窓が開いていれば追記、閉じていればバッジだけ光らせる。 */
+  function fNudgeKarube() {
+    const log = $("phs-log");
+    if (!log || log.childElementCount === 0) {
+      phsFSafetyPending = true;
+      phsRing();
+      return;
+    }
+    log.insertAdjacentHTML("beforeend", '<p class="wait">' + F_KARUBE_SAFETY_LINE + "</p>");
+    if (!phsOpen) phsRing();
+  }
+
+  /* ゴール：#ov-unlock ではなく専用オーバーレイ #ov-goal を開く。次の
+     ステージへの解錠ではなくレースの終端であることを見た目で区別する
+     （docs/ui/07_Final.md §4）。unlock と違い自動では閉じない。
+     発熱インジケータ・TEAMS[2].pos はどちらも Final 開始時点の値のまま動かさない。 */
+  async function goalSequence() {
+    const me = TEAMS[2];
+    $("goal-t").textContent = (me.nm || "自チーム") + "　ゴール";
+    $("goal-s").textContent = "聖クロノス熱（仮）記者会見資料 — 提出完了";
+    drawMarks("goal-marks");
+    $("ov-goal").classList.remove("hide");
   }
 
   /* ------------------------------------------------------------------ */
@@ -3802,6 +4075,10 @@
   // 罠ステージではないので、上限到達メッセージのほうを優先して見せる。
   let phsS5Pending = false;
   let phsS5LimitPending = false;
+  // Final の通常トリガー（一緒に呼び出されているだけ）と、2回目の差し戻しで
+  // 発火する最終セーフティ。罠ステージではないが、Stage 5 と同じ優先順位で扱う。
+  let phsFPending = false;
+  let phsFSafetyPending = false;
   function phsRing() {
     $("phs").classList.remove("hide");
     $("phs-badge").classList.remove("hide");
@@ -3861,6 +4138,19 @@
       log.innerHTML = "<p>" + S5_KARUBE_LINE + "</p>";
       return;
     }
+    if (phsFSafetyPending) {
+      // 最終セーフティ（2回目の差し戻し）のほうが新しい情報なので、通常トリガーより優先して見せる。
+      phsFSafetyPending = false;
+      phsFPending = false;
+      log.innerHTML = "<p>" + F_KARUBE_SAFETY_LINE + "</p>";
+      return;
+    }
+    if (phsFPending) {
+      // 一緒に呼び出されているだけ。書きぶりそのものには踏み込まない。
+      phsFPending = false;
+      log.innerHTML = "<p>" + F_KARUBE_LINE + "</p>";
+      return;
+    }
     // 待たされることがヒントのコスト。開いてもまだ返事は来ていない。
     log.innerHTML = '<p class="wait">〔苅部〕今、別病棟対応中。あとで。</p>';
     later(() => { log.insertAdjacentHTML("beforeend", "<p>" + PHS_LINES[0] + "</p>"); }, 1400);
@@ -3879,13 +4169,14 @@
     { id: "unlock",  label: "⑥ 解錠",       mode: "alert", note: "報酬は師長の承認だけ。スコアも星も出さない。同時に「発熱」が 3→5 に静かに変わる——解錠の喜びの陰で、誰も見ていない数字が増える。" },
     { id: "s3",      label: "⑦ Stage 3 暫定", mode: "crisis", note: "本研修の心臓部（設計ドキュメント上の呼称は「嘘」だが、参加者に見える名は「暫定」——ネタバレを避けるため）。器が alert から crisis へ落ち、院内状況インジケータが「発熱9」でクレッシェンド表示になる（他の平時指標が消える）。検査科メールが既知検査すべて陰性を確定通知し、Stage 2 の伏線3名（005/6/008）を患者IDで名指しして回収する。カワイさんのメールに汚染教材（発熱対応早見表）が添付され、AIチャットも同じ3つの嘘（標準予防策止まりのPPE・解熱での解除・濃度指定を欠いた消毒に壁床の過剰消毒が乗る・架空の出典）を返す。3欄（環境消毒／PPE・隔離／解除基準）に提出し、罠キーワードを含むと blackout→lock（罰ゲーム：接触者リスト整形）へ。正典マニュアルは Prologue から左ペイン下部の「共有フォルダ」に常設済み——カワイさんが早見表を拾ったのと同じ棚に正典も入っている。気づいて先に読んだチームが報われる設計。" },
     { id: "s4",      label: "⑧ Stage 4 回答", mode: "crisis", note: "参加者に見える名は「回答」（設計上の呼称「情報漏洩」は罠を予告するので出さない）。発熱インジケータは Stage 3 解錠時の14のまま動かない——山ではなく維持の回。患者相談窓口が家族の問い合わせ（面会制限・「発熱者が多いらしい」・説明の要求）を転送し、5A病棟師長がカルテ抜粋（患者005・渡辺 三郎、Stage 2/3 の伏線と同一人物）を添付して返信文の作成を依頼する。罠はStage 3と違い提出フォームではなく送信前ゲート（AIチャットの手前）にあり、カルテ抜粋の固有情報を送信すると alarm→lock（罰ゲーム：インシデント報告書の黒塗り）へ。塗るべき情報と塗ってはいけない一般語が混在し、判断がいる罰にしてある。AIチャットは罰ゲーム中だけ入力不可（Stage 3の罰との差）。苅部さんはここだけ返信が速い唯一の例外。" },
-    { id: "s5",      label: "⑨ Stage 5 掲示", mode: "crisis", note: "参加者に見える名は「掲示」。設計上の呼称「ポスター工房」は罠が無いので出しても支障は無いが、Stage 3・4 の呼称の流儀（暫定／回答）に揃える。罠疲れの後のご褒美ステージで、alarm/lock/blackoutを一度も使わない唯一の本編ステージ。発熱インジケータ・crisisモードは Stage 4 から継続。事務長が面会制限の正式な掲示を依頼し、患者相談窓口 近藤（Stage 4 と同一人物）が多言語対応の理由と去年の悪い実例（字だらけで不評だった掲示物）を添えて再登場する。AIチャットが初めて画像を返す——モックはAPIを呼ばず、プロンプトのタグ一致で事前生成した候補画像を出し分ける（S5_POSTERS）。生成回数には上限があり（従量課金という体で苅部さんが告げる）、上限後も生成済みの候補はいつでも提出できるので詰まない。判定は画像ではなくプロンプト文字列（マスク着用・面会時間・多言語orピクトグラム）に対して行う——品質はDebriefの「ポスター大賞」に譲る。苅部さんは門外漢で、観点だけ示しデザインの良し悪しは言わない。返信遅延はStage4だけの短縮を終え通常値に戻る。" }
+    { id: "s5",      label: "⑨ Stage 5 掲示", mode: "crisis", note: "参加者に見える名は「掲示」。設計上の呼称「ポスター工房」は罠が無いので出しても支障は無いが、Stage 3・4 の呼称の流儀（暫定／回答）に揃える。罠疲れの後のご褒美ステージで、alarm/lock/blackoutを一度も使わない最初の本編ステージ（Final も同様）。発熱インジケータ・crisisモードは Stage 4 から継続。事務長が面会制限の正式な掲示を依頼し、患者相談窓口 近藤（Stage 4 と同一人物）が多言語対応の理由と去年の悪い実例（字だらけで不評だった掲示物）を添えて再登場する。AIチャットが初めて画像を返す——モックはAPIを呼ばず、プロンプトのタグ一致で事前生成した候補画像を出し分ける（S5_POSTERS）。生成回数には上限があり（従量課金という体で苅部さんが告げる）、上限後も生成済みの候補はいつでも提出できるので詰まない。判定は画像ではなくプロンプト文字列（マスク着用・面会時間・多言語orピクトグラム）に対して行う——品質はDebriefの「ポスター大賞」に譲る。苅部さんは門外漢で、観点だけ示しデザインの良し悪しは言わない。返信遅延はStage4だけの短縮を終え通常値に戻る。" },
+    { id: "final",   label: "⑩ Final 会見",  mode: "crisis", note: "参加者に見える名は「会見」。本編の最終ステージ・ゴールライン（企画書§5）。発熱インジケータ・crisisモードは Stage 4・5 から継続で14のまま動かさない——会見の論点そのものになる数字。事務長が記者会見の資料4点（院長向け想定問答／ご家族向け説明文／職員向け通知／報道機関向けリリース）を依頼し、同時に仮称「聖クロノス熱（仮）」の爆誕を告げる。広報課が記者クラブの事前質問（答えられる問いと答えられない問いが混在）を渡す。判定はルールベース（誤り→不足、Stage 3 と同じ順序）で4欄それぞれに行い、罰は無く橙の差し戻しのみ。④の誤り判定は Stage 4 の個人情報検知（S4_PII）を再利用する。AIチャットは断定調の台本で応答し、そのまま貼ると差し戻される——罠ではなくGPT-4oの素の癖。苅部さんは「一緒に呼び出されている」だけで書きぶりには踏み込まないが、2回目の差し戻しで最終セーフティ（過去の経緯）が発火する。4欄すべて通過すると unlock ではなく専用のゴール演出（#ov-goal）が開き、自動では閉じない——次のステージが無いため。" }
   ];
 
   function go(id, keepMode) {
     clearLater();
     verdicting = false;
-    s1Stop(); s2Stop(); s2StopDeadline(); s3Stop(); s4Stop(); s4StopDeadline(); s5Stop();
+    s1Stop(); s2Stop(); s2StopDeadline(); s3Stop(); s4Stop(); s4StopDeadline(); s5Stop(); fStop();
     hasS1AddMail = false; readS1A = false;   // 追加分は締切超過で改めて着弾する
     view = id;
     const step = STEPS.find((s) => s.id === id) || STEPS[0];
@@ -3899,6 +4190,7 @@
     $("phs-log").innerHTML = "";
     phsOpen = false; phsShown = 0; phsIntroPending = false; phsAIPending = false; phsS3Pending = false; phsS4Pending = false;
     phsS5Pending = false; phsS5LimitPending = false;
+    phsFPending = false; phsFSafetyPending = false;
     $("ai-log").innerHTML = '<div class="empty">（まだ何もありません）</div>';
     // Stage 5 だけが使う残り生成回数の表示。renderStage5() だけが外す。
     $("s5-gen").classList.add("hide");
@@ -3910,6 +4202,7 @@
       hasS3LabMail = false; hasS3KawaiMail = false; readS3Lab = false; readS3Kawai = false;
       hasS4SoudanMail = false; hasS4ShichoMail = false; readS4Soudan = false; readS4Shicho = false;
       hasS5JimuMail = false; hasS5SoudanMail = false; readS5Jimu = false; readS5Soudan = false;
+      hasFJimuMail = false; hasFKohoMail = false; readFJimu = false; readFKoho = false;
       $("fever").textContent = "3";
       $("vitals").classList.remove("crescendo");
       TEAMS[2].pos = 1; drawMarks();
@@ -3932,6 +4225,7 @@
       hasS3LabMail = false; hasS3KawaiMail = false; readS3Lab = false; readS3Kawai = false;
       hasS4SoudanMail = false; hasS4ShichoMail = false; readS4Soudan = false; readS4Shicho = false;
       hasS5JimuMail = false; hasS5SoudanMail = false; readS5Jimu = false; readS5Soudan = false;
+      hasFJimuMail = false; hasFKohoMail = false; readFJimu = false; readFKoho = false;
       $("vitals").classList.remove("crescendo");
       TEAMS[2].pos = 1; drawMarks();
       renderStage1Flood(s1SkipBrief);
@@ -3941,6 +4235,7 @@
       hasS3LabMail = false; hasS3KawaiMail = false; readS3Lab = false; readS3Kawai = false;
       hasS4SoudanMail = false; hasS4ShichoMail = false; readS4Soudan = false; readS4Shicho = false;
       hasS5JimuMail = false; hasS5SoudanMail = false; readS5Jimu = false; readS5Soudan = false;
+      hasFJimuMail = false; hasFKohoMail = false; readFJimu = false; readFKoho = false;
       $("vitals").classList.remove("crescendo");
       TEAMS[2].pos = 2; drawMarks();
       // AIパネルはここでは出さない。Stage 2 独自の苅部さんトリガー
@@ -3952,6 +4247,7 @@
       hasS3LabMail = false; hasS3KawaiMail = false; readS3Lab = false; readS3Kawai = false;
       hasS4SoudanMail = false; hasS4ShichoMail = false; readS4Soudan = false; readS4Shicho = false;
       hasS5JimuMail = false; hasS5SoudanMail = false; readS5Jimu = false; readS5Soudan = false;
+      hasFJimuMail = false; hasFKohoMail = false; readFJimu = false; readFKoho = false;
       $("vitals").classList.remove("crescendo");
       revealAI(true);
       renderStage2Excel();
@@ -3964,6 +4260,7 @@
       hasUnlockMail = false; $("fever").textContent = "9";
       hasS4SoudanMail = false; hasS4ShichoMail = false; readS4Soudan = false; readS4Shicho = false;
       hasS5JimuMail = false; hasS5SoudanMail = false; readS5Jimu = false; readS5Soudan = false;
+      hasFJimuMail = false; hasFKohoMail = false; readFJimu = false; readFKoho = false;
       $("vitals").classList.add("crescendo");
       TEAMS[2].pos = 3; drawMarks();
       revealAI(true);   // Stage 2 を経ずに devbar から直接来ても、AIパネルは既に出ている前提
@@ -3973,6 +4270,7 @@
       hasUnlockMail = false; $("fever").textContent = "14";
       hasS3LabMail = false; hasS3KawaiMail = false; readS3Lab = false; readS3Kawai = false;
       hasS5JimuMail = false; hasS5SoudanMail = false; readS5Jimu = false; readS5Soudan = false;
+      hasFJimuMail = false; hasFKohoMail = false; readFJimu = false; readFKoho = false;
       $("vitals").classList.add("crescendo");
       TEAMS[2].pos = 4; drawMarks();
       revealAI(true);   // Stage 3 を経ずに devbar から直接来ても、AIパネルは既に出ている前提
@@ -3982,10 +4280,21 @@
       hasUnlockMail = false; $("fever").textContent = "14";
       hasS3LabMail = false; hasS3KawaiMail = false; readS3Lab = false; readS3Kawai = false;
       hasS4SoudanMail = false; hasS4ShichoMail = false; readS4Soudan = false; readS4Shicho = false;
+      hasFJimuMail = false; hasFKohoMail = false; readFJimu = false; readFKoho = false;
       $("vitals").classList.add("crescendo");
       TEAMS[2].pos = 5; drawMarks();
       revealAI(true);   // Stage 4 を経ずに devbar から直接来ても、AIパネルは既に出ている前提
       renderStage5();
+    }
+    else if (id === "final") {
+      hasUnlockMail = false; $("fever").textContent = "14";
+      hasS3LabMail = false; hasS3KawaiMail = false; readS3Lab = false; readS3Kawai = false;
+      hasS4SoudanMail = false; hasS4ShichoMail = false; readS4Soudan = false; readS4Shicho = false;
+      hasS5JimuMail = false; hasS5SoudanMail = false; readS5Jimu = false; readS5Soudan = false;
+      $("vitals").classList.add("crescendo");
+      TEAMS[2].pos = 6; drawMarks();
+      revealAI(true);   // Stage 5 を経ずに devbar から直接来ても、AIパネルは既に出ている前提
+      renderFinal();
     }
 
     $("steps").querySelectorAll("button").forEach((b) => {

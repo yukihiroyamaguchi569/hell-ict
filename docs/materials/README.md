@@ -25,6 +25,7 @@ Stage 2 の手作業はアプリ内の編集可能グリッドで行う（[../ui
 | [`stage3_contaminated.md`](stage3_contaminated.md) | **配布版・汚染教材**。カワイさんの添付＝罠の実体 | ✅ 読む（PDF化して配布） |
 | [`stage4_chart.md`](stage4_chart.md) | **配布版**。患者005（渡辺 三郎）のカルテ抜粋＝師長の添付＝PII検知の対象そのもの | ✅ 読む（添付ビューアで開く） |
 | [`stage5_notice_old.md`](stage5_notice_old.md) | **配布版**。去年の面会制限のお知らせ＝近藤さんの添付＝**罠ではない**悪い実例 | ✅ 読む（添付ビューアで開く） |
+| [`final_press_questions.md`](final_press_questions.md) | **配布版**。記者クラブ事前質問8問＝広報課の添付＝**罠ではない**答えられる問いと答えられない問いの混在 | ✅ 読む（添付ビューアで開く） |
 
 > ⚠️ `annotated` を配布版と取り違えると、Stage 3 の伏線が Stage 2 で丸見えになる。
 > **`stage3_manual.md`（正典）と `stage3_contaminated.md`（汚染）を取り違えると、Stage 3 の罠がまるごと消える**
@@ -99,5 +100,21 @@ MRSA 陰性なのに発熱ありの3名（`005` / `6` / `008`）が Stage 3 で�
 - **判定はこの教材の文言ではなく、参加者がAIに送ったプロンプト文字列に対して行う。** Stage 5 に画像の
   自動品質判定は無いため、Stage 2〜4 のような「教材文言と判定パターンの単一情報源化」は不要
   （[`stage5_notice_old.md`](stage5_notice_old.md) 実装メモ）。
-- **罰ゲームは無い。** Stage 5 は本編で唯一、`alarm`/`lock` を使わないステージ
-  （[../scenario/06_Stage5_ポスター工房.md](../scenario/06_Stage5_ポスター工房.md) §演出・時間）。
+- **罰ゲームは無い。** Stage 5 は本編で `alarm`/`lock` を使わない最初のステージ
+  （[../scenario/06_Stage5_ポスター工房.md](../scenario/06_Stage5_ポスター工房.md) §演出・時間。
+  Final も同様に使わない。下記「Final の教材」）。
+
+## Final の教材
+
+- `final_press_questions.md`（記者クラブ事前質問）は**Markdown が正典で添付ビューア用テキストは派生物**
+  （同じ原則）。広報課のメールに添付される形でのみ配布し、共有フォルダには置かない
+  （[../ui/07_Final.md](../ui/07_Final.md) §1）。
+- **これも Stage 3 の汚染教材とは性質が違う。** 誤情報は無く、答えられる質問と答えられない質問が
+  混在しているだけ（[`final_press_questions.md`](final_press_questions.md) 📌）。読んでも判定に
+  不利益は生じない。
+- **判定はこの教材の文言ではなく、参加者が提出した4欄の文章に対して行う。** ④報道向けリリースの
+  「患者の固有情報」判定だけは Stage 4 の `stage4_chart.md`（`S4_PATIENT`）を単一の情報源として再利用し、
+  ここに新規の教材を作らない（[`final_press_questions.md`](final_press_questions.md) 実装メモ）。
+- **罰ゲームは無い。** Final は Stage 5 に続き `alarm`/`lock`/`blackout` を使わないステージ
+  （[../scenario/07_Final_記者会見.md](../scenario/07_Final_記者会見.md) §演出・時間）。差し戻し
+  （橙表示）はあるが、罰は無い。
