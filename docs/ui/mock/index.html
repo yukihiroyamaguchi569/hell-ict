@@ -643,8 +643,8 @@
    （docs/ui/06_Stage5.md §3「隠すと混乱する」）。 */
 .s5-gen { font-size: 12px; color: var(--ai-muted); padding: 6px 12px 0; }
 
-/* Stage 5：提出候補の枠。.box を土台にする（.box.warn で Stage 3・4 と同じ
-   差し戻しの橙表示を共用できる。docs/ui/06_Stage5.md §2）。 */
+/* Stage 5：提出候補の枠。.box を土台にする（枠の見た目だけを借りる——Stage 5 に
+   判定は無いので .warn は使わない。docs/ui/06_Stage5.md §2）。 */
 .s5cand { padding: 14px; display: flex; gap: 14px; align-items: flex-start; min-height: 120px; }
 .s5cand .empty { color: var(--fg-muted); font-size: 15px; }
 .s5cand .thumb { width: 120px; height: 120px; object-fit: cover; border: 1px solid var(--rule); flex: 0 0 auto; background: var(--surface-2); }
@@ -1449,18 +1449,13 @@
   /* stage5_notice_old.md。Stage 5 に罠は無いので、この教材は Stage 3 の  */
   /* 汚染教材とは違い「読んでも判定に不利益は生じない」悪い実例。          */
   /*                                                                    */
-  /* 画像候補の出し分けタグ（S5_POSTERS）と、判定の必須要素（S5_REQUIRED）*/
-  /* は同じ語群から作る。多言語 or ピクトグラムの語彙を S5_LANG_WORDS に   */
-  /* 1箇所だけ持ち、両方がここを参照する——Stage 3 が踏んだ負債（教材と   */
-  /* 判定が別々の場所にあり片方だけ直して静かに壊れる）を Stage 5 でも     */
-  /* 繰り返さないための構成（docs/ui/mock/README.md 既知の設計負債）。    */
+  /* ⚠️ Stage 5 に自動判定は無い（企画書§5「判定：提出で次ステージ解錠      */
+  /* （レースを止めない）」）。必須要素（マスク・面会時間・多言語 or       */
+  /* ピクトグラム）は課題文の材料であって、提出のゲートには使わない。       */
+  /* 下の S5_POSTERS の tag は「判定」ではなく「どの候補画像を見せるか」    */
+  /* だけを決める——一致しなくても S5_POSTER_DEFAULT を返すので、          */
+  /* 生成そのものが失敗することは無い。                                   */
   /* ------------------------------------------------------------------ */
-  const S5_LANG_WORDS = /多言語|ピクトグラム|やさしい日本語|英語|中国語|絵|イラスト|図解/;
-  const S5_REQUIRED = [
-    /マスク/,
-    /時間|\d{1,2}時/,
-    S5_LANG_WORDS
-  ];
 
   /* 画像は事前生成した候補をプロンプトのタグで出し分ける（モックはAPIを呼ばない）。
      該当するタグが無ければ S5_POSTER_DEFAULT にフォールバックする。
@@ -3486,32 +3481,19 @@
     later(() => { if (view === "s5") { phsS5Pending = true; phsRing(); } }, S5_KARUBE_DELAY * 1000);
   }
 
-  function checkStage5(text) {
-    return S5_REQUIRED.every((re) => re.test(text));
-  }
-
+  /* Stage 5 に判定は無い（企画書§5「判定：提出で次ステージ解錠（レースを
+     止めない）」）。候補が選ばれていれば即座に解錠する——Stage 2〜4 の
+     checkStageN()/差し戻しに相当する分岐は存在しない
+     （docs/ui/06_Stage5.md §4「解錠：提出すれば即座に、関門は無い」）。 */
   async function runStage5Verdict() {
     const v = $("s5-verdict");
     if (!v || s5Verdicting || s5Selected === null) return;
     s5Verdicting = true;
-    $("s5-cand").classList.remove("warn");
-    const c = s5Candidates[s5Selected];
     $("btn-s5-submit").disabled = true;
     v.innerHTML = '<div class="verdict"><div class="lead">提出を確認しています…</div></div>';
     const box = v.firstElementChild;
     await wait(500);
     if (view !== "s5") { s5Verdicting = false; return; }   // 判断C
-
-    if (!checkStage5(c.prompt)) {
-      $("s5-cand").classList.add("warn");
-      const d = document.createElement("div");
-      d.className = "lead";
-      d.textContent = "まだ足りません（マスク・面会時間・多言語かピクトグラムのいずれかが伝わっていません）。";
-      box.appendChild(d);
-      $("btn-s5-submit").disabled = false;
-      s5Verdicting = false;
-      return;
-    }
 
     const d = document.createElement("div");
     // 解錠されるのは「次の」ステージ。Stage 5 をクリアしたので Final が開く
