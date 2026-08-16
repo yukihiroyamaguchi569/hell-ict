@@ -158,7 +158,7 @@ Final に罠は無いが、**Stage 3 の3欄フォームを1欄増やして判�
   ではなく「差し戻しを繰り返したら」を発火条件にした（`docs/character/苅部さん.md` §4 Final 行）。
 - **通過すると `unlock` ではなく `goalSequence()`（3795）が `#ov-goal` を開く。** `hideOverlays()` の
   ID配列に `"ov-goal"` を追加済み。`#ov-unlock` と違い**自動では閉じない**——次のステージが無いため。
-  `drawMarks()` は第2引数 `targetId` を取れるように一般化してあり（既定 `"marks"`）、
+  `drawMarks()` は任意の第1引数 `targetId` を取れるように一般化してあり（既定 `"marks"`）、
   `goalSequence()` は `drawMarks("goal-marks")` で同じ関数をゴール演出のリーダーボードにも使い回す。
 - **AIチャットは Stage 3・4 と同じ台本方式に戻る。** `sendAI()`（1906）のガードに `view !== "final"` を
   追加し、`F_REQUEST_TRIGGER` にマッチすると断定調の `F_AI_REPLY` が返る——そのまま貼ると①④の
