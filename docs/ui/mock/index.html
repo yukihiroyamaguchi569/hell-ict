@@ -605,6 +605,36 @@
 .lock .shicho { font-family: var(--font-legacy); font-size: 13px; color: var(--fg); padding: 2px; }
 .lock .discard { font-size: 13px; color: var(--fg-muted); padding: 2px; }
 
+/* Stage 4：個人情報インシデントの警報。blackout（Stage 3・暗転）と対で使う——
+   逆に画面をフラッシュさせることで「事故の音」を表現する
+   （docs/ui/05_Stage4.md §alarmオーバーレイの初出）。責める文言も安心させる
+   文言も置かない。 */
+.alarm { background: var(--accent); flex-direction: column; gap: 8px; animation: alarmFlash .5s ease-in-out 3; }
+@keyframes alarmFlash { 0%, 100% { background: var(--accent); } 50% { background: #050607; } }
+.alarm .t { font-size: 26px; font-weight: 700; color: #fff; letter-spacing: .03em; }
+.alarm .s { font-size: 16px; color: #fff; opacity: .92; }
+
+/* Stage 4：インシデント対応業務（黒塗り）。下書きの中から個人情報にあたる
+   トークンだけをクリックして塗る——ボトル補充（Stage 3）と違い判断がいる
+   （docs/ui/05_Stage4.md §4）。2003年書式で組む。 */
+.report { font-family: var(--font-legacy); font-size: 14px; line-height: 2.1; white-space: pre-wrap; }
+.report .tok { border: 1px dashed var(--warn); padding: 0 3px; cursor: pointer; background: transparent; color: inherit; font: inherit; }
+.report .tok:hover { background: rgba(217,154,31,.14); }
+.report .tok.masked { background: #16181a; color: #16181a; border-color: #16181a; }
+
+/* 罰ゲーム中のAIチャット。Stage 3 の罰は入力を禁止しないが、Stage 4 は
+   「AI使用ロック」そのものが罰の内容（docs/ui/04_Stage3.md §やらないこと）。 */
+.pane-r.locked { filter: grayscale(1) opacity(.5); pointer-events: none; }
+
+/* Stage 4：近藤さんの着信ポップアップ。窓の器（.sysdlg）は事務長ブリーフィングと
+   共用するが、.briefing 固有の段落フェードイン（.beat）は使わない——全文を最初から
+   出す（対話ではなく一方向の一報なので、演出で焦らす必要が無い）。
+   近藤さんの肖像は production art を使う。 */
+.callin { background: rgba(8,9,10,.6); }
+.callin .say { font-size: 17px; line-height: 1.8; }
+.callin .say + .say { margin-top: 10px; }
+.callin .por .frame { font-size: 56px; }
+
 /* 教材ビューア：見た目を整えない。汚いまま出す。
    これはアプリの画面ではなく病院から届いた「ファイル」なので、
    テーマに追従させず白い紙として固定する。 */
@@ -906,13 +936,53 @@
           <div class="t" id="blackout-text"></div>
         </div>
 
-        <!-- Stage 3：拡大対応業務（消毒液ボトルの補充）。主役は残り時間の数字。
+        <!-- Stage 3・4：罰ゲームの器。主役は残り時間の数字。
              見出しに「罰ゲーム」と書かない——罰も業務として出す（企画書 §6）。
-             #penalty-host は空のまま持ち、startPenalty() が中身を注入する。 -->
+             見出しは #penalty-host と同じく「毎回明示的にセットし直す」流儀にする
+             （unlockSequence() 系と同じ理由。docs/ui/mock/README.md 既知の設計負債）。
+             #penalty-host は空のまま持ち、startPenalty()/startS4Penalty() が中身を注入する。 -->
         <div class="veil lock hide" id="ov-lock">
-          <div class="hd">拡大対応業務：消毒液ボトルの補充</div>
+          <div class="hd" id="lock-hd">拡大対応業務：消毒液ボトルの補充</div>
           <div class="timer" id="lock-timer">00:40</div>
           <div class="box" id="penalty-host"></div>
+        </div>
+
+        <!-- Stage 4：個人情報インシデントの警報。--accentのフラッシュ＋全画面赤帯。
+             blackout（Stage 3・暗転）と対で使い分ける——Stage 4 は「事故の音」として
+             逆にフラッシュさせる（docs/ui/05_Stage4.md §alarmオーバーレイの初出）。
+             責める文言も安心させる文言も置かない。事実の報告のみ。 -->
+        <div class="veil alarm hide" id="ov-alarm">
+          <div class="t">個人情報インシデント発生</div>
+          <div class="s">送信はブロックされました。</div>
+        </div>
+
+        <!-- Stage 4：回答期限超過で割り込む、患者相談窓口・近藤さんからの着信。
+             メール着弾ではなく全画面ポップアップにした（docs/ui/05_Stage4.md §回答期限）。
+             一方向・1回きり・正解を知らない人物なので「窓口ではない登場人物」の枠内
+             （docs/character/00_お助けキャラの原則.md §0）——新しいウィンドウだが対話には
+             ならない（[了解しました]の1つだけ）ので「窓口は一つ」を破らない。
+             罠ではないので暗転も警報も使わず、事務長ブリーフィングと同じ院内システムの
+             窓（.sysdlg）を流用する。近藤さんの肖像には本番素材
+             （assets/images/production/stage4-patient-relations-kondo.png）を使う。 -->
+        <div class="veil sysdlg callin hide" id="ov-s4call">
+          <div class="win">
+            <div class="tb">
+              <span class="grow">📞 着信 — 患者相談窓口</span>
+              <span class="ctl">□ ✕</span>
+            </div>
+            <div class="bd">
+              <div class="por">
+                <div class="frame"><img src="../../../assets/images/production/stage4-patient-relations-kondo.png" alt="近藤"></div>
+                <div class="cap">患者相談窓口<br><b>近藤</b></div>
+              </div>
+              <div class="main">
+                <div class="say">あ、ICTさん……すみません、まだお電話が繋がったままで……。</div>
+                <div class="say">渡辺様のご長男様なんですけど、「まだ返事がないんですか」って、かなりお怒りで……。</div>
+                <div class="say">このままお待ちになるとのことなので、ご返信だけ急いでいただけますか……。</div>
+              </div>
+            </div>
+            <div class="ft"><button class="btn" id="btn-s4call-close">了解しました</button></div>
+          </div>
         </div>
 
       </div>
@@ -1228,6 +1298,121 @@
   /* 罰ゲームの制限表示（仮値・P0実測で確定。本番は1分程度）。 */
   const S3_PENALTY = 40;
 
+  /* ------------------------------------------------------------------ */
+  /* Stage 4 の教材（配布版）                                            */
+  /*                                                                    */
+  /* 正典は docs/scenario/05_Stage4_情報漏洩.md ・ docs/materials/       */
+  /* stage4_chart.md。患者ID・氏名・病棟・採取日・MRSA結果・発熱は        */
+  /* S2_SHEET_ROWS の005行（渡辺 三郎）と一致させてある——数値をどちらか   */
+  /* 片方だけ直すと、Stage 2→3→4 を貫く縦軸が矛盾する。                  */
+  /*                                                                    */
+  /* S4_PATIENT が唯一の情報源。送信前ゲートの検知パターン（S4_PII）と    */
+  /* 黒塗りの下書き（S4_REPORT）は、ここから作る値だけを使う——           */
+  /* Stage 3 が踏んだ負債（教材と判定が別々の場所にあり片方だけ直して     */
+  /* 静かに壊れる）をここで繰り返さないための構成（README「既知の設計負債」）。*/
+  /* ------------------------------------------------------------------ */
+  const S4_PATIENT = {
+    name: "渡辺 三郎",
+    id: "005",
+    dob: "1952年3月14日",
+    phone: "090-1234-5678",
+    familyName: "渡辺 健一"
+  };
+
+  /* 📌 固有情報を独立した項目欄（氏名／ID／生年月日／連絡先）にまとめない。
+     まとめると個人情報だけが上に固まり、下の経過欄だけをコピーすれば送信前
+     ゲートを一度も踏まずに正解ルートへ行けてしまう——返信文の材料として
+     実際に要る経過の文中に固有情報を織り込むことで、「必要な部分を選ぶ」
+     という自然な操作の中に判断を要らせる（docs/materials/stage4_chart.md §抜粋）。 */
+  const S4_CHART_TEXT =
+"【電子カルテ 抜粋】5A病棟 / 出力 7月10日\n\n" +
+"病名     原因不明の発熱（精査中）\n" +
+"         ※インフルエンザ・COVID-19・ノロウイルス・アデノウイルス\n" +
+"           いずれも陰性（7/10 検査科）\n\n" +
+"経過\n" +
+" 7/3   患者ID " + S4_PATIENT.id + "、" + S4_PATIENT.name + "さん（" + S4_PATIENT.dob + "生、74歳）が\n" +
+"       37.9℃の発熱で受診。MRSA検査は陰性、個室管理は行わず経過観察。\n" +
+" 7/6   37.8℃。解熱剤にて経過観察。\n" +
+" 7/9   38.1℃に再上昇。培養検査を提出。\n" +
+" 7/10  37.6℃、解熱傾向。ご長男（" + S4_PATIENT.familyName + "様・" + S4_PATIENT.phone + "）より\n" +
+"       面会制限に関するお問い合わせあり。";
+
+  /* 送信前ゲートの検知パターン。固有情報（S4_PATIENT）に加え、生年月日・
+     電話番号は汎用の書式でも拾う——渡された値をコピペせず、参加者が
+     手で書き写した場合も検知させるため。 */
+  const S4_PII = [
+    { re: new RegExp(S4_PATIENT.name.replace(" ", "[\\s　]*")), label: "患者氏名" },
+    { re: /(?<!\d)005(?!\d)/, label: "患者ID" },
+    { re: /\d{4}年\d{1,2}月\d{1,2}日/, label: "生年月日" },
+    { re: /0\d{1,4}[-\s]?\d{2,4}[-\s]?\d{3,4}/, label: "電話番号" },
+    { re: new RegExp(S4_PATIENT.familyName.replace(" ", "[\\s　]*")), label: "ご家族の氏名" }
+  ];
+
+  /* インシデント報告書の下書き（罰ゲーム＝黒塗りの対象）。pii:true は
+     塗るべきトークン、pii:false は塗ってはいけない一般語のトークン、
+     pii キー無しはクリックできない地の文。 */
+  const S4_REPORT = [
+    { t: "【インシデント報告書（下書き）】\n" },
+    { t: "発生日時：" }, { t: "7月10日 14:22", pii: false }, { t: "\n" },
+    { t: "病棟：" }, { t: "5A病棟", pii: false }, { t: "\n" },
+    { t: "報告者：" }, { t: "感染制御チーム", pii: false }, { t: "\n\n" },
+    { t: "概要：" }, { t: S4_PATIENT.name, pii: true }, { t: " 様（ID:" },
+    { t: S4_PATIENT.id, pii: true }, { t: "、\n" },
+    { t: S4_PATIENT.dob, pii: true }, { t: "生）のカルテ抜粋を\n" },
+    { t: "外部AIサービス", pii: false }, { t: "へ送信しようとした。\n" },
+    { t: "連絡先 " }, { t: S4_PATIENT.phone, pii: true },
+    { t: "（ご長男 " }, { t: S4_PATIENT.familyName, pii: true }, { t: "様）も含まれていた。" }
+  ];
+
+  /* 着弾メール2通。1通目で問い合わせを読ませ、2通目で仕事と餌（カルテ抜粋）を渡す
+     （docs/scenario/05_Stage4_情報漏洩.md §状況）。 */
+  const MAIL_S4_SOUDAN = {
+    from: "患者相談窓口 近藤", subj: "患者ご家族より問い合わせ（5A病棟・渡辺様）",
+    body: [
+      "いつもお世話になっております。5A病棟にご入院中の渡辺様のご長男から、下記のお問い合わせをいただきました。",
+      "恐れ入りますが、ご回答の作成にご協力ください。",
+      "「父にもう2週間近く会えていません。面会制限がいつまで続くのか教えてください。」",
+      "「病棟で熱を出している人がたくさんいると、看護師さんから聞いたのですが……父は大丈夫なんでしょうか。」",
+      "「今、父がどういう状態なのか、きちんと説明していただきたいです。」",
+      "なお、ご長男様は今もお電話を切らずにお待ちとのことです。"
+    ]
+  };
+  const MAIL_S4_SHICHO = {
+    from: "5A病棟 師長", subj: "ご家族への返信、お願いできますか",
+    attach: "カルテ抜粋_5A_0710.txt",
+    body: [
+      "上のメール、見た？　私が書くと事務的になっちゃうから、ICTさんでまとめてもらえると助かる。",
+      "参考までに、渡辺さんの今の状態を貼っておきます。返信の中身を決めるのに要るかなと思って。"
+    ]
+  };
+
+  /* 提出フォーム（1欄）の必須要素。家族の問い合わせ3点に対応する
+     （面会制限／検査の経過／今後の連絡窓口）。「発熱者が多い」への
+     答え方は判定しない——正解の言い方をアプリが教えることになるため。 */
+  const S4_REQUIRED = [/面会/, /検査|精査|確認|培養/, /連絡|窓口|担当/];
+
+  /* AIチャットの台本応答。匿名化・抽象化してから渡した依頼にだけ返る
+     （送信前ゲートを正しく通過したチームへの報い）。 */
+  const S4_AI_REPLY = [
+    "承知しました。ご家族向けの返信文の下書きです。",
+    "面会制限の現状・患者様の検査の経過・今後のご連絡方法について、簡潔にまとめました。",
+    "（このモックでは以降の文面生成は行いません）"
+  ];
+
+  /* 苅部さん。職掌が最も合うステージなので台詞は1行のみ、遅延も最短
+     （企画書§6「待たされ＝ヒントのコスト」の唯一の例外・苅部さん.md §5）。
+     「匿名化しろ」とは言わない。 */
+  const S4_KARUBE_LINE = "〔苅部〕それ、外部のAIに送るんですよね。……本気ですか。";
+  const S4_KARUBE_AFTER_TRAP = "〔苅部〕……危なかったですね。次はもう、罰は無いですよ。";
+  const S4_KARUBE_DELAY = 12;   // 短い。仮値・P0実測で確定
+  const S4_GATE_MS = 450;       // 送信前ゲートの検査の一瞬（仮値）
+  const S4_PENALTY = 40;        // 罰ゲームの制限表示（仮値。S3_PENALTY と揃える）
+  /* Stage 4 の回答期限。目安時間そのものを実際のカウントダウンにする
+     （Stage 3 までの「目安」は演出上のタイマーを持たない見積もりだったが、
+     Stage 4 は焦りが罠の発火率に直結するため、あえて可視化する）。
+     超過すると MAIL_S4_CALL が着弾する（s4LandCall）。 */
+  const S4_DEADLINE = 120;      // 2分。仮値・P0実測で確定
+
   /* ⚠️ 未配置の素材：「二正面」——受信トレイに次々着弾し、本命は3通だけ。
      全部丁寧に返すと確実に溢れる。速度ではなく「捨てる判断」を問う設計。
 
@@ -1293,6 +1478,9 @@
   // （hasS1Mail/hasUnlockMail と同じ形。ここだけ一般化しない）。
   let hasS3LabMail = false, readS3Lab = false;
   let hasS3KawaiMail = false, readS3Kawai = false;
+  // Stage 4 の2通。同じ流儀。
+  let hasS4SoudanMail = false, readS4Soudan = false;
+  let hasS4ShichoMail = false, readS4Shicho = false;
 
   /* 6桁コード入力欄 */
   $("code").innerHTML = "";
@@ -1356,6 +1544,8 @@
     const box = $("mails"); box.innerHTML = "";
     const list = [];
     if (hasUnlockMail) list.push({ m: MAIL_UNLOCK, key: "u", read: readU });
+    if (hasS4ShichoMail) list.push({ m: MAIL_S4_SHICHO, key: "s4shicho", read: readS4Shicho });
+    if (hasS4SoudanMail) list.push({ m: MAIL_S4_SOUDAN, key: "s4soudan", read: readS4Soudan });
     if (hasS3KawaiMail) list.push({ m: MAIL_S3_KAWAI, key: "s3kawai", read: readS3Kawai });
     if (hasS3LabMail) list.push({ m: MAIL_S3_LAB, key: "s3lab", read: readS3Lab });
     if (hasS1AddMail) list.push({ m: MAIL_S1_ADD, key: "s1a", read: readS1A });
@@ -1377,17 +1567,20 @@
         else if (it.key === "u") readU = true;
         else if (it.key === "s3lab") readS3Lab = true;
         else if (it.key === "s3kawai") readS3Kawai = true;
+        else if (it.key === "s4soudan") readS4Soudan = true;
+        else if (it.key === "s4shicho") readS4Shicho = true;
         openIdx = it.key;
         if (view === "inbox") renderInbox(); else renderMails();
         if (view === "inbox") readerFor(it.m);
         // 添付を持つメールを開くと教材ビューアが中央ペインの上に開く（ui/03 §1）。
         else if (it.m.attach) {
-          const viewerKey = it.key === "s1a" ? "add" : it.key === "s3kawai" ? "s3contaminated" : "main";
+          const viewerKey = it.key === "s1a" ? "add" : it.key === "s3kawai" ? "s3contaminated" : it.key === "s4shicho" ? "s4chart" : "main";
           openViewer(viewerKey);
         }
-        // Stage 2/3 の中央ペインはワークスペース専用でメール本文を表示できないため、
-        // 添付の無い検査科メールもビューアで読ませる（モック限定の簡略化）。
+        // Stage 2/3/4 の中央ペインはワークスペース専用でメール本文を表示できないため、
+        // 添付の無い検査科メール・相談窓口メールもビューアで読ませる（モック限定の簡略化）。
         else if (it.key === "s3lab") openViewer("s3lab");
+        else if (it.key === "s4soudan") openViewer("s4soudan");
       });
       box.appendChild(b);
     });
@@ -1416,12 +1609,15 @@
   let view = "entry";
 
   function hideOverlays() {
-    ["ov-entry", "ov-brief", "ov-viewer", "ov-unlock", "ov-s1res", "ov-blackout", "ov-lock"].forEach((id) => $(id).classList.add("hide"));
-    // #ov-lock の中身（拡大対応業務のボトル棚）は startPenalty() が動的に注入したもの。
-    // .hide を付けるだけでは DOM とリスナーが残り続けるので、シーンを離れるたびに
-    // 必ず空にする（finishPenalty() 経由でも別途空にする）。
+    ["ov-entry", "ov-brief", "ov-viewer", "ov-unlock", "ov-s1res", "ov-blackout", "ov-alarm", "ov-lock", "ov-s4call"].forEach((id) => $(id).classList.add("hide"));
+    // #ov-lock の中身（拡大対応業務のボトル棚／インシデント報告書）は
+    // startPenalty()/startS4Penalty() が動的に注入したもの。.hide を付けるだけでは
+    // DOM とリスナーが残り続けるので、シーンを離れるたびに必ず空にする
+    // （finishPenalty()/finishS4Penalty() 経由でも別途空にする）。
     const host = $("penalty-host");
     if (host) host.innerHTML = "";
+    // Stage 4 の罰（AI使用ロック）が付けた沈み込みも、シーンを離れたら必ず外す。
+    paneR.classList.remove("locked");
   }
 
   /* AIチャットは最初から画面にいない。Stage 1 では中央ペインの下書きボタンだけを
@@ -1446,12 +1642,14 @@
     $("phs").classList.remove("hide");
   }
 
-  /* Stage 3 だけ台本応答を返すAIチャット。Stage 1/2 は入力しても何も起きない
+  /* Stage 3・4 だけ台本応答を返すAIチャット。Stage 1/2 は入力しても何も起きない
      ダミーのまま（docs/ui/mock/README.md 既知の設計負債）——罠を見せるのに
      必要な最小限だけ実装する。汚染教材を貼り付けたかどうかに関わらず、
      消毒・PPE・隔離・解除の語を含む送信には同じ3つの嘘が返る
      （システムプロンプト注入方式の代替）。 */
   const S3_TRAP_TRIGGER = /消毒|PPE|防護|隔離|解除|基準/;
+  /* Stage 4：匿名化・抽象化してから渡された依頼にだけ台本が返る。 */
+  const S4_REQUEST_TRIGGER = /面会|説明|返信|家族|問い合わせ/;
   function aiBubble(who, html, mine) {
     const log = $("ai-log");
     const empty = log.querySelector(".empty");
@@ -1465,18 +1663,46 @@
   function sendAI() {
     // Stage 1/2 では送信ボタン・textarea に何のリスナーも無かった（完全な
     // ダミー）。#pane-r のマークアップは全ステージ共通なので、ここで
-    // view !== "s3" を弾いておかないと Stage 1/2 でも「応答しません」と
+    // view でガードしておかないと Stage 1/2 でも「応答しません」と
     // 返してしまい、「現状のダミーのまま変更しない」が崩れる。
-    if (view !== "s3") return;
+    if (view !== "s3" && view !== "s4") return;
     const ta = $("ai-input");
     const text = ta.value.trim();
     if (!text) return;
+
+    if (view === "s4") {
+      // 送信前ゲート（docs/ui/00_共通シェルと通奏低音.md §7）。PIIを検知したら
+      // 実際には送信しない——自分の吹き出しも出さない。入力欄の中身は消さない
+      // （罰から戻ったとき、何を送ろうとしていたかが手元にあるほうが学習になる）。
+      const hit = S4_PII.find((p) => p.re.test(text));
+      if (hit) {
+        later(() => {
+          if (view !== "s4") return;   // 判断C
+          if (!s4TrapUsed) {
+            s4TrapUsed = true;
+            triggerLeak();
+          } else {
+            // 上限は1回（企画書§6）。2回目以降は罰を出さず、ブロックだけ告げる。
+            aiBubble("システム", "個人情報を検知したため、送信をブロックしました。");
+            s4NudgeKarube();
+          }
+        }, S4_GATE_MS);
+        return;
+      }
+    }
+
     aiBubble("あなた", esc(text), true);
     ta.value = "";
     later(() => {
-      if (view !== "s3") return;   // 判断C：送信後にシーンを離れていたら黙る
-      if (S3_TRAP_TRIGGER.test(text)) {
-        aiBubble("AI", S3_TRAP_LIE.map(esc).join("<br>"));
+      if (view !== "s3" && view !== "s4") return;   // 判断C：送信後にシーンを離れていたら黙る
+      if (view === "s3") {
+        if (S3_TRAP_TRIGGER.test(text)) {
+          aiBubble("AI", S3_TRAP_LIE.map(esc).join("<br>"));
+        } else {
+          aiBubble("AI", "（このモックでは応答しません）");
+        }
+      } else if (S4_REQUEST_TRIGGER.test(text)) {
+        aiBubble("AI", S4_AI_REPLY.map(esc).join("<br>"));
       } else {
         aiBubble("AI", "（このモックでは応答しません）");
       }
@@ -2309,7 +2535,11 @@
     // 検査科メールには添付が無い。Stage 2/3 の中央ペインはワークスペース専用で
     // メール本文を出す場所が無いため、添付が無いメールもこのビューアで読ませる
     // （本来の .reader 書式ではなく viewer の白紙書式になる簡略化・モック限定）。
-    s3lab: { name: MAIL_S3_LAB.subj, text: MAIL_S3_LAB.body.join("\n\n") }
+    s3lab: { name: MAIL_S3_LAB.subj, text: MAIL_S3_LAB.body.join("\n\n") },
+    // 師長のカルテ抜粋添付。罠の餌そのもの（docs/materials/stage4_chart.md）。
+    s4chart: { name: MAIL_S4_SHICHO.attach, text: S4_CHART_TEXT },
+    // 患者相談窓口メールも添付が無いので s3lab と同じ簡略化を踏襲する。
+    s4soudan: { name: MAIL_S4_SOUDAN.subj, text: MAIL_S4_SOUDAN.body.join("\n\n") }
   };
   function openViewer(which) {
     const v = VIEWERS[which];
@@ -2627,16 +2857,16 @@
   }
 
   async function stage3UnlockSequence() {
-    // TODO: Stage 4 の参加者向け呼称は未決定。「情報漏洩 — 渡す/渡さないの罠」は
-    // 企画書 §5 の設計上の呼称であって、そのまま出すと Stage 3 と同じネタバレになる
-    // （Stage 4 も 💀罠 ステージ）。ここは暫定の副題。
+    // 参加者向け呼称は「回答」。設計上の呼称「情報漏洩 — 渡す/渡さないの罠」は
+    // 企画書 §5 の呼称であって、そのまま出すと Stage 3 と同じネタバレになる
+    // （Stage 4 も 💀罠 ステージ。docs/scenario/05_Stage4_情報漏洩.md）。
     $("ov-unlock").querySelector(".t").textContent = "Stage 4 を解錠しました";
-    $("ov-unlock").querySelector(".s").textContent = "報告 — 委員会への提出";
+    $("ov-unlock").querySelector(".s").textContent = "回答 — ご家族への返信";
     $("ov-unlock").classList.remove("hide");
     await wait(1900);
     if (view !== "s3") return;   // 判断C
     $("ov-unlock").classList.add("hide");
-    // Stage 4 は未実装。位置と発熱の値だけ、あるべき次の停留所へ進めておく。
+    // 位置と発熱の値だけ、あるべき次の停留所へ進めておく。
     TEAMS[2].pos = 4; drawMarks();
     $("fever").textContent = "14";
   }
@@ -2754,6 +2984,248 @@
       return;
     }
     log.insertAdjacentHTML("beforeend", '<p class="wait">' + S3_KARUBE_AFTER_TRAP + "</p>");
+    if (!phsOpen) phsRing();
+  }
+
+  /* ------------------------------------------------------------------ */
+  /* Stage 4：情報漏洩 —— 送信前ゲートと黒塗り                             */
+  /*                                                                    */
+  /* 正典は docs/scenario/05_Stage4_情報漏洩.md ・ docs/ui/05_Stage4.md。 */
+  /* Stage 3 と違い、罠は提出フォームではなく AIチャットの送信前ゲート     */
+  /* （sendAI() 内）で発火する。ここにある関数群は Stage 3 の実装パターン  */
+  /* （renderStageN/checkStageN/runStageNVerdict/stageNUnlockSequence/    */
+  /* stopN/NudgeKarube）を1対1で踏襲する。                               */
+  /* ------------------------------------------------------------------ */
+  let s4Verdicting = false;
+  let s4TrapUsed = false;     // インシデント発火は1回まで（企画書§6）
+  let s4PenaltyTick = null;
+  let s4Masked = new Set();   // 黒塗り済みトークンの index
+  let s4T0 = 0, s4Timer = 0;
+  let s4CallLanded = false;   // お怒りの電話メールは1回きり
+
+  function s4Stop() {
+    clearInterval(s4PenaltyTick); s4PenaltyTick = null;
+  }
+
+  /* --- 回答期限とお怒りの電話 ------------------------------------------- */
+  /* Stage 2 の締切超過（罰は業務が増える。s2StartDeadline/s2LandAddendum）と
+     同じ思想。提出は一切ロックせず、判定の必須要素も増やさない——超過の罰は
+     あくまで「電話が来る」という演出と、それを読む時間そのもの。 */
+  function s4StartDeadline() {
+    clearInterval(s4Timer);
+    s4T0 = Date.now();
+    s4CallLanded = false;
+    s4Timer = setInterval(s4DeadlineFrame, 250);
+    s4DeadlineFrame();
+  }
+  function s4StopDeadline() { clearInterval(s4Timer); s4Timer = 0; }
+
+  function s4DeadlineFrame() {
+    const el = $("s4-dl");
+    if (!el) { s4StopDeadline(); return; }
+    const left = S4_DEADLINE - Math.floor((Date.now() - s4T0) / 1000);
+    if (left <= 0) {
+      el.classList.remove("hot"); el.classList.add("over");
+      $("s4-dl-t").textContent = "回答期限超過";
+      if (!s4CallLanded) { s4CallLanded = true; s4ShowCall(); }
+      s4StopDeadline();
+      return;
+    }
+    el.classList.toggle("hot", left <= 15);
+    $("s4-dl-t").textContent =
+      String(Math.floor(left / 60)).padStart(2, "0") + ":" + String(left % 60).padStart(2, "0");
+    $("s4-dl-b").style.width = (left / S4_DEADLINE * 100) + "%";
+  }
+
+  /* 患者相談窓口の近藤さんから着信ポップアップが割り込む（1回きり）。
+     メール着弾ではなく全画面オーバーレイにしたのは、01_Prologue.md の事務長ブリーフィングと
+     同じ「窓口ではない登場人物」の一方向・1回きりの登場（docs/character/00_お助けキャラの原則.md §0）
+     に当たるため——新しいウィンドウにはなるが、対話にはならない（[了解しました]の1つだけ）ので
+     「窓口は一つ」の不変条件を破らない。罠ではないので暗転も警報も使わず、通話中の落ち着いた見た目にする。 */
+  function s4ShowCall() {
+    $("ov-s4call").classList.remove("hide");
+  }
+
+  function renderStage4() {
+    hideOverlays();
+    paneL.classList.remove("hide"); paneR.classList.remove("hide");
+    s4Verdicting = false; s4TrapUsed = false; s4Masked = new Set();
+    hasS4SoudanMail = true; hasS4ShichoMail = true;
+    openIdx = "s4soudan"; readS4Soudan = false; readS4Shicho = false;
+    renderMails("s4soudan");
+
+    paneC.innerHTML =
+      '<div class="work">' +
+        '<div class="stage-title">Stage 4　回答</div>' +
+        '<div class="brief">渡辺様のご家族への返信文を作成し、提出せよ。</div>' +
+        // 締切は課題カードの中に1本（Stage 2 §「締切は課題カードの中に1本」と同じ配置）。
+        // .s2-dl は Stage 2 発の名前だがステージ非依存の見た目なので、そのまま再利用する。
+        '<div class="s2-dl" id="s4-dl"><span>電話でお待ちです</span>' +
+          '<b id="s4-dl-t">02:00</b><span class="bar"><i id="s4-dl-b" style="width:100%"></i></span></div>' +
+        '<div class="box" id="s4-box">' +
+          '<textarea class="submit-area" id="s4-reply" style="min-height:180px"></textarea></div>' +
+        '<div class="row-end" id="s4-actions">' +
+          '<button class="btn" id="btn-s4-submit">提出する</button>' +
+        "</div>" +
+        '<div id="s4-verdict"></div>' +
+      "</div>";
+
+    $("btn-s4-submit").addEventListener("click", runStage4Verdict);
+    s4StartDeadline();
+
+    // 苅部さんの時限トリガー（仮値・P0実測で確定）。Stage 4 だけ短い
+    // （企画書§6「待たされ＝ヒントのコスト」の唯一の例外）。
+    later(() => { if (view === "s4") { phsS4Pending = true; phsRing(); } }, S4_KARUBE_DELAY * 1000);
+  }
+
+  function checkStage4(text) {
+    return S4_REQUIRED.every((re) => re.test(text));
+  }
+
+  async function runStage4Verdict() {
+    const v = $("s4-verdict");
+    if (!v || s4Verdicting) return;
+    s4Verdicting = true;
+    $("s4-box").classList.remove("warn");
+    const text = $("s4-reply").value;
+    $("s4-actions").classList.add("hide");
+    v.innerHTML = '<div class="verdict"><div class="lead">提出を確認しています…</div></div>';
+    const box = v.firstElementChild;
+    await wait(500);
+    if (view !== "s4") { s4Verdicting = false; return; }   // 判断C
+
+    if (!checkStage4(text)) {
+      $("s4-box").classList.add("warn");
+      const d = document.createElement("div");
+      d.className = "lead";
+      d.textContent = "まだ足りません（ご家族の問い合わせに答えられていない項目があります）。";
+      box.appendChild(d);
+      $("s4-actions").classList.remove("hide");
+      s4Verdicting = false;
+      return;
+    }
+
+    const d = document.createElement("div");
+    // 解錠されるのは「次の」ステージ。Stage 4 をクリアしたので Stage 5 が開く
+    // （stage4UnlockSequence() のオーバーレイ文言と必ず揃えること）。
+    d.className = "done"; d.textContent = "Stage 5 を解錠しました";
+    box.appendChild(d);
+    s4Verdicting = false;
+    stage4UnlockSequence();
+  }
+
+  async function stage4UnlockSequence() {
+    s4StopDeadline();   // クリア済みなので回答期限は止める（罰は時間＝クリア後に近藤さんの着信を割り込ませない）
+    $("ov-unlock").querySelector(".t").textContent = "Stage 5 を解錠しました";
+    $("ov-unlock").querySelector(".s").textContent = "掲示 — 面会制限のお知らせ";
+    $("ov-unlock").classList.remove("hide");
+    await wait(1900);
+    if (view !== "s4") return;   // 判断C
+    $("ov-unlock").classList.add("hide");
+    // Stage 5 は未実装。位置だけ、あるべき次の停留所へ進めておく。
+    // 発熱インジケータは動かさない——Stage 4・5 は 14 のまま継続
+    // （docs/scenario/00_未知ウイルスの通奏低音.md §3「●●●継続」）。
+    TEAMS[2].pos = 5; drawMarks();
+  }
+
+  /* インシデント発火：alarm → lock。責める文言も安心させる文言も置かない
+     （事実の報告のみ。docs/ui/05_Stage4.md §alarmオーバーレイの初出）。 */
+  async function triggerLeak() {
+    $("ov-alarm").classList.remove("hide");
+    await wait(1600);
+    if (view !== "s4") return;   // 判断C
+    $("ov-alarm").classList.add("hide");
+    startS4Penalty();
+  }
+
+  /* インシデント対応業務：報告書の黒塗り。
+     塗るべきトークンと塗ってはいけないトークンが混在し、判断がいる——
+     Stage 3 のボトル補充（押して待つだけ）とは質の違う罰にしてある。 */
+  function startS4Penalty() {
+    s4Masked = new Set();
+    $("lock-hd").textContent = "インシデント対応業務：報告書の作成";
+
+    $("penalty-host").innerHTML =
+      '<div class="note">個人情報にあたる箇所を黒く塗り、提出してください。</div>' +
+      '<div class="report" id="report"></div>' +
+      '<div class="row-end"><button class="btn" id="btn-s4-report-submit">報告書を提出</button></div>' +
+      '<div id="s4-report-verdict"></div>';
+    drawRedact();
+    $("btn-s4-report-submit").addEventListener("click", submitReport);
+
+    // Stage 4 の罰の本体は「AI使用ロック」。灰色に沈めて入力不可にする
+    // （docs/ui/04_Stage3.md §やらないこと「Stage 3 の罰で AI 入力を禁止すること」の裏返し）。
+    paneR.classList.add("locked");
+
+    $("ov-lock").classList.remove("hide");
+    let remain = S4_PENALTY;
+    const paint = () => { $("lock-timer").textContent = "00:" + String(Math.max(0, remain)).padStart(2, "0"); };
+    paint();
+    clearInterval(s4PenaltyTick);
+    s4PenaltyTick = setInterval(() => {
+      remain--; paint();
+      if (remain <= 0) { clearInterval(s4PenaltyTick); s4PenaltyTick = null; }
+    }, 1000);
+  }
+
+  function drawRedact() {
+    const host = $("report");
+    if (!host) return;
+    host.innerHTML = S4_REPORT.map((seg, i) => {
+      if (seg.pii === undefined) return esc(seg.t);
+      const masked = s4Masked.has(i);
+      return '<button type="button" data-i="' + i + '" class="tok' + (masked ? " masked" : "") + '">' + esc(seg.t) + "</button>";
+    }).join("");
+    host.querySelectorAll(".tok").forEach((el) => {
+      el.addEventListener("click", () => toggleRedact(Number(el.dataset.i)));
+    });
+  }
+
+  function toggleRedact(i) {
+    if (s4Masked.has(i)) s4Masked.delete(i); else s4Masked.add(i);
+    drawRedact();
+  }
+
+  /* 提出時に判定する。塗り漏れ・過剰黒塗りとも差し戻し（無制限・無罰）——
+     Stage 3 の再提出と同じ扱い（docs/ui/05_Stage4.md §4）。 */
+  function submitReport() {
+    const v = $("s4-report-verdict");
+    const missing = S4_REPORT.some((seg, i) => seg.pii === true && !s4Masked.has(i));
+    const over = S4_REPORT.some((seg, i) => seg.pii === false && s4Masked.has(i));
+    if (missing) {
+      v.innerHTML = '<div class="verdict"><div class="lead">個人情報が残っています。</div></div>';
+      return;
+    }
+    if (over) {
+      v.innerHTML = '<div class="verdict"><div class="lead">日時や部署名まで黒く塗られていて、何が起きたのか分かりません。</div></div>';
+      return;
+    }
+    v.innerHTML = '<div class="verdict"><div class="done">報告書を医療安全管理室へ送信しました。</div></div>';
+    later(finishS4Penalty, 1200);
+  }
+
+  function finishS4Penalty() {
+    s4Stop();
+    $("ov-lock").classList.add("hide");
+    $("penalty-host").innerHTML = "";
+    s4Masked = new Set();
+    paneR.classList.remove("locked");
+    if (view !== "s4") return;   // 判断C
+    // Stage 4 の提出フォームへ復帰。入力は保持する（Stage 3 §NG時と同じ理由）。
+    $("s4-verdict").innerHTML = "";
+    $("s4-actions").classList.remove("hide");
+    s4NudgeKarube();
+  }
+
+  /* 苅部さんの追加ヒント。Stage 3 の s3NudgeKarube() と同じ流儀。 */
+  function s4NudgeKarube() {
+    const log = $("phs-log");
+    if (!log || log.childElementCount === 0) {
+      phsS4Pending = true;
+      phsRing();
+      return;
+    }
+    log.insertAdjacentHTML("beforeend", '<p class="wait">' + S4_KARUBE_AFTER_TRAP + "</p>");
     if (!phsOpen) phsRing();
   }
 
@@ -3020,6 +3492,8 @@
   // Stage 3 の1段目トリガー（出典を問う）で立つフラグ。本番は3段だが、
   // モックでは1段目・2段目を合体して2段に簡略化する（PR2計画・判断A）。
   let phsS3Pending = false;
+  // Stage 4 のトリガーで立つフラグ。台詞は1行のみ（苅部さん.md §4「Stage 4 が最も自然」）。
+  let phsS4Pending = false;
   function phsRing() {
     $("phs").classList.remove("hide");
     $("phs-badge").classList.remove("hide");
@@ -3060,6 +3534,12 @@
       later(() => { log.insertAdjacentHTML("beforeend", "<p>" + S3_KARUBE_LINES[1] + "</p>"); }, 900);
       return;
     }
+    if (phsS4Pending) {
+      // Stage 4 は職掌が最も合うステージなので台詞は1行のみ。「匿名化しろ」とは言わない。
+      phsS4Pending = false;
+      log.innerHTML = "<p>" + S4_KARUBE_LINE + "</p>";
+      return;
+    }
     // 待たされることがヒントのコスト。開いてもまだ返事は来ていない。
     log.innerHTML = '<p class="wait">〔苅部〕今、別病棟対応中。あとで。</p>';
     later(() => { log.insertAdjacentHTML("beforeend", "<p>" + PHS_LINES[0] + "</p>"); }, 1400);
@@ -3076,13 +3556,14 @@
     { id: "s1",      label: "④ Stage 1 平常運転", mode: "peace", note: "画面はまだ明るい（peace）。アウトブレイクは起きていない——起きていないのに、着任初日のICTが1分刻みのメール処理をやらされる。10通すべて平時の事務で、緊急のものは1通も無い。急変はこのステージを終えた後に来る。冒頭に事務長のブリーフィングが入る。「派遣は1分、他の職員は5分」——バグではなく人が決めた基準だと本人の口から告げる。[了解しました] を押した瞬間に締切のカウントとレースが始まる（読んでいる時間は減らない）。1回目：全通が本物、AIは無い。1通ごとの締切が並走し、督促は来ない——時間切れは二度と返信できない一発勝負。1回目が終わって全通捌けていなければ、そこで初めて苅部さんが割り込みAIを渡す（固定タイマーではなく「失敗した」が発火条件、5分ルールの実在も認める）。2回目：新しい10通に「要点→AIに下書きさせる→送信」で再挑戦。手動で1回目を全通さばき切っても構わない、ボタンの使用は強制しない。検査科メール（8通目）に未知ウイルスの種が1粒仕込んである。" },
     { id: "s2",      label: "⑤ Stage 2 火の手",   mode: "alert", note: "直前に急変（赤帯・転調）が入る。ここで初めて「5A病棟でMRSA疑い」が明かされ、器の色が peace から alert へ落ちる。メールを片付けて一息ついた瞬間に世界が変わる——段階を追って追い詰めるための順序。課題は師長から届く汚いExcelのラインリスト整形。右のAIチャットパネルはここが初出現——Stage 1で苅部さんが渡すのは中央ペインの下書きボタンだけ。Stage 2開始からS2_KARUBE_DELAY秒後、苅部さんが皮肉2行→「送りました」で解禁する。「添付を開く」→［コピー］→AIへ貼り付け→提出、そこから先は自分で言語化させる。整形対象に MRSA陰性なのに発熱ありの3名（005/6/008）が紛れており、Stage 3 で回収される。" },
     { id: "unlock",  label: "⑥ 解錠",       mode: "alert", note: "報酬は師長の承認だけ。スコアも星も出さない。同時に「発熱」が 3→5 に静かに変わる——解錠の喜びの陰で、誰も見ていない数字が増える。" },
-    { id: "s3",      label: "⑦ Stage 3 暫定", mode: "crisis", note: "本研修の心臓部（設計ドキュメント上の呼称は「嘘」だが、参加者に見える名は「暫定」——ネタバレを避けるため）。器が alert から crisis へ落ち、院内状況インジケータが「発熱9」でクレッシェンド表示になる（他の平時指標が消える）。検査科メールが既知検査すべて陰性を確定通知し、Stage 2 の伏線3名（005/6/008）を患者IDで名指しして回収する。カワイさんのメールに汚染教材（発熱対応早見表）が添付され、AIチャットも同じ3つの嘘（標準予防策止まりのPPE・解熱での解除・濃度指定を欠いた消毒に壁床の過剰消毒が乗る・架空の出典）を返す。3欄（環境消毒／PPE・隔離／解除基準）に提出し、罠キーワードを含むと blackout→lock（罰ゲーム：接触者リスト整形）へ。正典マニュアルは Prologue から左ペイン下部の「共有フォルダ」に常設済み——カワイさんが早見表を拾ったのと同じ棚に正典も入っている。気づいて先に読んだチームが報われる設計。" }
+    { id: "s3",      label: "⑦ Stage 3 暫定", mode: "crisis", note: "本研修の心臓部（設計ドキュメント上の呼称は「嘘」だが、参加者に見える名は「暫定」——ネタバレを避けるため）。器が alert から crisis へ落ち、院内状況インジケータが「発熱9」でクレッシェンド表示になる（他の平時指標が消える）。検査科メールが既知検査すべて陰性を確定通知し、Stage 2 の伏線3名（005/6/008）を患者IDで名指しして回収する。カワイさんのメールに汚染教材（発熱対応早見表）が添付され、AIチャットも同じ3つの嘘（標準予防策止まりのPPE・解熱での解除・濃度指定を欠いた消毒に壁床の過剰消毒が乗る・架空の出典）を返す。3欄（環境消毒／PPE・隔離／解除基準）に提出し、罠キーワードを含むと blackout→lock（罰ゲーム：接触者リスト整形）へ。正典マニュアルは Prologue から左ペイン下部の「共有フォルダ」に常設済み——カワイさんが早見表を拾ったのと同じ棚に正典も入っている。気づいて先に読んだチームが報われる設計。" },
+    { id: "s4",      label: "⑧ Stage 4 回答", mode: "crisis", note: "参加者に見える名は「回答」（設計上の呼称「情報漏洩」は罠を予告するので出さない）。発熱インジケータは Stage 3 解錠時の14のまま動かない——山ではなく維持の回。患者相談窓口が家族の問い合わせ（面会制限・「発熱者が多いらしい」・説明の要求）を転送し、5A病棟師長がカルテ抜粋（患者005・渡辺 三郎、Stage 2/3 の伏線と同一人物）を添付して返信文の作成を依頼する。罠はStage 3と違い提出フォームではなく送信前ゲート（AIチャットの手前）にあり、カルテ抜粋の固有情報を送信すると alarm→lock（罰ゲーム：インシデント報告書の黒塗り）へ。塗るべき情報と塗ってはいけない一般語が混在し、判断がいる罰にしてある。AIチャットは罰ゲーム中だけ入力不可（Stage 3の罰との差）。苅部さんはここだけ返信が速い唯一の例外。" }
   ];
 
   function go(id, keepMode) {
     clearLater();
     verdicting = false;
-    s1Stop(); s2Stop(); s2StopDeadline(); s3Stop();
+    s1Stop(); s2Stop(); s2StopDeadline(); s3Stop(); s4Stop(); s4StopDeadline();
     hasS1AddMail = false; readS1A = false;   // 追加分は締切超過で改めて着弾する
     view = id;
     const step = STEPS.find((s) => s.id === id) || STEPS[0];
@@ -3090,11 +3571,11 @@
 
     // 画面ごとの初期化
     $("redband").classList.add("hide");
-    aiRevealed = false; paneR.classList.add("collapsed");
+    aiRevealed = false; paneR.classList.add("collapsed"); paneR.classList.remove("locked");
     $("phs").classList.add("hide");
     $("phs-win").classList.add("hide");
     $("phs-log").innerHTML = "";
-    phsOpen = false; phsShown = 0; phsIntroPending = false; phsAIPending = false; phsS3Pending = false;
+    phsOpen = false; phsShown = 0; phsIntroPending = false; phsAIPending = false; phsS3Pending = false; phsS4Pending = false;
     $("ai-log").innerHTML = '<div class="empty">（まだ何もありません）</div>';
 
     if (id === "entry" || id === "welcome" || id === "inbox") {
@@ -3102,6 +3583,7 @@
       stopClock();
       hasS1Mail = false; hasUnlockMail = false; readS1 = false; readU = false;
       hasS3LabMail = false; hasS3KawaiMail = false; readS3Lab = false; readS3Kawai = false;
+      hasS4SoudanMail = false; hasS4ShichoMail = false; readS4Soudan = false; readS4Shicho = false;
       $("fever").textContent = "3";
       $("vitals").classList.remove("crescendo");
       TEAMS[2].pos = 1; drawMarks();
@@ -3122,6 +3604,7 @@
     else if (id === "s1") {
       hasS1Mail = false; hasUnlockMail = false; $("fever").textContent = "3";
       hasS3LabMail = false; hasS3KawaiMail = false; readS3Lab = false; readS3Kawai = false;
+      hasS4SoudanMail = false; hasS4ShichoMail = false; readS4Soudan = false; readS4Shicho = false;
       $("vitals").classList.remove("crescendo");
       TEAMS[2].pos = 1; drawMarks();
       renderStage1Flood(s1SkipBrief);
@@ -3129,6 +3612,7 @@
     else if (id === "s2") {
       hasUnlockMail = false; $("fever").textContent = "3";
       hasS3LabMail = false; hasS3KawaiMail = false; readS3Lab = false; readS3Kawai = false;
+      hasS4SoudanMail = false; hasS4ShichoMail = false; readS4Soudan = false; readS4Shicho = false;
       $("vitals").classList.remove("crescendo");
       TEAMS[2].pos = 2; drawMarks();
       // AIパネルはここでは出さない。Stage 2 独自の苅部さんトリガー
@@ -3138,6 +3622,7 @@
     else if (id === "unlock") {
       hasUnlockMail = false; readU = false; $("fever").textContent = "3";
       hasS3LabMail = false; hasS3KawaiMail = false; readS3Lab = false; readS3Kawai = false;
+      hasS4SoudanMail = false; hasS4ShichoMail = false; readS4Soudan = false; readS4Shicho = false;
       $("vitals").classList.remove("crescendo");
       revealAI(true);
       renderStage2Excel();
@@ -3148,10 +3633,19 @@
     }
     else if (id === "s3") {
       hasUnlockMail = false; $("fever").textContent = "9";
+      hasS4SoudanMail = false; hasS4ShichoMail = false; readS4Soudan = false; readS4Shicho = false;
       $("vitals").classList.add("crescendo");
       TEAMS[2].pos = 3; drawMarks();
       revealAI(true);   // Stage 2 を経ずに devbar から直接来ても、AIパネルは既に出ている前提
       renderStage3();
+    }
+    else if (id === "s4") {
+      hasUnlockMail = false; $("fever").textContent = "14";
+      hasS3LabMail = false; hasS3KawaiMail = false; readS3Lab = false; readS3Kawai = false;
+      $("vitals").classList.add("crescendo");
+      TEAMS[2].pos = 4; drawMarks();
+      revealAI(true);   // Stage 3 を経ずに devbar から直接来ても、AIパネルは既に出ている前提
+      renderStage4();
     }
 
     $("steps").querySelectorAll("button").forEach((b) => {
@@ -3202,12 +3696,20 @@
     // ここでAIを出さない。早期に開閉しただけで解禁されると、苅部さんの
     // トリガー（S2_KARUBE_DELAY秒後）がまるごとスキップされてしまう。
   });
+  $("btn-s4call-close").addEventListener("click", () => {
+    $("ov-s4call").classList.add("hide");
+  });
   $("btn-copy").addEventListener("click", () => {
     const btn = $("btn-copy");
-    const txt = VIEWERS[$("ov-viewer").dataset.which].text;
+    const which = $("ov-viewer").dataset.which;
+    const txt = VIEWERS[which].text;
     if (navigator.clipboard) navigator.clipboard.writeText(txt).catch(() => {});
     btn.textContent = "コピーしました";
     later(() => { btn.textContent = "コピー"; }, 1400);
+    // カルテ抜粋をコピーした瞬間、苅部さんの時限トリガーより先に反応させる
+    // （渡された直後に声をかけてくるほうが、職掌が最も合うキャラの説得力になる。
+    // docs/ui/05_Stage4.md §5「時限トリガー、または開いた／コピーした瞬間——どちらか早い方」）。
+    if (which === "s4chart" && view === "s4") { phsS4Pending = true; phsRing(); }
   });
   $("btn-open-manual").addEventListener("click", () => openViewer("s3manual"));
   $("btn-open-quickref").addEventListener("click", () => openViewer("s3contaminated"));

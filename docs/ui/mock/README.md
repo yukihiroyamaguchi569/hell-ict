@@ -3,7 +3,7 @@
 **捨てる前提の使い捨て実装。** React 実装へ持ち越すのは CSS トークン名（`--bg` `--accent` 等、[00_共通シェルと通奏低音.md](../00_共通シェルと通奏低音.md) 実装メモ）だけで、
 JS 構造そのものは資産ではない。単一ファイル・フレームワーク無し・ビルド無し。ブラウザで直接開けば動く。
 
-このファイルは本体 3201 行を頭から読まずに済ませるための地図。**該当関数だけを Read で読む。**
+このファイルは本体 3743 行を頭から読まずに済ませるための地図。**該当関数だけを Read で読む。**
 
 > 📌 **現フェーズではこのモックが正典。** Stage 3 の作り込み中、`docs/企画書.md` との差分は
 > 意図的に放置している（モックが固まってから企画書へ一括反映し、そのとき version を上げる）。
@@ -20,33 +20,34 @@ JS 構造そのものは資産ではない。単一ファイル・フレーム�
 
 | 範囲 | 内容 |
 |---|---|
-| 4-653 | `<style>`。テーマトークン（`data-mode="peace/alert/crisis"`）、2003年書式（`.legacy` `.reader`）、オーバーレイのCSS一式（`.blackout`/`.lock` を含む） |
-| 655-904 | HTML。`#screen` 配下は中央ペイン以外ほぼ静的マークアップ＋オーバーレイの器 |
-| 905-3201 | `<script>`（IIFE, `"use strict"`） |
+| 4-705 | `<style>`。テーマトークン（`data-mode="peace/alert/crisis"`）、2003年書式（`.legacy` `.reader`）、オーバーレイのCSS一式（`.blackout`/`.lock`/`.alarm`/`.callin` を含む） |
+| 707-996 | HTML。`#screen` 配下は中央ペイン以外ほぼ静的マークアップ＋オーバーレイの器 |
+| 997-3743 | `<script>`（IIFE, `"use strict"`） |
 
 ## シーン管理の中核（まずここを読む）
 
-- **`view`**（1394）— 唯一のシーン識別子（文字列）。
-- **`STEPS`**（3030-）— シーン定義の**唯一のテーブル**。`{ id, label, mode, note }`。devbar のボタンとURLハッシュ起動はここから自動生成されるので、新シーンを足すときは基本ここに1行足すだけでよい。
-- **`go(id, keepMode)`**（3040-）— シーン遷移の本体。冒頭で `clearLater()` と各ステージの `Stop()` を呼んで前のシーンのタイマーを止める（新ステージを足したら**ここに `Stop()` を追加し忘れない**こと）。
-- **`hideOverlays()`**（1396-）— オーバーレイIDの配列を舐めて閉じる。新しいオーバーレイを足したらこの配列に追加。Stage 3 以降、罰ゲームが動的に注入した `#grid` 等（`#penalty-grid-host` の中身）もここで一緒に空にする——**`.hide` を付けるだけでは id 重複が残る**（後述の負債参照）。
+- **`view`**（1608）— 唯一のシーン識別子（文字列）。
+- **`STEPS`**（3550-）— シーン定義の**唯一のテーブル**。`{ id, label, mode, note }`。devbar のボタンとURLハッシュ起動はここから自動生成されるので、新シーンを足すときは基本ここに1行足すだけでよい。
+- **`go(id, keepMode)`**（3561-）— シーン遷移の本体。冒頭で `clearLater()` と各ステージの `Stop()` を呼んで前のシーンのタイマーを止める（新ステージを足したら**ここに `Stop()` を追加し忘れない**こと。Stage 4 は `s4Stop()`（罰の秒読み）と `s4StopDeadline()`（回答期限）の**2本**を呼ぶ——Stage 2 が `s2Stop()`/`s2StopDeadline()` と2本立てなのと同じ理由）。
+- **`hideOverlays()`**（1610-）— オーバーレイIDの配列を舐めて閉じる。新しいオーバーレイを足したらこの配列に追加。Stage 3 以降、罰ゲームが動的に注入した `#grid` 等（`#penalty-host` の中身）もここで一緒に空にする——**`.hide` を付けるだけでは id 重複が残る**（後述の負債参照）。Stage 4 の罰（AI使用ロック）が付ける `pane-r.locked` も、離脱時にここで外す。
 - **`transition()`**— 急変（Stage 1→2 の転調）専用。`go()` を経由しない。
 
 ## ステージごとのエントリ
 
 | ステージ | エントリ関数 | 状態 |
 |---|---|---|
-| Stage 1 | `renderStage1Flood()`（1989） | `s1` オブジェクト1つに集約 |
-| Stage 2（火の手） | `renderStage2Excel()`（2036） | `s2Grid` / `s2Hot` / `s2T0` 等、モジュール変数に散在 |
-| Stage 2（二正面） | `renderStage2()`（2921） | **実装済みだがどこからも呼ばれない＝未配置**（企画書§5「未配置の素材」） |
-| Stage 3（暫定） | `renderStage3()`（2508） | 3欄のテキストエリア。判定は `checkStage3()`（2542）、罠発火は `triggerTrap()`（2625）→`startPenalty()`（2639）。苅部さんの3段トリガーは2段に簡略化（`phsS3Pending`） |
+| Stage 1 | `renderStage1Flood()`（2235） | `s1` オブジェクト1つに集約 |
+| Stage 2（火の手） | `renderStage2Excel()`（2281） | `s2Grid` / `s2Hot` / `s2T0` 等、モジュール変数に散在 |
+| Stage 2（二正面） | `renderStage2()`（3433） | **実装済みだがどこからも呼ばれない＝未配置**（企画書§5「未配置の素材」） |
+| Stage 3（暫定） | `renderStage3()`（2755） | 3欄のテキストエリア。判定は `checkStage3()`（2789）、罠発火は `triggerTrap()`（2874）→`startPenalty()`（2887）。苅部さんの3段トリガーは2段に簡略化（`phsS3Pending`） |
+| Stage 4（回答） | `renderStage4()`（3049） | 1欄のテキストエリア。判定は `checkStage4()`（3081）。罠は提出フォームではなく **`sendAI()` 内の送信前ゲート**にあり、検知すると `triggerLeak()`（3133）→`startS4Penalty()`（3144）。回答期限（`s4StartDeadline()`3014）超過で近藤さんの着信ポップアップが割り込む（`s4ShowCall()`3045）。苅部さんは1段のみ（`phsS4Pending`） |
 
-> **参加者に見えるステージ名は「暫定」**。「嘘」は設計ドキュメント上の呼称で、画面に出すと罠を予告してしまう
-> （[../04_Stage3.md](../04_Stage3.md) 冒頭 ⚠️）。`unlock` オーバーレイの副題も同じ理由で罠の名前を書かない。
+> **参加者に見えるステージ名は「暫定」「回答」**。「嘘」「情報漏洩」は設計ドキュメント上の呼称で、画面に出すと罠を予告してしまう
+> （[../04_Stage3.md](../04_Stage3.md) 冒頭 ⚠️・[../05_Stage4.md](../05_Stage4.md) 冒頭 ⚠️）。`unlock` オーバーレイの副題も同じ理由で罠の名前を書かない。
 
-文言・教材データの定数は 914-1200 あたりの帯にまとまっている（`S1_MAILS` 等、ステージ別プレフィックス。Stage 3 は `S3_*`）。
+文言・教材データの定数は 1017-1413 あたりの帯にまとまっている（`MAILS`/`MAIL_S1` 等、ステージ別プレフィックス。Stage 3 は `S3_*`、Stage 4 は `S4_*`）。
 
-## Stage 3：判定の作り（`S3_REQUIRED`1154 / `S3_TRAP`1170 / `checkStage3`2542）
+## Stage 3：判定の作り（`S3_REQUIRED`1246 / `S3_TRAP`1262 / `checkStage3`2789）
 
 判定はルールベースのみ。LLM は呼ばない（企画書 §7）。**罠 → 不足の順**で、指す欄は常に画面の並び順
 （`S3_ORDER = ["ppe","release","clean"]`）で最初に当たったもの。
@@ -70,20 +71,56 @@ Stage 2 のグリッド機構とは**もう一切関わらない**——1本ク�
 > `S2_COLS` の直接参照に戻してある。`s2GridBackup`/`s2HotBackup`/`checkContactsGrid()` と
 > `docs/materials/stage3_contacts.tsv` も削除済み。**Stage 2 側にはもうStage 3のための仕掛けが無い。**
 
+## Stage 4：送信前ゲートと黒塗り
+
+Stage 3 と違い、**罠は提出フォームではなく AIチャットの送信前ゲートにある**。`sendAI()`（1663）が
+Stage 4 のときだけ `S4_PII`（1343）で入力を検査し、ヒットすれば自分の吹き出しを出さずに `triggerLeak()`
+（3133）→ `startS4Penalty()`（3144）へ進む。ヒットしなければ従来どおり吹き出しを出し、`S4_REQUEST_TRIGGER`
+（1652）にマッチする内容だけ `S4_AI_REPLY` の台本を返す（Stage 3 の `S3_TRAP_TRIGGER` と同じ思想）。
+
+- **`S4_PATIENT`（1314）が唯一の情報源。** 検知パターン（`S4_PII`）・カルテ抜粋（`S4_CHART_TEXT`）・
+  黒塗り下書き（`S4_REPORT`）の3箇所とも、ここから作った値だけを参照する。Stage 3 の負債（教材の文言と
+  判定の正規表現が別々の場所にあり片方だけ直すと静かに壊れる）を Stage 4 で繰り返さないための構成。
+  カルテ抜粋は氏名・ID・生年月日・連絡先を独立した項目欄にせず、**経過欄の文中に織り込んである**——
+  項目欄にまとめると個人情報だけが上に固まり、経過欄だけをコピーすればゲートを踏まずに正解ルートへ
+  行けてしまうため（`docs/materials/stage4_chart.md` §抜粋の 📌）。
+- **罰ゲームは黒塗り（`drawRedact()`3171/`toggleRedact()`3184/`submitReport()`3191）。** `S4_REPORT`（1354）は
+  `{ t, pii }` の配列——`pii: true` が塗るべきトークン、`pii: false` が塗ってはいけない一般語のトークン、
+  `pii` キー無しはクリックできない地の文。**塗る前の見た目はすべて同じ**（`.tok` に統一）——スタイルで
+  答えを教えない。
+- **AI使用ロックが罰の本体。** `startS4Penalty()` が `paneR.classList.add("locked")` を付け、
+  `finishS4Penalty()`（3207）と `hideOverlays()` の両方で外す（Stage 3 の `#penalty-host` 後始末と同じ二重の作法）。
+- 苅部さんは `S4_KARUBE_LINE`（1405・1行のみ）・`S4_KARUBE_DELAY`（短い・仮値12秒）。カルテ抜粋を `[コピー]`
+  した瞬間にも `phsS4Pending` が立つ（`btn-copy` ハンドラ）——時限トリガーとどちらか早い方。
+- `#ov-lock` は Stage 3 と共有する。見出し（`#lock-hd`）は `startPenalty()`/`startS4Penalty()` が
+  **毎回明示的にセットし直す**（`unlock` オーバーレイと同じ流儀。後述の負債参照）。
+- **回答期限（`S4_DEADLINE`＝2分・1414）は Stage 4 だけ実際のカウントダウンにしてある。** `s4StartDeadline()`
+  （3014）/`s4StopDeadline()`/`s4DeadlineFrame()` は Stage 2 の `s2StartDeadline()` 系と1対1で対応する
+  （課題カードに `#s4-dl`/`#s4-dl-t`/`#s4-dl-b` を持たせ、CSSクラス `.s2-dl` をそのまま再利用）。
+  超過すると `s4ShowCall()`（3045）が全画面オーバーレイ `#ov-s4call`（患者相談窓口・近藤さんの着信）を開く——
+  **メールの着弾ではなくポップアップにした**（devbar での指示変更。当初はメール3通目だったが、
+  「焦りを即座に体感させたい」ため割り込み式に差し替えた）。事務長の Stage 1 ブリーフィングと同じ
+  `.sysdlg` の窓を流用し、`.callin` 修飾クラスでタイトルバー文言とポートレートだけ差し替える。
+  **近藤さんのイラストは制作済み**——`.por .frame` は
+  `assets/images/production/stage4-patient-relations-kondo.png` を事務長の画像と同じ `<img>` で表示する。`alarm`/`lock` は出さない、
+  提出もロックしない、判定の必須要素も増やさない——Stage 2 の締切超過（`s2LandAddendum`）と完全に同じ
+  「罰は業務ではなく時間そのもの」の扱い。ポップアップは一方向・1回きりなので
+  [00_お助けキャラの原則.md](../character/00_お助けキャラの原則.md) §0「窓口ではない登場人物」の枠内——
+  新しいウィンドウが増えるが「窓口が増えた」ことにはならない。
+
 ## 既知の設計負債（新ステージを足すと必ず踏む）
 
-- `TEAMS[2].pos`（自チームの位置）の直接代入が8箇所超に散在（Stage 3 分でさらに増えた）。`STEPS` 側に持たせて一元化されていない。
-- `#fever`（院内状況インジケータ）の直接代入も同様に散在。
-- `unlock` オーバーレイの文言は、表示する側（`unlockSequence()`/`stage3UnlockSequence()`）が**毎回明示的にセットし直す**形にした（Stage 3 追加時に修正済み）。次のステージを足す時もこの流儀を踏襲すること——HTMLの初期値に頼ると、どちらが先に使われたかで文言が化ける。
-- `data-mode="crisis"` は Stage 3 で初めて使われるようになった（もう「定義のみで未使用」ではない）。
-- 右ペインのAIチャットは Stage 3 に限り台本応答を返すようにした（`sendAI()` が `view !== "s3"` で即 return）。**Stage 1/2 は完全なダミーのまま**——`view` チェックを外すと Stage 1/2 でも「応答しません」を返してしまうので注意。
-- `wait()`（Promise版タイマー）は `clearLater()` でキャンセルされない。Stage 3 の新設シーケンス（`triggerTrap()`/`runStage3Verdict()`/`stage3UnlockSequence()`）は要所に `if (view !== "s3") return;` の軽いガードを入れて緩和したが、**根本修正はしていない**——`runVerdict()`/`unlockSequence()`（Stage 2）は今も無防備。
-- **動的に注入した要素は必ず後始末する。** `startPenalty()` は `#penalty-host` の中身を都度生成するので、`finishPenalty()` と `hideOverlays()` の両方で空にしている。旧実装では注入側が `id="grid"` を再利用しており、消し忘れると**Stage 2 の本物の `#grid` と id が重複して `document.getElementById("grid")` が壊れた**（jsdomでの検証で実際に踏んだ）。現在の実装は id を再利用していないが、後始末の作法は同じく必要。
-- **教材の文言と判定の正規表現が別々の場所にある。** 教材は `S3_MANUAL_TEXT`/`S3_CONTAMINATED_TEXT`/`S3_TRAP_LIE`、判定は `S3_REQUIRED`/`S3_TRAP`。片方だけ直すと静かに壊れる（罠が発火しない／正解が通らない）。**教材を触ったら必ず判定側も確認する。**
+- `TEAMS[2].pos`（自チームの位置）の直接代入が10箇所超に散在（Stage 3・4 分でさらに増えた）。`STEPS` 側に持たせて一元化されていない。
+- `#fever`（院内状況インジケータ）の直接代入も同様に散在。Stage 4 は値を動かさない（14のまま）が、リセット処理では他の値に戻す必要があり、結局同じ場所に手を入れることになる。
+- `unlock` オーバーレイの文言は、表示する側（`unlockSequence()`/`stage3UnlockSequence()`）が**毎回明示的にセットし直す**形にした（Stage 3 追加時に修正済み）。**`#ov-lock` の見出し（`#lock-hd`）も Stage 4 追加時に同じ流儀に揃えた**——HTMLの初期値に頼ると、どちらが先に使われたかで文言が化ける。次のステージを足す時もこの流儀を踏襲すること。
+- `data-mode="crisis"` は Stage 3 で初めて使われるようになった。Stage 4 も `crisis` のまま（転調は起きない）。
+- 右ペインのAIチャットは Stage 3・4 に限り台本応答を返すようにした（`sendAI()` が `view !== "s3" && view !== "s4"` で即 return）。**Stage 1/2 は完全なダミーのまま**——`view` チェックを外すと Stage 1/2 でも「応答しません」を返してしまうので注意。
+- `wait()`（Promise版タイマー）は `clearLater()` でキャンセルされない。Stage 3・4 の新設シーケンスは要所に `if (view !== "s3") return;` / `if (view !== "s4") return;` の軽いガードを入れて緩和したが、**根本修正はしていない**——`runVerdict()`/`unlockSequence()`（Stage 2）は今も無防備。
+- **動的に注入した要素は必ず後始末する。** `startPenalty()`/`startS4Penalty()` は `#penalty-host` の中身を都度生成するので、`finishPenalty()`/`finishS4Penalty()` と `hideOverlays()` の両方で空にしている。旧実装では注入側が `id="grid"` を再利用しており、消し忘れると**Stage 2 の本物の `#grid` と id が重複して `document.getElementById("grid")` が壊れた**（jsdomでの検証で実際に踏んだ）。現在の実装は id を再利用していないが、後始末の作法は同じく必要。**Stage 4 は `pane-r.locked` という別種の後始末も増えた**（同じく `finishS4Penalty()` と `hideOverlays()` の両方で外す）。
+- **教材の文言と判定の正規表現が別々の場所にある。** Stage 3 は教材 `S3_MANUAL_TEXT`/`S3_CONTAMINATED_TEXT`/`S3_TRAP_LIE` と判定 `S3_REQUIRED`/`S3_TRAP` が別々。片方だけ直すと静かに壊れる（罠が発火しない／正解が通らない）。**Stage 4 はこの負債を踏まない設計にした**（`S4_PATIENT` を単一情報源にして3箇所とも参照させる。上記「Stage 4：送信前ゲートと黒塗り」参照）が、`S4_PATIENT` の値を直すときは `S4_PII`・`S4_REPORT` が自動的に追従することを忘れないこと（テンプレートリテラルで組んでいるので通常は壊れないが、正規表現側 `S4_PII` は `new RegExp()` で毎回組み立てている点に注意）。
 
 ## 残りの宿題
 
-- **Stage 4 の参加者向け呼称が未決定。** `stage3UnlockSequence()` の `unlock` 副題を暫定で「報告 — 委員会への提出」にしてある（TODOコメントあり）。企画書 §5 の「情報漏洩 — 渡す/渡さないの罠」はそのまま出すと Stage 3 と同じネタバレになる（Stage 4 も 💀罠）。
 - **苅部さんの3段トリガーが2段のまま**（`S3_KARUBE_LINES` は2行）。設計上は3段目＝最終セーフティ（規定時間 or 2回目の罠発火で詰み防止）。
-- **`S3_KARUBE_DELAY`（40秒）/ `S3_PENALTY`（40秒）/ `S3_BOTTLE_FILL_MS`（700ms）は仮値。** P0 実測で確定させる（罰ゲームの狙いは1分程度）。
-- **企画書が旧い罰ゲーム（接触者リスト整形）のまま。** §5・§6・§10 と `docs/research/03_地獄のICT概要.md` に記述が残っている。モックが正なので放置しているが、企画書へ一括反映するときに直す。
+- **`S3_KARUBE_DELAY`（40秒）/ `S3_PENALTY`（40秒）/ `S3_BOTTLE_FILL_MS`（700ms）/ `S4_KARUBE_DELAY`（12秒）/ `S4_PENALTY`（40秒）/ `S4_GATE_MS`（450ms）/ `S4_DEADLINE`（2分）は仮値。** P0 実測で確定させる（罰ゲームの狙いは1分程度。`S4_DEADLINE` は企画書の「目安12分」から変更した値で、特に実測の裏付けが要る——[05_Stage4_情報漏洩.md](../scenario/05_Stage4_情報漏洩.md) 冒頭 📌）。
+- **企画書が旧い罰ゲーム（接触者リスト整形）のまま。** §5・§6・§10 と `docs/research/03_地獄のICT概要.md` に記述が残っている。モックが正なので放置しているが、企画書へ一括反映するときに直す。Stage 4 の教材・罰の記述も同様に未同期。
