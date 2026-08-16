@@ -41,11 +41,13 @@ JS 構造そのものは資産ではない。単一ファイル・フレーム�
 | Stage 2（二正面） | `renderStage2()`（3433） | **実装済みだがどこからも呼ばれない＝未配置**（企画書§5「未配置の素材」） |
 | Stage 3（暫定） | `renderStage3()`（2755） | 3欄のテキストエリア。判定は `checkStage3()`（2789）、罠発火は `triggerTrap()`（2874）→`startPenalty()`（2887）。苅部さんの3段トリガーは2段に簡略化（`phsS3Pending`） |
 | Stage 4（回答） | `renderStage4()`（3048） | 1欄のテキストエリア。判定は `checkStage4()`（3080）。罠は提出フォームではなく **`sendAI()` 内の送信前ゲート**にあり、検知すると `triggerLeak()`（3131）→`startS4Penalty()`（3142）。回答期限（`s4StartDeadline()`3013）超過で近藤さんの着信ポップアップが割り込む（`s4ShowCall()`3044）。苅部さんは1段のみ（`phsS4Pending`） |
+| Stage 5（掲示） | `renderStage5()`（3463） | 提出フォームはテキストエリアではなく**画像候補の枠**（`#s5-cand`）。判定は `checkStage5()`（3489）——**プロンプト文字列**に対して行い、画像そのものは見ない。罠も罰も無いので `triggerXxx()`/`startXxxPenalty()` に相当する関数が無い唯一のステージ。`alarm`/`lock`/`blackout` を一度も呼ばない |
 
-> **参加者に見えるステージ名は「暫定」「回答」**。「嘘」「情報漏洩」は設計ドキュメント上の呼称で、画面に出すと罠を予告してしまう
-> （[../04_Stage3.md](../04_Stage3.md) 冒頭 ⚠️・[../05_Stage4.md](../05_Stage4.md) 冒頭 ⚠️）。`unlock` オーバーレイの副題も同じ理由で罠の名前を書かない。
+> **参加者に見えるステージ名は「暫定」「回答」「掲示」**。「嘘」「情報漏洩」は設計ドキュメント上の呼称で、画面に出すと罠を予告してしまう
+> （[../04_Stage3.md](../04_Stage3.md) 冒頭 ⚠️・[../05_Stage4.md](../05_Stage4.md) 冒頭 ⚠️）。Stage 5（「ポスター工房」）に罠は無いので予告の心配自体は無いが、
+> 呼称の流儀を Stage 3・4 に揃えてある（[../06_Stage5.md](../06_Stage5.md) 冒頭 ⚠️）。`unlock` オーバーレイの副題も同じ理由で罠の名前を書かない。
 
-文言・教材データの定数は 1017-1413 あたりの帯にまとまっている（`MAILS`/`MAIL_S1` 等、ステージ別プレフィックス。Stage 3 は `S3_*`、Stage 4 は `S4_*`）。
+文言・教材データの定数は 1017-1525 あたりの帯にまとまっている（`MAILS`/`MAIL_S1` 等、ステージ別プレフィックス。Stage 3 は `S3_*`、Stage 4 は `S4_*`、Stage 5 は `S5_*`）。
 
 ## Stage 3：判定の作り（`S3_REQUIRED`1246 / `S3_TRAP`1262 / `checkStage3`2789）
 
@@ -108,19 +110,45 @@ Stage 4 のときだけ `S4_PII`（1343）で入力を検査し、ヒットす�
   [00_お助けキャラの原則.md](../character/00_お助けキャラの原則.md) §0「窓口ではない登場人物」の枠内——
   新しいウィンドウが増えるが「窓口が増えた」ことにはならない。
 
+## Stage 5：画像生成の出し分けと、判定に使う語の対応表
+
+Stage 5 に罠は無い。`sendAI()`（1662）は `view === "s5"` のとき `S4_PII` の検査を素通りし、
+自分の吹き出しを出したあと `s5Generate()`（3401）へ渡す——Stage 3・4 の「罠 → 台本応答」ではなく
+「プロンプト → 候補画像」という別の分岐にしてある。
+
+- **モックは gpt-image-1 を呼ばない。** `S5_POSTERS`（1469）の `tag` 正規表現とプロンプト文字列を
+  照合し、最初に一致した候補を返す。どれにも一致しなければ `S5_POSTER_DEFAULT`（1477）。
+  生成待ちは `S5_GEN_MS`（1525・仮値2.5秒）の `later()` で、実際にAPIを叩いているように見せる。
+- **判定に使う語（`S5_REQUIRED`）と、画像の出し分けタグ（`S5_POSTERS` の `tag`）は同じ語群
+  `S5_LANG_WORDS`（1459直前）から作る。** 「多言語 or ピクトグラム」の判定と、ピクトグラム系候補の
+  出し分けが別の語彙にならないよう、この1箇所を両方が参照する——Stage 3 が踏んだ負債（教材文言と
+  判定の正規表現が別々の場所にあり、片方だけ直すと静かに壊れる）を Stage 5 でも避けるための構成。
+- **生成回数の上限（`S5_GEN_LIMIT`）に達すると、生成せずに苅部さんの2段目
+  （`S5_KARUBE_LIMIT_LINE`）を光らせる。** `phsRing()` のクリックハンドラで `phsS5LimitPending` を
+  `phsS5Pending`（通常トリガー）より優先して見せる。**上限後も、それまでに生成した候補
+  （`s5Candidates`）はいつでも選んで提出できる**——詰みを作らない（企画書§6）。
+- **`s5PickCandidate()`（3438）で選んだ候補だけが `#s5-cand`（`s5DrawCandidate()`3445）に反映される。**
+  AIチャット上の候補ボタンを押すまで、中央ペインの提出候補は「未選択」のまま——生成しただけでは
+  提出は完了しない。
+- **画像アセットは `<img onerror>` でフォールバックする。** `assets/images/production/` に
+  `stage5-poster-*.png` の4点（pictogram/multilingual/textheavy/default）がまだ無くても、
+  候補ボタンとサムネイルの枠・代替テキストだけで最後まで操作できる。ファイルが揃えば
+  コードを変更せずに差し替わる。
+
 ## 既知の設計負債（新ステージを足すと必ず踏む）
 
-- `TEAMS[2].pos`（自チームの位置）の直接代入が10箇所超に散在（Stage 3・4 分でさらに増えた）。`STEPS` 側に持たせて一元化されていない。
-- `#fever`（院内状況インジケータ）の直接代入も同様に散在。Stage 4 は値を動かさない（14のまま）が、リセット処理では他の値に戻す必要があり、結局同じ場所に手を入れることになる。
-- `unlock` オーバーレイの文言は、表示する側（`unlockSequence()`/`stage3UnlockSequence()`）が**毎回明示的にセットし直す**形にした（Stage 3 追加時に修正済み）。**`#ov-lock` の見出し（`#lock-hd`）も Stage 4 追加時に同じ流儀に揃えた**——HTMLの初期値に頼ると、どちらが先に使われたかで文言が化ける。次のステージを足す時もこの流儀を踏襲すること。
-- `data-mode="crisis"` は Stage 3 で初めて使われるようになった。Stage 4 も `crisis` のまま（転調は起きない）。
-- 右ペインのAIチャットは Stage 3・4 に限り台本応答を返すようにした（`sendAI()` が `view !== "s3" && view !== "s4"` で即 return）。**Stage 1/2 は完全なダミーのまま**——`view` チェックを外すと Stage 1/2 でも「応答しません」を返してしまうので注意。
-- `wait()`（Promise版タイマー）は `clearLater()` でキャンセルされない。Stage 3・4 の新設シーケンスは要所に `if (view !== "s3") return;` / `if (view !== "s4") return;` の軽いガードを入れて緩和したが、**根本修正はしていない**——`runVerdict()`/`unlockSequence()`（Stage 2）は今も無防備。
-- **動的に注入した要素は必ず後始末する。** `startPenalty()`/`startS4Penalty()` は `#penalty-host` の中身を都度生成するので、`finishPenalty()`/`finishS4Penalty()` と `hideOverlays()` の両方で空にしている。旧実装では注入側が `id="grid"` を再利用しており、消し忘れると**Stage 2 の本物の `#grid` と id が重複して `document.getElementById("grid")` が壊れた**（jsdomでの検証で実際に踏んだ）。現在の実装は id を再利用していないが、後始末の作法は同じく必要。**Stage 4 は `pane-r.locked` という別種の後始末も増えた**（同じく `finishS4Penalty()` と `hideOverlays()` の両方で外す）。
-- **教材の文言と判定の正規表現が別々の場所にある。** Stage 3 は教材 `S3_MANUAL_TEXT`/`S3_CONTAMINATED_TEXT`/`S3_TRAP_LIE` と判定 `S3_REQUIRED`/`S3_TRAP` が別々。片方だけ直すと静かに壊れる（罠が発火しない／正解が通らない）。**Stage 4 はこの負債を踏まない設計にした**（`S4_PATIENT` を単一情報源にして3箇所とも参照させる。上記「Stage 4：送信前ゲートと黒塗り」参照）が、`S4_PATIENT` の値を直すときは `S4_PII`・`S4_REPORT` が自動的に追従することを忘れないこと（テンプレートリテラルで組んでいるので通常は壊れないが、正規表現側 `S4_PII` は `new RegExp()` で毎回組み立てている点に注意）。
+- `TEAMS[2].pos`（自チームの位置）の直接代入が10箇所超に散在（Stage 3・4・5 分でさらに増えた）。`STEPS` 側に持たせて一元化されていない。
+- `#fever`（院内状況インジケータ）の直接代入も同様に散在。Stage 4・5 は値を動かさない（14のまま）が、リセット処理では他の値に戻す必要があり、結局同じ場所に手を入れることになる。
+- `unlock` オーバーレイの文言は、表示する側（`unlockSequence()`/`stage3UnlockSequence()`/`stage4UnlockSequence()`/`stage5UnlockSequence()`）が**毎回明示的にセットし直す**形にした（Stage 3 追加時に修正済み）。**`#ov-lock` の見出し（`#lock-hd`）も Stage 4 追加時に同じ流儀に揃えた**——HTMLの初期値に頼ると、どちらが先に使われたかで文言が化ける。次のステージを足す時もこの流儀を踏襲すること（Stage 5 は罠・罰が無いので `#ov-lock` 自体を触らない——`stage5UnlockSequence()` は `#ov-unlock` だけをセットし直す）。
+- `data-mode="crisis"` は Stage 3 で初めて使われるようになった。Stage 4・5 も `crisis` のまま（転調は起きない）。
+- 右ペインのAIチャットは Stage 3・4・5 に限り応答を返すようにした（`sendAI()` が `view !== "s3" && view !== "s4" && view !== "s5"` で即 return）。**Stage 1/2 は完全なダミーのまま**——`view` チェックを外すと Stage 1/2 でも「応答しません」を返してしまうので注意。Stage 5 だけは台本の文章応答ではなく `s5Generate()` へ分岐する。
+- `wait()`（Promise版タイマー）は `clearLater()` でキャンセルされない。Stage 3・4・5 の新設シーケンスは要所に `if (view !== "s3") return;` / `if (view !== "s4") return;` / `if (view !== "s5") return;` の軽いガードを入れて緩和したが、**根本修正はしていない**——`runVerdict()`/`unlockSequence()`（Stage 2）は今も無防備。
+- **動的に注入した要素は必ず後始末する。** `startPenalty()`/`startS4Penalty()` は `#penalty-host` の中身を都度生成するので、`finishPenalty()`/`finishS4Penalty()` と `hideOverlays()` の両方で空にしている。旧実装では注入側が `id="grid"` を再利用しており、消し忘れると**Stage 2 の本物の `#grid` と id が重複して `document.getElementById("grid")` が壊れた**（jsdomでの検証で実際に踏んだ）。現在の実装は id を再利用していないが、後始末の作法は同じく必要。**Stage 4 は `pane-r.locked` という別種の後始末も増えた**（同じく `finishS4Penalty()` と `hideOverlays()` の両方で外す）。**Stage 5 は罰ゲームが無いので `#penalty-host`/`pane-r.locked` の後始末は不要**——その代わり `#s5-gen`（残り生成回数の表示）を `go()` の共通リセットで毎回 `hide` に戻し、`renderStage5()` だけが外す。
+- **教材の文言と判定の正規表現が別々の場所にある。** Stage 3 は教材 `S3_MANUAL_TEXT`/`S3_CONTAMINATED_TEXT`/`S3_TRAP_LIE` と判定 `S3_REQUIRED`/`S3_TRAP` が別々。片方だけ直すと静かに壊れる（罠が発火しない／正解が通らない）。**Stage 4・5 はこの負債を踏まない設計にした**（Stage 4 は `S4_PATIENT` を、Stage 5 は `S5_LANG_WORDS` を単一情報源にして判定と出し分けの両方に参照させる。上記「Stage 4：送信前ゲートと黒塗り」「Stage 5：画像生成の出し分けと、判定に使う語の対応表」参照）が、値を直すときは派生する定数（`S4_PII`・`S4_REPORT`・`S5_POSTERS` の一部タグ）が自動的に追従することを忘れないこと（テンプレートリテラルで組んでいるので通常は壊れないが、正規表現側は `new RegExp()` で毎回組み立てている点に注意）。
 
 ## 残りの宿題
 
 - **苅部さんの3段トリガーが2段のまま**（`S3_KARUBE_LINES` は2行）。設計上は3段目＝最終セーフティ（規定時間 or 2回目の罠発火で詰み防止）。
-- **`S3_KARUBE_DELAY`（40秒）/ `S3_PENALTY`（40秒）/ `S3_BOTTLE_FILL_MS`（700ms）/ `S4_KARUBE_DELAY`（12秒）/ `S4_PENALTY`（40秒）/ `S4_GATE_MS`（450ms）/ `S4_DEADLINE`（2分）は仮値。** P0 実測で確定させる（罰ゲームの狙いは1分程度。`S4_DEADLINE` は企画書の「目安12分」から変更した値で、特に実測の裏付けが要る——[05_Stage4_情報漏洩.md](../scenario/05_Stage4_情報漏洩.md) 冒頭 📌）。
+- **`S3_KARUBE_DELAY`（40秒）/ `S3_PENALTY`（40秒）/ `S3_BOTTLE_FILL_MS`（700ms）/ `S4_KARUBE_DELAY`（12秒）/ `S4_PENALTY`（40秒）/ `S4_GATE_MS`（450ms）/ `S4_DEADLINE`（2分）/ `S5_KARUBE_DELAY`（40秒）/ `S5_GEN_LIMIT`（5回）/ `S5_GEN_MS`（2.5秒）は仮値。** P0 実測で確定させる（罰ゲームの狙いは1分程度。`S4_DEADLINE` は企画書の「目安12分」から変更した値で、特に実測の裏付けが要る——[05_Stage4_情報漏洩.md](../scenario/05_Stage4_情報漏洩.md) 冒頭 📌）。
+- **Stage 5 の候補画像4点（`stage5-poster-pictogram/multilingual/textheavy/default.png`）が未制作。** `assets/images/production/` にまだ無く、モックは `<img onerror>` のフォールバック表示で動いている。gpt-image-1 で別途制作し、`test/` → `production/` の昇格ルール（`assets/images/README.md`）に従って置く。
 - **企画書が旧い罰ゲーム（接触者リスト整形）のまま。** §5・§6・§10 と `docs/research/03_地獄のICT概要.md` に記述が残っている。モックが正なので放置しているが、企画書へ一括反映するときに直す。Stage 4 の教材・罰の記述も同様に未同期。
