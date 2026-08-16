@@ -1390,7 +1390,8 @@
     { t: S4_PATIENT.id, pii: true }, { t: "、\n" },
     { t: S4_PATIENT.dob, pii: true }, { t: "生）のカルテ抜粋を\n" },
     { t: "外部AIサービス", pii: false }, { t: "へ送信しようとした。\n" },
-    { t: "連絡先 " }, { t: S4_PATIENT.phone, pii: true }, { t: " も含まれていた。" }
+    { t: "連絡先 " }, { t: S4_PATIENT.phone, pii: true },
+    { t: "（ご長男 " }, { t: S4_PATIENT.familyName, pii: true }, { t: "様）も含まれていた。" }
   ];
 
   /* 着弾メール2通。1通目で問い合わせを読ませ、2通目で仕事と餌（カルテ抜粋）を渡す
@@ -1418,7 +1419,7 @@
   /* 提出フォーム（1欄）の必須要素。家族の問い合わせ3点に対応する
      （面会制限／検査の経過／今後の連絡窓口）。「発熱者が多い」への
      答え方は判定しない——正解の言い方をアプリが教えることになるため。 */
-  const S4_REQUIRED = [/面会/, /検査|精査|確認|培養/, /連絡|窓口|担当|説明/];
+  const S4_REQUIRED = [/面会/, /検査|精査|確認|培養/, /連絡|窓口|担当/];
 
   /* AIチャットの台本応答。匿名化・抽象化してから渡した依頼にだけ返る
      （送信前ゲートを正しく通過したチームへの報い）。 */
@@ -3251,6 +3252,7 @@
   }
 
   async function stage4UnlockSequence() {
+    s4StopDeadline();   // クリア済みなので回答期限は止める（罰は時間＝クリア後に近藤さんの着信を割り込ませない）
     $("ov-unlock").querySelector(".t").textContent = "Stage 5 を解錠しました";
     $("ov-unlock").querySelector(".s").textContent = "掲示 — 面会制限のお知らせ";
     $("ov-unlock").classList.remove("hide");
