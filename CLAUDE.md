@@ -2,9 +2,9 @@
 
 医療従事者向けのゲーム型AI研修Webアプリ。複数のアウトブレイクが同時進行する架空の病院に放り込まれた参加者が、AIを駆使して難問を突破する。クリアした頃にはAI活用スキルが身についている、という研修。
 
-**現状: 企画段階。企画方針の正典は `docs/企画書.md`（v0.7.0）。** 詳細設計は「読む地図」に従う。
+**現状: 企画段階。企画方針の正典は `docs/企画書.md`（v0.8.0）。** 詳細設計は「読む地図」に従う。
 **モックはある**が実装ではない——`docs/ui/mock/index.html`（単一ファイル・素のHTML/CSS/JS、ビルド無し）で
-Prologue / Stage 1 / Stage 2 が動く、**捨てる前提**の使い捨て実装。本番（React/Vite）へ持ち越すのは
+Prologue〜Final の全ステージが動く、**捨てる前提**の使い捨て実装。本番（React/Vite）へ持ち越すのは
 CSS トークン名だけ（`docs/ui/00_共通シェルと通奏低音.md` 実装メモ）。
 
 ## 大前提
@@ -45,7 +45,7 @@ Cloudflare Pages (React/Vite) / Workers / Durable Objects (WebSocket・チーム
 | UI・演出（色・オーバーレイ・レイアウト） | `docs/ui/00_共通シェルと通奏低音.md` |
 | お助けキャラの台詞 | `docs/character/苅部さん.md`（機構自体の不変条件は `docs/character/00_お助けキャラの原則.md`） |
 | 教材データ | `docs/materials/README.md` |
-| モック `index.html` を触る | `docs/ui/mock/README.md` を先に読み、必要な関数だけ本体（2642行）を読む |
+| モック `index.html` を触る | `docs/ui/mock/README.md` を先に読み、必要な関数だけ本体（4394行）を読む |
 
 **1ステージの作業単位** = `scenario/NN_StageN_◯◯.md` ＋ `ui/NN_StageN.md` ＋ `materials/`（要れば）＋ モック実装。
 設計（scenario/ui）を先に固めてからモックに手を付ける。
