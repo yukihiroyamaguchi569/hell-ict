@@ -343,7 +343,7 @@
   padding: 11px 13px; font-family: var(--font-num); font-size: 14px; color: var(--fg-muted);
 }
 .folded .grow { flex: 1; }
-/* 提出ボタンは中央ペインの中に置く。監査役が「待って」と言える距離に。 */
+/* 提出ボタンは中央ペインの中に置く。誰かが「待って」と言える距離に。 */
 .row-end { display: flex; justify-content: flex-end; gap: 10px; align-items: center; }
 .btn {
   background: var(--accent); color: #fff; border: 1px solid var(--accent);
@@ -519,16 +519,6 @@
 .welcome .inner { max-width: 780px; margin: 0 auto; display: flex; flex-direction: column; gap: 24px; }
 .welcome h2 { font-size: 25px; font-weight: 700; margin: 0; text-wrap: balance; }
 .welcome .say { font-size: 18px; line-height: 1.85; max-width: 58ch; }
-.welcome .roles-lab { font-size: 15px; color: var(--fg-muted); text-align: center; }
-.roles { display: flex; gap: 13px; }
-.role { flex: 1; border: 1px solid var(--rule); background: var(--surface); padding: 14px 12px; text-align: center; }
-.role .ic { font-size: 24px; }
-.role .nm { font-size: 15px; font-weight: 700; margin: 5px 0 10px; }
-.role input {
-  width: 100%; background: transparent; border: 0; border-bottom: 1px solid var(--rule);
-  color: var(--fg); font-family: var(--font-ui); font-size: 15px; padding: 5px 2px; text-align: center;
-}
-.role.opt { opacity: .62; }
 .welcome .note { font-size: 14px; color: var(--fg-muted); line-height: 1.8; }
 
 /* 急変：赤帯は3秒で消える。赤は使い減りする資源として扱う。 */
@@ -1270,8 +1260,7 @@
 "　　2. 新規発生が所定期間（当院基準では14日間）ゼロとなったとき";
 
   /* 汚染教材。docs/materials/stage3_contaminated.md の要約。罠の実体。
-     NotebookLM の照会対象には絶対に含めない、という配布経路の区別はシナリオ側の
-     決めごとであり、モック上は正典と別の viewer キー（下記）で分離するだけに留める。 */
+     正典と混ざらないよう、モック上は別の viewer キー（下記）で分離する。 */
   const S3_CONTAMINATED_TEXT =
 "病棟対応メモ　-　発熱対応早見表\n\n" +
 "【発熱対応早見表（原因不明時）】\n" +
@@ -1993,20 +1982,10 @@
         "<h2>聖クロノス総合病院 感染制御チーム（ICT）へようこそ</h2>" +
         '<div class="say">本日より支援に入っていただく皆さんです。まずは落ち着いて、届いているメールに目を通してください。' +
         "何も起きていません。いい一日になりますように。</div>" +
-        '<div class="roles-lab">＼ 今日のあなたのチーム ／</div>' +
-        '<div class="roles">' +
-          role("🧠", "司令塔", "") + role("⌨️", "手", "") +
-          role("🔍", "監査役", "") + role("🎲", "遊撃", " opt") +
-        "</div>" +
-        '<div class="note">役割はステージごとに交代します。PCはこの1台だけ、触れるのは「手」の1人です。' +
-        "（3人チームは「遊撃」を空欄のままで進めます）</div>" +
+        '<div class="note">PCはこの1台だけです。みんなで囲んで進めてください。</div>' +
         '<div class="row-end"><button class="btn" id="btn-inbox">受信トレイへ</button></div>' +
       "</div></div>";
     $("btn-inbox").addEventListener("click", () => go("inbox"));
-  }
-  function role(ic, nm, cls) {
-    return '<div class="role' + cls + '"><div class="ic">' + ic + "</div>" +
-           '<div class="nm">' + nm + '</div><input aria-label="' + nm + 'の担当者"></div>';
   }
 
   function renderInbox() {
@@ -2047,7 +2026,7 @@
   /* 絶対条件「ここで詰まらせない」に反する）。                           */
   /*                                                                    */
   /* かといって院内マニュアルや連絡先シートを配ってはいけない。            */
-  /* 「根拠のある文書を引く」は Stage 2・3（NotebookLM）のクライマックス   */
+  /* 「根拠のある文書を引く」は Stage 2・3のクライマックス               */
   /* であって、ここで先に配ると先食いになる。                            */
   /*                                                                    */
   /* 長くて丁寧なら通る——これは手抜きの判定ではなく、この病院の実態その   */
@@ -2676,7 +2655,7 @@
   }
 
   function updateRecog() {
-    // 提出前に監査役が数えられるようにする。判定を待たせない。
+    // 提出前に誰でも数えられるようにする。判定を待たせない。
     if ($("recog")) $("recog").textContent = s2Grid.length + "行 × " + S2_COLS.length + "列";
   }
 
