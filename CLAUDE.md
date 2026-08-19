@@ -15,7 +15,7 @@ CSS トークン名だけ（`docs/ui/00_共通シェルと通奏低音.md` 実�
 
 ## 想定スタック（未実装・企画書 §7 が正）
 
-Cloudflare Pages (React/Vite) / Workers / Durable Objects (WebSocket・チーム状態とリーダーボード) / D1 / KV / R2、OpenAI API (GPT-4o・gpt-image-1)。参加者は別タブで自分のNotebookLMアカウントも使う。
+Cloudflare Pages (React/Vite) / Workers / Durable Objects (WebSocket・チーム状態とリーダーボード) / D1 / KV / R2、OpenAI API (GPT-4o・gpt-image-1)。
 
 ## 壊してはいけない設計判断
 
@@ -24,8 +24,8 @@ Cloudflare Pages (React/Vite) / Workers / Durable Objects (WebSocket・チーム
 - **罰は減点ではなく時間**。レースなので時間こそが最も痛い。スコア減点方式に戻さない。
 - **PII検知はOpenAIに送信する前にWorkers側で止める**。Stage 4は「安全に事故を体験させる」ステージ。ダミー個人情報が実際に外部へ出た時点で企画の意図が崩れる。
 - **Stage 3の罠はモデルの気まぐれに依存させない**。汚染教材＋システムプロンプト注入の二段構えで確実に発動させる（企画書 §7 末尾）。「GPT-4oが賢くなったから罠が効かない」が起きない設計になっている。
-- **GPT-4oはアプリ内蔵、NotebookLMは外部の本物**。この2本立て自体が「素のLLMは嘘をつく／ソース接地型は根拠を示す」を教えるための教育設計。片方に寄せない。
-- **チームに1契約でも会話スレッドは複数持てる**。Stage 2の3人並列分担がこれに依存している。
+- **Stage 3の復旧はアプリ内マニュアルビューアの自力照合のみ**。外部ツール（NotebookLM等）に依存しない設計に戻さない。
+- **チームに1契約でも会話スレッドは複数持てる**。Stage 2のタスク別文脈分離がこれに依存している。
 
 ## トーンのルール（教材・UI文言を書くとき）
 
