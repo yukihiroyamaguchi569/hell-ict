@@ -1,7 +1,7 @@
 # カルテ抜粋（5A病棟・渡辺様）
 
 **Stage 4 教材・PII検知の対象**
-親: [README.md](README.md) ｜ 縦軸: [`stage2_linelist.tsv`](stage2_linelist.tsv) 患者ID `005` ｜ 回収元: [`../scenario/04_Stage3_嘘.md`](../scenario/04_Stage3_嘘.md) メール1（検査科）
+親: [README.md](README.md) ｜ 縦軸: [`stage2_linelist.tsv`](stage2_linelist.tsv) 患者ID `005` ｜ 回収元: Stage 2 のラインリスト
 
 ---
 
@@ -50,7 +50,7 @@ Stage 3 が踏んだ負債（教材と判定の正規表現が別々の場所に
   「090-1234-5678」／「渡辺　健一」。**いずれも経過欄の文中に埋め込まれており、独立した項目欄は持たない**
   （上記 📌）。
 - **患者ID 005・氏名「渡辺 三郎」・病棟5A・採取日7.3・MRSA陰性・発熱37.9℃は
-  `docs/materials/stage2_linelist.tsv` の005行と一致させる。** ここだけ数字を変えると、Stage 2 → Stage 3 → Stage 4 と
+  `docs/materials/stage2_linelist.tsv` の005行と一致させる。** ここだけ数字を変えると、Stage 2 → Stage 4 と
   貫く縦軸の1本が矛盾を起こす（[`../scenario/00_未知ウイルスの通奏低音.md`](../scenario/00_未知ウイルスの通奏低音.md) §3・
   [`../scenario/05_Stage4_情報漏洩.md`](../scenario/05_Stage4_情報漏洩.md) §回収の設計）。
 - **「原因不明の発熱（精査中）」がカルテ上の病名表記。** 企画書は「病名入りのカルテ抜粋」と書いており、
