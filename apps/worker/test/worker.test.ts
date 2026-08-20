@@ -1,5 +1,6 @@
 import { env, exports } from "cloudflare:workers";
 import { listDurableObjectIds } from "cloudflare:test";
+import { leaderboardSnapshotSchema, teamSnapshotSchema } from "@hell-ict/domain";
 import { describe, expect, it } from "vitest";
 
 const session = async (teamCode: string): Promise<Response> =>
@@ -9,6 +10,25 @@ const session = async (teamCode: string): Promise<Response> =>
       body: JSON.stringify({ teamCode }),
     }),
   );
+
+const upgrade = async (path: string): Promise<Response> =>
+  exports.default.fetch(
+    new Request(`https://example.test${path}`, { headers: { Upgrade: "websocket" } }),
+  );
+
+const firstMessage = async (response: Response): Promise<unknown> => {
+  const socket = response.webSocket;
+  if (socket === null) throw new Error("101応答にWebSocketがありません。");
+  const received = new Promise<unknown>((resolve) => {
+    socket.addEventListener("message", (event) => {
+      resolve(typeof event.data === "string" ? (JSON.parse(event.data) as unknown) : null);
+    });
+  });
+  socket.accept();
+  const message = await received;
+  socket.close();
+  return message;
+};
 
 describe("P1B Worker", () => {
   it("health checkはDOを作らず固定の成功応答を返す", async () => {
@@ -99,5 +119,46 @@ describe("P1B Worker", () => {
       revision: 0,
       state: { stage: "prologue" },
     });
+  });
+
+  it("syncはWebSocket Upgrade以外の要求を426で拒否する", async () => {
+    const team = await exports.default.fetch(
+      new Request("https://example.test/api/teams/000003/sync"),
+    );
+    const leaderboard = await exports.default.fetch(
+      new Request("https://example.test/api/leaderboard/sync?teamCode=000003"),
+    );
+    expect(team.status).toBe(426);
+    expect(leaderboard.status).toBe(426);
+  });
+
+  it("チームsyncは101で切り替わり、初回メッセージで状態を配信する", async () => {
+    await session("000003");
+    const response = await upgrade("/api/teams/000003/sync");
+    expect(response.status).toBe(101);
+    const message = teamSnapshotSchema.parse(await firstMessage(response));
+    expect(message).toMatchObject({
+      teamCode: "000003",
+      revision: 0,
+      state: { stage: "prologue" },
+    });
+  });
+
+  it("リーダーボードsyncは101で切り替わり、チームコードを配信に含めない", async () => {
+    await session("000004");
+    const response = await upgrade("/api/leaderboard/sync?teamCode=000004");
+    expect(response.status).toBe(101);
+    const message = leaderboardSnapshotSchema.parse(await firstMessage(response));
+    const self = message.entries.filter((entry) => entry.isSelf);
+    expect(self).toMatchObject([{ stage: "prologue", teamRevision: 0 }]);
+  });
+
+  it("不正なsync要求はTeamRoomを増やさずに拒否する", async () => {
+    const before = (await listDurableObjectIds(env.TEAM_ROOM)).length;
+    const invalidQuery = await upgrade("/api/leaderboard/sync?teamCode=12345");
+    const invalidPath = await upgrade("/api/teams/12345/sync");
+    expect(invalidQuery.status).toBe(400);
+    expect(invalidPath.status).toBe(404);
+    await expect(listDurableObjectIds(env.TEAM_ROOM)).resolves.toHaveLength(before);
   });
 });

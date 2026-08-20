@@ -7,7 +7,13 @@ import {
   teamSnapshotSchema,
   transitionTeam,
 } from "@hell-ict/domain";
-import type { CommandResult, LeaderboardSnapshot, TeamCode, TeamSnapshot } from "@hell-ict/domain";
+import type {
+  CommandResult,
+  LeaderboardSnapshot,
+  TeamCode,
+  TeamCommand,
+  TeamSnapshot,
+} from "@hell-ict/domain";
 import { DurableObject } from "cloudflare:workers";
 
 type StoredCommand = { result: string };
@@ -76,7 +82,7 @@ export class RaceLeaderboard extends DurableObject<Env> {
     const server = pair[1];
     server.serializeAttachment({ kind: "leaderboard", teamCode: parsed.data });
     this.ctx.acceptWebSocket(server);
-    this.send(server, parsed.data);
+    this.send(server, this.snapshotFor(parsed.data));
     return new Response(null, { status: 101, webSocket: client });
   }
 
@@ -88,7 +94,7 @@ export class RaceLeaderboard extends DurableObject<Env> {
     socket.close();
   }
 
-  private snapshotFor(teamCode: TeamCode): LeaderboardSnapshot {
+  private readEntries(): { revision: number; rows: StoredLeaderboard[] } {
     const meta = this.ctx.storage.sql
       .exec<StoredRevision>("SELECT value AS revision FROM leaderboard_meta WHERE key = 'revision'")
       .one();
@@ -97,9 +103,16 @@ export class RaceLeaderboard extends DurableObject<Env> {
         "SELECT team_code, team_revision, stage FROM leaderboard_entries ORDER BY team_revision DESC, team_code ASC",
       )
       .toArray();
+    return { revision: meta?.revision ?? 0, rows };
+  }
+
+  private snapshotFrom(
+    entries: { revision: number; rows: StoredLeaderboard[] },
+    teamCode: TeamCode,
+  ): LeaderboardSnapshot {
     return leaderboardSnapshotSchema.parse({
-      revision: meta?.revision ?? 0,
-      entries: rows.map((row, index) => ({
+      revision: entries.revision,
+      entries: entries.rows.map((row, index) => ({
         marker: `チーム${index + 1}`,
         isSelf: row.team_code === teamCode,
         stage: row.stage,
@@ -108,20 +121,25 @@ export class RaceLeaderboard extends DurableObject<Env> {
     });
   }
 
+  private snapshotFor(teamCode: TeamCode): LeaderboardSnapshot {
+    return this.snapshotFrom(this.readEntries(), teamCode);
+  }
+
   private broadcast(): void {
+    const entries = this.readEntries();
     for (const socket of this.ctx.getWebSockets()) {
       const attachment: unknown = socket.deserializeAttachment();
       const teamCode =
         typeof attachment === "object" && attachment !== null && "teamCode" in attachment
           ? teamCodeSchema.safeParse(attachment.teamCode)
           : teamCodeSchema.safeParse(undefined);
-      if (teamCode.success) this.send(socket, teamCode.data);
+      if (teamCode.success) this.send(socket, this.snapshotFrom(entries, teamCode.data));
     }
   }
 
-  private send(socket: WebSocket, teamCode: TeamCode): void {
+  private send(socket: WebSocket, snapshot: LeaderboardSnapshot): void {
     try {
-      socket.send(JSON.stringify(this.snapshotFor(teamCode)));
+      socket.send(JSON.stringify(snapshot));
     } catch {
       socket.close(1011, "配信に失敗しました。");
     }
@@ -179,10 +197,12 @@ export class TeamRoom extends DurableObject<Env> {
       applied: true,
       leaderboardPending: true,
     });
-    this.ctx.storage.sql.exec(
-      "UPDATE team_state SET snapshot = ? WHERE id = 1",
+    const written = this.ctx.storage.sql.exec(
+      "UPDATE team_state SET snapshot = ? WHERE id = 1 AND json_extract(snapshot, '$.revision') = ?",
       JSON.stringify(pending.snapshot),
-    );
+      command.expectedRevision,
+    ).rowsWritten;
+    if (written === 0) return { conflict: true };
     this.ctx.storage.sql.exec(
       "INSERT INTO processed_commands (command_id, result) VALUES (?, ?)",
       command.commandId,
@@ -247,29 +267,39 @@ export class TeamRoom extends DurableObject<Env> {
 }
 
 const handleSession = async (request: Request, env: Env): Promise<Response> => {
+  let teamCode: TeamCode;
   try {
     const input = await parseJson(request);
-    const teamCode = teamCodeSchema.parse(
+    teamCode = teamCodeSchema.parse(
       typeof input === "object" && input !== null && "teamCode" in input
         ? input.teamCode
         : undefined,
     );
+  } catch {
+    return error("teamCodeはASCII数字6桁で指定してください。", 400);
+  }
+  try {
     const snapshot = await env.TEAM_ROOM.getByName(teamCode).join(teamCode);
     await env.RACE_LEADERBOARD.getByName("global").upsert(teamCode, snapshot);
     return json(snapshot);
   } catch {
-    return error("teamCodeはASCII数字6桁で指定してください。", 400);
+    return error("チーム状態の処理に失敗しました。時間を置いて再試行してください。", 503);
   }
 };
 
 const handleCommand = async (request: Request, env: Env, teamCode: TeamCode): Promise<Response> => {
+  let command: TeamCommand;
   try {
-    const command = teamCommandSchema.parse(await parseJson(request));
+    command = teamCommandSchema.parse(await parseJson(request));
+  } catch {
+    return error("commandの形式が不正です。", 400);
+  }
+  try {
     const result = await env.TEAM_ROOM.getByName(teamCode).command(teamCode, command);
     if ("conflict" in result) return error("状態の競合または許可されない遷移です。", 409);
     return json(result, result.leaderboardPending ? 503 : 200);
   } catch {
-    return error("commandの形式が不正です。", 400);
+    return error("コマンドの処理に失敗しました。時間を置いて再試行してください。", 503);
   }
 };
 

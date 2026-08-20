@@ -28,9 +28,12 @@ describe("最小チーム状態", () => {
       ok: false,
       reason: "revision-conflict",
     });
-    expect(
-      transitionTeam((transitioned as { ok: true; snapshot: typeof initial }).snapshot, command),
-    ).toEqual({ ok: false, reason: "revision-conflict" });
+    const stage1 = (transitioned as { ok: true; snapshot: typeof initial }).snapshot;
+    expect(transitionTeam(stage1, command)).toEqual({ ok: false, reason: "revision-conflict" });
+    expect(transitionTeam(stage1, { ...command, expectedRevision: 1 })).toEqual({
+      ok: false,
+      reason: "forbidden-transition",
+    });
   });
 
   it("未知のフィールド、配列、null、非整数revisionを拒否する", () => {
