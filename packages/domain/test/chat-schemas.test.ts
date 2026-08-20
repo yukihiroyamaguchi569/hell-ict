@@ -1,0 +1,70 @@
+import { describe, expect, it } from "vitest";
+
+import {
+  chatCommandSchema,
+  chatMessageSchema,
+  chatSnapshotSchema,
+  chatThreadSchema,
+} from "../src/schemas/chat.js";
+
+const threadId = "00000000-0000-4000-8000-000000000001";
+const messageId = "00000000-0000-4000-8000-000000000010";
+const commandId = "00000000-0000-4000-8000-000000000020";
+
+const validMessage = {
+  messageId,
+  role: "user",
+  text: "こんにちは",
+  createdAt: "2026-08-20T00:00:00.000Z",
+};
+
+describe("チャットschemaの境界", () => {
+  it("正当なメッセージを受理し、空文字・4000字超・未知roleを拒否する", () => {
+    expect(chatMessageSchema.parse(validMessage)).toEqual(validMessage);
+    for (const input of [
+      { ...validMessage, text: "" },
+      { ...validMessage, text: "  " },
+      { ...validMessage, text: "あ".repeat(4001) },
+      { ...validMessage, role: "system" },
+      { ...validMessage, createdAt: "not-a-date" },
+      { ...validMessage, extra: true },
+    ]) {
+      expect(chatMessageSchema.safeParse(input).success).toBe(false);
+    }
+    expect(chatMessageSchema.parse({ ...validMessage, text: "あ".repeat(4000) }).text).toHaveLength(
+      4000,
+    );
+  });
+
+  it("threadは空でないtitleとメッセージ配列を受理する", () => {
+    const thread = { threadId, title: "メイン", messages: [validMessage] };
+    expect(chatThreadSchema.parse(thread)).toEqual(thread);
+    expect(chatThreadSchema.safeParse({ ...thread, title: "" }).success).toBe(false);
+    expect(chatThreadSchema.safeParse({ ...thread, title: "あ".repeat(41) }).success).toBe(false);
+  });
+
+  it("snapshotは最低1スレッドを要求する", () => {
+    const snapshot = {
+      teamCode: "000000",
+      revision: 0,
+      threads: [{ threadId, title: "メイン", messages: [] }],
+    };
+    expect(chatSnapshotSchema.parse(snapshot)).toEqual(snapshot);
+    expect(chatSnapshotSchema.safeParse({ ...snapshot, threads: [] }).success).toBe(false);
+  });
+
+  it("コマンドはtypeで判別され、未知typeと欠落フィールドを拒否する", () => {
+    const createThread = { type: "create-thread", commandId, title: "副" };
+    const sendMessage = { type: "send-message", commandId, threadId, text: "本文" };
+    expect(chatCommandSchema.parse(createThread)).toEqual(createThread);
+    expect(chatCommandSchema.parse(sendMessage)).toEqual(sendMessage);
+    for (const input of [
+      { type: "delete-thread", commandId, threadId },
+      { type: "create-thread", commandId, threadId },
+      { type: "create-thread", commandId, title: "" },
+      { type: "send-message", commandId, threadId, text: "" },
+    ]) {
+      expect(chatCommandSchema.safeParse(input).success).toBe(false);
+    }
+  });
+});

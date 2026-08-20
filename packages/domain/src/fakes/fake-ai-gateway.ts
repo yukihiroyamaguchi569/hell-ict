@@ -1,4 +1,4 @@
-import type { AiGateway, AiRequest } from "../ports/ai-gateway.js";
+import type { AiGateway, AiRequest, AiResponse } from "../ports/ai-gateway.js";
 
 export type FakeAiOutcome =
   | { readonly kind: "success"; readonly response: string }
@@ -10,14 +10,14 @@ export class FakeAiGateway implements AiGateway {
 
   constructor(private readonly outcomes: readonly FakeAiOutcome[]) {}
 
-  complete(request: AiRequest): Promise<string> {
+  complete(request: AiRequest): Promise<AiResponse> {
     this.requests.push(request);
     const outcome = this.outcomes.at(this.requests.length - 1);
     if (outcome === undefined) {
       return Promise.reject(new Error("FakeAiGatewayに結果が設定されていません。"));
     }
     if (outcome.kind === "success") {
-      return Promise.resolve(outcome.response);
+      return Promise.resolve({ text: outcome.response });
     }
     if (outcome.kind === "failure") {
       return Promise.reject(outcome.error);

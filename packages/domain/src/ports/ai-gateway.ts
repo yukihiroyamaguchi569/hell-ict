@@ -1,8 +1,17 @@
+export interface AiMessage {
+  readonly role: "user" | "assistant";
+  readonly text: string;
+}
+
 export interface AiRequest {
-  readonly prompt: string;
+  readonly messages: readonly AiMessage[];
   readonly timeoutMs: number;
 }
 
+export interface AiResponse {
+  readonly text: string;
+}
+
 export interface AiGateway {
-  complete(request: AiRequest): Promise<string>;
+  complete(request: AiRequest): Promise<AiResponse>;
 }

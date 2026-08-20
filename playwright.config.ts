@@ -13,8 +13,15 @@ export default defineConfig({
   projects: [{ name: "chromium", use: { ...devices["Desktop Chrome"] } }],
   webServer: [
     {
+      name: "openai-stub",
+      command: "node e2e/openai-stub.mjs",
+      url: "http://127.0.0.1:8789/health",
+      reuseExistingServer: !process.env.CI,
+    },
+    {
       name: "worker",
-      command: "pnpm --filter @hell-ict/worker dev",
+      command:
+        "pnpm --filter @hell-ict/worker exec wrangler dev --local --ip 127.0.0.1 --port 8787 --var OPENAI_BASE_URL:http://127.0.0.1:8789",
       url: "http://127.0.0.1:8787/api/health",
       reuseExistingServer: !process.env.CI,
     },
