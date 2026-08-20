@@ -1,27 +1,26 @@
-import { leaderboardSnapshotSchema, teamSnapshotSchema } from "@hell-ict/domain";
-import type { LeaderboardSnapshot, TeamSnapshot } from "@hell-ict/domain";
+import {
+  commandResultSchema,
+  leaderboardSnapshotSchema,
+  teamCodeSchema,
+  teamSnapshotSchema,
+} from "@hell-ict/domain";
+import type { CommandResult, LeaderboardSnapshot, TeamSnapshot } from "@hell-ict/domain";
 import { useCallback, useEffect, useRef, useState } from "react";
 
 const savedTeamCodeKey = "hell-ict-team-code";
-const isTeamCode = (value: string): boolean => /^\d{6}$/.test(value);
+const isTeamCode = (value: string): boolean => teamCodeSchema.safeParse(value).success;
 const socketUrl = (path: string): string =>
   `${location.protocol === "https:" ? "wss" : "ws"}://${location.host}${path}`;
 
-const submitStage1 = async (
-  snapshot: TeamSnapshot,
-  commandId: string,
-): Promise<{ snapshot: TeamSnapshot; ok: boolean }> => {
+const submitStage1 = async (snapshot: TeamSnapshot, commandId: string): Promise<CommandResult> => {
   const response = await fetch(`/api/teams/${snapshot.teamCode}/commands`, {
     method: "POST",
     headers: { "content-type": "application/json" },
     body: JSON.stringify({ type: "enter-stage1", commandId, expectedRevision: snapshot.revision }),
   });
-  const body: unknown = await response.json();
-  const candidate =
-    typeof body === "object" && body !== null && "snapshot" in body ? body.snapshot : undefined;
-  const parsed = teamSnapshotSchema.safeParse(candidate);
+  const parsed = commandResultSchema.safeParse(await response.json());
   if (!parsed.success) throw new Error();
-  return { snapshot: parsed.data, ok: response.ok };
+  return parsed.data;
 };
 
 export const App = () => {
@@ -32,6 +31,7 @@ export const App = () => {
   });
   const [snapshot, setSnapshot] = useState<TeamSnapshot | null>(null);
   const [leaderboard, setLeaderboard] = useState<LeaderboardSnapshot | null>(null);
+  const [leaderboardPending, setLeaderboardPending] = useState(false);
   const [message, setMessage] = useState("6桁のチームコードを入力してください。");
   const commandId = useRef<string | null>(null);
   const teamGeneration = useRef(0);
@@ -132,8 +132,13 @@ export const App = () => {
     try {
       const result = await submitStage1(snapshot, commandId.current);
       acceptTeamSnapshot(result.snapshot);
-      if (result.ok) commandId.current = null;
-      setMessage(result.ok ? "Stage 1へ進みました。" : "リーダーボードの同期を再試行します。");
+      setLeaderboardPending(result.leaderboardPending);
+      if (!result.leaderboardPending) commandId.current = null;
+      setMessage(
+        result.leaderboardPending
+          ? "リーダーボードの同期が未完了です。再試行してください。"
+          : "Stage 1へ進みました。",
+      );
     } catch {
       setMessage("結果を確認できません。もう一度押すと同じ操作を安全に再試行します。");
     }
@@ -188,6 +193,16 @@ export const App = () => {
             }}
           >
             了解しました
+          </button>
+        )}
+        {snapshot.state.stage === "stage1" && leaderboardPending && (
+          <button
+            type="button"
+            onClick={() => {
+              void enterStage1();
+            }}
+          >
+            リーダーボード同期を再試行
           </button>
         )}
         <p role="status">{message}</p>
