@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import { OpenAiGateway } from "../src/openai-gateway.js";
+import { OpenAiGateway, OpenAiRefusalError } from "../src/openai-gateway.js";
 
 describe("OpenAiGateway", () => {
   it("APIキーはAuthorizationヘッダーにだけ乗せ、bodyには含めない", async () => {
@@ -33,7 +33,7 @@ describe("OpenAiGateway", () => {
     }
   });
 
-  it("HTTPエラー応答は例外として伝える", async () => {
+  it("HTTPエラー応答は例外として伝え、OpenAiRefusalErrorとは区別する", async () => {
     const originalFetch = globalThis.fetch;
     globalThis.fetch = (() =>
       Promise.resolve(new Response("rate limited", { status: 429 }))) as typeof fetch;
@@ -42,12 +42,15 @@ describe("OpenAiGateway", () => {
       await expect(
         gateway.complete({ messages: [{ role: "user", text: "test" }], timeoutMs: 1_000 }),
       ).rejects.toThrow();
+      await expect(
+        gateway.complete({ messages: [{ role: "user", text: "test" }], timeoutMs: 1_000 }),
+      ).rejects.not.toBeInstanceOf(OpenAiRefusalError);
     } finally {
       globalThis.fetch = originalFetch;
     }
   });
 
-  it("ポリシー拒否（content: null, refusal）はrefusalの内容を含む例外として伝える", async () => {
+  it("ポリシー拒否（content: null, refusal）はOpenAiRefusalErrorとして伝える", async () => {
     const originalFetch = globalThis.fetch;
     globalThis.fetch = (() =>
       Promise.resolve(
@@ -63,6 +66,9 @@ describe("OpenAiGateway", () => {
       await expect(
         gateway.complete({ messages: [{ role: "user", text: "test" }], timeoutMs: 1_000 }),
       ).rejects.toThrow("対応できません");
+      await expect(
+        gateway.complete({ messages: [{ role: "user", text: "test" }], timeoutMs: 1_000 }),
+      ).rejects.toBeInstanceOf(OpenAiRefusalError);
     } finally {
       globalThis.fetch = originalFetch;
     }

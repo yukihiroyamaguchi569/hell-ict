@@ -37,13 +37,14 @@ type StoredState = { snapshot: string };
 type StoredChatState = { snapshot: string };
 type StoredThreadCommand = { result: string };
 type StoredMessageCommand = { result: string };
-type StoredPendingMessage = { thread_id: string };
+type StoredPendingMessage = { thread_id: string; claimed_at: string | null };
 type ConflictReply = { conflict: true };
 type UnknownThreadReply = { unknownThread: true };
 
 export type BeginChatMessageOutcome =
   | { kind: "already-processed"; result: ChatMessageResult }
-  | { kind: "pending"; history: AiMessage[] };
+  | { kind: "pending"; history: AiMessage[] }
+  | { kind: "in-progress" };
 
 export type CompleteChatMessageOutcome = { kind: "success"; text: string } | { kind: "failure" };
 
@@ -57,6 +58,14 @@ export type CompleteChatMessageOutcome = { kind: "success"; text: string } | { k
  * 掃除の安全性と重複防止を両立させる。
  */
 const PENDING_MESSAGE_EXPIRY_MS = 6 * 60 * 60 * 1000;
+
+/**
+ * 同一commandIdの同時リクエストがどちらもAI呼び出しへ進まないよう、pending行を
+ * 「今まさに処理中」の印（claimed_at）で守る猶予期間。AiGateway自体のタイムアウト
+ * （index.tsのCHAT_TIMEOUT_MS = 20秒）より十分長く取り、Worker/DOが応答を返せず
+ * 終わった場合だけクレームを回収できるようにする。
+ */
+const CLAIM_TIMEOUT_MS = 45 * 1000;
 
 export class TeamRoom extends DurableObject<Env> {
   constructor(ctx: DurableObjectState, env: Env) {
@@ -77,7 +86,7 @@ export class TeamRoom extends DurableObject<Env> {
       "CREATE TABLE IF NOT EXISTS processed_message_commands (command_id TEXT PRIMARY KEY, result TEXT NOT NULL)",
     );
     this.ctx.storage.sql.exec(
-      "CREATE TABLE IF NOT EXISTS pending_message_commands (command_id TEXT PRIMARY KEY, thread_id TEXT NOT NULL, created_at TEXT NOT NULL)",
+      "CREATE TABLE IF NOT EXISTS pending_message_commands (command_id TEXT PRIMARY KEY, thread_id TEXT NOT NULL, created_at TEXT NOT NULL, claimed_at TEXT)",
     );
   }
 
@@ -215,11 +224,19 @@ export class TeamRoom extends DurableObject<Env> {
     const pending =
       this.ctx.storage.sql
         .exec<StoredPendingMessage>(
-          "SELECT thread_id FROM pending_message_commands WHERE command_id = ?",
+          "SELECT thread_id, claimed_at FROM pending_message_commands WHERE command_id = ?",
           command.commandId,
         )
         .toArray()[0] ?? null;
     if (pending !== null) {
+      if (!this.isClaimStale(pending.claimed_at)) return { kind: "in-progress" };
+      // 未クレーム、またはクレームが古い（AI呼び出しが完了しないまま終わった）ので、
+      // ここで改めてクレームを取り直してから再試行させる。
+      this.ctx.storage.sql.exec(
+        "UPDATE pending_message_commands SET claimed_at = ? WHERE command_id = ?",
+        new Date().toISOString(),
+        command.commandId,
+      );
       const snapshot = this.loadChatSnapshot(teamCode);
       return { kind: "pending", history: this.historyFor(snapshot, pending.thread_id) };
     }
@@ -237,11 +254,13 @@ export class TeamRoom extends DurableObject<Env> {
     const appended = appendMessage(snapshot, { threadId: command.threadId, message: userMessage });
     if (!appended.ok) return { unknownThread: true };
     this.saveChatSnapshot(appended.snapshot);
+    const now = new Date().toISOString();
     this.ctx.storage.sql.exec(
-      "INSERT INTO pending_message_commands (command_id, thread_id, created_at) VALUES (?, ?, ?)",
+      "INSERT INTO pending_message_commands (command_id, thread_id, created_at, claimed_at) VALUES (?, ?, ?, ?)",
       command.commandId,
       command.threadId,
-      new Date().toISOString(),
+      now,
+      now,
     );
     this.broadcastChat(appended.snapshot);
     return { kind: "pending", history: this.historyFor(appended.snapshot, command.threadId) };
@@ -264,12 +283,20 @@ export class TeamRoom extends DurableObject<Env> {
     const pending =
       this.ctx.storage.sql
         .exec<StoredPendingMessage>(
-          "SELECT thread_id FROM pending_message_commands WHERE command_id = ?",
+          "SELECT thread_id, claimed_at FROM pending_message_commands WHERE command_id = ?",
           commandId,
         )
         .toArray()[0] ?? null;
     if (pending === null) throw new Error("該当する送信途中のメッセージがありません。");
-    if (outcome.kind === "failure") return { retry: true };
+    if (outcome.kind === "failure") {
+      // クレームを解放する。解放しないと、正当な再送（同じcommandIdでの再送信）が
+      // 誤って「進行中」と判定され、二度とAIを呼べなくなる。
+      this.ctx.storage.sql.exec(
+        "UPDATE pending_message_commands SET claimed_at = NULL WHERE command_id = ?",
+        commandId,
+      );
+      return { retry: true };
+    }
 
     const stored = this.ctx.storage.sql
       .exec<StoredChatState>("SELECT snapshot FROM chat_state WHERE id = 1")
@@ -308,6 +335,12 @@ export class TeamRoom extends DurableObject<Env> {
   private expirePendingMessages(): void {
     const cutoff = new Date(Date.now() - PENDING_MESSAGE_EXPIRY_MS).toISOString();
     this.ctx.storage.sql.exec("DELETE FROM pending_message_commands WHERE created_at < ?", cutoff);
+  }
+
+  /** クレーム無し、またはクレームから十分な時間が経っていれば「取り直してよい」と判定する。 */
+  private isClaimStale(claimedAt: string | null): boolean {
+    if (claimedAt === null) return true;
+    return Date.now() - new Date(claimedAt).getTime() > CLAIM_TIMEOUT_MS;
   }
 
   private historyFor(snapshot: ChatSnapshot, threadId: string): AiMessage[] {

@@ -6,10 +6,11 @@ import {
   teamSyncMessageSchema,
 } from "@hell-ict/domain";
 import { FakeAiGateway } from "@hell-ict/domain/fakes";
-import type { ChatSnapshot } from "@hell-ict/domain";
+import type { AiGateway, ChatSnapshot } from "@hell-ict/domain";
 import { describe, expect, it } from "vitest";
 
 import { handleChatMessage } from "../src/index.js";
+import { OpenAiRefusalError } from "../src/openai-gateway.js";
 import { collectMessages, postJson, session, upgrade } from "./support.js";
 
 const createThread = (teamCode: string, commandId: string, title: string): Promise<Response> =>
@@ -157,6 +158,80 @@ describe("P1C チャット骨格", () => {
       ["user", "本文"],
       ["assistant", "応答"],
     ]);
+  });
+
+  it("同一commandIdの並行送信は2回目をin-progressとして拒否する", async () => {
+    await session("400006");
+    const created = await createThread("400006", "00000000-0000-4000-8000-000000000601", "副");
+    const { snapshot } = createThreadResultSchema.parse(await created.json());
+    const threadId = snapshot.threads[0]?.threadId;
+    if (threadId === undefined) throw new Error("unexpected");
+
+    const command = {
+      type: "send-message",
+      commandId: "00000000-0000-4000-8000-000000000602",
+      threadId,
+      text: "本文",
+    };
+    const room = env.TEAM_ROOM.getByName("400006");
+    const first = await room.beginChatMessage("400006", command);
+    const second = await room.beginChatMessage("400006", command);
+    expect(first).toMatchObject({ kind: "pending" });
+    expect(second).toEqual({ kind: "in-progress" });
+  });
+
+  it("進行中のcommandIdへの送信はAIを呼ばず409を返す", async () => {
+    await session("400007");
+    const created = await createThread("400007", "00000000-0000-4000-8000-000000000701", "副");
+    const { snapshot } = createThreadResultSchema.parse(await created.json());
+    const threadId = snapshot.threads[0]?.threadId;
+    if (threadId === undefined) throw new Error("unexpected");
+
+    const command = {
+      commandId: "00000000-0000-4000-8000-000000000702",
+      threadId,
+      text: "本文",
+    };
+    // 先にDOを直接呼び、pending行をクレームさせておく
+    // （別リクエストが処理中の状態を再現する）。
+    await env.TEAM_ROOM.getByName("400007").beginChatMessage("400007", {
+      type: "send-message",
+      ...command,
+    });
+
+    const gateway = new FakeAiGateway([{ kind: "success", response: "応答" }]);
+    const response = await sendMessage("400007", command, gateway);
+    expect(response.status).toBe(409);
+    expect(gateway.requests).toHaveLength(0);
+  });
+
+  it("OpenAIのポリシー拒否は422を返し、汎用の再試行案内とは区別する", async () => {
+    await session("400008");
+    const created = await createThread("400008", "00000000-0000-4000-8000-000000000801", "副");
+    const { snapshot } = createThreadResultSchema.parse(await created.json());
+    const threadId = snapshot.threads[0]?.threadId;
+    if (threadId === undefined) throw new Error("unexpected");
+
+    const refusalGateway: AiGateway = {
+      complete: () => Promise.reject(new OpenAiRefusalError("対応できません")),
+    };
+    const response = await handleChatMessage(
+      new Request("https://example.test/api/teams/400008/chat/messages", {
+        method: "POST",
+        body: JSON.stringify({
+          type: "send-message",
+          commandId: "00000000-0000-4000-8000-000000000802",
+          threadId,
+          text: "本文",
+        }),
+      }),
+      env,
+      "400008",
+      refusalGateway,
+    );
+    expect(response.status).toBe(422);
+    const body = await response.json();
+    expect(body).toMatchObject({ message: expect.stringContaining("対応できません") });
   });
 
   it("未知スレッドへの送信は404で拒否し、状態を変えない", async () => {

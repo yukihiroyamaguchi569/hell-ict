@@ -2,6 +2,13 @@ import { parseOpenAiChatCompletion } from "@hell-ict/domain";
 import type { AiGateway, AiMessage, AiRequest, AiResponse } from "@hell-ict/domain";
 
 /**
+ * OpenAIがポリシー拒否（content: null + refusal）を返したことを、タイムアウトや
+ * レート制限など他の失敗と型で区別するためのエラー。呼び出し側（index.ts）は
+ * これを「再試行すれば直るかもしれない失敗」と分けて扱う。
+ */
+export class OpenAiRefusalError extends Error {}
+
+/**
  * `AiGateway`のOpenAI adapter。domainからCloudflare/OpenAIを直接importさせないため、
  * ここWorker側だけに置く。APIキーはこの呼び出しの外へは出さない。
  */
@@ -40,11 +47,10 @@ export class OpenAiGateway implements AiGateway {
       const message = completion.choices[0]?.message;
       if (message === undefined) throw new Error("OpenAI応答にcontentがありません。");
       if (message.content === null) {
-        throw new Error(
-          message.refusal !== null && message.refusal !== undefined
-            ? `OpenAIが応答を拒否しました: ${message.refusal}`
-            : "OpenAI応答にcontentがありません。",
-        );
+        if (message.refusal !== null && message.refusal !== undefined) {
+          throw new OpenAiRefusalError(message.refusal);
+        }
+        throw new Error("OpenAI応答にcontentがありません。");
       }
       return { text: message.content };
     } finally {

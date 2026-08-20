@@ -18,6 +18,10 @@ P1Cは、アプリ内AIチャットをWorkers経由でOpenAIへ中継し、チ�
 
 AI呼び出し中にクライアントが同じcommandIdで再送すると、ユーザーメッセージを増やさずAI呼び出しだけを再試行する。AIが失敗し続けた場合、ユーザーメッセージだけが残り、assistantメッセージは増えない。
 
+同じcommandIdの送信は、`pending_message_commands`の`claimed_at`でクレームする。既にクレーム済み（＝別のHTTPリクエストが処理中）なら`409`を返しAIを一切呼ばない——ネットワーク再送や複数タブから同じcommandIdが同時に届いても、OpenAI呼び出しは1回だけになる。クレームはAI呼び出しの完了・失敗のどちらでも解放され、失敗後の正当な再送は改めてクレームを取り直す。クレームしたままWorker/DOが応答を返せず終わった場合に備え、45秒（AiGatewayの20秒タイムアウトより十分長い）を超えたクレームは古いものとみなして取り直せるようにしている。
+
+OpenAIのポリシー拒否（`content: null` + `refusal`）は、汎用の失敗（タイムアウト・レート制限など）と区別して`422`を返す——再試行しても無意味なので、汎用の「再試行してください」とは違う応答にする。DO側の状態（pending行の扱い）は通常の失敗と同じ。
+
 ## OpenAI adapter
 
 `apps/worker/src/openai-gateway.ts`の`OpenAiGateway`が`AiGateway`を実装する。APIキーは`env.OPENAI_API_KEY`からのみ読み、Authorizationヘッダーにだけ乗せる——応答payloadにもWebSocket配信にも出さない。応答は`packages/domain/src/schemas/openai-response.ts`のschemaで検証してから使う。OpenAIがポリシー拒否で`content: null`かつ`refusal`を返した場合は、原因不明の汎用エラーではなく`refusal`の内容を含むエラーとして区別する。

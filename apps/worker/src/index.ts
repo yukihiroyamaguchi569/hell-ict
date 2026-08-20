@@ -6,6 +6,8 @@ import {
 } from "@hell-ict/domain";
 import type {
   AiGateway,
+  AiMessage,
+  ChatMessageResult,
   CreateThreadCommand,
   CreateThreadResult,
   SendMessageCommand,
@@ -14,7 +16,7 @@ import type {
 } from "@hell-ict/domain";
 
 import { error, isWebSocketRequest, json, parseJson, teamCodeFromPath } from "./http.js";
-import { createAiGateway } from "./openai-gateway.js";
+import { createAiGateway, OpenAiRefusalError } from "./openai-gateway.js";
 import { RaceLeaderboard } from "./race-leaderboard.js";
 import { TeamRoom } from "./team-room.js";
 
@@ -81,6 +83,45 @@ const handleCreateThread = async (
   }
 };
 
+type ChatAiOutcome = { kind: "success"; text: string } | { kind: "failure" };
+
+/**
+ * AI呼び出しの成否をDOへ渡す`outcome`へ変換しつつ、ポリシー拒否（再試行しても
+ * 無意味）だけを区別できるよう`refusal`も併せて返す。handleChatMessageの
+ * 複雑度を下げるための切り出し。
+ */
+const runAiCompletion = async (
+  aiGateway: AiGateway,
+  history: readonly AiMessage[],
+): Promise<{ outcome: ChatAiOutcome; refusal: string | null }> => {
+  let refusal: string | null = null;
+  const response = await aiGateway
+    .complete({ messages: history, timeoutMs: CHAT_TIMEOUT_MS })
+    .catch((caught: unknown) => {
+      if (caught instanceof OpenAiRefusalError) refusal = caught.message;
+      return null;
+    });
+  return {
+    outcome: response === null ? { kind: "failure" } : { kind: "success", text: response.text },
+    refusal,
+  };
+};
+
+/** AI応答保存の結果をHTTP応答へ変換する。handleChatMessageの複雑度を下げるための切り出し。 */
+const respondToCompletion = (
+  result: ChatMessageResult | { retry: true } | null,
+  refusal: string | null,
+): Response => {
+  if (result === null)
+    return error("応答の保存に失敗しました。時間を置いて再試行してください。", 503);
+  if ("retry" in result) {
+    return refusal !== null
+      ? error(`AIが回答を拒否しました: ${refusal}`, 422)
+      : error("AI応答の取得に失敗しました。再試行してください。", 503);
+  }
+  return json(result);
+};
+
 export const handleChatMessage = async (
   request: Request,
   env: Env,
@@ -100,18 +141,12 @@ export const handleChatMessage = async (
     return error("メッセージの処理に失敗しました。時間を置いて再試行してください。", 503);
   if ("unknownThread" in begin) return error("指定されたスレッドが見つかりません。", 404);
   if (begin.kind === "already-processed") return json(begin.result);
+  if (begin.kind === "in-progress")
+    return error("同じ内容が既に送信処理中です。少し待って再試行してください。", 409);
 
-  const response = await aiGateway
-    .complete({ messages: begin.history, timeoutMs: CHAT_TIMEOUT_MS })
-    .catch(() => null);
-  const outcome: { kind: "success"; text: string } | { kind: "failure" } =
-    response === null ? { kind: "failure" } : { kind: "success", text: response.text };
-
+  const { outcome, refusal } = await runAiCompletion(aiGateway, begin.history);
   const result = await room.completeChatMessage(command.commandId, outcome).catch(() => null);
-  if (result === null)
-    return error("応答の保存に失敗しました。時間を置いて再試行してください。", 503);
-  if ("retry" in result) return error("AI応答の取得に失敗しました。再試行してください。", 503);
-  return json(result);
+  return respondToCompletion(result, refusal);
 };
 
 const handleTeamSync = (request: Request, env: Env, teamCode: TeamCode): Promise<Response> => {
