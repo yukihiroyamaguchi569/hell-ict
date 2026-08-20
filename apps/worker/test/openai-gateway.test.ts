@@ -46,4 +46,43 @@ describe("OpenAiGateway", () => {
       globalThis.fetch = originalFetch;
     }
   });
+
+  it("ポリシー拒否（content: null, refusal）はrefusalの内容を含む例外として伝える", async () => {
+    const originalFetch = globalThis.fetch;
+    globalThis.fetch = (() =>
+      Promise.resolve(
+        new Response(
+          JSON.stringify({
+            choices: [{ message: { content: null, refusal: "対応できません" } }],
+          }),
+          { status: 200 },
+        ),
+      )) as typeof fetch;
+    try {
+      const gateway = new OpenAiGateway("https://example.test/v1", "secret-key", "gpt-4o");
+      await expect(
+        gateway.complete({ messages: [{ role: "user", text: "test" }], timeoutMs: 1_000 }),
+      ).rejects.toThrow("対応できません");
+    } finally {
+      globalThis.fetch = originalFetch;
+    }
+  });
+
+  it("refusal無しのcontent: nullは原因不明のエラーとして伝える", async () => {
+    const originalFetch = globalThis.fetch;
+    globalThis.fetch = (() =>
+      Promise.resolve(
+        new Response(JSON.stringify({ choices: [{ message: { content: null } }] }), {
+          status: 200,
+        }),
+      )) as typeof fetch;
+    try {
+      const gateway = new OpenAiGateway("https://example.test/v1", "secret-key", "gpt-4o");
+      await expect(
+        gateway.complete({ messages: [{ role: "user", text: "test" }], timeoutMs: 1_000 }),
+      ).rejects.toThrow("contentがありません");
+    } finally {
+      globalThis.fetch = originalFetch;
+    }
+  });
 });

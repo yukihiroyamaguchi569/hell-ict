@@ -9,7 +9,11 @@ export const openAiChatCompletionSchema = z.object({
     .array(
       z.object({
         message: z.object({
-          content: z.string().min(1),
+          // ポリシー拒否時、OpenAIは content: null かつ refusal に理由を返す。
+          // content必須にすると正当な拒否応答がただのparse失敗になり、
+          // 原因不明のまま扱われてしまう。
+          content: z.string().min(1).nullable(),
+          refusal: z.string().min(1).nullable().optional(),
         }),
       }),
     )

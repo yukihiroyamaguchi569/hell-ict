@@ -47,6 +47,17 @@ export type BeginChatMessageOutcome =
 
 export type CompleteChatMessageOutcome = { kind: "success"; text: string } | { kind: "failure" };
 
+/**
+ * AI呼び出しが失敗し続け、クライアントが二度と同じcommandIdで再送しない場合に
+ * pending_message_commandsが際限なく残るのを防ぐ猶予期間。研修は120分で終わる
+ * 前提（企画書§3）なので、それより十分長い時間を掃除の境界にする——短すぎると、
+ * 期限切れ後に同じcommandIdで本当に再送された場合、ユーザーメッセージが
+ * 重複して追加されてしまう（pending行は「再送を待つ印」であり、これを消すと
+ * 冪等性を失う）。1セッションの範囲では実質発生しない長さを取ることで、
+ * 掃除の安全性と重複防止を両立させる。
+ */
+const PENDING_MESSAGE_EXPIRY_MS = 6 * 60 * 60 * 1000;
+
 export class TeamRoom extends DurableObject<Env> {
   constructor(ctx: DurableObjectState, env: Env) {
     super(ctx, env);
@@ -66,7 +77,7 @@ export class TeamRoom extends DurableObject<Env> {
       "CREATE TABLE IF NOT EXISTS processed_message_commands (command_id TEXT PRIMARY KEY, result TEXT NOT NULL)",
     );
     this.ctx.storage.sql.exec(
-      "CREATE TABLE IF NOT EXISTS pending_message_commands (command_id TEXT PRIMARY KEY, thread_id TEXT NOT NULL)",
+      "CREATE TABLE IF NOT EXISTS pending_message_commands (command_id TEXT PRIMARY KEY, thread_id TEXT NOT NULL, created_at TEXT NOT NULL)",
     );
   }
 
@@ -187,6 +198,7 @@ export class TeamRoom extends DurableObject<Env> {
   ): Promise<BeginChatMessageOutcome | UnknownThreadReply> {
     const teamCode = teamCodeSchema.parse(teamCodeInput);
     const command: SendMessageCommand = sendMessageCommandSchema.parse(commandInput);
+    this.expirePendingMessages();
     const processed =
       this.ctx.storage.sql
         .exec<StoredMessageCommand>(
@@ -226,9 +238,10 @@ export class TeamRoom extends DurableObject<Env> {
     if (!appended.ok) return { unknownThread: true };
     this.saveChatSnapshot(appended.snapshot);
     this.ctx.storage.sql.exec(
-      "INSERT INTO pending_message_commands (command_id, thread_id) VALUES (?, ?)",
+      "INSERT INTO pending_message_commands (command_id, thread_id, created_at) VALUES (?, ?, ?)",
       command.commandId,
       command.threadId,
+      new Date().toISOString(),
     );
     this.broadcastChat(appended.snapshot);
     return { kind: "pending", history: this.historyFor(appended.snapshot, command.threadId) };
@@ -290,6 +303,11 @@ export class TeamRoom extends DurableObject<Env> {
     );
     this.broadcastChat(appended.snapshot);
     return result;
+  }
+
+  private expirePendingMessages(): void {
+    const cutoff = new Date(Date.now() - PENDING_MESSAGE_EXPIRY_MS).toISOString();
+    this.ctx.storage.sql.exec("DELETE FROM pending_message_commands WHERE created_at < ?", cutoff);
   }
 
   private historyFor(snapshot: ChatSnapshot, threadId: string): AiMessage[] {

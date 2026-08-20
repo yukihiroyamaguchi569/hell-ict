@@ -21,10 +21,21 @@ export const collectMessages = (response: Response, count: number): Promise<unkn
   const socket = response.webSocket;
   if (socket === null) throw new Error("101応答にWebSocketがありません。");
   const received: unknown[] = [];
-  const done = new Promise<void>((resolve) => {
+  const done = new Promise<void>((resolve, reject) => {
     socket.addEventListener("message", (event) => {
-      received.push(typeof event.data === "string" ? (JSON.parse(event.data) as unknown) : null);
+      try {
+        received.push(typeof event.data === "string" ? (JSON.parse(event.data) as unknown) : null);
+      } catch (parseError) {
+        reject(parseError as Error);
+        return;
+      }
       if (received.length >= count) resolve();
+    });
+    socket.addEventListener("close", () => {
+      reject(new Error(`${String(count)}件集める前にWebSocketが閉じました。`));
+    });
+    socket.addEventListener("error", () => {
+      reject(new Error("WebSocketでエラーが発生しました。"));
     });
   });
   socket.accept();

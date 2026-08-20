@@ -13,17 +13,19 @@ export default defineConfig({
   projects: [{ name: "chromium", use: { ...devices["Desktop Chrome"] } }],
   webServer: [
     {
+      // 既存プロセスを再利用すると、OPENAI_BASE_URLがスタブを指さない
+      // 素のWorker/実キー経路へE2Eが無言で迂回しうる。常に起動し直す。
       name: "openai-stub",
       command: "node e2e/openai-stub.mjs",
       url: "http://127.0.0.1:8789/health",
-      reuseExistingServer: !process.env.CI,
+      reuseExistingServer: false,
     },
     {
       name: "worker",
       command:
         "pnpm --filter @hell-ict/worker exec wrangler dev --local --ip 127.0.0.1 --port 8787 --var OPENAI_BASE_URL:http://127.0.0.1:8789",
       url: "http://127.0.0.1:8787/api/health",
-      reuseExistingServer: !process.env.CI,
+      reuseExistingServer: false,
     },
     {
       name: "web",

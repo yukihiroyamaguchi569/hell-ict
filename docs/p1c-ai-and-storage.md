@@ -20,7 +20,9 @@ AI呼び出し中にクライアントが同じcommandIdで再送すると、ユ
 
 ## OpenAI adapter
 
-`apps/worker/src/openai-gateway.ts`の`OpenAiGateway`が`AiGateway`を実装する。APIキーは`env.OPENAI_API_KEY`からのみ読み、Authorizationヘッダーにだけ乗せる——応答payloadにもWebSocket配信にも出さない。応答は`packages/domain/src/schemas/openai-response.ts`のschemaで検証してから使う。
+`apps/worker/src/openai-gateway.ts`の`OpenAiGateway`が`AiGateway`を実装する。APIキーは`env.OPENAI_API_KEY`からのみ読み、Authorizationヘッダーにだけ乗せる——応答payloadにもWebSocket配信にも出さない。応答は`packages/domain/src/schemas/openai-response.ts`のschemaで検証してから使う。OpenAIがポリシー拒否で`content: null`かつ`refusal`を返した場合は、原因不明の汎用エラーではなく`refusal`の内容を含むエラーとして区別する。
+
+`OPENAI_API_KEY`は`wrangler.jsonc`の`vars`に置かない（`vars`はCloudflareダッシュボードに平文表示される）。型は`apps/worker/src/env.d.ts`が手書きでグローバルな`Env`型へ追加し、値はローカルでは`apps/worker/.dev.vars`（`.gitignore`済み）、本番では`wrangler secret put OPENAI_API_KEY`で供給する。`OPENAI_BASE_URL`・`OPENAI_MODEL`は秘匿情報ではないため`vars`のままでよい。
 
 AiGatewayの呼び出しは`TeamRoom` DOの外、Workerの`fetch`ハンドラ（`handleChatMessage`）で行う。DOはCloudflare RuntimeのRPCでのみ呼び出され、テストからFakeへ直接差し替えられないため、AI呼び出しをDOの外に出すことで`FakeAiGateway`を注入できる境界を保っている。
 

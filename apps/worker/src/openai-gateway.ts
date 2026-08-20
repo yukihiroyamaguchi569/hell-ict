@@ -37,9 +37,16 @@ export class OpenAiGateway implements AiGateway {
         throw new Error(`OpenAI応答が異常です（status ${String(response.status)}）。`);
       }
       const completion = parseOpenAiChatCompletion(await response.json());
-      const text = completion.choices[0]?.message.content;
-      if (text === undefined) throw new Error("OpenAI応答にcontentがありません。");
-      return { text };
+      const message = completion.choices[0]?.message;
+      if (message === undefined) throw new Error("OpenAI応答にcontentがありません。");
+      if (message.content === null) {
+        throw new Error(
+          message.refusal !== null && message.refusal !== undefined
+            ? `OpenAIが応答を拒否しました: ${message.refusal}`
+            : "OpenAI応答にcontentがありません。",
+        );
+      }
+      return { text: message.content };
     } finally {
       clearTimeout(timer);
     }

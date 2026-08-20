@@ -129,6 +129,36 @@ describe("P1C チャット骨格", () => {
     expect(thread?.messages.map((m) => m.role)).toEqual(["user"]);
   });
 
+  it("AI失敗後、同じcommandIdで再送すると成功し、userメッセージは重複しない", async () => {
+    await session("400005");
+    const created = await createThread("400005", "00000000-0000-4000-8000-000000000501", "副");
+    const { snapshot } = createThreadResultSchema.parse(await created.json());
+    const threadId = snapshot.threads[0]?.threadId;
+    if (threadId === undefined) throw new Error("unexpected");
+
+    const gateway = new FakeAiGateway([
+      { kind: "failure", error: new Error("rate limited") },
+      { kind: "success", response: "応答" },
+    ]);
+    const command = {
+      commandId: "00000000-0000-4000-8000-000000000502",
+      threadId,
+      text: "本文",
+    };
+    const failed = await sendMessage("400005", command, gateway);
+    expect(failed.status).toBe(503);
+    const retried = await sendMessage("400005", command, gateway);
+    expect(retried.status).toBe(200);
+    expect(gateway.requests).toHaveLength(2);
+
+    const final = await chatSnapshotOf("400005");
+    const thread = final.threads.find((t) => t.threadId === threadId);
+    expect(thread?.messages.map((m) => [m.role, m.text])).toEqual([
+      ["user", "本文"],
+      ["assistant", "応答"],
+    ]);
+  });
+
   it("未知スレッドへの送信は404で拒否し、状態を変えない", async () => {
     await session("400004");
     const gateway = new FakeAiGateway([]);
