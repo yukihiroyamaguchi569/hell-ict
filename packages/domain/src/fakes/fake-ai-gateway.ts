@@ -14,7 +14,7 @@ export class FakeAiGateway implements AiGateway {
     this.requests.push(request);
     const outcome = this.outcomes.at(this.requests.length - 1);
     if (outcome === undefined) {
-      throw new Error("FakeAiGatewayに結果が設定されていません。");
+      return Promise.reject(new Error("FakeAiGatewayに結果が設定されていません。"));
     }
     if (outcome.kind === "success") {
       return Promise.resolve(outcome.response);

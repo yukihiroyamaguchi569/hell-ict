@@ -1,4 +1,4 @@
-import { env, exports } from "cloudflare:workers";
+import { exports } from "cloudflare:workers";
 import { describe, expect, it } from "vitest";
 
 describe("開発ハーネスWorker", () => {
@@ -18,9 +18,14 @@ describe("開発ハーネスWorker", () => {
   });
 
   it("Durable Objectをローカル実行環境で永続化する", async () => {
-    const counter = env.HARNESS_COUNTER.getByName("singleton");
+    const first = await exports.default.fetch(
+      new Request("https://example.test/harness/increment", { method: "POST" }),
+    );
+    const second = await exports.default.fetch(
+      new Request("https://example.test/harness/increment", { method: "POST" }),
+    );
 
-    await expect(counter.increment()).resolves.toBe(1);
-    await expect(counter.increment()).resolves.toBe(2);
+    await expect(first.json()).resolves.toEqual({ count: 1 });
+    await expect(second.json()).resolves.toEqual({ count: 2 });
   });
 });

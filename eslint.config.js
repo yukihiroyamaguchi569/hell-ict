@@ -44,7 +44,13 @@ export default tseslint.config(
     },
   },
   {
-    files: ["apps/worker/**/*.ts", "**/*.test.ts", "**/*.spec.ts", "e2e/**/*.ts"],
+    files: [
+      "apps/worker/**/*.ts",
+      "**/*.test.ts",
+      "**/*.spec.ts",
+      "test/materials/**/*.ts",
+      "e2e/**/*.ts",
+    ],
     languageOptions: {
       globals: globals.node,
       parserOptions: {

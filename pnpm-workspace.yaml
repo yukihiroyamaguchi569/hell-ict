@@ -1,6 +1,7 @@
 packages:
   - apps/*
   - packages/*
+engineStrict: true
 overrides:
   qs: 6.15.2
 allowBuilds:

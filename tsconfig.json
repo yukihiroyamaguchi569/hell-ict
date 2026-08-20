@@ -3,6 +3,7 @@
   "references": [
     { "path": "./packages/domain" },
     { "path": "./apps/web" },
-    { "path": "./apps/worker" }
+    { "path": "./apps/worker" },
+    { "path": "./tsconfig.tests.json" }
   ]
 }

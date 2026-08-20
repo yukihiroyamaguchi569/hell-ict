@@ -10,10 +10,12 @@ import {
 
 describe("開発用Fake", () => {
   it("時刻、乱数、IDを決定的に差し替える", () => {
-    const clock = new FakeClock(new Date("2026-08-20T00:00:00.000Z"));
+    const initialTime = new Date("2026-08-20T00:00:00.000Z");
+    const clock = new FakeClock(initialTime);
     const random = new FakeRandom([0.25]);
     const ids = new FakeIdGenerator(["test-id"]);
 
+    initialTime.setUTCFullYear(2030);
     clock.advanceBy(1_000);
 
     expect(clock.now().toISOString()).toBe("2026-08-20T00:00:01.000Z");
@@ -34,6 +36,14 @@ describe("開発用Fake", () => {
     await expect(gateway.complete(request)).rejects.toThrow("rate limited");
     await expect(gateway.complete(request)).rejects.toThrow("500ms");
     expect(gateway.requests).toHaveLength(3);
+  });
+
+  it("結果が尽きたAI呼び出しを記録し、Promise rejectとして返す", async () => {
+    const gateway = new FakeAiGateway([]);
+    const request = { prompt: "test", timeoutMs: 500 };
+
+    await expect(gateway.complete(request)).rejects.toThrow("結果が設定されていません");
+    expect(gateway.requests).toEqual([request]);
   });
 
   it("保存失敗後に副作用を残さず、次の保存を許可する", async () => {

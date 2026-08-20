@@ -1,0 +1,2 @@
+# TSVの空の最終列は末尾タブで表現するため、空白エラーとして扱わない。
+docs/materials/*.tsv -whitespace
