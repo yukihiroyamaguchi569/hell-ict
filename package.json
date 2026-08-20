@@ -1,0 +1,45 @@
+{
+  "name": "hell-ict",
+  "private": true,
+  "type": "module",
+  "version": "0.1.0",
+  "packageManager": "pnpm@11.22.0",
+  "engines": {
+    "node": ">=22.12.0"
+  },
+  "scripts": {
+    "build": "pnpm --filter @hell-ict/web build && pnpm --filter @hell-ict/worker build",
+    "dev": "pnpm --filter @hell-ict/web dev",
+    "dev:worker": "pnpm --filter @hell-ict/worker dev",
+    "format": "prettier --write .",
+    "format:check": "prettier --check .",
+    "lint": "eslint . --max-warnings 0",
+    "typecheck": "tsc --build --pretty false && pnpm --filter @hell-ict/worker exec wrangler types --check",
+    "test:domain": "vitest run --config vitest.domain.config.ts",
+    "test:materials": "vitest run --config vitest.materials.config.ts",
+    "test:worker": "pnpm --filter @hell-ict/worker test",
+    "test:e2e": "playwright test --project=chromium",
+    "test:e2e:all": "playwright test",
+    "mutation": "stryker run",
+    "duplicates": "jscpd packages --min-lines 8 --min-tokens 60 --threshold 0 --reporters console",
+    "audit": "pnpm audit --prod --audit-level high",
+    "verify": "pnpm format:check && pnpm lint && pnpm typecheck && pnpm build && pnpm test:domain && pnpm test:materials && pnpm test:worker && pnpm test:e2e",
+    "verify:full": "pnpm verify && pnpm test:e2e:all && pnpm mutation && pnpm duplicates && pnpm audit"
+  },
+  "devDependencies": {
+    "@eslint/js": "9.39.1",
+    "@playwright/test": "1.57.0",
+    "@stryker-mutator/core": "10.0.0",
+    "@stryker-mutator/vitest-runner": "10.0.0",
+    "@types/node": "24.10.1",
+    "eslint": "9.39.1",
+    "eslint-plugin-react-hooks": "7.1.1",
+    "eslint-plugin-react-refresh": "0.5.4",
+    "globals": "16.5.0",
+    "jscpd": "5.0.16",
+    "prettier": "3.7.4",
+    "typescript": "5.9.3",
+    "typescript-eslint": "8.46.4",
+    "vitest": "4.1.11"
+  }
+}

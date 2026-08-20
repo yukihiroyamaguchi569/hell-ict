@@ -1,0 +1,9 @@
+{
+  "extends": "./tsconfig.base.json",
+  "compilerOptions": {
+    "lib": ["DOM", "DOM.Iterable", "ES2024"],
+    "noEmit": true,
+    "tsBuildInfoFile": "./dist/tsconfig.tests.tsbuildinfo"
+  },
+  "include": ["test/materials/**/*.ts", "e2e/**/*.ts"]
+}
