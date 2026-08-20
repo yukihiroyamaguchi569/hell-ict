@@ -1,0 +1,15 @@
+AGENTS.md
+CLAUDE.md
+assets/
+docs/
+docs/ui/mock/
+.mulmoterminal.json
+apps/worker/worker-configuration.d.ts
+pnpm-lock.yaml
+node_modules/
+dist/
+coverage/
+playwright-report/
+test-results/
+.stryker-tmp/
+.wrangler/
