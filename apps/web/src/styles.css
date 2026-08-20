@@ -15,6 +15,19 @@ main {
   padding: 2rem;
 }
 
+button,
+input {
+  font: inherit;
+  margin: 0.5rem 0.5rem 0.5rem 0;
+  padding: 0.6rem;
+}
+section,
+aside {
+  border: 1px solid #55616d;
+  margin-top: 1rem;
+  padding: 1rem;
+}
+
 .eyebrow {
   color: #95a0aa;
   font-size: 0.875rem;

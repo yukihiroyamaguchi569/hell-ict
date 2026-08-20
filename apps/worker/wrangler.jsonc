@@ -7,8 +7,12 @@
   "durable_objects": {
     "bindings": [
       {
-        "name": "HARNESS_COUNTER",
-        "class_name": "HarnessCounter",
+        "name": "TEAM_ROOM",
+        "class_name": "TeamRoom",
+      },
+      {
+        "name": "RACE_LEADERBOARD",
+        "class_name": "RaceLeaderboard",
       },
     ],
   },
@@ -16,6 +20,11 @@
     {
       "tag": "v1",
       "new_sqlite_classes": ["HarnessCounter"],
+    },
+    {
+      "tag": "v2",
+      "deleted_classes": ["HarnessCounter"],
+      "new_sqlite_classes": ["TeamRoom", "RaceLeaderboard"],
     },
   ],
   "observability": {

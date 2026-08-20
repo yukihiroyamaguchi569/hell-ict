@@ -11,9 +11,16 @@ export default defineConfig({
     trace: "on-first-retry",
   },
   projects: [{ name: "chromium", use: { ...devices["Desktop Chrome"] } }],
-  webServer: {
-    command: "pnpm --filter @hell-ict/web dev --host 127.0.0.1 --port 4173",
-    url: "http://127.0.0.1:4173",
-    reuseExistingServer: !process.env.CI,
-  },
+  webServer: [
+    {
+      command: "pnpm --filter @hell-ict/worker dev",
+      url: "http://127.0.0.1:8787",
+      reuseExistingServer: !process.env.CI,
+    },
+    {
+      command: "pnpm --filter @hell-ict/web dev --host 127.0.0.1 --port 4173",
+      url: "http://127.0.0.1:4173",
+      reuseExistingServer: !process.env.CI,
+    },
+  ],
 });
