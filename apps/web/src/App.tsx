@@ -26,6 +26,10 @@ const submitStage1 = async (
 
 export const App = () => {
   const [teamCode, setTeamCode] = useState(() => localStorage.getItem(savedTeamCodeKey) ?? "");
+  const [joinedCode, setJoinedCode] = useState<string | null>(() => {
+    const saved = localStorage.getItem(savedTeamCodeKey);
+    return saved !== null && isTeamCode(saved) ? saved : null;
+  });
   const [snapshot, setSnapshot] = useState<TeamSnapshot | null>(null);
   const [leaderboard, setLeaderboard] = useState<LeaderboardSnapshot | null>(null);
   const [message, setMessage] = useState("6桁のチームコードを入力してください。");
@@ -96,9 +100,9 @@ export const App = () => {
   );
 
   useEffect(() => {
-    if (!isTeamCode(teamCode)) return;
-    return connect(teamCode);
-  }, [connect, teamCode]);
+    if (joinedCode === null) return;
+    return connect(joinedCode);
+  }, [connect, joinedCode]);
 
   const join = async (): Promise<void> => {
     if (!isTeamCode(teamCode)) {
@@ -114,6 +118,7 @@ export const App = () => {
       const parsed = teamSnapshotSchema.safeParse(await response.json());
       if (!response.ok || !parsed.success) throw new Error();
       localStorage.setItem(savedTeamCodeKey, teamCode);
+      setJoinedCode(teamCode);
       acceptTeamSnapshot(parsed.data);
       setMessage("おかえりなさい。チーム状態を復元しました。");
     } catch {
