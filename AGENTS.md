@@ -117,9 +117,9 @@
 この節はCodexを使用している場合だけ適用する。Claude Codeなど、ほかの開発ツールには適用しない。
 
 - 設計と実装計画は、`.codex/agents/planner.toml`で定義した`planner`へ委譲する。
-- コード、テスト、設定、ドキュメントの変更と検証は、`.codex/agents/implementer.toml`で定義した`implementer`へ委譲する。親エージェント自身はファイルを変更しない。
+- 作業ブランチの作成、コード・テスト・設定・ドキュメントの変更と検証、stage、コミット、push、Pull Requestの作成・更新は、`.codex/agents/implementer.toml`で定義した`implementer`へ委譲する。親エージェント自身はファイルやGitHubの状態を変更しない。
 - 計画と実装を含む依頼では、先に`planner`が計画を作り、その結果を`implementer`へ渡す。
-- 親エージェントは、ユーザーとの対話、スコープの判断、結果の統合、Git・GitHub操作を担当する。
+- 親エージェントは、ユーザーとの対話、スコープの判断、結果の統合を担当する。Pull Requestのマージは、ユーザーから明示的に依頼された場合だけ行う。
 - 重要な選択肢が残っている場合は、`implementer`を起動する前に親エージェントがユーザーへ確認する。
 
 ## Git・GitHubワークフロー
