@@ -304,6 +304,9 @@ const handleGet = (request: Request, env: Env, url: URL): Promise<Response> => {
 const worker = {
   async fetch(request: Request, env: Env): Promise<Response> {
     const url = new URL(request.url);
+    if (request.method === "GET" && url.pathname === "/api/health") {
+      return json({ status: "ok" });
+    }
     if (request.method === "POST") return handlePost(request, env, url);
     if (request.method === "GET") return handleGet(request, env, url);
     return new Response("Not found", { status: 404 });

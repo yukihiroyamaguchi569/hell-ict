@@ -13,11 +13,13 @@ export default defineConfig({
   projects: [{ name: "chromium", use: { ...devices["Desktop Chrome"] } }],
   webServer: [
     {
+      name: "worker",
       command: "pnpm --filter @hell-ict/worker dev",
-      url: "http://127.0.0.1:8787",
+      url: "http://127.0.0.1:8787/api/health",
       reuseExistingServer: !process.env.CI,
     },
     {
+      name: "web",
       command: "pnpm --filter @hell-ict/web dev --host 127.0.0.1 --port 4173",
       url: "http://127.0.0.1:4173",
       reuseExistingServer: !process.env.CI,

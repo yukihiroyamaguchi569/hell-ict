@@ -1,4 +1,5 @@
-import { exports } from "cloudflare:workers";
+import { env, exports } from "cloudflare:workers";
+import { listDurableObjectIds } from "cloudflare:test";
 import { describe, expect, it } from "vitest";
 
 const session = async (teamCode: string): Promise<Response> =>
@@ -10,6 +11,18 @@ const session = async (teamCode: string): Promise<Response> =>
   );
 
 describe("P1B Worker", () => {
+  it("health checkはDOを作らず固定の成功応答を返す", async () => {
+    await expect(listDurableObjectIds(env.TEAM_ROOM)).resolves.toEqual([]);
+    await expect(listDurableObjectIds(env.RACE_LEADERBOARD)).resolves.toEqual([]);
+
+    const response = await exports.default.fetch(new Request("https://example.test/api/health"));
+
+    expect(response.status).toBe(200);
+    await expect(response.json()).resolves.toEqual({ status: "ok" });
+    await expect(listDurableObjectIds(env.TEAM_ROOM)).resolves.toEqual([]);
+    await expect(listDurableObjectIds(env.RACE_LEADERBOARD)).resolves.toEqual([]);
+  });
+
   it("6桁コードで初期状態を作成し、同じコードでは復元する", async () => {
     const first = await session("000000");
     expect(first.status).toBe(200);
