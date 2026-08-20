@@ -2,6 +2,7 @@ name: 検証
 
 on:
   pull_request:
+    types: [opened, synchronize, reopened, labeled]
   push:
     branches: [main]
   workflow_dispatch:
@@ -30,7 +31,10 @@ jobs:
 
   verify-full:
     name: pnpm verify:full
-    if: github.event_name == 'workflow_dispatch'
+    # 中核ロジックを大きく変更したPRは「監査レーン」ラベルを付けて実行する。
+    if: >-
+      github.event_name == 'workflow_dispatch'
+      || contains(github.event.pull_request.labels.*.name, '監査レーン')
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v6
