@@ -1,6 +1,8 @@
 import type { ChatSnapshot } from "@hell-ict/domain";
 import { useRef, useState } from "react";
 
+import { HttpRequestError } from "./http-client.js";
+
 type ChatPaneProps = {
   snapshot: ChatSnapshot | null;
   onCreateThread: (commandId: string, title: string) => Promise<void>;
@@ -8,6 +10,22 @@ type ChatPaneProps = {
 };
 
 type PendingSend = { commandId: string; threadId: string; text: string };
+
+/**
+ * 送信前ゲート（beginChatMessageを呼ぶ前）でのブロックか判定する。このときだけ
+ * 何も保存されていないため、pendingを解除して新しいcommandIdで書き直せる。
+ * AIポリシー拒否・履歴中PIIのブロックは既にユーザーメッセージが保存済みなので
+ * 対象にしない——同じcommandIdでの再試行に倒し、二重保存を防ぐ。
+ * sendの複雑度を下げるための切り出し。
+ */
+const isPreSendBlock = (caught: unknown): boolean =>
+  caught instanceof HttpRequestError && caught.code === "pii_blocked";
+
+/** 送信失敗時の表示文言を組み立てる。sendの複雑度を下げるための切り出し。 */
+const sendFailureMessage = (caught: unknown): string =>
+  caught instanceof HttpRequestError
+    ? caught.message
+    : "送信に失敗しました。もう一度押すと同じ内容を安全に再試行します。";
 
 /**
  * P1Cの最小チャットペイン。判定・永続化は持たず、送信とスレッド切り替えの
@@ -45,8 +63,12 @@ export const ChatPane = ({ snapshot, onCreateThread, onSendMessage }: ChatPanePr
       setPending(null);
       setText("");
       setStatus("");
-    } catch {
-      setStatus("送信に失敗しました。もう一度押すと同じ内容を安全に再試行します。");
+    } catch (caught) {
+      // 送信前ゲートでのブロックだけは何も保存されていないため、入力欄を再び
+      // 有効にして書き直せるようにする。それ以外の失敗はpendingを保持し、
+      // 同じcommandIdでの再試行に倒す（新しいcommandIdだと二重保存になる）。
+      if (isPreSendBlock(caught)) setPending(null);
+      setStatus(sendFailureMessage(caught));
     } finally {
       setSending(false);
     }

@@ -16,22 +16,12 @@ import type {
 import { useCallback, useEffect, useRef, useState } from "react";
 
 import { ChatPane } from "./chat-pane.js";
+import { postJson } from "./http-client.js";
 
 const savedTeamCodeKey = "hell-ict-team-code";
 const isTeamCode = (value: string): boolean => teamCodeSchema.safeParse(value).success;
 const socketUrl = (path: string): string =>
   `${location.protocol === "https:" ? "wss" : "ws"}://${location.host}${path}`;
-
-const postJson = async (path: string, body: unknown): Promise<unknown> => {
-  const response = await fetch(path, {
-    method: "POST",
-    headers: { "content-type": "application/json" },
-    body: JSON.stringify(body),
-  });
-  const parsed = (await response.json()) as unknown;
-  if (!response.ok) throw new Error();
-  return parsed;
-};
 
 const submitStage1 = async (snapshot: TeamSnapshot, commandId: string): Promise<CommandResult> => {
   const parsed = commandResultSchema.safeParse(

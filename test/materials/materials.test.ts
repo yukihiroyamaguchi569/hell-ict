@@ -3,6 +3,7 @@ import { resolve } from "node:path";
 
 import { describe, expect, it } from "vitest";
 
+import { detectPii, stage4Patient } from "../../packages/domain/src/pii.js";
 import { parseTsv } from "./parse-tsv.js";
 
 const materialsPath = (name: string): string =>
@@ -43,5 +44,29 @@ describe("教材の整合性", () => {
     expect(patient?.slice(0, 6)).toEqual(["005", "渡辺 三郎", "5A", "7.3", "陰性", "37.9℃"]);
     expect(chart).toContain("渡辺 三郎");
     expect(chart).toContain("患者ID 005");
+  });
+
+  it("Stage 4カルテはdetectPiiの検知パターン（stage4Patient）5値すべてを含む", async () => {
+    const chart = await readFile(materialsPath("stage4_chart.md"), "utf8");
+    expect(chart).toContain(stage4Patient.name);
+    expect(chart).toContain(stage4Patient.id);
+    expect(chart).toContain(stage4Patient.dob);
+    expect(chart).toContain(stage4Patient.phone);
+    expect(chart).toContain(stage4Patient.familyName);
+  });
+
+  it("Stage 4カルテの経過欄はdetectPiiで検知される", async () => {
+    const chart = await readFile(materialsPath("stage4_chart.md"), "utf8");
+    const line = chart
+      .split("\n")
+      .find((row) => row.includes("患者ID") && row.includes(stage4Patient.name));
+    expect(line).toBeDefined();
+    expect(detectPii(line ?? "")).not.toBeNull();
+  });
+
+  it("塗ってはいけない一般語は単体では検知されない", () => {
+    for (const general of ["5A病棟", "7月10日", "原因不明の発熱（精査中）", "感染制御チーム"]) {
+      expect(detectPii(general)).toBeNull();
+    }
   });
 });

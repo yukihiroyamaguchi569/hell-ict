@@ -1,5 +1,6 @@
 import {
   createThreadCommandSchema,
+  detectPii,
   sendMessageCommandSchema,
   teamCodeSchema,
   teamCommandSchema,
@@ -122,6 +123,26 @@ const respondToCompletion = (
   return json(result);
 };
 
+/**
+ * 履歴（過去に保存された分）にPIIが混ざっていないか外部送信の直前で確認する。
+ * 送信前ゲートは今回の本文しか検査しないため、想定外の経路で混入した場合や、
+ * 将来AIの応答自体がPIIを含んで保存された場合の防御として置く。見つかったら
+ * pending行のクレームを解放し、ブロック応答を返す（このcommandIdの本文は既に
+ * 保存済みなので"pii_blocked"は付けず、クライアントは同じcommandIdで再試行する）。
+ * handleChatMessageの複雑度を下げるための切り出し。
+ */
+const blockHistoryPii = async (
+  room: DurableObjectStub<TeamRoom>,
+  commandId: string,
+  history: readonly AiMessage[],
+): Promise<Response | null> => {
+  if (!history.some((message) => detectPii(message.text) !== null)) return null;
+  const blocked = await room.completeChatMessage(commandId, { kind: "failure" }).catch(() => null);
+  return blocked === null
+    ? error("メッセージの処理に失敗しました。時間を置いて再試行してください。", 503)
+    : error("会話履歴に個人情報を検知したため、送信をブロックしました。", 422);
+};
+
 export const handleChatMessage = async (
   request: Request,
   env: Env,
@@ -135,6 +156,13 @@ export const handleChatMessage = async (
     return error("commandの形式が不正です。", 400);
   }
 
+  // 送信前PIIゲート（企画書§7）。DO・AiGatewayのどちらにも触れる前に止める——
+  // ユーザーメッセージを保存させず、OpenAIへも一切送らない。何も保存していないので
+  // "pii_blocked"を付け、クライアントが新しいcommandIdで書き直せることを示す。
+  if (detectPii(command.text) !== null) {
+    return error("個人情報を検知したため、送信をブロックしました。", 422, "pii_blocked");
+  }
+
   const room = env.TEAM_ROOM.getByName(teamCode);
   const begin = await room.beginChatMessage(teamCode, command).catch(() => null);
   if (begin === null)
@@ -143,6 +171,9 @@ export const handleChatMessage = async (
   if (begin.kind === "already-processed") return json(begin.result);
   if (begin.kind === "in-progress")
     return error("同じ内容が既に送信処理中です。少し待って再試行してください。", 409);
+
+  const historyBlock = await blockHistoryPii(room, command.commandId, begin.history);
+  if (historyBlock !== null) return historyBlock;
 
   const { outcome, refusal } = await runAiCompletion(aiGateway, begin.history);
   const result = await room.completeChatMessage(command.commandId, outcome).catch(() => null);

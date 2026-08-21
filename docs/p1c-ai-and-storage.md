@@ -1,6 +1,6 @@
 # P1C AI・保存基盤
 
-P1Cは、アプリ内AIチャットをWorkers経由でOpenAIへ中継し、チームごとに複数スレッドの会話を保存する。本ドキュメントは実装が進むごとに更新する。現在の内容はチャット骨格（スレッド・メッセージ・OpenAI adapter）までを反映する。PII検知・送信前ゲート、利用制限、D1ログ、障害耐性の分類は後続のPRで追記する。
+P1Cは、アプリ内AIチャットをWorkers経由でOpenAIへ中継し、チームごとに複数スレッドの会話を保存する。本ドキュメントは実装が進むごとに更新する。現在の内容はチャット骨格（スレッド・メッセージ・OpenAI adapter）と送信前PIIゲートまでを反映する。利用制限、D1ログ、障害耐性の分類は後続のPRで追記する。
 
 ## チャットの状態とWebSocket配信
 
@@ -30,10 +30,18 @@ OpenAIのポリシー拒否（`content: null` + `refusal`）は、汎用の失�
 
 AiGatewayの呼び出しは`TeamRoom` DOの外、Workerの`fetch`ハンドラ（`handleChatMessage`）で行う。DOはCloudflare RuntimeのRPCでのみ呼び出され、テストからFakeへ直接差し替えられないため、AI呼び出しをDOの外に出すことで`FakeAiGateway`を注入できる境界を保っている。
 
+## 送信前PIIゲート
+
+`handleChatMessage`（`apps/worker/src/index.ts`）は、`sendMessageCommandSchema`の検証直後・`TeamRoom`にもAiGatewayにも触れる前に、`packages/domain/src/pii.ts`の`detectPii`でユーザー本文を検査する。検知したら`beginChatMessage`を呼ばず、`422`（「個人情報を検知したため、送信をブロックしました。」）を返す——ユーザーメッセージはDOへ保存されず、AI呼び出しも一度も発生しない。
+
+検知パターンの唯一の情報源は`stage4Patient`（`docs/materials/stage4_chart.md`の患者005＝渡辺 三郎の固有情報）。教材との一致は`test/materials/materials.test.ts`で固定する。生年月日・電話番号は固有値ではなく汎用の書式でも拾う——参加者が値を手で書き写した場合も検知するため。「5A病棟の70代男性のご家族へ」のような正しく匿名化した依頼は素通りする。
+
+ゲートは常に全送信へ適用する（ステージによる分岐を持たない）。Stage 4のインシデント発火・黒塗り罰ゲーム・AI使用ロック・回答期限は`teamState`にインシデント/罰の状態が無いため未実装で、Stage 4本体の実装PRへ送る。
+
 ## 検証
 
-Worker統合テストは`FakeAiGateway`を直接注入し、複数スレッドの独立性・commandId冪等性・AI失敗時の状態・未知スレッドの拒否を確認する。OpenAiGateway自体のテストは、APIキーがAuthorizationヘッダーにのみ乗りbodyへ出ないことを確認する。E2Eは実キーを使わず、`e2e/openai-stub.mjs`が返す固定応答を`OPENAI_BASE_URL`の差し替え（`wrangler dev --var`）で参照させる。本番コードに分岐は追加しない。
+Worker統合テストは`FakeAiGateway`を直接注入し、複数スレッドの独立性・commandId冪等性・AI失敗時の状態・未知スレッドの拒否・PIIゲート（ブロック時に`FakeAiGateway.requests`が0件のまま・処理済み/進行中commandIdへのPII本文再送も拒否されること）を確認する。OpenAiGateway自体のテストは、APIキーがAuthorizationヘッダーにのみ乗りbodyへ出ないことを確認する。E2Eは実キーを使わず、`e2e/openai-stub.mjs`が返す固定応答を`OPENAI_BASE_URL`の差し替え（`wrangler dev --var`）で参照させる。本番コードに分岐は追加しない。
 
 ## 含まないもの
 
-PII検知・送信前ゲート、レート制限・トークン予算、D1へのAIログ保存、障害の分類とフォールバック、KV・R2は後続PRで追加する。
+利用制限・トークン予算、D1へのAIログ保存、障害の分類とフォールバック、KV・R2、Stage 4のインシデント状態機械（黒塗り罰ゲーム・AI使用ロック・回答期限）は後続PRで追加する。

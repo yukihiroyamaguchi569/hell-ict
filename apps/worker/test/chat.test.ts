@@ -3,6 +3,7 @@ import {
   chatMessageResultSchema,
   chatSnapshotSchema,
   createThreadResultSchema,
+  httpErrorSchema,
   teamSyncMessageSchema,
 } from "@hell-ict/domain";
 import { FakeAiGateway } from "@hell-ict/domain/fakes";
@@ -232,6 +233,194 @@ describe("P1C チャット骨格", () => {
     expect(response.status).toBe(422);
     const body = await response.json();
     expect(body).toMatchObject({ message: expect.stringContaining("対応できません") });
+  });
+
+  it("PIIを含む送信は422でブロックし、AIを呼ばずチャットにも残さない", async () => {
+    await session("400009");
+    const created = await createThread("400009", "00000000-0000-4000-8000-000000000901", "副");
+    const { snapshot } = createThreadResultSchema.parse(await created.json());
+    const threadId = snapshot.threads[0]?.threadId;
+    if (threadId === undefined) throw new Error("unexpected");
+
+    const gateway = new FakeAiGateway([]);
+    const response = await sendMessage(
+      "400009",
+      {
+        commandId: "00000000-0000-4000-8000-000000000902",
+        threadId,
+        text: "渡辺 三郎さんの件で返信文を書いてください",
+      },
+      gateway,
+    );
+    expect(response.status).toBe(422);
+    expect(gateway.requests).toHaveLength(0);
+    const body = httpErrorSchema.parse(await response.json());
+    expect(body.code).toBe("pii_blocked");
+
+    const final = await chatSnapshotOf("400009");
+    const thread = final.threads.find((t) => t.threadId === threadId);
+    expect(thread?.messages).toEqual([]);
+  });
+
+  it("匿名化した依頼はゲートを素通りしてAIへ届く", async () => {
+    await session("400010");
+    const created = await createThread("400010", "00000000-0000-4000-8000-000000001001", "副");
+    const { snapshot } = createThreadResultSchema.parse(await created.json());
+    const threadId = snapshot.threads[0]?.threadId;
+    if (threadId === undefined) throw new Error("unexpected");
+
+    const gateway = new FakeAiGateway([{ kind: "success", response: "承知しました" }]);
+    const response = await sendMessage(
+      "400010",
+      {
+        commandId: "00000000-0000-4000-8000-000000001002",
+        threadId,
+        text: "5A病棟の70代男性のご家族へ、面会制限の説明文を作成してください",
+      },
+      gateway,
+    );
+    expect(response.status).toBe(200);
+    expect(gateway.requests).toHaveLength(1);
+  });
+
+  it("処理済みcommandIdへPIIを含む本文で再送してもAIを呼ばず422を返す", async () => {
+    await session("400011");
+    const created = await createThread("400011", "00000000-0000-4000-8000-000000001101", "副");
+    const { snapshot } = createThreadResultSchema.parse(await created.json());
+    const threadId = snapshot.threads[0]?.threadId;
+    if (threadId === undefined) throw new Error("unexpected");
+
+    const gateway = new FakeAiGateway([{ kind: "success", response: "応答" }]);
+    const commandId = "00000000-0000-4000-8000-000000001102";
+    const first = await sendMessage("400011", { commandId, threadId, text: "本文" }, gateway);
+    expect(first.status).toBe(200);
+
+    const retried = await sendMessage(
+      "400011",
+      { commandId, threadId, text: "渡辺 三郎さんの件です" },
+      gateway,
+    );
+    expect(retried.status).toBe(422);
+    expect(gateway.requests).toHaveLength(1);
+  });
+
+  it("進行中commandIdへPIIを含む本文を送ってもAIを呼ばず422を返す", async () => {
+    await session("400012");
+    const created = await createThread("400012", "00000000-0000-4000-8000-000000001201", "副");
+    const { snapshot } = createThreadResultSchema.parse(await created.json());
+    const threadId = snapshot.threads[0]?.threadId;
+    if (threadId === undefined) throw new Error("unexpected");
+
+    const commandId = "00000000-0000-4000-8000-000000001202";
+    await env.TEAM_ROOM.getByName("400012").beginChatMessage("400012", {
+      type: "send-message",
+      commandId,
+      threadId,
+      text: "本文",
+    });
+
+    const gateway = new FakeAiGateway([]);
+    const response = await sendMessage(
+      "400012",
+      { commandId, threadId, text: "渡辺 三郎さんの件です" },
+      gateway,
+    );
+    expect(response.status).toBe(422);
+    expect(gateway.requests).toHaveLength(0);
+  });
+
+  it("ブロックされた送信はpending/processedを残さず、同じcommandIdでの再送を妨げない", async () => {
+    await session("400013");
+    const created = await createThread("400013", "00000000-0000-4000-8000-000000001301", "副");
+    const { snapshot } = createThreadResultSchema.parse(await created.json());
+    const threadId = snapshot.threads[0]?.threadId;
+    if (threadId === undefined) throw new Error("unexpected");
+
+    const gateway = new FakeAiGateway([{ kind: "success", response: "応答" }]);
+    const commandId = "00000000-0000-4000-8000-000000001302";
+    const blocked = await sendMessage(
+      "400013",
+      { commandId, threadId, text: "渡辺 三郎さんの件です" },
+      gateway,
+    );
+    expect(blocked.status).toBe(422);
+
+    const retried = await sendMessage("400013", { commandId, threadId, text: "本文" }, gateway);
+    expect(retried.status).toBe(200);
+    expect(gateway.requests).toHaveLength(1);
+
+    const final = await chatSnapshotOf("400013");
+    const thread = final.threads.find((t) => t.threadId === threadId);
+    expect(thread?.messages.map((m) => [m.role, m.text])).toEqual([
+      ["user", "本文"],
+      ["assistant", "応答"],
+    ]);
+  });
+
+  it("履歴に混入したPII（想定外経路のアシスタント応答）を検知し、追加のAI呼び出しをせず422を返す", async () => {
+    await session("400014");
+    const created = await createThread("400014", "00000000-0000-4000-8000-000000001401", "副");
+    const { snapshot } = createThreadResultSchema.parse(await created.json());
+    const threadId = snapshot.threads[0]?.threadId;
+    if (threadId === undefined) throw new Error("unexpected");
+
+    // 送信前ゲートは今回の本文しか検査しない。ここではAI応答自体がPIIを含んで
+    // 保存された状態を再現し、外部送信の直前で履歴側の防御が効くことを検証する。
+    const gateway = new FakeAiGateway([
+      { kind: "success", response: "渡辺 三郎さんの件、承知しました" },
+    ]);
+    const first = await sendMessage(
+      "400014",
+      { commandId: "00000000-0000-4000-8000-000000001402", threadId, text: "本文" },
+      gateway,
+    );
+    expect(first.status).toBe(200);
+
+    const response = await sendMessage(
+      "400014",
+      { commandId: "00000000-0000-4000-8000-000000001403", threadId, text: "別の本文" },
+      gateway,
+    );
+    expect(response.status).toBe(422);
+    const body = httpErrorSchema.parse(await response.json());
+    expect(body.code).toBeUndefined();
+    expect(gateway.requests).toHaveLength(1);
+  });
+
+  it("履歴ブロック後、同じcommandIdで再送すると同じブロックが再現され、ユーザーメッセージは重複しない", async () => {
+    await session("400015");
+    const created = await createThread("400015", "00000000-0000-4000-8000-000000001501", "副");
+    const { snapshot } = createThreadResultSchema.parse(await created.json());
+    const threadId = snapshot.threads[0]?.threadId;
+    if (threadId === undefined) throw new Error("unexpected");
+
+    const gateway = new FakeAiGateway([
+      { kind: "success", response: "渡辺 三郎さんの件、承知しました" },
+    ]);
+    await sendMessage(
+      "400015",
+      { commandId: "00000000-0000-4000-8000-000000001502", threadId, text: "本文" },
+      gateway,
+    );
+
+    const command = {
+      commandId: "00000000-0000-4000-8000-000000001503",
+      threadId,
+      text: "別の本文",
+    };
+    const first = await sendMessage("400015", command, gateway);
+    expect(first.status).toBe(422);
+    const retried = await sendMessage("400015", command, gateway);
+    expect(retried.status).toBe(422);
+    expect(gateway.requests).toHaveLength(1);
+
+    const final = await chatSnapshotOf("400015");
+    const thread = final.threads.find((t) => t.threadId === threadId);
+    expect(thread?.messages.map((m) => [m.role, m.text])).toEqual([
+      ["user", "本文"],
+      ["assistant", "渡辺 三郎さんの件、承知しました"],
+      ["user", "別の本文"],
+    ]);
   });
 
   it("未知スレッドへの送信は404で拒否し、状態を変えない", async () => {

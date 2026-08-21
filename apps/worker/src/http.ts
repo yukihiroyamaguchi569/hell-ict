@@ -1,8 +1,9 @@
 import { teamCodeSchema } from "@hell-ict/domain";
-import type { TeamCode } from "@hell-ict/domain";
+import type { HttpErrorCode, TeamCode } from "@hell-ict/domain";
 
 export const json = (value: unknown, status = 200): Response => Response.json(value, { status });
-export const error = (message: string, status: number): Response => json({ message }, status);
+export const error = (message: string, status: number, code?: HttpErrorCode): Response =>
+  json(code === undefined ? { message } : { message, code }, status);
 export const parseJson = async (request: Request): Promise<unknown> => request.json();
 export const isWebSocketRequest = (request: Request): boolean =>
   request.headers.get("Upgrade")?.toLowerCase() === "websocket";
