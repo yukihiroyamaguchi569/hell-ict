@@ -25,6 +25,7 @@ export {
   chatThreadSchema,
   createThreadCommandSchema,
   createThreadResultSchema,
+  promptProfileSchema,
   sendMessageCommandSchema,
 } from "./schemas/chat.js";
 export type {
@@ -38,6 +39,7 @@ export type {
   ChatThreadId,
   CreateThreadCommand,
   CreateThreadResult,
+  PromptProfile,
   SendMessageCommand,
 } from "./schemas/chat.js";
 export { appendMessage, createThread, initialChatSnapshot } from "./chat.js";

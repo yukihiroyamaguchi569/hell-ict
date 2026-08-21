@@ -9,6 +9,7 @@
   },
   "scripts": {
     "build": "pnpm --filter @hell-ict/web build && pnpm --filter @hell-ict/worker build",
+    "build:testplay": "bash scripts/build-testplay.sh",
     "dev": "pnpm --filter @hell-ict/web dev",
     "dev:worker": "pnpm --filter @hell-ict/worker dev",
     "format": "prettier --write .",

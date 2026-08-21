@@ -67,4 +67,14 @@ describe("チャットschemaの境界", () => {
       expect(chatCommandSchema.safeParse(input).success).toBe(false);
     }
   });
+
+  it("send-messageはpromptProfileを省略でき、既知の値を受理し未知の値を拒否する", () => {
+    const base = { type: "send-message", commandId, threadId, text: "本文" };
+    expect(chatCommandSchema.parse(base)).toEqual(base);
+    for (const promptProfile of ["default", "s1", "s3"] as const) {
+      const withProfile = { ...base, promptProfile };
+      expect(chatCommandSchema.parse(withProfile)).toEqual(withProfile);
+    }
+    expect(chatCommandSchema.safeParse({ ...base, promptProfile: "s2" }).success).toBe(false);
+  });
 });

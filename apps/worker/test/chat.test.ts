@@ -19,7 +19,12 @@ const createThread = (teamCode: string, commandId: string, title: string): Promi
 
 const sendMessage = (
   teamCode: string,
-  command: { commandId: string; threadId: string; text: string },
+  command: {
+    commandId: string;
+    threadId: string;
+    text: string;
+    promptProfile?: "default" | "s1" | "s3";
+  },
   aiGateway: FakeAiGateway,
 ): Promise<Response> =>
   handleChatMessage(
@@ -31,6 +36,47 @@ const sendMessage = (
     teamCode,
     aiGateway,
   );
+
+type PromptProfileCase = {
+  readonly label: string;
+  readonly promptProfile?: "s1" | "s3";
+  readonly teamCode: string;
+  readonly threadCommandId: string;
+  readonly messageCommandId: string;
+};
+
+/**
+ * `testCase`のprofileで1件送信し、AIへ渡ったmessagesの先頭がsystemちょうど1件で
+ * あることを検証したうえで、そのsystemメッセージ本文を返す。
+ * 「3つのpromptProfileそれぞれで…」テストの複雑度を下げるための切り出し。
+ */
+const expectSingleLeadingSystemPrompt = async (testCase: PromptProfileCase): Promise<string> => {
+  await session(testCase.teamCode);
+  const created = await createThread(testCase.teamCode, testCase.threadCommandId, "副");
+  const { snapshot } = createThreadResultSchema.parse(await created.json());
+  const threadId = snapshot.threads[0]?.threadId;
+  if (threadId === undefined) throw new Error("unexpected");
+
+  const gateway = new FakeAiGateway([{ kind: "success", response: "応答" }]);
+  await sendMessage(
+    testCase.teamCode,
+    {
+      commandId: testCase.messageCommandId,
+      threadId,
+      text: "本文",
+      promptProfile: testCase.promptProfile,
+    },
+    gateway,
+  );
+
+  const messages = gateway.requests[0]?.messages ?? [];
+  const systemMessages = messages.filter((message) => message.role === "system");
+  expect(messages[0]?.role, testCase.label).toBe("system");
+  expect(systemMessages, testCase.label).toHaveLength(1);
+  const text = systemMessages[0]?.text ?? "";
+  expect(text.length, testCase.label).toBeGreaterThan(0);
+  return text;
+};
 
 const chatSnapshotOf = async (teamCode: string): Promise<ChatSnapshot> => {
   const response = await upgrade(`/api/teams/${teamCode}/sync`);
@@ -421,6 +467,101 @@ describe("P1C チャット骨格", () => {
       ["assistant", "渡辺 三郎さんの件、承知しました"],
       ["user", "別の本文"],
     ]);
+  });
+
+  it("3つのpromptProfileそれぞれで、AIへ送るmessagesの先頭にsystemが1件だけ前置される", async () => {
+    // 期待値をsystemPromptFor()自身にするとトートロジーになるため、ここでは
+    // 「systemがindex 0にちょうど1件」「3種の本文が互いに異なる」
+    // 「s3は接触予防策の方針を含み、角化型には触れない」という、実装本文に
+    // 依存しない緩い性質だけを検証する。
+    const cases: readonly PromptProfileCase[] = [
+      {
+        label: "省略（default扱い）",
+        teamCode: "400016",
+        threadCommandId: "00000000-0000-4000-8000-000000001601",
+        messageCommandId: "00000000-0000-4000-8000-000000001602",
+      },
+      {
+        label: "s1",
+        promptProfile: "s1",
+        teamCode: "400017",
+        threadCommandId: "00000000-0000-4000-8000-000000001701",
+        messageCommandId: "00000000-0000-4000-8000-000000001702",
+      },
+      {
+        label: "s3",
+        promptProfile: "s3",
+        teamCode: "400018",
+        threadCommandId: "00000000-0000-4000-8000-000000001801",
+        messageCommandId: "00000000-0000-4000-8000-000000001802",
+      },
+    ];
+
+    const systemPromptTexts: string[] = [];
+    for (const testCase of cases) {
+      systemPromptTexts.push(await expectSingleLeadingSystemPrompt(testCase));
+    }
+
+    expect(new Set(systemPromptTexts).size).toBe(3);
+    const [, , s3PromptText] = systemPromptTexts;
+    expect(s3PromptText).toContain("接触予防策");
+    // "角化型"は「利用者には言及しない」という内部方針の説明に必要な語として
+    // システムプロンプト自身には現れる（AIへの指示であり、AI出力ではない）。
+    // そのため「含まない」ではなく、「疥癬に触れるのはs3のプロンプトだけ」という、
+    // s1・defaultとの識別性を検証する。
+    expect(systemPromptTexts.filter((text) => text.includes("疥癬"))).toEqual([s3PromptText]);
+  });
+
+  it("同一スレッドへの2ターン目でもsystemはindex 0に1件だけで、保存済み履歴はuser/assistantのみになる", async () => {
+    await session("400019");
+    const created = await createThread("400019", "00000000-0000-4000-8000-000000001901", "副");
+    const { snapshot } = createThreadResultSchema.parse(await created.json());
+    const threadId = snapshot.threads[0]?.threadId;
+    if (threadId === undefined) throw new Error("unexpected");
+
+    const gateway = new FakeAiGateway([
+      { kind: "success", response: "1ターン目の応答" },
+      { kind: "success", response: "2ターン目の応答" },
+    ]);
+    await sendMessage(
+      "400019",
+      {
+        commandId: "00000000-0000-4000-8000-000000001902",
+        threadId,
+        text: "1ターン目",
+        promptProfile: "s3",
+      },
+      gateway,
+    );
+    await sendMessage(
+      "400019",
+      {
+        commandId: "00000000-0000-4000-8000-000000001903",
+        threadId,
+        text: "2ターン目",
+        promptProfile: "s3",
+      },
+      gateway,
+    );
+
+    expect(gateway.requests).toHaveLength(2);
+    for (const request of gateway.requests) {
+      const systemMessages = request.messages.filter((message) => message.role === "system");
+      expect(request.messages[0]?.role).toBe("system");
+      expect(systemMessages).toHaveLength(1);
+    }
+    // 2ターン目のリクエストには1ターン目のuser/assistantが履歴として積まれているはず。
+    expect(gateway.requests[1]?.messages.map((message) => message.role)).toEqual([
+      "system",
+      "user",
+      "assistant",
+      "user",
+    ]);
+
+    const final = await chatSnapshotOf("400019");
+    const thread = final.threads.find((t) => t.threadId === threadId);
+    expect(thread?.messages.map((m) => m.role)).toEqual(["user", "assistant", "user", "assistant"]);
+    expect(thread?.messages.every((m) => m.role === "user" || m.role === "assistant")).toBe(true);
   });
 
   it("未知スレッドへの送信は404で拒否し、状態を変えない", async () => {

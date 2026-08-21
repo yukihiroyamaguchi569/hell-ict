@@ -8,6 +8,12 @@
     "OPENAI_BASE_URL": "https://api.openai.com/v1",
     "OPENAI_MODEL": "gpt-4o",
   },
+  // テストプレイ用の静的配信。/api/* は必ずWorkerへ届かせ、それ以外の
+  // パスだけAssetsから返す（scripts/build-testplay.shが生成するpublic/を配信対象とする）。
+  "assets": {
+    "directory": "./public",
+    "run_worker_first": ["/api/*"],
+  },
   "durable_objects": {
     "bindings": [
       {

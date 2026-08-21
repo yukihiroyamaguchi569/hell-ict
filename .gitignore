@@ -7,5 +7,7 @@ playwright-report/
 test-results/
 .wrangler/
 .stryker-tmp/
+apps/worker/public/*
+!apps/worker/public/.gitkeep
 .dev.vars
 *.tsbuildinfo

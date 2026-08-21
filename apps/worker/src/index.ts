@@ -19,6 +19,7 @@ import type {
 import { error, isWebSocketRequest, json, parseJson, teamCodeFromPath } from "./http.js";
 import { createAiGateway, OpenAiRefusalError } from "./openai-gateway.js";
 import { RaceLeaderboard } from "./race-leaderboard.js";
+import { systemPromptFor } from "./stage-prompts.js";
 import { TeamRoom } from "./team-room.js";
 
 export { RaceLeaderboard, TeamRoom };
@@ -175,7 +176,13 @@ export const handleChatMessage = async (
   const historyBlock = await blockHistoryPii(room, command.commandId, begin.history);
   if (historyBlock !== null) return historyBlock;
 
-  const { outcome, refusal } = await runAiCompletion(aiGateway, begin.history);
+  // ステージ別システムプロンプトは送信時にだけ前置し、DOへ保存される履歴には含めない
+  // （保存対象はユーザー/アシスタントのやり取りのみ。企画書§5のStage別罠設計）。
+  const historyWithSystemPrompt: readonly AiMessage[] = [
+    { role: "system", text: systemPromptFor(command.promptProfile) },
+    ...begin.history,
+  ];
+  const { outcome, refusal } = await runAiCompletion(aiGateway, historyWithSystemPrompt);
   const result = await room.completeChatMessage(command.commandId, outcome).catch(() => null);
   return respondToCompletion(result, refusal);
 };
@@ -205,9 +212,20 @@ const handlePost = (request: Request, env: Env, url: URL): Promise<Response> => 
     : handleCommand(request, env, commandTeamCode);
 };
 
+const handleChatSnapshot = async (env: Env, teamCode: TeamCode): Promise<Response> => {
+  try {
+    const snapshot = await env.TEAM_ROOM.getByName(teamCode).chatSnapshot(teamCode);
+    return json(snapshot);
+  } catch {
+    return error("チャット状態の取得に失敗しました。時間を置いて再試行してください。", 503);
+  }
+};
+
 const handleGet = (request: Request, env: Env, url: URL): Promise<Response> => {
   const teamCode = teamCodeFromPath(url.pathname, "/api/teams/", "/sync");
   if (teamCode !== null) return handleTeamSync(request, env, teamCode);
+  const chatTeamCode = teamCodeFromPath(url.pathname, "/api/teams/", "/chat");
+  if (chatTeamCode !== null) return handleChatSnapshot(env, chatTeamCode);
   return url.pathname === "/api/leaderboard/sync"
     ? handleLeaderboardSync(request, env)
     : Promise.resolve(new Response("Not found", { status: 404 }));

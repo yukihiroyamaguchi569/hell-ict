@@ -39,12 +39,17 @@ export const createThreadCommandSchema = z
   })
   .strict();
 
+// ステージ別のシステムプロンプトを切り替えるための識別子。省略時はWorker側で
+// "default"として扱う（企画書§5、Stage 1/3のシステムプロンプト注入設計）。
+export const promptProfileSchema = z.enum(["default", "s1", "s3"]);
+
 export const sendMessageCommandSchema = z
   .object({
     type: z.literal("send-message"),
     commandId: commandIdSchema,
     threadId: chatThreadIdSchema,
     text: z.string().trim().min(1).max(4000),
+    promptProfile: promptProfileSchema.optional(),
   })
   .strict();
 
@@ -69,6 +74,7 @@ export const createThreadResultSchema = z
 export type ChatThreadId = z.infer<typeof chatThreadIdSchema>;
 export type ChatMessageId = z.infer<typeof chatMessageIdSchema>;
 export type ChatRole = z.infer<typeof chatRoleSchema>;
+export type PromptProfile = z.infer<typeof promptProfileSchema>;
 export type ChatMessage = z.infer<typeof chatMessageSchema>;
 export type ChatThread = z.infer<typeof chatThreadSchema>;
 export type ChatSnapshot = z.infer<typeof chatSnapshotSchema>;
