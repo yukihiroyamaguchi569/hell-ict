@@ -38,9 +38,13 @@ AiGatewayの呼び出しは`TeamRoom` DOの外、Workerの`fetch`ハンドラ（
 
 ゲートは常に全送信へ適用する（ステージによる分岐を持たない）。Stage 4のインシデント発火・黒塗り罰ゲーム・AI使用ロック・回答期限は`teamState`にインシデント/罰の状態が無いため未実装で、Stage 4本体の実装PRへ送る。
 
+新規本文のゲートは`beginChatMessage`の**前**で今回のテキストしか検査しない。`begin.history`（DOに保存済みの過去メッセージ）は、想定外の経路で混入した場合や将来AIの応答自体がPIIを含んで保存された場合に備え、`blockHistoryPii`が**AiGateway.complete()の直前**で改めて全件検査する。検知したら`completeChatMessage(commandId, {kind:"failure"})`でpending行のクレームを解放し、AIを呼ばず`422`（「会話履歴に個人情報を検知したため、送信をブロックしました。」）を返す。
+
+HTTPエラー応答（`packages/domain/src/schemas/http-error.ts`の`httpErrorSchema`）は`code: "pii_blocked"`を持てる。このcodeは**新規送信ゲートでのブロックだけ**に付ける——このときは何もDOへ保存されていないため、クライアント（`apps/web/src/chat-pane.tsx`）は`pending`を解除し新しい`commandId`で書き直せる。AIポリシー拒否と履歴ブロックはどちらも既にユーザーメッセージが保存済みなのでcodeを付けず、クライアントは`pending`を保持して同じ`commandId`で再試行する——別のcommandIdで再送すると同じユーザーメッセージが重複保存されるため。
+
 ## 検証
 
-Worker統合テストは`FakeAiGateway`を直接注入し、複数スレッドの独立性・commandId冪等性・AI失敗時の状態・未知スレッドの拒否・PIIゲート（ブロック時に`FakeAiGateway.requests`が0件のまま・処理済み/進行中commandIdへのPII本文再送も拒否されること）を確認する。OpenAiGateway自体のテストは、APIキーがAuthorizationヘッダーにのみ乗りbodyへ出ないことを確認する。E2Eは実キーを使わず、`e2e/openai-stub.mjs`が返す固定応答を`OPENAI_BASE_URL`の差し替え（`wrangler dev --var`）で参照させる。本番コードに分岐は追加しない。
+Worker統合テストは`FakeAiGateway`を直接注入し、複数スレッドの独立性・commandId冪等性・AI失敗時の状態・未知スレッドの拒否・PIIゲート（新規送信ブロック時に`FakeAiGateway.requests`が0件のまま・処理済み/進行中commandIdへのPII本文再送も拒否されること・履歴に混入したPIIを追加のAI呼び出しなしでブロックし同じcommandIdでの再試行がユーザーメッセージを重複させないこと）を確認する。OpenAiGateway自体のテストは、APIキーがAuthorizationヘッダーにのみ乗りbodyへ出ないことを確認する。E2Eは実キーを使わず、`e2e/openai-stub.mjs`が返す固定応答を`OPENAI_BASE_URL`の差し替え（`wrangler dev --var`）で参照させる。本番コードに分岐は追加しない。
 
 ## 含まないもの
 
