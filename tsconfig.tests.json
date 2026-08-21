@@ -5,5 +5,6 @@
     "noEmit": true,
     "tsBuildInfoFile": "./dist/tsconfig.tests.tsbuildinfo"
   },
+  "references": [{ "path": "./packages/domain" }],
   "include": ["test/materials/**/*.ts", "e2e/**/*.ts"]
 }

@@ -1,5 +1,6 @@
 import {
   createThreadCommandSchema,
+  detectPii,
   sendMessageCommandSchema,
   teamCodeSchema,
   teamCommandSchema,
@@ -133,6 +134,12 @@ export const handleChatMessage = async (
     command = sendMessageCommandSchema.parse(await parseJson(request));
   } catch {
     return error("commandの形式が不正です。", 400);
+  }
+
+  // 送信前PIIゲート（企画書§7）。DO・AiGatewayのどちらにも触れる前に止める——
+  // ユーザーメッセージを保存させず、OpenAIへも一切送らない。
+  if (detectPii(command.text) !== null) {
+    return error("個人情報を検知したため、送信をブロックしました。", 422);
   }
 
   const room = env.TEAM_ROOM.getByName(teamCode);

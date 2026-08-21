@@ -1,6 +1,8 @@
 import type { ChatSnapshot } from "@hell-ict/domain";
 import { useRef, useState } from "react";
 
+import { HttpRequestError } from "./http-client.js";
+
 type ChatPaneProps = {
   snapshot: ChatSnapshot | null;
   onCreateThread: (commandId: string, title: string) => Promise<void>;
@@ -8,6 +10,16 @@ type ChatPaneProps = {
 };
 
 type PendingSend = { commandId: string; threadId: string; text: string };
+
+/** 送信前ゲート・AIポリシー拒否による422か判定する。sendの複雑度を下げるための切り出し。 */
+const isBlockedByGate = (caught: unknown): caught is HttpRequestError =>
+  caught instanceof HttpRequestError && caught.status === 422;
+
+/** 送信失敗時の表示文言を組み立てる。sendの複雑度を下げるための切り出し。 */
+const sendFailureMessage = (caught: unknown): string =>
+  isBlockedByGate(caught)
+    ? caught.message
+    : "送信に失敗しました。もう一度押すと同じ内容を安全に再試行します。";
 
 /**
  * P1Cの最小チャットペイン。判定・永続化は持たず、送信とスレッド切り替えの
@@ -45,8 +57,11 @@ export const ChatPane = ({ snapshot, onCreateThread, onSendMessage }: ChatPanePr
       setPending(null);
       setText("");
       setStatus("");
-    } catch {
-      setStatus("送信に失敗しました。もう一度押すと同じ内容を安全に再試行します。");
+    } catch (caught) {
+      // 422（PIIブロック・AIポリシー拒否）はサーバに何も保存されていない。同じ
+      // commandIdでの再試行は成立しないため、入力欄を再び有効にして書き直せるようにする。
+      if (isBlockedByGate(caught)) setPending(null);
+      setStatus(sendFailureMessage(caught));
     } finally {
       setSending(false);
     }
