@@ -15,10 +15,12 @@ import type {
   TeamCode,
   TeamCommand,
 } from "@hell-ict/domain";
+import type { Clock } from "@hell-ict/domain/ports";
 
 import { error, isWebSocketRequest, json, parseJson, teamCodeFromPath } from "./http.js";
 import { createAiGateway, OpenAiRefusalError } from "./openai-gateway.js";
 import { RaceLeaderboard } from "./race-leaderboard.js";
+import { SystemClock } from "./system-clock.js";
 import { TeamRoom } from "./team-room.js";
 
 export { RaceLeaderboard, TeamRoom };
@@ -46,7 +48,12 @@ const handleSession = async (request: Request, env: Env): Promise<Response> => {
   }
 };
 
-const handleCommand = async (request: Request, env: Env, teamCode: TeamCode): Promise<Response> => {
+export const handleCommand = async (
+  request: Request,
+  env: Env,
+  teamCode: TeamCode,
+  clock: Clock,
+): Promise<Response> => {
   let command: TeamCommand;
   try {
     command = teamCommandSchema.parse(await parseJson(request));
@@ -54,7 +61,11 @@ const handleCommand = async (request: Request, env: Env, teamCode: TeamCode): Pr
     return error("commandの形式が不正です。", 400);
   }
   try {
-    const result = await env.TEAM_ROOM.getByName(teamCode).command(teamCode, command);
+    const result = await env.TEAM_ROOM.getByName(teamCode).command(
+      teamCode,
+      command,
+      clock.now().toISOString(),
+    );
     if ("conflict" in result) return error("状態の競合または許可されない遷移です。", 409);
     return json(result, result.leaderboardPending ? 503 : 200);
   } catch {
@@ -202,7 +213,7 @@ const handlePost = (request: Request, env: Env, url: URL): Promise<Response> => 
   const commandTeamCode = teamCodeFromPath(url.pathname, "/api/teams/", "/commands");
   return commandTeamCode === null
     ? Promise.resolve(new Response("Not found", { status: 404 }))
-    : handleCommand(request, env, commandTeamCode);
+    : handleCommand(request, env, commandTeamCode, new SystemClock());
 };
 
 const handleGet = (request: Request, env: Env, url: URL): Promise<Response> => {

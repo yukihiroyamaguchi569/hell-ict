@@ -67,6 +67,14 @@ const PENDING_MESSAGE_EXPIRY_MS = 6 * 60 * 60 * 1000;
  */
 const CLAIM_TIMEOUT_MS = 45 * 1000;
 
+/** Clockから渡されたISO日時文字列をDateへ変換する。command()のRPC境界を守る。 */
+const parseNow = (nowInput: unknown): Date => {
+  if (typeof nowInput !== "string") throw new Error("nowはISO日時文字列である必要があります。");
+  const now = new Date(nowInput);
+  if (Number.isNaN(now.getTime())) throw new Error("nowはISO日時文字列である必要があります。");
+  return now;
+};
+
 export class TeamRoom extends DurableObject<Env> {
   constructor(ctx: DurableObjectState, env: Env) {
     super(ctx, env);
@@ -110,9 +118,11 @@ export class TeamRoom extends DurableObject<Env> {
   async command(
     teamCodeInput: unknown,
     commandInput: unknown,
+    nowInput: unknown,
   ): Promise<CommandResult | ConflictReply> {
     const teamCode = teamCodeSchema.parse(teamCodeInput);
     const command = teamCommandSchema.parse(commandInput);
+    const now = parseNow(nowInput);
     const saved =
       this.ctx.storage.sql
         .exec<StoredCommand>(
@@ -125,7 +135,7 @@ export class TeamRoom extends DurableObject<Env> {
         commandResultSchema.parse(JSON.parse(saved.result) as unknown),
         command.commandId,
       );
-    const transition = transitionTeam(await this.join(teamCode), command);
+    const transition = transitionTeam(await this.join(teamCode), command, now);
     if (!transition.ok) return { conflict: true };
     const pending = commandResultSchema.parse({
       snapshot: transition.snapshot,
