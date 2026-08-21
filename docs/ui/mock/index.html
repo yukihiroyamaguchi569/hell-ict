@@ -590,16 +590,44 @@
 /* Final：ゴール。#ov-unlock とは別の器——「次のステージへの解錠」ではなく
    「レースの終端」であることを見た目で区別する（docs/ui/07_Final.md §4）。
    リーダーボード帯（.board .track）を全画面サイズに拡大した構図にする。
-   自動では閉じない（.unlock の1900ms自動クローズとは違う）。 */
-.goal { background: rgba(8,9,10,.82); flex-direction: column; gap: 22px; }
+   自動では閉じない（.unlock の1900ms自動クローズとは違う）。
+   2026-08-22 改修（ユーザーフィードバック）：暗い背景＋控えめな紙吹雪だと
+   「演出が加わらない」ように見えてしまったため、白系の明るい祝祭背景へ
+   反転した。#ov-goal は他の data-mode（peace/alert/crisis）から独立した
+   固定の見た目にする——.sysdlg/.viewer と同じ「テーマに追従しない」流儀
+   （crisisモードの --accent は赤で「警報」に寄るため、ここでは使わない）。
+   トラックの停留所マーク（.mark-t、drawMarks() 共有）は素の状態だと
+   var(--fg)/var(--accent) を継承して明背景で読めなくなるため、
+   .goal-track 配下だけ固定色へ上書きする。 */
+.goal {
+  background: linear-gradient(160deg, #fffaf3 0%, #fdf0dc 55%, #fbe4c4 100%);
+  flex-direction: column; gap: 22px;
+}
+/* 2026-08-22 追加修正（ユーザー確認済み「だいぶ良くなった」の上での微調整）：
+   ①タイトルをさらに拡大 ②副題は非表示 ③進捗トラックを最上段から最下段へ
+   （DOM順自体もHTML側で移動済み。.goal は .veil のflex-columnなので、
+   順序を変えるだけで見た目の並びが変わる）。 */
 .goal-track { width: min(84vw, 900px); }
 .goal-track .stops {
   display: flex; justify-content: space-between; font-family: var(--font-num);
-  font-size: 13px; color: #8d979f; letter-spacing: .04em; margin-bottom: 34px;
+  font-size: 13px; color: #a3906f; letter-spacing: .04em; margin-bottom: 22px;
 }
 .goal-track .marks { position: relative; height: 22px; }
-.goal .t { font-size: 34px; font-weight: 700; color: #fff; letter-spacing: .06em; }
-.goal .s { font-size: 17px; color: #b9c2c9; }
+.goal-track .mark-t { color: #8a7a68; }
+.goal-track .mark-t.me { color: #b8631f; font-weight: 700; }
+.goal-track .mark-t.lead { color: #4a3f34; }
+.goal .t {
+  font-size: clamp(56px, 9vw, 92px); font-weight: 800; letter-spacing: .05em;
+  max-width: 92vw; text-align: center;
+  background: linear-gradient(135deg, #b8631f 0%, #d9a441 45%, #c97b84 100%);
+  -webkit-background-clip: text; background-clip: text; color: transparent;
+  filter: drop-shadow(0 3px 0 rgba(255,255,255,.7)) drop-shadow(0 10px 22px rgba(184,99,31,.35));
+}
+/* 副題は要素ごと非表示。goalSequence() 側の textContent 書き込みは
+   構造保持のため残すが、CSSで確実に見せない。 */
+.goal .s { display: none; }
+.goal #goal-next { background: #b8631f; border-color: #b8631f; color: #fff; }
+.goal #goal-next:hover { filter: brightness(1.1); }
 
 /* Stage 3：罠発火の暗転。白文字1行だけを残す。責める文言は置かない
    （docs/ui/00_共通シェルと通奏低音.md §9・docs/ui/04_Stage3.md §3）。 */
@@ -681,8 +709,8 @@
 .s5-wait .bar i { display: block; height: 100%; width: 0; background: var(--ai-fg); animation-name: s5fill; animation-timing-function: linear; animation-fill-mode: forwards; }
 @keyframes s5fill { to { width: 100%; } }
 .s5-img-wrap { display: flex; flex-direction: column; gap: 8px; }
-.s5-img { width: 100%; max-width: 220px; border: 1px solid var(--ai-rule); display: block; }
-.s5-img.broken { display: none; }
+.s5-img { width: 100%; max-width: 220px; border: 1px solid var(--ai-rule); display: block; cursor: zoom-in; }
+.s5-img.broken { display: none; cursor: default; }
 .s5-fallback { font-size: 13px; color: var(--ai-muted); border: 1px dashed var(--ai-rule); padding: 10px; }
 .s5-fallback.hide { display: none; }
 .s5-pick { border: 1px solid var(--ai-fg); background: #fff; color: var(--ai-fg); font: inherit; font-size: 13px; padding: 7px 11px; align-self: flex-start; }
@@ -695,11 +723,10 @@
    判定は無いので .warn は使わない。docs/ui/06_Stage5.md §2）。 */
 .s5cand { padding: 14px; display: flex; gap: 14px; align-items: flex-start; min-height: 120px; }
 .s5cand .empty { color: var(--fg-muted); font-size: 15px; }
-.s5cand .thumb { width: 120px; height: 120px; object-fit: cover; border: 1px solid var(--rule); flex: 0 0 auto; background: var(--surface-2); }
-.s5cand .thumb.broken { display: none; }
+.s5cand .thumb { width: 120px; height: 120px; object-fit: cover; border: 1px solid var(--rule); flex: 0 0 auto; background: var(--surface-2); cursor: zoom-in; }
+.s5cand .thumb.broken { display: none; cursor: default; }
 .s5cand .thumb-fallback { width: 120px; flex: 0 0 auto; font-size: 12px; line-height: 1.6; color: var(--fg-muted); border: 1px dashed var(--rule); padding: 8px; }
 .s5cand .thumb-fallback.hide { display: none; }
-.s5cand .prompt { font-size: 13px; color: var(--fg-muted); line-height: 1.7; white-space: pre-wrap; }
 
 /* Stage 4：事務長の督促ポップアップ（2026-08-22再設計で近藤さんから差し替え）。
    窓の器（.sysdlg）は事務長ブリーフィングと共用するが、.briefing 固有の段落
@@ -790,7 +817,7 @@
    タイルはこの研修で作った成果物6枚——サムネイル画像ではなく簡易SVG
    アイコン＋文字だけで表現する（新規画像アセットを増やさない）。 */
 .fboard { display: flex; flex-direction: column; gap: 18px; align-items: center; width: 100%; }
-.ftiles { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 12px; width: 100%; max-width: 640px; }
+.ftiles { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 12px; width: 100%; max-width: 700px; }
 .ftile {
   display: flex; flex-direction: column; gap: 6px; align-items: flex-start;
   padding: 12px 14px; border: 1px solid var(--rule); background: var(--surface-2);
@@ -802,8 +829,10 @@
 .ftile.lit .fn { color: var(--accent); }
 .ftile svg { width: 22px; height: 22px; stroke: var(--fg-muted); fill: none; }
 .ftile.lit svg { stroke: var(--accent); }
-.ftile .ft-title { font-size: 14px; font-weight: 700; }
-.ftile .ft-cap { font-size: 12px; color: var(--fg-muted); line-height: 1.5; }
+/* 主役はステージ名ではなく達成文（2026-08-22改修）——2行に収まる分量で
+   文言側を管理する（F_BOARD_TILES 定義コメント参照）。念のため
+   overflow-wrap も付け、万一長い語が来ても枠からはみ出さず折り返す。 */
+.ftile .ft-title { font-size: 13px; font-weight: 700; line-height: 1.5; overflow-wrap: anywhere; }
 
 /* 空白ピース：中央下段に単独で置く。点灯前は枠だけ、6枚が揃うと入力欄が
    開き、記入後は一言がそのまま残る（消えない——ファシリテーターが各チーム
@@ -833,6 +862,46 @@
 @keyframes fPulse { 0% { box-shadow: 0 0 0 rgba(0,0,0,0); } 40% { box-shadow: 0 0 0 3px var(--accent); } 100% { box-shadow: 0 0 0 rgba(0,0,0,0); } }
 .fclose { font-size: 15px; line-height: 1.9; color: var(--fg-muted); max-width: 56ch; text-align: center; margin: 4px auto 0; }
 .fclose .fclose-head { color: var(--fg); font-weight: 700; margin-bottom: 4px; }
+
+/* レースのゴール演出（2026-08-22追加・ユーザー決定「もっと賑やかに」）。
+   紙吹雪は goalConfettiBurst() が数十片を都度生成し、数秒で降り切って
+   自分でDOMごと消える（無限ループでCPUを食わない）。pointer-events:none
+   なので[振り返りへ進む]のクリックを一切邪魔しない。病院の世界観なので
+   ネオン系ではなく、既存トークンに寄せた落ち着いた数色に絞る。 */
+.confetti { position: absolute; inset: 0; overflow: hidden; pointer-events: none; }
+.confetti i {
+  position: absolute; top: -8%; width: 9px; height: 16px; border-radius: 1px;
+  box-shadow: 0 1px 2px rgba(0,0,0,.12);
+  opacity: 0; animation-name: confettiFall; animation-timing-function: cubic-bezier(.35,0,.65,1);
+  animation-fill-mode: forwards;
+}
+@keyframes confettiFall {
+  0% { transform: translateY(0) translateX(0) rotate(0deg); opacity: 1; }
+  100% { transform: translateY(124vh) translateX(var(--drift, 0px)) rotate(var(--rot, 360deg)); opacity: .85; }
+}
+/* タイトルの登場を弾ませる。#ov-goal は display:none⇄表示の切り替えなので
+   （.hide トグル）、開くたびにこのアニメーションは自然に最初から再生される。
+   2026-08-22 強化：スケールだけでなくわずかな回転ゆれを足して弾みを強調した
+   （持続的な光彩は上の .goal .t の filter:drop-shadow が担うので、ここでは
+   旧・白グロー版の text-shadow は削除——明背景では見えなくなるため）。 */
+.goal .t { animation: goalTitlePop .7s cubic-bezier(.34,1.56,.64,1) both; }
+@keyframes goalTitlePop {
+  0% { transform: scale(.4) rotate(-3deg); opacity: 0; }
+  50% { transform: scale(1.18) rotate(2deg); opacity: 1; }
+  75% { transform: scale(.96) rotate(-1deg); }
+  100% { transform: scale(1) rotate(0deg); }
+}
+
+/* ポスター画像の拡大表示（2026-08-22追加）。軽量ライトボックス——
+   縦長（A4想定）の画像なので高さ基準でビューポートへ収める。 */
+.lightbox { background: rgba(8,9,10,.88); }
+.lightbox img { max-height: 90vh; max-width: 90vw; width: auto; height: auto; object-fit: contain; box-shadow: 0 8px 40px rgba(0,0,0,.5); }
+.lightbox-close {
+  position: absolute; top: 18px; right: 22px; width: 36px; height: 36px;
+  border: 1px solid rgba(255,255,255,.5); background: transparent; color: #fff;
+  font-size: 20px; line-height: 1; cursor: pointer;
+}
+.lightbox-close:hover { background: rgba(255,255,255,.12); }
 
 @media (prefers-reduced-motion: reduce) {
   .screen, .screen *, .stage-fit { transition-duration: .001ms !important; animation-duration: .001ms !important; animation-iteration-count: 1 !important; }
@@ -1111,6 +1180,15 @@
              からのみ開く。Final 自身はもう開かない（Final は振り返りボードに
              全面改修——判定が無く、通過による「解錠」が無いため）。 -->
         <div class="veil goal hide" id="ov-goal">
+          <div class="t" id="goal-t">ゴール</div>
+          <!-- 副題は2026-08-22ユーザー確認済みで非表示化。要素・textContentの
+               書き込み自体は goalSequence() 側に残す（.goal .s { display:none }
+               で消すだけ）——将来また使う可能性に備えて構造は壊さない。 -->
+          <div class="s" id="goal-s"></div>
+          <button class="btn" id="goal-next">振り返りへ進む</button>
+          <!-- 進捗トラックは2026-08-22ユーザー確認済みで最上段から最下段へ移動
+               （タイトル・ボタンより下、紙吹雪より上）。主役をタイトル＋CTAに
+               譲り、位置情報は補足として下段に置く。 -->
           <div class="goal-track">
             <div class="stops">
               <span>Prologue</span><span>S1</span><span>S2</span><span>S3</span>
@@ -1118,9 +1196,19 @@
             </div>
             <div class="marks" id="goal-marks"></div>
           </div>
-          <div class="t" id="goal-t">ゴール</div>
-          <div class="s" id="goal-s"></div>
-          <button class="btn" id="goal-next">振り返りへ進む</button>
+          <!-- 紙吹雪（2026-08-22追加）。goalConfettiBurst() が毎回ここへ生成し、
+               数秒後に自分で片付ける（DOM残留・無限ループなし）。
+               pointer-events:none なので[振り返りへ進む]の押下を一切邪魔しない。 -->
+          <div class="confetti" id="goal-confetti" aria-hidden="true"></div>
+        </div>
+
+        <!-- ポスター画像の拡大表示（2026-08-22追加）。Stage 5 のAIチャット吹き出し
+             （#ai-log への委譲）と提出候補枠（#s5-cand への委譲）の両方から開く。
+             背景クリックか×ボタンで閉じる。hideOverlays() の配列にも入れてあるので
+             シーン離脱時に確実に閉じ、img.src はクリック時に毎回セットし直す。 -->
+        <div class="veil lightbox hide" id="ov-lightbox">
+          <button type="button" class="lightbox-close" id="lightbox-close" aria-label="閉じる">×</button>
+          <img id="lightbox-img" src="" alt="">
         </div>
 
         <!-- Stage 3：罠発火の暗転。白文字1行だけ。事実の報告のみで、責める文言は無い。 -->
@@ -2171,7 +2259,7 @@
   const MAIL_F_JIMU = {
     from: "事務長", subj: "明朝の記者会見について",
     body: [
-      "ICTの皆さん、お疲れ様です。明朝10時、院長が記者会見を行うことになりました。資料の細部はこちらで詰めますので、皆さんにお願いしたいのは一つだけです——この2日間、実際に何をしてきたかを一度振り返って、会見の冒頭で最初にお伝えする一言を残しておいてください。",
+      "ICTの皆さん、お疲れ様です。明朝10時、院長が記者会見を行うことになりました。資料の細部はこちらで詰めますので、皆さんへのお願いは一つだけです——この2日間の対応を一度振り返って、次にこの病院へ入るICTチームへ向けた引き継ぎメモを一言、残しておいてください。",
       "それと、これはお伝えしておかないといけないのですが……名前が無いと記事が書けない、と記者クラブから言われまして。院長の一存で、「聖クロノス熱（仮）」で行くことになりました。学名ですか。……そういうのは、後で結構です。"
     ]
   };
@@ -2204,29 +2292,36 @@
      参加者向け名称（方針／報告 等）ではなく、何をしたかがそのまま伝わる
      言い方を選ぶ。renderFinal() が順に点灯させる（F_BOARD_LIGHT_MS間隔）。 */
   const F_BOARD_LIGHT_MS = 400;   // タイル点灯の間隔（仮値・体感重視）
+  /* 2026-08-22 追加改修（ユーザー決定）：各タイルの主役をステージ名から
+     「チームが成し遂げたこと」に変える。ステージ番号（n）は小さな添えとして
+     残し、achieve が完了形の達成文（2行に収まる長さ・誇張しない事実ベース）。 */
   const F_BOARD_TILES = [
-    { id: "s1", n: "STAGE 1", title: "メール対応", caption: "前任ICNの引き継ぎメモ",
+    { id: "s1", n: "STAGE 1", achieve: "殺到するメールを、AIと捌き切った",
       icon: '<rect x="3" y="5" width="18" height="14" rx="1"></rect><path d="M4 6l8 7 8-7"></path>' },
-    { id: "s2", n: "STAGE 2", title: "火の手", caption: "発熱の芽・ラインリスト整形",
+    { id: "s2", n: "STAGE 2", achieve: "壊れた台帳を復元し、発熱の芽を見つけた",
       icon: '<path d="M4 6h16M4 12h10M4 18h16"></path><circle cx="19" cy="12" r="1.6"></circle>' },
-    { id: "s3", n: "STAGE 3", title: "方針", caption: "疥癬の対応方針",
+    { id: "s3", n: "STAGE 3", achieve: "AIの誤りを正典で見抜き、方針を立てた",
       icon: '<path d="M12 3l7 3v6c0 5-3.2 8-7 9-3.8-1-7-4-7-9V6l7-3z"></path>' },
-    { id: "s35", n: "STAGE 3.5", title: "解釈", caption: "前駆症状の手がかり・眼痛",
+    { id: "s35", n: "STAGE 3.5", achieve: "英語の速報から、発熱前の兆候を掘り当てた",
       icon: '<path d="M2 12s4-7 10-7 10 7 10 7-4 7-10 7-10-7-10-7z"></path><circle cx="12" cy="12" r="2.6"></circle>' },
-    { id: "s4", n: "STAGE 4", title: "報告", caption: "保健所提出・発熱14名",
+    { id: "s4", n: "STAGE 4", achieve: "個人情報を守って、保健所へ報告した",
       icon: '<rect x="5" y="4" width="14" height="17" rx="1"></rect><path d="M9 4V3h6v1"></path><path d="M8 10h8M8 14h8M8 18h5"></path>' },
-    { id: "s5", n: "STAGE 5", title: "掲示", caption: "面会制限ポスター",
+    { id: "s5", n: "STAGE 5", achieve: "誰にでも伝わる掲示を、形にした",
       icon: '<rect x="3" y="4" width="18" height="15" rx="1"></rect><path d="M3 16l5-5 4 4 3-3 6 6"></path><circle cx="8" cy="9" r="1.4"></circle>' }
   ];
 
-  /* 空白ピース（記者会見）の問いと、記入後に出す締めのメッセージ。
+  /* 空白ピース（引き継ぎ）の問いと、記入後に出す締めのメッセージ。
+     2026-08-22 再設計（親裁定済み）：「記者会見で最初に伝える一言」だと
+     ICTの振り返りという主題からズレるため、「引き継ぎメモ」型に変えた——
+     Stage 1 で前任ICNのメモに助けられて始まった研修が、自分たちの引き継ぎ
+     メモを残して終わる円環構成（下記 F_CLOSE_LINES）。
      判定は「空でないか」だけ——文面の中身は一切見ない。記したその場から
      消さない（画面に残し続ける。ファシリテーターが各チームのPCから
      読み上げるため）。 */
-  const F_LINE_PROMPT = "明日の記者会見で、病院として最初に伝える一言";
+  const F_LINE_PROMPT = "次にこの病院へ来るICTチームへ——引き継ぎメモに残す一言";
   const F_CLOSE_LINES = [
-    "この2日間で、あなたたちがやったことです。",
-    "疥癬患者への対応、汚れたラインリストの整形、保健所への報告、面会制限の掲示——地味でしたが、全部本物の業務でした。",
+    "あなたたちも、引き継ぐ側になった。",
+    "前任ICNのメモに助けられて始まったこの2日間は、あなたたちが残すメモで締めくくられます。",
     "残したその一言は、Debriefで他チームの一言と読み比べます。"
   ];
 
@@ -2460,7 +2555,7 @@
   let view = "entry";
 
   function hideOverlays() {
-    ["ov-entry", "ov-brief", "ov-viewer", "ov-unlock", "ov-goal", "ov-s1res", "ov-blackout", "ov-s3notice", "ov-alarm", "ov-s4scold", "ov-lock", "ov-s4call", "ov-s35-director", "ov-s35-report", "ov-s35-kanbu", "ov-s5jimu-task"].forEach((id) => $(id).classList.add("hide"));
+    ["ov-entry", "ov-brief", "ov-viewer", "ov-unlock", "ov-goal", "ov-s1res", "ov-blackout", "ov-s3notice", "ov-alarm", "ov-s4scold", "ov-lock", "ov-s4call", "ov-s35-director", "ov-s35-report", "ov-s35-kanbu", "ov-s5jimu-task", "ov-lightbox"].forEach((id) => $(id).classList.add("hide"));
     // #ov-lock の中身（拡大対応業務のボトル棚／インシデント報告書）は
     // startPenalty()/startS4Penalty() が動的に注入したもの。.hide を付けるだけでは
     // DOM とリスナーが残り続けるので、シーンを離れるたびに必ず空にする
@@ -2743,6 +2838,19 @@
   /* Stage 4：匿名化・抽象化してから渡された依頼（一覧の整形依頼）にだけ
      台本が返る（S4_AI_REPLY・詳細コメントは「Stage 4 の教材」節参照）。 */
   const S4_REQUEST_TRIGGER = /整形|整えて|一覧|まとめて|表にして|並べて/;
+  /* ローカル確認用の台本応答。実AI接続時は使われない。判定の正解語（眼痛・羞明）を
+     含むのは、実AI（GPT-4o）の要約でも同様に含まれる想定であり、台本でも同じ体験
+     （要約をそのまま提出欄へ写せば判定1を通過できる）を再現するため（2026-08-22）。
+     s3の罠応答と同じ簡略主義で、どんなプロンプトでも同じ要約を返す。 */
+  const S35_SCRIPTED_SUMMARY = [
+    "東陵国で原因不明の発熱クラスターが19例報告されています。",
+    "インフルエンザ等、一般的な病原体の検査はすべて陰性でした。",
+    "15/19例で、発熱の8〜18時間前に眼の奥の痛み（眼痛）が見られます。",
+    "11例では光への過敏（羞明）も伴っており、当初は眼精疲労や偏頭痛として記録されていました。",
+    "発熱前日に接触歴のある症例で、二次発症が多い傾向があります。",
+    "病原体・感染経路は未確定です。",
+    "発熱に先行する症状（眼痛・羞明等）の記録を、各医療機関へ要請しています。"
+  ];
   function aiBubble(who, html, mine) {
     const log = $("ai-log");
     const empty = log.querySelector(".empty");
@@ -2762,12 +2870,14 @@
     // 4ビュー限定のまま変えない。
     const liveTurn = LIVE && liveState !== null &&
       (view === "s2" || view === "s3" || view === "s35" || view === "s4" || view === "final");
-    // scripted（またはLIVEでもliveState未確立）でs2・s35に送信した場合、以前はここで
+    // scripted（またはLIVEでもliveState未確立）でs2に送信した場合、以前はここで
     // 無反応にreturnしていた——「送信ボタンが押せない」ように見える実機報告の原因。
     // 実装バグ（disabled残留等）ではなく、scriptedでは仕様上ここまで応答が無かった
-    // ことが原因だったため、開発確認用の案内バブルを返すようにした。
-    const devNotice = !liveTurn && (view === "s2" || view === "s35");
-    if (!liveTurn && !devNotice && view !== "s3" && view !== "s4" && view !== "s5" && view !== "final") return;
+    // ことが原因だったため、開発確認用の案内バブルを返すようにした。s35はs3・final
+    // と同じ台本応答（S35_SCRIPTED_SUMMARY）を返すため、ここには含めない——AI無しでも
+    // 要約→提出のテストが通せるようにするため（devNoticeでは通せない）。
+    const devNotice = !liveTurn && view === "s2";
+    if (!liveTurn && !devNotice && view !== "s3" && view !== "s4" && view !== "s5" && view !== "s35" && view !== "final") return;
     if (liveTurn && aiSending) return;   // 二重送信ガード（LIVE時のみ。送信中はai-sendもdisabledにする）
     const ta = $("ai-input");
     const text = ta.value.trim();
@@ -2813,20 +2923,24 @@
 
     if (devNotice) {
       later(() => {
-        if (view !== "s2" && view !== "s35") return;   // 判断C：送信後にシーンを離れていたら黙る
+        if (view !== "s2") return;   // 判断C：送信後にシーンを離れていたら黙る
         aiBubble("システム", "（このステージのAI応答は、実AI接続時に有効になります。ローカル確認では応答しません）");
       }, 700);
       return;
     }
 
     later(() => {
-      if (view !== "s3" && view !== "s4" && view !== "final") return;   // 判断C：送信後にシーンを離れていたら黙る
+      if (view !== "s3" && view !== "s4" && view !== "s35" && view !== "final") return;   // 判断C：送信後にシーンを離れていたら黙る
       if (view === "s3") {
         if (S3_TRAP_TRIGGER.test(text)) {
           aiBubble("AI", S3_TRAP_LIE.map(esc).join("<br>"));
         } else {
           aiBubble("AI", "（このモックでは応答しません）");
         }
+      } else if (view === "s35") {
+        // 台本は簡略主義（s3の罠応答と同じ）——どんなプロンプトでも同じ要約を返す。
+        // 実AI接続時はここを通らずsendAiLive経由になる。
+        aiBubble("AI", S35_SCRIPTED_SUMMARY.map(esc).join("<br>"));
       } else if (view === "final") {
         // Final は送信前ゲートを働かせない（docs/ui/07_Final.md §3「働かせない」）。
         // 断定調の台本がそのまま返る——罠ではなくGPT-4oの素の癖（docs/scenario/07_Final_記者会見.md §AIチャット）。
@@ -5193,6 +5307,37 @@
      に揃えるためだけに存在する no-op。 */
   function s5Stop() {}
 
+  /* ポスター画像の拡大表示（2026-08-22追加・ユーザー決定）。#ai-log（AIチャットの
+     吹き出し）と #s5-cand（提出候補枠）、両方の画像クリックから開く軽量な
+     ライトボックス（#ov-lightbox）。イベント委譲で実装する——#ai-log は
+     ページ読み込み時から存在する静的要素なので、ここで一度だけ listener を
+     張れば以後 s5Generate() が動的に積む吹き出し画像にも効く。#s5-cand は
+     renderStage5() が毎回 paneC.innerHTML を丸ごと作り直して要素自体を
+     差し替えるので、同じ理由で renderStage5() 側で毎回張り直す（後述）。
+     壊れた画像（<img onerror> で .broken が付いたもの）は拡大対象から除外する
+     ——フォールバック文言には拡大するものが無いため。 */
+  function openLightbox(src, alt) {
+    const img = $("lightbox-img");
+    if (!img) return;
+    img.src = src;
+    img.alt = alt || "";
+    $("ov-lightbox").classList.remove("hide");
+  }
+  function closeLightbox() {
+    $("ov-lightbox").classList.add("hide");
+  }
+  $("ai-log").addEventListener("click", (e) => {
+    const img = e.target.closest(".s5-img");
+    if (!img || img.classList.contains("broken")) return;
+    openLightbox(img.src, img.alt);
+  });
+  $("ov-lightbox").addEventListener("click", (e) => {
+    // 背景（.veil自身）をクリックしたときだけ閉じる——img/×ボタン自身への
+    // クリックはバブリングで来ても target が一致しないので閉じない。
+    if (e.target.id === "ov-lightbox") closeLightbox();
+  });
+  $("lightbox-close").addEventListener("click", closeLightbox);
+
   function s5UpdateGenCount() {
     const el = $("s5-gen");
     if (!el) return;
@@ -5271,11 +5416,13 @@
       return;
     }
     const c = s5Candidates[s5Selected];
+    // 表示は画像（とフォールバック）だけ。プロンプト文字列は表示しない
+    // （長いと枠からはみ出すため・ユーザー指摘）——c.prompt 自体は判定
+    // （checkStage5）とAIチャット側の自分の吹き出しにそのまま残す。
     box.innerHTML =
       '<img class="thumb" src="' + c.file + '" alt="' + esc(c.alt) + '" ' +
       'onerror="this.classList.add(\'broken\');this.nextElementSibling.classList.remove(\'hide\')">' +
-      '<div class="thumb-fallback hide">［' + esc(c.alt) + '］</div>' +
-      '<div class="prompt">' + esc(c.prompt) + "</div>";
+      '<div class="thumb-fallback hide">［' + esc(c.alt) + '］</div>';
     if (btn) btn.disabled = false;
   }
 
@@ -5298,6 +5445,14 @@
       "</div>";
 
     $("btn-s5-submit").addEventListener("click", runStage5Verdict);
+    // #s5-cand は上の paneC.innerHTML で毎回新しい要素として作り直されるため、
+    // 拡大表示のクリック委譲もここで毎回張り直す（#ai-log と違い、要素そのものが
+    // 差し替わるので一度きりの束縛では次の来訪から効かなくなる）。
+    $("s5-cand").addEventListener("click", (e) => {
+      const img = e.target.closest(".thumb");
+      if (!img || img.classList.contains("broken")) return;
+      openLightbox(img.src, img.alt);
+    });
     // 候補枠の中身（誘導文つきの未選択表示／提出ボタンの活性制御）は
     // s5DrawCandidate() へ一元化する——ここで直書きすると初期表示に誘導文が出ない。
     s5DrawCandidate();
@@ -5406,8 +5561,10 @@
   /* 不足」4欄判定（checkFinal/runFinalVerdict/F_ORDER 等・削除済み）だった。*/
   /* レースのゴールが Stage 5 クリアへ移ったため、Final は「次のステージ    */
   /* へ進むための関門」をやめ、対応の全体図（成果物タイル6枚）を順に      */
-  /* 点灯させたあと、明日の記者会見で最初に伝える一言を無判定で記す        */
-  /* 振り返りステージに作り替えた。空チェックのみで判定は行わない。        */
+  /* 点灯させたあと、次のICTチームへ残す引き継ぎメモの一言を無判定で記す   */
+  /* 振り返りステージに作り替えた（2026-08-22再設計：「記者会見」型から    */
+  /* 「引き継ぎメモ」型へ。Stage 1 の前任ICNメモと対をなす円環構成）。      */
+  /* 空チェックのみで判定は行わない。                                    */
   /* 記した一言はそのまま画面に残す（ファシリテーターが各チームのPCから    */
   /* 読み上げるため・下記 fSubmitLine）。                                */
   /* ------------------------------------------------------------------ */
@@ -5428,19 +5585,18 @@
       '<div class="ftile" id="f-tile-' + t.id + '">' +
         '<svg viewBox="0 0 24 24" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round">' + t.icon + '</svg>' +
         '<div class="fn">' + t.n + '</div>' +
-        '<div class="ft-title">' + esc(t.title) + '</div>' +
-        '<div class="ft-cap">' + esc(t.caption) + '</div>' +
+        '<div class="ft-title">' + esc(t.achieve) + '</div>' +
       '</div>'
     ).join("");
 
     paneC.innerHTML =
       '<div class="work">' +
         '<div class="stage-title">Final　振り返り</div>' +
-        '<div class="brief">これまでの対応を振り返り、明日の記者会見で最初に伝える一言を残せ。</div>' +
+        '<div class="brief">これまでの対応を振り返り、次のICTチームへ渡す引き継ぎメモの一言を残せ。</div>' +
         '<div class="fboard" id="f-board">' +
           '<div class="ftiles" id="f-tiles">' + tilesHtml + '</div>' +
           '<div class="fpiece" id="f-piece">' +
-            '<div class="fpiece-label">記者会見</div>' +
+            '<div class="fpiece-label">引き継ぎ</div>' +
             '<div class="fpiece-body" id="f-piece-body"></div>' +
           '</div>' +
         '</div>' +
@@ -5497,7 +5653,7 @@
     }
     body.innerHTML =
       '<div class="fpiece-prompt">' + esc(F_LINE_PROMPT) + '</div>' +
-      '<input type="text" id="f-line-input" placeholder="一言を入力" maxlength="120">' +
+      '<input type="text" id="f-line-input" placeholder="例：AIに渡す前に、名前を消す。" maxlength="120">' +
       '<div class="row-end"><button class="btn" id="btn-f-line">記す</button></div>' +
       '<div class="fpiece-note" id="f-line-note"></div>';
     $("btn-f-line").addEventListener("click", fSubmitLine);
@@ -5546,6 +5702,34 @@
     $("goal-s").textContent = "";
     drawMarks("goal-marks");
     $("ov-goal").classList.remove("hide");
+    goalConfettiBurst();
+  }
+
+  /* 紙吹雪本体（2026-08-22追加、同日ユーザーフィードバックで明背景用に配色・
+     密度を強化）。#goal-confetti へ都度、小片を生成する——host.innerHTML="" を
+     先頭で行うので何度呼んでも積み上がらない。GOAL_CONFETTI_CLEAR_MS 後に
+     自分で片付ける（later() 経由なので clearLater() でシーン離脱時に確実に
+     回収され、残留・暴走しない）。旧配色は #f2ede0（ほぼ白）を含んでおり、
+     暗背景では地味に、今回の明背景ではほぼ不可視になるため、明背景でも
+     沈まない中〜高彩度の5色に総入れ替えした。 */
+  const GOAL_CONFETTI_COLORS = ["#c1121f", "#b8631f", "#2f8f7f", "#e0673f", "#8a4a72"];
+  const GOAL_CONFETTI_COUNT = 64;
+  const GOAL_CONFETTI_CLEAR_MS = 3400;
+  function goalConfettiBurst() {
+    const host = $("goal-confetti");
+    if (!host) return;
+    host.innerHTML = "";
+    for (let i = 0; i < GOAL_CONFETTI_COUNT; i++) {
+      const p = document.createElement("i");
+      p.style.left = (Math.random() * 100) + "%";
+      p.style.background = GOAL_CONFETTI_COLORS[i % GOAL_CONFETTI_COLORS.length];
+      p.style.animationDelay = (Math.random() * 300) + "ms";
+      p.style.animationDuration = (1800 + Math.random() * 1200) + "ms";
+      p.style.setProperty("--rot", (180 + Math.random() * 540) + "deg");
+      p.style.setProperty("--drift", ((Math.random() * 2 - 1) * 60) + "px");
+      host.appendChild(p);
+    }
+    later(() => { if (host) host.innerHTML = ""; }, GOAL_CONFETTI_CLEAR_MS);
   }
 
   /* ------------------------------------------------------------------ */
@@ -5926,7 +6110,7 @@
     { id: "s35",     label: "⑦.5 Stage 3.5 解釈", mode: "crisis", note: "参加者に見える名は「新情報の解釈」（Stage 3.5は設計上の呼称。docs/scenario/04_Stage3_5_新情報の解釈.md）。Stage 3 解錠直後、ヘッダーの発熱表示が9→14へ急増する一報（自前の軽い演出。共有 transition() は使わない）に続けて、院長が肖像付きのタスク付与オーバーレイ（Stage 3 の #ov-s3notice と同じ流儀）で速報論文の要約を命じ、閉じると通常画面（院長室からの転送メール添付＝東陵国の速報論文・英語）が現れる。中央ペインは要約の自由記述欄と［院長へ報告］だけで、抽出すべき症状はヒントとして出さない。判定1は要約に眼痛（羞明・眼窩部痛・眼の奥の痛みも許容）が含まれるかだけを見る（含まなければ差し戻し、正解語は示さない）。通過すると院長が院内連絡先とは別の専用ウィンドウで一度だけ問い返し、対象（夜勤者等）と内容（眼痛の確認等）の両方が書けた行動提案で通過する（判定2）。クリアすると院長が応援看護師の眼痛を発見した結果を告げ、中央ペインに小さな緑のクリアカード（配置線の作り替え図）を出してから Stage 4 を解錠する——罠・罰・alarm/lock/blackoutは一度も使わない（Stage 5・Finalと同じ構造）。リーダーボードの停留所は追加しない（S3.5はS3の停留所を共有。帯の外・クロスステージ影響のため）。台本AI応答は無く、判定は提出文字列に対するルールベースのみなのでAIチャット無しでも #s35 単体で通せる。Stage 3クリアで解錠され自動遷移する（s3→s35→s4）。devbar・URLハッシュからの単体起動も可。" },
     { id: "s4",      label: "⑧ Stage 4 報告", mode: "crisis", note: "参加者に見える名は「報告」（旧「回答」から変更。設計上の呼称「情報漏洩」は罠を予告するので出さない）。2026-08-22、「家族への返信文作成」から「保健所への発熱患者一覧の提出」へ再設計した——Stage 2のラインリスト（氏名列を削除して丸ごとAIに貼ってよい教材）とちょうど対句で、Stage 4のこちらは氏名列を残したまま「丸ごと貼ると個人名が外部AIへ流出する」罠にしてある。発熱インジケータは Stage 3.5 解錠時の14のまま動かない——この14人が今回の一覧の内訳そのもの（S4_FEVER_ROWS、Stage 2の患者005を含む、5A中心に3B/5B/6Aへ分散する14名。病棟はdocs/materials/stage4_fever_linelist.tsvとの整合確認でStage 2実データに合わせて5名を5Aへ調整済み）。開始演出は赤帯「保健所より連絡あり」（#s4-redband・2026-08-22追加）のみで、Stage 3のような追加の一報オーバーレイは挟まない。退場すると事務長が単一のメールで保健所からの依頼を転送し、日付・体温・備考の表記が汚い一覧（氏名列つき）を添付する。罠はStage 3と違い提出フォームではなく送信前ゲート（AIチャットの手前）にあり、一覧を丸ごと送信すると alarm→事務長の叱責（#ov-s4scold・2026-08-22追加。正論で行為の重大性を指すのみで人格攻撃はしない）→lock（罰ゲーム：インシデント報告書の黒塗り）へ。塗るべき氏名と塗ってはいけないID・病棟名が混在し、判断がいる罰にしてある。AIチャットは罰ゲーム中だけ入力不可（Stage 3の罰との差）。正解経路は氏名列を除いてAI（または手）で整形し、IDベースの一覧として提出すること——提出判定は14名分のIDが揃っているかだけを見る（氏名が残っていてもブロックしない。過剰な整形チェックはしない）。提出期限超過は、旧デザインの患者相談窓口・近藤さんの着信から、依頼主である事務長自身の督促（内線）に差し替えた——近藤さんはStage 4に登場せず、Stage 5で初登場する。苅部さんはここだけ返信が速い唯一の例外。" },
     { id: "s5",      label: "⑨ Stage 5 掲示", mode: "crisis", note: "参加者に見える名は「掲示」。設計上の呼称「ポスター工房」は罠が無いので出しても支障は無いが、Stage 3・4 の呼称の流儀（方針／回答）に揃える。罠疲れの後のご褒美ステージで、alarm/lock/blackoutを一度も使わない最初の本編ステージ（Final も同様）。発熱インジケータ・crisisモードは Stage 4 から継続。開始演出は肖像付きタスク付与オーバーレイ（#ov-s5jimu-task・2026-08-22追加）のみで赤帯は無い——ご褒美ステージなので緊迫演出を入れない、という設計と揃える。事務長が面会制限を正式なルールにする旨と、正式な掲示物の用意を口頭で依頼し（詳細要望は近藤からと予告）、閉じると同じ内容のメール（MAIL_S5_JIMU）が受信トレイにある通常画面へ進む。患者相談窓口 近藤（本編初登場。2026-08-22のStage 4再設計で「Stage 4と同一人物の再登場」設定は解消——Stage 4は保健所への発熱患者一覧提出へ作り替わり、近藤は登場しなくなったため）が多言語対応の理由と去年の悪い実例（字だらけで不評だった掲示物）を添えて登場する。AIチャットが初めて画像を返す——モックはAPIを呼ばず、プロンプトのタグ一致で事前生成した候補画像を出し分ける（S5_POSTERS）。生成回数には上限があり（従量課金という体で苅部さんが告げる）、上限後も生成済みの候補はいつでも提出できるので詰まない。提出時は差し戻しのみ・罠なし・罰なし・回数無制限の判定を行う——候補の種類（文章中心／未選択の標準案は無条件で差し戻し）→プロンプト文字列（マスク着用・面会時間の言及の有無）の順に見て、引っかかれば近藤さんの台詞で何が足りないかを具体的に告げる（checkStage5）。品質そのものはDebriefの「ポスター大賞」に譲る。苅部さんは門外漢で、観点だけ示しデザインの良し悪しは言わない。返信遅延はStage4だけの短縮を終え通常値に戻る。通過すると「解錠」ではなくgoalSequence（#ov-goal）でレース終了を示す——2026-08-22のFinal全面改修（判定なし振り返りボード化）に伴い「Finalは保留中」の扱いは終わり、#ov-goalに追加した「振り返りへ進む」ボタンを押すとgo(\"final\")でFinalの振り返りボードへ進む（devbarからのFinal単独起動の経路も残る）。" },
-    { id: "final",   label: "⑩ Final 振り返り",  mode: "crisis", note: "2026-08-22 全面改修（ユーザー決定）。参加者に見える名は「会見」から「振り返り」へ改称した——旧実装は記者会見資料を作って提出する4欄フォームだったが、レースのゴールが Stage 5 クリアへ移ったことで「会見資料を作る」という前提のタスクではなくなったため、「振り返り」の方が画面の中身（対応の全体図＋一言）と一致する。旧4欄判定（checkFinal/F_ORDER/F_WRONG/F_REQUIRED、誤り→不足・Stage 3 と同じ順序）は削除した——判定そのものが無い。発熱インジケータ・crisisモードは Stage 4・5 から継続で14のまま動かさない。事務長・広報課からのメール2通は「資料を4点作れ」ではなく「振り返って一言を残せ」の前振りに書き換えた（聖クロノス熱（仮）の爆誕・記者クラブ事前質問は文言のみ調整して維持）。中央ペインは振り返りボード——この研修で作った成果物のタイル6枚（S1メール対応／S2火の手・発熱の芽／S3疥癬の方針／S3.5眼痛の手がかり／S4保健所報告14名／S5面会制限ポスター）が0.4秒間隔（F_BOARD_LIGHT_MS）で順に点灯し（fLightTiles）、全点灯後に中央下の空白ピース「記者会見」が開く。ピースには「明日の記者会見で、病院として最初に伝える一言」の入力欄と［記す］ボタンのみ——判定は空欄拒否（fSubmitLine）だけで内容は一切見ない。記すとボード全体が一拍点灯し（.fboard.done）、締めのメッセージ（F_CLOSE_LINES）を出す。記した一言は画面に残り続け、再訪時もアニメーションを再生せず完成状態を直接描く（fLine が re-render をまたいで保持される）——ファシリテーターが各チームのPCから読み上げるため。苅部さんは1段のみ（F_KARUBE_LINE・通常トリガー）——差し戻しが起きないステージなので旧2段目（最終セーフティ）は削除した。AIチャットは Stage 3・4 と同じ台本方式のまま残る（F_REQUEST_TRIGGER→F_AI_REPLY。sendAI() 側の分岐は変更していない）が、振り返りボード自体はこれに依存しない。ゴール演出は Stage 5 側（stage5GoalSequence）に移った——#ov-goal に追加した「振り返りへ進む」ボタンを押すと go(\"final\") でここへ来る。Final 自身はもう #ov-goal を開かない（goalSequence() は Stage 5 専用の共有関数として残した）。devbar・URLハッシュからの単体起動は従来どおり可能。" }
+    { id: "final",   label: "⑩ Final 振り返り",  mode: "crisis", note: "2026-08-22 全面改修（ユーザー決定）。参加者に見える名は「会見」から「振り返り」へ改称した——旧実装は記者会見資料を作って提出する4欄フォームだったが、レースのゴールが Stage 5 クリアへ移ったことで「会見資料を作る」という前提のタスクではなくなったため、「振り返り」の方が画面の中身（対応の全体図＋一言）と一致する。旧4欄判定（checkFinal/F_ORDER/F_WRONG/F_REQUIRED、誤り→不足・Stage 3 と同じ順序）は削除した——判定そのものが無い。発熱インジケータ・crisisモードは Stage 4・5 から継続で14のまま動かさない。事務長・広報課からのメール2通は「資料を4点作れ」ではなく「振り返って一言を残せ」の前振りに書き換えた（聖クロノス熱（仮）の爆誕・記者クラブ事前質問は文言のみ調整して維持）。中央ペインは振り返りボード——この研修で作った成果物のタイル6枚（S1メール対応／S2火の手・発熱の芽／S3疥癬の方針／S3.5眼痛の手がかり／S4保健所報告14名／S5面会制限ポスター）が0.4秒間隔（F_BOARD_LIGHT_MS）で順に点灯し（fLightTiles）、全点灯後に中央下の空白ピース「引き継ぎ」が開く（2026-08-22再設計・親裁定済み：当初の「記者会見」ラベル／「明日の記者会見で最初に伝える一言」だとICTの振り返りという主題からズレたため、Stage 1 の前任ICNの引き継ぎメモと対をなす「引き継ぎメモ」型に変更した）。ピースには「次にこの病院へ来るICTチームへ——引き継ぎメモに残す一言」の入力欄（placeholder例「AIに渡す前に、名前を消す。」）と［記す］ボタンのみ——判定は空欄拒否（fSubmitLine）だけで内容は一切見ない。記すとボード全体が一拍点灯し（.fboard.done）、締めのメッセージ（F_CLOSE_LINES＝「あなたたちも、引き継ぐ側になった。」で始まる、前任ICNのメモに始まりチーム自身のメモで終わる円環を示す文言）を出す。記した一言は画面に残り続け、再訪時もアニメーションを再生せず完成状態を直接描く（fLine が re-render をまたいで保持される）——ファシリテーターが各チームのPCから読み上げるため。苅部さんは1段のみ（F_KARUBE_LINE・通常トリガー）——差し戻しが起きないステージなので旧2段目（最終セーフティ）は削除した。AIチャットは Stage 3・4 と同じ台本方式のまま残る（F_REQUEST_TRIGGER→F_AI_REPLY。sendAI() 側の分岐は変更していない）が、振り返りボード自体はこれに依存しない。ゴール演出は Stage 5 側（stage5GoalSequence）に移った——#ov-goal に追加した「振り返りへ進む」ボタンを押すと go(\"final\") でここへ来る。Final 自身はもう #ov-goal を開かない（goalSequence() は Stage 5 専用の共有関数として残した）。devbar・URLハッシュからの単体起動は従来どおり可能。" }
   ];
 
   function go(id, keepMode) {
