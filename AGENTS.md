@@ -85,7 +85,7 @@
 - `pnpm verify`: format、lint、型検査、ドメインテスト、教材整合テスト、Worker統合テスト、主要E2Eを実行する。PRの必須チェックとし、数分で終わる状態を保つ。
 - `pnpm verify:full`: 全E2E、全体Mutation Testing、重複検査、依存関係監査を実行する。手動実行と、中核ロジックを大きく変更したPRで使用する。
 
-CIでは `pnpm verify` を全PRで実行し、`pnpm verify:full` は既定でスキップする。ゲーム状態遷移、ステージ判定、PIIゲート、時間処理、罰ゲーム、再接続の重複防止を変更したPRには `監査レーン` ラベルを付け、監査レーンをCIで実行する。ラベルを付けた時点で実行され、以後そのPRへpushするたびに再実行される。ラベルなしでも手動実行（Actionsの Run workflow）で任意のブランチに対して実行できる。
+CIでは `pnpm verify` を、コードに影響しうる変更を含む全PRで実行し、`pnpm verify:full` は既定でスキップする。`docs/`（`docs/materials/` を除く）とリポジトリ直下の `*.md` だけを変更したPRは、CI設定（`.github/workflows/verify.yml` の `paths-ignore`）により `pnpm verify` 自体をスキップする——`docs/materials/` はテストが実行時に読むため対象外とする。ゲーム状態遷移、ステージ判定、PIIゲート、時間処理、罰ゲーム、再接続の重複防止を変更したPRには `監査レーン` ラベルを付け、監査レーンをCIで実行する。ラベルを付けた時点で実行され、以後そのPRへpushするたびに再実行される。ラベルなしでも手動実行（Actionsの Run workflow）で任意のブランチに対して実行できる。
 
 ## 読む地図
 
