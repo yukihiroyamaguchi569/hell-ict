@@ -11,7 +11,12 @@ import {
 
 const validMetrics = { occupancy: 398, capacity: 400, availableBeds: 2, unknownFever: 3 };
 const validState = { mode: "peace", stage: "prologue", metrics: validMetrics };
-const stage1State = { ...validState, stage: "stage1" };
+const stage1State = {
+  mode: "peace",
+  stage: "stage1",
+  metrics: validMetrics,
+  stage1: { roundStartedAt: "2026-08-21T00:00:00.000Z", replies: [] },
+};
 const validSnapshot = { teamCode: "000000", revision: 0, state: validState };
 
 describe("チーム状態schemaの境界", () => {
@@ -32,6 +37,28 @@ describe("チーム状態schemaの境界", () => {
     ]) {
       expect(teamStateSchema.safeParse(input).success).toBe(false);
     }
+  });
+
+  it("stage固有のフィールドの過不足を拒否する", () => {
+    // prologueなのにstage1フィールドを持つ、stage1なのにstage1フィールドが無い、を両方拒否する。
+    expect(teamStateSchema.safeParse({ ...validState, stage1: stage1State.stage1 }).success).toBe(
+      false,
+    );
+    expect(
+      teamStateSchema.safeParse({ mode: "peace", stage: "stage1", metrics: validMetrics }).success,
+    ).toBe(false);
+    expect(
+      teamStateSchema.safeParse({
+        ...stage1State,
+        stage1: { roundStartedAt: "not-a-datetime", replies: [] },
+      }).success,
+    ).toBe(false);
+    expect(
+      teamStateSchema.safeParse({
+        ...stage1State,
+        stage1: { roundStartedAt: stage1State.stage1.roundStartedAt, replies: [{ emailId: "m1" }] },
+      }).success,
+    ).toBe(false);
   });
 
   it("snapshotとcommand resultの構造を受理し、欠落と負のrevisionを拒否する", () => {
