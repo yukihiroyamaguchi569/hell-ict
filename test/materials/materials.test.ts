@@ -108,13 +108,7 @@ describe("教材の整合性", () => {
       const rows = await readTsv("stage4_fever_linelist.tsv");
       const patient = rows.find((row) => row[0] === "005");
 
-      expect(patient?.slice(0, 5)).toEqual([
-        "005",
-        stage4Patient.name,
-        "5A",
-        "7/3",
-        "38.1℃",
-      ]);
+      expect(patient?.slice(0, 5)).toEqual(["005", stage4Patient.name, "5A", "7/3", "38.1℃"]);
     });
   });
 });
