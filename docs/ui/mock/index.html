@@ -863,6 +863,113 @@
 .fclose { font-size: 15px; line-height: 1.9; color: var(--fg-muted); max-width: 56ch; text-align: center; margin: 4px auto 0; }
 .fclose .fclose-head { color: var(--fg); font-weight: 700; margin-bottom: 4px; }
 
+/* Final：②引き継ぎ書（2026-08-22追加、同日ユーザー確認で「記念品」寄りの
+   装飾へ強化）。#ov-goal と同じく「ここが最終状態」なので閉じる導線は無い。
+   本文は院内文書として .sysdlg/.viewer と同じテーマ非依存の固定色で組む——
+   2003年の院内文書という世界観は保ったまま、賞状風の外枠（.hdoc-frame＋
+   四隅の.hcorn）・二重罫（border:double）・公印風の丸印（.hdoc-seal、SVG）・
+   淡い紙目（.hdoc の repeating-linear-gradient）で「テストプレイの最後に
+   記念撮影したくなる画面」に寄せた。ナレーション（.hdoc-narration）だけは
+   veil の暗い下地の上に直接置くので、その下地に合わせた明るい固定色にする。
+   すべてのアニメーションは #ov-f-handover が .hide→表示になるたびに
+   最初から再生される（display:noneの間はCSSアニメーションが進行しない
+   ため）——エンディング完了時も #final 再入場での復元時も、同じ登場演出が
+   見られる。 */
+.handover { background: rgba(8,9,10,.78); padding: 32px; }
+.hdoc-wrap {
+  width: 100%; max-width: 640px; max-height: 100%; overflow-y: auto;
+  display: flex; flex-direction: column; align-items: center; gap: 24px;
+}
+/* 外枠：賞状の台紙。四隅の brackets（.hcorn）と、中の二重罫の文書
+   （.hdoc）の間に余白を持たせ、「額装された文書」に見せる。 */
+.hdoc-frame {
+  position: relative; width: 100%; padding: 22px;
+  border: 1px solid #b8a888;
+  background: linear-gradient(160deg, #fffdf7 0%, #f2e9d4 100%);
+  box-shadow: 0 14px 44px rgba(0,0,0,.4), 0 2px 0 rgba(255,255,255,.5) inset;
+  animation: hdocFrameIn .7s cubic-bezier(.22,1,.36,1) both;
+}
+@keyframes hdocFrameIn { from { opacity: 0; transform: translateY(18px) scale(.97); } to { opacity: 1; transform: none; } }
+.hcorn { position: absolute; width: 22px; height: 22px; }
+.hcorn.tl { top: 8px; left: 8px; border-top: 2px solid #9c8552; border-left: 2px solid #9c8552; }
+.hcorn.tr { top: 8px; right: 8px; border-top: 2px solid #9c8552; border-right: 2px solid #9c8552; }
+.hcorn.bl { bottom: 8px; left: 8px; border-bottom: 2px solid #9c8552; border-left: 2px solid #9c8552; }
+.hcorn.br { bottom: 8px; right: 8px; border-bottom: 2px solid #9c8552; border-right: 2px solid #9c8552; }
+/* 本体：二重罫（border:double）＋ごく淡い紙目。position:relative は
+   末尾の .hdoc-seal（公印）を右下に据えるための基準。 */
+.hdoc {
+  position: relative; width: 100%; color: #16181a;
+  border: 5px double #9c8552;
+  background:
+    repeating-linear-gradient(135deg, rgba(120,100,60,.035) 0 2px, transparent 2px 7px),
+    linear-gradient(165deg, #fffefb 0%, #f8f2e3 100%);
+  padding: 34px 38px 46px;
+}
+.hdoc-title {
+  font-size: 24px; font-weight: 700; text-align: center; letter-spacing: .4em;
+  color: #2c2015; text-indent: .4em;
+}
+/* 表題直下の飾り罫。中央に◆を置いた賞状見出しの定型。 */
+.hdoc-orn { display: flex; align-items: center; gap: 12px; margin: 12px 0 20px; }
+.hdoc-orn span { flex: 1; height: 1px; background: linear-gradient(90deg, transparent, #b39b6a 50%, transparent); }
+.hdoc-orn b { color: #ab8f57; font-size: 12px; font-weight: 400; }
+.hdoc-meta { font-family: var(--font-legacy); font-size: 13px; line-height: 2.1; color: #4a524c; }
+/* mailBodyHTML／.reader が使う .rule はスコープが .reader 配下限定なので、
+   ここでは .hdoc 独自に区切り罫を与える。 */
+.hdoc .rule { border-top: 1px solid #c9b98f; margin: 18px 0 0; }
+.hdoc p { font-family: var(--font-legacy); font-size: 14px; line-height: 1.95; color: #333; margin: 18px 0 0; }
+/* 一言の引用：この画面の主役なので、他の要素より一段大きく・中央揃えで
+   独立した額に入れる。装飾の引用符（::before/::after）は西洋風の飾りとして
+   添えるだけで、実際の文字はJS側が「」で囲んで esc() 済みで挿入する
+   （fShowHandover）——二重に囲うが矛盾はしない。 */
+.hdoc-quote {
+  position: relative; margin: 26px auto 0; max-width: 44ch;
+  padding: 28px 34px; border: 1.5px solid #c2a765;
+  background: linear-gradient(180deg, #fffef8 0%, #faf1da 100%);
+  box-shadow: inset 0 0 0 4px #fffef8;
+  font-family: var(--font-legacy); font-size: 22px; font-weight: 700;
+  line-height: 1.8; text-align: center; color: #241c10;
+  animation: hdocQuoteIn .55s cubic-bezier(.22,1,.36,1) .35s both;
+}
+@keyframes hdocQuoteIn { from { opacity: 0; transform: scale(.9); } to { opacity: 1; transform: none; } }
+.hdoc-quote::before, .hdoc-quote::after {
+  position: absolute; font-family: Georgia, "Hiragino Mincho ProN", serif;
+  font-size: 44px; line-height: 1; color: rgba(171, 143, 87, .5);
+}
+.hdoc-quote::before { content: "“"; top: 4px; left: 12px; }
+.hdoc-quote::after { content: "”"; bottom: -10px; right: 12px; }
+/* 公印風の丸印。SVGの二重円＋院名を朱色で、わずかに傾けて「押した」体に
+   する。mix-blend-mode:multiply で下の紙目に馴染ませ、インクが少し
+   にじんだような質感にする。実在の団体印を模したものではない
+   （院名は架空の聖クロノス総合病院）。 */
+.hdoc-seal {
+  position: absolute; right: 30px; bottom: 22px; width: 96px; height: 96px;
+  opacity: .85; mix-blend-mode: multiply; transform: rotate(-9deg);
+  pointer-events: none;
+  animation: hdocSealIn .5s ease-out .8s both;
+}
+@keyframes hdocSealIn {
+  0% { opacity: 0; transform: rotate(-9deg) scale(1.7); }
+  65% { opacity: .9; transform: rotate(-9deg) scale(.93); }
+  100% { opacity: .85; transform: rotate(-9deg) scale(1); }
+}
+.hdoc-seal svg { width: 100%; height: 100%; }
+.hdoc-seal circle { fill: none; stroke: #b3231f; }
+.hdoc-seal .ring-out { stroke-width: 2.6; }
+.hdoc-seal .ring-in { stroke-width: 1.4; }
+.hdoc-seal text {
+  fill: #b3231f; font-family: var(--font-legacy); font-weight: 700;
+  text-anchor: middle; letter-spacing: .02em;
+}
+.hdoc-seal .seal-l1 { font-size: 15px; }
+.hdoc-seal .seal-l2 { font-size: 15px; }
+.hdoc-seal .seal-sub { font-size: 9px; letter-spacing: .05em; }
+.hdoc-narration {
+  font-size: 16px; color: #e6e9ec; letter-spacing: .06em; text-align: center;
+  animation: hdocFadeIn .8s ease-out 1.05s both;
+}
+@keyframes hdocFadeIn { from { opacity: 0; } to { opacity: 1; } }
+
 /* レースのゴール演出（2026-08-22追加・ユーザー決定「もっと賑やかに」）。
    紙吹雪は goalConfettiBurst() が数十片を都度生成し、数秒で降り切って
    自分でDOMごと消える（無限ループでCPUを食わない）。pointer-events:none
@@ -1200,6 +1307,82 @@
                数秒後に自分で片付ける（DOM残留・無限ループなし）。
                pointer-events:none なので[振り返りへ進む]の押下を一切邪魔しない。 -->
           <div class="confetti" id="goal-confetti" aria-hidden="true"></div>
+        </div>
+
+        <!-- Final：幹部の労いリレー（2026-08-22追加、同日ユーザー確認で自動送り廃止）。
+             振り返りボード完成（fSubmitLine）直後に開く、判定なしのエピローグ演出。
+             #ov-s3notice・#ov-s4scold と同じ肖像つき sysdlg（.callin）の器を
+             再利用するが、話者が院長→看護部長→事務長の順に切り替わる点だけ新しい。
+             自動タイマーは持たない——Stage 1 の処理結果ウィンドウ（s1ShowResultWin）
+             と同じく、読む速さはチームに委ね、［次へ］ボタンを押した瞬間にだけ
+             次の話者へ進む（クリックでの早送りは残す。fAdvanceRelay）。
+             最後（事務長）の［引き継ぎ書へ］だけはボタン文言・遷移先の両方が異なり
+             （fRelayNext）、②引き継ぎ書（#ov-f-handover）へ進む——早送りクリックの
+             対象には含めない、明示的な操作でのみ踏ませる区切り。
+             肖像あり文脈のため台詞に話者表記〔〕は付けない（#ov-s3notice と同じ
+             流儀）。fShowRelayStep が中身を書き換える——3人分のマークアップを
+             あらかじめ並べず、器を1つだけ持って使い回す。 -->
+        <div class="veil sysdlg callin hide" id="ov-f-relay">
+          <div class="win">
+            <div class="tb">
+              <span class="grow" id="f-relay-tb">📞 内線</span>
+              <span class="ctl">□ ✕</span>
+            </div>
+            <div class="bd">
+              <div class="por">
+                <div class="frame"><img id="f-relay-img" src="" alt=""></div>
+                <div class="cap" id="f-relay-cap"></div>
+              </div>
+              <div class="main" id="f-relay-main"></div>
+            </div>
+            <div class="ft" id="f-relay-ft"><button class="btn" id="btn-f-relay-next">次へ</button></div>
+          </div>
+        </div>
+
+        <!-- Final：②引き継ぎ書（2026-08-22追加、同日ユーザー確認で装飾を強化）。
+             労いリレーの後に開く、ゲームの最終状態。#ov-goal と同じく閉じる導線を
+             持たない——次のステージが無いため、fEnded（go()のリセット対象外の
+             モジュール変数）が立った以後は #final 再入場のたびに renderFinal() が
+             この画面を直接復元する（fShowHandover）。
+             構造は「賞状の台紙（.hdoc-frame・四隅に.hcorn）＞二重罫の文書本体
+             （.hdoc・2003年書式の.legacy相当のフォントは.hdoc側で個別に指定）＞
+             公印風の丸印（.hdoc-seal・SVG、実在団体印の模倣ではなく架空の
+             聖クロノス総合病院名）」の入れ子。チームの一言（fLine）は必ず esc() を
+             通して #hdoc-quote へ引用符内に置く（fShowHandover）——ナレーション
+             （.hdoc-narration）だけは文書の外に置き、演出と文書を混同させない。
+             装飾要素（.hcorn・.hdoc-orn・.hdoc-seal）は意味を持たないので
+             aria-hidden。 -->
+        <div class="veil handover hide" id="ov-f-handover">
+          <div class="hdoc-wrap">
+            <div class="hdoc-frame">
+              <span class="hcorn tl" aria-hidden="true"></span>
+              <span class="hcorn tr" aria-hidden="true"></span>
+              <span class="hcorn bl" aria-hidden="true"></span>
+              <span class="hcorn br" aria-hidden="true"></span>
+              <div class="hdoc">
+                <div class="hdoc-title">引き継ぎ書</div>
+                <div class="hdoc-orn" aria-hidden="true"><span></span><b>◆</b><span></span></div>
+                <div class="hdoc-meta">
+                  <div>宛先：次期　感染制御チーム　御中</div>
+                  <div>日付：本日</div>
+                  <div>差出：感染制御チーム（外部支援）</div>
+                </div>
+                <div class="rule"></div>
+                <p>この2日間、当院で発生した一連の事案への対応にあたりました。詳細は各種報告書のとおりです。次にこの病院へ来られるチームへ、一言だけ残します。</p>
+                <div class="hdoc-quote" id="hdoc-quote"></div>
+                <div class="hdoc-seal" aria-hidden="true">
+                  <svg viewBox="0 0 100 100">
+                    <circle class="ring-out" cx="50" cy="50" r="46"></circle>
+                    <circle class="ring-in" cx="50" cy="50" r="39"></circle>
+                    <text class="seal-l1" x="50" y="42">聖クロノス</text>
+                    <text class="seal-l2" x="50" y="60">総合病院</text>
+                    <text class="seal-sub" x="50" y="78">感染制御チーム</text>
+                  </svg>
+                </div>
+              </div>
+            </div>
+            <div class="hdoc-narration">——これで、この病院も大丈夫だろう。</div>
+          </div>
         </div>
 
         <!-- ポスター画像の拡大表示（2026-08-22追加）。Stage 5 のAIチャット吹き出し
@@ -2325,6 +2508,28 @@
     "残したその一言は、Debriefで他チームの一言と読み比べます。"
   ];
 
+  /* エンディング①：幹部の労いリレー（2026-08-22追加）。ボード完成の後、
+     院長→看護部長→事務長の順に1人ずつ短い労いを見せる。全員、Stage 1・3で
+     見せた人格そのままに態度だけ軟化させる——美談化・別人化はしない。
+     - 院長：Stage 3.5 の「分かった。」「上出来だ。」と同じ、威厳を保った短さ。
+     - 看護部長：Stage 3 開始一報（S3_NOTICE_LINES）の「……あら、そんな顔
+       しないで。感染対策の専門チームなんですもの、あなたたちなら対応は
+       簡単でしょう？」という挑発を、同じ人物の口調のまま労いへ反転させる。
+     - 事務長：Stage 1（s1AdminLine の手動クリア台詞）の「ほう。手が早い
+       ですね。……派遣の方にしては。」を、同じ皮肉屋のまま言い直させて
+       回収する——手放しの称賛ではなく「訂正」という体を取る。 */
+  const F_RELAY = [
+    { name: "院長", tb: "内線 — 院長", img: "stage35-director.png",
+      lines: ["よくやってくれた。", "会見は私が話す。……あとは、もう休め。"] },
+    { name: "看護部長", tb: "内線 — 看護部長", img: "stage3-nursing-director.png",
+      lines: ["……ふふ、まだそんな顔をしているの？終わったのよ。",
+              "「対応は簡単でしょう？」なんて意地悪を言った甲斐が、なかったわね。……助かったわ、本当に。"] },
+    { name: "事務長", tb: "内線 — 事務長", img: "stage1-administrative-director.png",
+      lines: ["ほう。",
+              "……いや、訂正しましょう。派遣の方には荷が重い、と思っていたのですが——派遣の方“だから”、ここまでやれたのかもしれませんね。",
+              "次にお願いするときも、うちに来ていただけると助かります。"] }
+  ];
+
   /* AIチャットの台本応答。旧4欄フォーム時代の名残——sendAI()（Stage 1〜4帯・
      編集対象外）が view==="final" のとき今も参照しているため、判定を廃止
      した後もこの2つは削除せずに残す（削除すると sendAI() が壊れる）。
@@ -2555,7 +2760,7 @@
   let view = "entry";
 
   function hideOverlays() {
-    ["ov-entry", "ov-brief", "ov-viewer", "ov-unlock", "ov-goal", "ov-s1res", "ov-blackout", "ov-s3notice", "ov-alarm", "ov-s4scold", "ov-lock", "ov-s4call", "ov-s35-director", "ov-s35-report", "ov-s35-kanbu", "ov-s5jimu-task", "ov-lightbox"].forEach((id) => $(id).classList.add("hide"));
+    ["ov-entry", "ov-brief", "ov-viewer", "ov-unlock", "ov-goal", "ov-s1res", "ov-blackout", "ov-s3notice", "ov-alarm", "ov-s4scold", "ov-lock", "ov-s4call", "ov-s35-director", "ov-s35-report", "ov-s35-kanbu", "ov-s5jimu-task", "ov-f-relay", "ov-f-handover", "ov-lightbox"].forEach((id) => $(id).classList.add("hide"));
     // #ov-lock の中身（拡大対応業務のボトル棚／インシデント報告書）は
     // startPenalty()/startS4Penalty() が動的に注入したもの。.hide を付けるだけでは
     // DOM とリスナーが残り続けるので、シーンを離れるたびに必ず空にする
@@ -5570,9 +5775,15 @@
   /* ------------------------------------------------------------------ */
 
   let fLine = null;   // 記された一言。null=未記述。記述後は re-render しても残す。
+  // 2026-08-22追加：エンディング（①労いリレー→②引き継ぎ書）の進行状態。
+  // fLine と同じくモジュール変数——go() のリセット対象に入れない（下記
+  // 「既知の設計負債」と同じ理由で、go() 側は一切触らない）。
+  let fEnded = false;    // ②引き継ぎ書まで到達済みか。true なら #final 再入場でこの画面を直接復元する。
+  let fRelayStep = -1;   // 労いリレーの現在の話者index。-1=未開始。
 
   function fStop() {}   // Stage 5 と同じく no-op。go() の呼び出し規約に揃えるためだけに存在
-                         // （タイル点灯は later() 経由で clearLater() が回収する）。
+                         // （タイル点灯・労いリレーへの遷移待ちは later() 経由で clearLater() が回収する。
+                         //   労いリレー自体は2026-08-22改修でボタン送りのみになり、自動タイマーは持たない）。
 
   function renderFinal() {
     hideOverlays();
@@ -5615,9 +5826,23 @@
       fLightTiles(0);
     }
 
+    if (fEnded) {
+      // エンディング済み——#final再入場でこの画面を直接復元する（fLine永続の
+      // 流儀を拡張）。労いリレーもボード点灯アニメーションも再生し直さない。
+      fShowHandover();
+    } else if (fLine !== null) {
+      // 一言は記されているが、労いリレー・引き継ぎ書までは到達していない
+      // （前回はリレー途中でシーンを離れた等）。ボードは完成状態のまま、
+      // 労いリレーへ改めて入り直す。
+      later(() => { if (view === "final") fStartRelay(); }, 700);
+    }
+
     // 苅部さんの唯一のトリガー（仮値・P0実測で確定）。差し戻しが無いステージ
     // なので最終セーフティ（2段目）は無い——シーンを離れていたら発火しない。
-    later(() => { if (view === "final") { phsFPending = true; phsRing(); } }, F_KARUBE_DELAY * 1000);
+    // エンディング済みなら、もう出す意味が無いので鳴らさない。
+    if (!fEnded) {
+      later(() => { if (view === "final") { phsFPending = true; phsRing(); } }, F_KARUBE_DELAY * 1000);
+    }
   }
 
   /* タイルを1枚ずつ点灯させる（F_BOARD_LIGHT_MS間隔）。全て点いたら
@@ -5664,7 +5889,9 @@
 
   /* 空欄のみ拒否する（内容は一切見ない）。記すとボード全体が完成点灯し、
      締めのメッセージを出す。一言はそのまま画面に残り続ける——消す操作を
-     どこにも用意しない（ファシリテーターが読み上げるため）。 */
+     どこにも用意しない（ファシリテーターが読み上げるため）。
+     2026-08-22追加：締めのメッセージの後、ボードの点灯パルス（.fboard.done
+     の fPulse アニメーション・900ms）が落ち着いてから①労いリレーへ進む。 */
   function fSubmitLine() {
     const inp = $("f-line-input");
     if (!inp) return;
@@ -5679,6 +5906,7 @@
     $("f-piece").classList.add("done");
     $("f-board").classList.add("done");
     fShowClose();
+    later(() => { if (view === "final") fStartRelay(); }, 1100);
   }
 
   function fShowClose() {
@@ -5688,6 +5916,78 @@
     el.innerHTML =
       '<div class="fclose-head">' + esc(F_CLOSE_LINES[0]) + "</div>" +
       F_CLOSE_LINES.slice(1).map((t) => "<div>" + esc(t) + "</div>").join("");
+  }
+
+  /* ------------------------------------------------------------------ */
+  /* エンディング①：幹部の労いリレー（#ov-f-relay）                       */
+  /*                                                                    */
+  /* F_RELAY を1人ずつ表示する。2026-08-22ユーザー確認により自動タイマー   */
+  /* 送りを廃止——Stage 1 の処理結果ウィンドウ（s1ShowResultWin）と同じ     */
+  /* 「読む速さはチームに委ねる」思想で、各話者に［次へ］ボタンを置き、     */
+  /* 押した瞬間にだけ進む。クリックでの早送り（ボタン以外の場所を押しても   */
+  /* 同じく次へ進む）は #ov-brief の s1BriefAll と同じ発想で残してある。    */
+  /* 最後の話者（事務長）の［次へ］だけは意味が違う——次の話者へではなく    */
+  /* ②引き継ぎ書へ進む（fRelayNext がここだけ分岐する）。                  */
+  /* ------------------------------------------------------------------ */
+
+  function fStartRelay() {
+    if (view !== "final") return;
+    $("ov-f-relay").classList.remove("hide");
+    fRelayStep = 0;
+    fShowRelayStep(0);
+  }
+
+  function fShowRelayStep(i) {
+    const person = F_RELAY[i];
+    const isLast = i === F_RELAY.length - 1;
+    $("f-relay-tb").textContent = "📞 " + person.tb;
+    $("f-relay-img").src = "../../../assets/images/production/" + person.img;
+    $("f-relay-img").alt = person.name;
+    $("f-relay-cap").innerHTML = "<b>" + esc(person.name) + "</b>";
+    $("f-relay-main").innerHTML = person.lines.map((t) => '<div class="say">' + esc(t) + "</div>").join("");
+    $("btn-f-relay-next").textContent = isLast ? "引き継ぎ書へ" : "次へ";
+  }
+
+  // ［次へ／引き継ぎ書へ］ボタン専用。最後の話者（事務長）だけ、次の話者へ
+  // ではなく②引き継ぎ書（fStartHandover）へ進む——ここだけは早送りクリック
+  // （fAdvanceRelay）に含めない、明示的な操作でのみ踏ませる境界線。
+  function fRelayNext() {
+    if (fRelayStep < 0) return;
+    if (fRelayStep < F_RELAY.length - 1) {
+      fAdvanceRelay();
+    } else {
+      fStartHandover();
+    }
+  }
+
+  // 背景クリックでの早送り専用。最後の話者では何もしない——②引き継ぎ書へは
+  // ［引き継ぎ書へ］ボタン（fRelayNext）を押さない限り進ませない。
+  function fAdvanceRelay() {
+    if (fRelayStep < 0 || fRelayStep >= F_RELAY.length - 1) return;
+    fRelayStep++;
+    fShowRelayStep(fRelayStep);
+  }
+
+  /* ------------------------------------------------------------------ */
+  /* エンディング②：引き継ぎ書（#ov-f-handover）——ゲームの最終状態。       */
+  /* #ov-goal と同じく閉じる導線を持たない。fEnded が立った後は            */
+  /* renderFinal() が #final 再入場のたびにこの画面を直接復元する。        */
+  /* ------------------------------------------------------------------ */
+
+  function fStartHandover() {
+    $("ov-f-relay").classList.add("hide");
+    fEnded = true;
+    fShowHandover();
+  }
+
+  // チームの一言（fLine）を鍵括弧で引用する。必ず esc() を通してから
+  // innerHTML へ渡す——引き継ぎ書は自由記述の一言をそのまま画面へ載せる
+  // 唯一の箇所なので、ここでXSSを埋めさせない。
+  function fShowHandover() {
+    const q = $("hdoc-quote");
+    if (q) q.innerHTML = "「" + esc(fLine || "") + "」";
+    $("ov-f-relay").classList.add("hide");
+    $("ov-f-handover").classList.remove("hide");
   }
 
   /* レース終了演出の本体。#ov-unlock ではなく専用オーバーレイ #ov-goal を
@@ -6371,6 +6671,16 @@
   $("btn-s5jimu-task-close").addEventListener("click", () => {
     $("ov-s5jimu-task").classList.add("hide");
   });
+  // Final：労いリレーの早送り。s1BriefAll と同じ「画面のどこを押しても
+  // 進む」思想だが、全部を一気に見せるのではなく1人ずつ次へ進める
+  // （fAdvanceRelay は最後の話者では何もしないので、ここで誤って
+  // ②引き継ぎ書まで進んでしまうことはない——読み終えたことの意思表示が
+  // 必要な区切りなので、その先は［引き継ぎ書へ］ボタンでのみ進む）。
+  $("ov-f-relay").addEventListener("click", (e) => {
+    if (e.target.closest("#btn-f-relay-next")) return;
+    fAdvanceRelay();
+  });
+  $("btn-f-relay-next").addEventListener("click", fRelayNext);
   $("btn-copy").addEventListener("click", () => {
     const btn = $("btn-copy");
     const which = $("ov-viewer").dataset.which;
