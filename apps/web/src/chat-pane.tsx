@@ -11,13 +11,19 @@ type ChatPaneProps = {
 
 type PendingSend = { commandId: string; threadId: string; text: string };
 
-/** 送信前ゲート・AIポリシー拒否による422か判定する。sendの複雑度を下げるための切り出し。 */
-const isBlockedByGate = (caught: unknown): caught is HttpRequestError =>
-  caught instanceof HttpRequestError && caught.status === 422;
+/**
+ * 送信前ゲート（beginChatMessageを呼ぶ前）でのブロックか判定する。このときだけ
+ * 何も保存されていないため、pendingを解除して新しいcommandIdで書き直せる。
+ * AIポリシー拒否・履歴中PIIのブロックは既にユーザーメッセージが保存済みなので
+ * 対象にしない——同じcommandIdでの再試行に倒し、二重保存を防ぐ。
+ * sendの複雑度を下げるための切り出し。
+ */
+const isPreSendBlock = (caught: unknown): boolean =>
+  caught instanceof HttpRequestError && caught.code === "pii_blocked";
 
 /** 送信失敗時の表示文言を組み立てる。sendの複雑度を下げるための切り出し。 */
 const sendFailureMessage = (caught: unknown): string =>
-  isBlockedByGate(caught)
+  caught instanceof HttpRequestError
     ? caught.message
     : "送信に失敗しました。もう一度押すと同じ内容を安全に再試行します。";
 
@@ -58,9 +64,10 @@ export const ChatPane = ({ snapshot, onCreateThread, onSendMessage }: ChatPanePr
       setText("");
       setStatus("");
     } catch (caught) {
-      // 422（PIIブロック・AIポリシー拒否）はサーバに何も保存されていない。同じ
-      // commandIdでの再試行は成立しないため、入力欄を再び有効にして書き直せるようにする。
-      if (isBlockedByGate(caught)) setPending(null);
+      // 送信前ゲートでのブロックだけは何も保存されていないため、入力欄を再び
+      // 有効にして書き直せるようにする。それ以外の失敗はpendingを保持し、
+      // 同じcommandIdでの再試行に倒す（新しいcommandIdだと二重保存になる）。
+      if (isPreSendBlock(caught)) setPending(null);
       setStatus(sendFailureMessage(caught));
     } finally {
       setSending(false);

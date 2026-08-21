@@ -11,8 +11,22 @@ describe("HTTPエラー応答schema", () => {
     });
   });
 
-  it("未知のフィールド、message欠落、非オブジェクトを拒否する", () => {
-    for (const input of [{ message: "本文", extra: true }, {}, { message: 1 }, null, []]) {
+  it("codeを持つオブジェクトを受理する", () => {
+    expect(httpErrorSchema.parse({ message: "本文", code: "pii_blocked" })).toEqual({
+      message: "本文",
+      code: "pii_blocked",
+    });
+  });
+
+  it("未知のフィールド、message欠落、不正なcode、非オブジェクトを拒否する", () => {
+    for (const input of [
+      { message: "本文", extra: true },
+      {},
+      { message: 1 },
+      { message: "本文", code: "unknown_code" },
+      null,
+      [],
+    ]) {
       expect(httpErrorSchema.safeParse(input).success).toBe(false);
     }
   });

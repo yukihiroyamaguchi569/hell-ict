@@ -49,8 +49,8 @@ export {
 export type { OpenAiChatCompletion } from "./schemas/openai-response.js";
 export { teamSyncMessageSchema } from "./schemas/sync.js";
 export type { TeamSyncMessage } from "./schemas/sync.js";
-export { httpErrorSchema } from "./schemas/http-error.js";
-export type { HttpError } from "./schemas/http-error.js";
+export { httpErrorCodeSchema, httpErrorSchema } from "./schemas/http-error.js";
+export type { HttpError, HttpErrorCode } from "./schemas/http-error.js";
 export { detectPii, piiPatterns, stage4Patient } from "./pii.js";
 export type { PiiLabel } from "./pii.js";
 export type { AiGateway, AiMessage, AiRequest, AiResponse } from "./ports/ai-gateway.js";
