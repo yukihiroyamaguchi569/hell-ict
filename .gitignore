@@ -9,3 +9,4 @@ test-results/
 .stryker-tmp/
 .dev.vars
 *.tsbuildinfo
+.mulmoterminal.json
