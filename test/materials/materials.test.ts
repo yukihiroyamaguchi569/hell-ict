@@ -19,15 +19,25 @@ const materialExpectations = [
 ] as const;
 
 describe("教材の整合性", () => {
-  it.each(materialExpectations)("$nameは患者7列と設計どおりの行数を持つ", async (material) => {
+  // 列は患者ID/病棟/採取日/MRSA結果/発熱/備考の6列固定（氏名列は削除済み——
+  // 実AI接続でStage 2の正規タスク（グリッドをAIに整形させる）を行うと、
+  // 旧・氏名列の値「渡辺 三郎」がStage 4のPII検知パターン（`stage4Patient.name`）と
+  // そのまま一致し、Stage 2の実作業がPIIゲートに誤射ブロックされていたため）。
+  it.each(materialExpectations)("$nameは患者6列と設計どおりの行数を持つ", async (material) => {
     const rows = await readTsv(material.name);
-    const patientRows = rows.filter((row) => row.length === 7);
-    const noiseRows = rows.filter((row) => row.length !== 7);
+    const patientRows = rows.filter((row) => row.length === 6);
+    const noiseRows = rows.filter((row) => row.length !== 6);
 
     expect(rows).toHaveLength(material.rowCount);
     expect(patientRows).toHaveLength(material.patientCount);
     expect(noiseRows).toHaveLength(material.noiseCount);
-    expect(patientRows.every((row) => row.length === 7)).toBe(true);
+    expect(patientRows.every((row) => row.length === 6)).toBe(true);
+  });
+
+  it("stage2_linelist.tsvに氏名列は存在しない（PII誤検知回避のため削除済み）", async () => {
+    const text = await readFile(materialsPath("stage2_linelist.tsv"), "utf8");
+    expect(text).not.toContain("渡辺");
+    expect(text).not.toContain(stage4Patient.name);
   });
 
   it("CRLFと末尾空列を保持し、終端改行だけを取り除く", () => {
@@ -36,12 +46,14 @@ describe("教材の整合性", () => {
     ]);
   });
 
-  it("患者005の固有情報はStage 2 TSVとStage 4カルテで一致する", async () => {
+  it("患者005の固有情報はStage 2 TSVとStage 4カルテで一致する（氏名はStage 4のみ）", async () => {
     const rows = await readTsv("stage2_linelist.tsv");
     const patient = rows.find((row) => row[0] === "005");
     const chart = await readFile(materialsPath("stage4_chart.md"), "utf8");
 
-    expect(patient?.slice(0, 6)).toEqual(["005", "渡辺 三郎", "5A", "7.3", "陰性", "37.9℃"]);
+    // ID・病棟・採取日・MRSA結果・発熱で一致させる。氏名はStage 2から削除済みで、
+    // Stage 4カルテ抜粋で初めて明かされる（stage4_chart.md 実装メモ参照）。
+    expect(patient?.slice(0, 5)).toEqual(["005", "5A", "7.3", "陰性", "37.9℃"]);
     expect(chart).toContain("渡辺 三郎");
     expect(chart).toContain("患者ID 005");
   });
@@ -68,5 +80,41 @@ describe("教材の整合性", () => {
     for (const general of ["5A病棟", "7月10日", "原因不明の発熱（精査中）", "感染制御チーム"]) {
       expect(detectPii(general)).toBeNull();
     }
+  });
+
+  // Stage 4再設計（家族返信→保健所への発熱患者一覧提出）の罠教材。Stage 2とは対句で、
+  // こちらは氏名列を「あえて残す」——丸ごとAIに貼ると個人名がPIIゲートに触れるべき罠
+  // （docs/materials/stage4_fever_linelist.md 実装メモ参照）。氏名検知パターンの追加は
+  // Worker担当の範囲のため、ここではファイル自体の構造整合のみを固定する。
+  describe("stage4_fever_linelist.tsv（発熱患者一覧・罠の実体）", () => {
+    it("発熱患者14名分、患者ID/氏名/病棟/発熱確認日/最高体温/備考の6列を持つ", async () => {
+      const rows = await readTsv("stage4_fever_linelist.tsv");
+      expect(rows).toHaveLength(14);
+      expect(rows.every((row) => row.length === 6)).toBe(true);
+    });
+
+    it("患者IDに重複が無い", async () => {
+      const rows = await readTsv("stage4_fever_linelist.tsv");
+      const ids = rows.map((row) => row[0]);
+      expect(new Set(ids).size).toBe(ids.length);
+    });
+
+    it("Stage 2とは対句で氏名列を持つ（罠の実体そのもの）", async () => {
+      const text = await readFile(materialsPath("stage4_fever_linelist.tsv"), "utf8");
+      expect(text).toContain(stage4Patient.name);
+    });
+
+    it("患者005の行は病棟・発熱確認日・最高体温がstage4_chart.mdと整合する", async () => {
+      const rows = await readTsv("stage4_fever_linelist.tsv");
+      const patient = rows.find((row) => row[0] === "005");
+
+      expect(patient?.slice(0, 5)).toEqual([
+        "005",
+        stage4Patient.name,
+        "5A",
+        "7/3",
+        "38.1℃",
+      ]);
+    });
   });
 });
