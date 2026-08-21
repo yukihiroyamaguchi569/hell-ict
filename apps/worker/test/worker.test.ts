@@ -1,34 +1,13 @@
 import { env, exports } from "cloudflare:workers";
 import { listDurableObjectIds } from "cloudflare:test";
-import { leaderboardSnapshotSchema, teamSnapshotSchema } from "@hell-ict/domain";
+import {
+  leaderboardSnapshotSchema,
+  teamSnapshotSchema,
+  teamSyncMessageSchema,
+} from "@hell-ict/domain";
 import { describe, expect, it } from "vitest";
 
-const session = async (teamCode: string): Promise<Response> =>
-  exports.default.fetch(
-    new Request("https://example.test/api/session", {
-      method: "POST",
-      body: JSON.stringify({ teamCode }),
-    }),
-  );
-
-const upgrade = async (path: string): Promise<Response> =>
-  exports.default.fetch(
-    new Request(`https://example.test${path}`, { headers: { Upgrade: "websocket" } }),
-  );
-
-const firstMessage = async (response: Response): Promise<unknown> => {
-  const socket = response.webSocket;
-  if (socket === null) throw new Error("101応答にWebSocketがありません。");
-  const received = new Promise<unknown>((resolve) => {
-    socket.addEventListener("message", (event) => {
-      resolve(typeof event.data === "string" ? (JSON.parse(event.data) as unknown) : null);
-    });
-  });
-  socket.accept();
-  const message = await received;
-  socket.close();
-  return message;
-};
+import { firstMessage, session, upgrade } from "./support.js";
 
 describe("P1B Worker", () => {
   it("health checkはDOを作らず固定の成功応答を返す", async () => {
@@ -132,12 +111,14 @@ describe("P1B Worker", () => {
     expect(leaderboard.status).toBe(426);
   });
 
-  it("チームsyncは101で切り替わり、初回メッセージで状態を配信する", async () => {
+  it("チームsyncは101で切り替わり、初回メッセージでteam envelopeを配信する", async () => {
     await session("000003");
     const response = await upgrade("/api/teams/000003/sync");
     expect(response.status).toBe(101);
-    const message = teamSnapshotSchema.parse(await firstMessage(response));
-    expect(message).toMatchObject({
+    const envelope = teamSyncMessageSchema.parse(await firstMessage(response));
+    expect(envelope.kind).toBe("team");
+    if (envelope.kind !== "team") throw new Error("unexpected");
+    expect(teamSnapshotSchema.parse(envelope.snapshot)).toMatchObject({
       teamCode: "000003",
       revision: 0,
       state: { stage: "prologue" },

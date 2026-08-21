@@ -1,26 +1,82 @@
 import {
+  chatMessageResultSchema,
   commandResultSchema,
+  createThreadResultSchema,
   leaderboardSnapshotSchema,
   teamCodeSchema,
   teamSnapshotSchema,
+  teamSyncMessageSchema,
 } from "@hell-ict/domain";
-import type { CommandResult, LeaderboardSnapshot, TeamSnapshot } from "@hell-ict/domain";
+import type {
+  ChatSnapshot,
+  CommandResult,
+  LeaderboardSnapshot,
+  TeamSnapshot,
+} from "@hell-ict/domain";
 import { useCallback, useEffect, useRef, useState } from "react";
+
+import { ChatPane } from "./chat-pane.js";
 
 const savedTeamCodeKey = "hell-ict-team-code";
 const isTeamCode = (value: string): boolean => teamCodeSchema.safeParse(value).success;
 const socketUrl = (path: string): string =>
   `${location.protocol === "https:" ? "wss" : "ws"}://${location.host}${path}`;
 
-const submitStage1 = async (snapshot: TeamSnapshot, commandId: string): Promise<CommandResult> => {
-  const response = await fetch(`/api/teams/${snapshot.teamCode}/commands`, {
+const postJson = async (path: string, body: unknown): Promise<unknown> => {
+  const response = await fetch(path, {
     method: "POST",
     headers: { "content-type": "application/json" },
-    body: JSON.stringify({ type: "enter-stage1", commandId, expectedRevision: snapshot.revision }),
+    body: JSON.stringify(body),
   });
-  const parsed = commandResultSchema.safeParse(await response.json());
+  const parsed = (await response.json()) as unknown;
+  if (!response.ok) throw new Error();
+  return parsed;
+};
+
+const submitStage1 = async (snapshot: TeamSnapshot, commandId: string): Promise<CommandResult> => {
+  const parsed = commandResultSchema.safeParse(
+    await postJson(`/api/teams/${snapshot.teamCode}/commands`, {
+      type: "enter-stage1",
+      commandId,
+      expectedRevision: snapshot.revision,
+    }),
+  );
   if (!parsed.success) throw new Error();
   return parsed.data;
+};
+
+const submitCreateThread = async (
+  teamCode: string,
+  commandId: string,
+  title: string,
+): Promise<ChatSnapshot> => {
+  const parsed = createThreadResultSchema.safeParse(
+    await postJson(`/api/teams/${teamCode}/chat/threads`, {
+      type: "create-thread",
+      commandId,
+      title,
+    }),
+  );
+  if (!parsed.success) throw new Error();
+  return parsed.data.snapshot;
+};
+
+const submitChatMessage = async (
+  teamCode: string,
+  commandId: string,
+  threadId: string,
+  text: string,
+): Promise<ChatSnapshot> => {
+  const parsed = chatMessageResultSchema.safeParse(
+    await postJson(`/api/teams/${teamCode}/chat/messages`, {
+      type: "send-message",
+      commandId,
+      threadId,
+      text,
+    }),
+  );
+  if (!parsed.success) throw new Error();
+  return parsed.data.snapshot;
 };
 
 export const App = () => {
@@ -30,6 +86,7 @@ export const App = () => {
     return saved !== null && isTeamCode(saved) ? saved : null;
   });
   const [snapshot, setSnapshot] = useState<TeamSnapshot | null>(null);
+  const [chatSnapshot, setChatSnapshot] = useState<ChatSnapshot | null>(null);
   const [leaderboard, setLeaderboard] = useState<LeaderboardSnapshot | null>(null);
   const [leaderboardPending, setLeaderboardPending] = useState(false);
   const [message, setMessage] = useState("6桁のチームコードを入力してください。");
@@ -42,6 +99,20 @@ export const App = () => {
       current === null || next.revision >= current.revision ? next : current,
     );
   }, []);
+
+  const acceptChatSnapshot = useCallback((next: ChatSnapshot) => {
+    setChatSnapshot((current) =>
+      current === null || next.revision >= current.revision ? next : current,
+    );
+  }, []);
+
+  const acceptTeamSyncMessage = useCallback(
+    (next: { kind: "team"; snapshot: TeamSnapshot } | { kind: "chat"; snapshot: ChatSnapshot }) => {
+      if (next.kind === "team") acceptTeamSnapshot(next.snapshot);
+      else acceptChatSnapshot(next.snapshot);
+    },
+    [acceptChatSnapshot, acceptTeamSnapshot],
+  );
 
   const connect = useCallback(
     (code: string) => {
@@ -82,8 +153,8 @@ export const App = () => {
       const closeTeam = connectSocket(
         `/api/teams/${code}/sync`,
         teamGeneration,
-        (input) => teamSnapshotSchema.safeParse(input),
-        acceptTeamSnapshot,
+        (input) => teamSyncMessageSchema.safeParse(input),
+        acceptTeamSyncMessage,
       );
       const closeLeaderboard = connectSocket(
         `/api/leaderboard/sync?teamCode=${code}`,
@@ -96,7 +167,7 @@ export const App = () => {
         closeLeaderboard();
       };
     },
-    [acceptTeamSnapshot],
+    [acceptTeamSyncMessage],
   );
 
   useEffect(() => {
@@ -110,13 +181,8 @@ export const App = () => {
       return;
     }
     try {
-      const response = await fetch("/api/session", {
-        method: "POST",
-        headers: { "content-type": "application/json" },
-        body: JSON.stringify({ teamCode }),
-      });
-      const parsed = teamSnapshotSchema.safeParse(await response.json());
-      if (!response.ok || !parsed.success) throw new Error();
+      const parsed = teamSnapshotSchema.safeParse(await postJson("/api/session", { teamCode }));
+      if (!parsed.success) throw new Error();
       localStorage.setItem(savedTeamCodeKey, teamCode);
       setJoinedCode(teamCode);
       acceptTeamSnapshot(parsed.data);
@@ -142,6 +208,20 @@ export const App = () => {
     } catch {
       setMessage("結果を確認できません。もう一度押すと同じ操作を安全に再試行します。");
     }
+  };
+
+  const createThread = async (threadCommandId: string, title: string): Promise<void> => {
+    if (joinedCode === null) throw new Error();
+    acceptChatSnapshot(await submitCreateThread(joinedCode, threadCommandId, title));
+  };
+
+  const sendChatMessage = async (
+    messageCommandId: string,
+    threadId: string,
+    text: string,
+  ): Promise<void> => {
+    if (joinedCode === null) throw new Error();
+    acceptChatSnapshot(await submitChatMessage(joinedCode, messageCommandId, threadId, text));
   };
 
   if (snapshot === null)
@@ -216,6 +296,11 @@ export const App = () => {
           </p>
         ))}
       </aside>
+      <ChatPane
+        snapshot={chatSnapshot}
+        onCreateThread={createThread}
+        onSendMessage={sendChatMessage}
+      />
     </main>
   );
 };

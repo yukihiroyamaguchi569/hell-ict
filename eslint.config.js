@@ -50,6 +50,7 @@ export default tseslint.config(
       "**/*.spec.ts",
       "test/materials/**/*.ts",
       "e2e/**/*.ts",
+      "e2e/**/*.mjs",
     ],
     languageOptions: {
       globals: globals.node,

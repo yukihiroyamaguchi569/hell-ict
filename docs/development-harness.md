@@ -10,7 +10,7 @@ P1Aではゲーム機能を実装せず、以後の実装を安全に行うた�
 | `apps/worker`     | HTTP入力の検証、Cloudflare binding、adapter     | `packages/domain` |
 | `apps/web`        | React表示                                       | `packages/domain` |
 
-UIは判定・永続化を持たない。Workerは外部入力を`packages/domain`のschemaで検証してから渡す。OpenAI・Storage・時刻・乱数・IDは`ports`に依存し、本番adapterはP1C以降、テストは`fakes`を使う。依存は外側から内側へ一方向であり、domainはReact・Cloudflare SDK・ストレージをimportしない。
+UIは判定・永続化を持たない。Workerは外部入力を`packages/domain`のschemaで検証してから渡す。OpenAI・Storage・時刻・乱数・IDは`ports`に依存し、テストは`fakes`を使う。OpenAIの本番adapter（`apps/worker/src/openai-gateway.ts`）はP1Cで実装済み。Storage・時刻・乱数・IDの本番adapterは、それぞれ必要になった工程で追加する。依存は外側から内側へ一方向であり、domainはReact・Cloudflare SDK・ストレージをimportしない。
 
 `HarnessCounter`はP1A限定の最小オブジェクトであり、P1Bで撤去した。現在のDO構成と最小状態管理の契約は [P1B 最小状態管理](p1b-minimal-team-state.md) を正とする。
 

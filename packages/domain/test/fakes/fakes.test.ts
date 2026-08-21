@@ -30,9 +30,9 @@ describe("開発用Fake", () => {
       { kind: "failure", error: new Error("rate limited") },
       { kind: "timeout" },
     ]);
-    const request = { prompt: "test", timeoutMs: 500 };
+    const request = { messages: [{ role: "user" as const, text: "test" }], timeoutMs: 500 };
 
-    await expect(gateway.complete(request)).resolves.toBe("確認済み");
+    await expect(gateway.complete(request)).resolves.toEqual({ text: "確認済み" });
     await expect(gateway.complete(request)).rejects.toThrow("rate limited");
     await expect(gateway.complete(request)).rejects.toThrow("500ms");
     expect(gateway.requests).toHaveLength(3);
@@ -40,7 +40,7 @@ describe("開発用Fake", () => {
 
   it("結果が尽きたAI呼び出しを記録し、Promise rejectとして返す", async () => {
     const gateway = new FakeAiGateway([]);
-    const request = { prompt: "test", timeoutMs: 500 };
+    const request = { messages: [{ role: "user" as const, text: "test" }], timeoutMs: 500 };
 
     await expect(gateway.complete(request)).rejects.toThrow("結果が設定されていません");
     expect(gateway.requests).toEqual([request]);
