@@ -1,6 +1,7 @@
 import { env, exports } from "cloudflare:workers";
 import { listDurableObjectIds } from "cloudflare:test";
 import {
+  chatSnapshotSchema,
   leaderboardSnapshotSchema,
   teamSnapshotSchema,
   teamSyncMessageSchema,
@@ -132,6 +133,16 @@ describe("P1B Worker", () => {
     const message = leaderboardSnapshotSchema.parse(await firstMessage(response));
     const self = message.entries.filter((entry) => entry.isSelf);
     expect(self).toMatchObject([{ stage: "prologue", teamRevision: 0 }]);
+  });
+
+  it("GET /api/teams/{code}/chatは200でchatSnapshot形状を返す", async () => {
+    await session("000005");
+    const response = await exports.default.fetch(
+      new Request("https://example.test/api/teams/000005/chat"),
+    );
+    expect(response.status).toBe(200);
+    const snapshot = chatSnapshotSchema.parse(await response.json());
+    expect(snapshot).toMatchObject({ teamCode: "000005", threads: [{ title: "メイン" }] });
   });
 
   it("不正なsync要求はTeamRoomを増やさずに拒否する", async () => {

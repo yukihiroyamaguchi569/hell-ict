@@ -1,5 +1,5 @@
 export interface AiMessage {
-  readonly role: "user" | "assistant";
+  readonly role: "system" | "user" | "assistant";
   readonly text: string;
 }
 
