@@ -65,6 +65,9 @@
   color: #eef2f5; margin: 0; text-wrap: balance;
 }
 .masthead p { margin: 0; font-size: 13px; color: #7d868e; max-width: 68ch; line-height: 1.7; }
+/* 並び順は元のまま（masthead→devbar→アプリ）。開発中はdevbarが上にあるほうが
+   ステージ切替が速い。テストプレイ配信時に参加者からmasthead/devbarを隠す加工は
+   scripts/build-testplay.sh 側の責務とする（モック本体の構造は変えない）。 */
 
 /* 開発用スイッチャ — 製品の一部ではないことが一目で分かる見た目にする */
 .devbar {
@@ -223,6 +226,13 @@
   padding: 1px 6px; margin-right: 6px; background: var(--warn); color: #14171a;
 }
 .mail.done { opacity: .38; }
+/* Stage 1：前任ICNの引き継ぎメモ（常駐）。read/done系の色落ちは付けない——
+   常に生きた資料として一覧の最上部に見せる（s1List）。 */
+.mail.pinned { border-left: 3px solid var(--accent); }
+/* 「常駐」タグは .mail .tag の既定色（--warn＝橙）のままだと締切間近の .hot と
+   紛らわしく「急いで」に見えてしまう。Stage 1 は常に peace モード（--accent は
+   落ち着いた青緑）なので、accentへ差し替えて「参照用の資料」という温度に戻す。 */
+.mail.pinned .tag { background: var(--accent); color: #fff; }
 
 .s2-hd { display: flex; align-items: center; gap: 16px; flex-wrap: wrap; }
 .s2-hd .grow { flex: 1; }
@@ -264,6 +274,10 @@
 /* Stage 3：差し戻し（不足）の枠。橙のみ、赤は使わない（Stage 2 §3の絶対条件を継続）。 */
 .box.warn { border-color: var(--warn); }
 .box.warn > .hd { color: var(--warn); }
+/* Stage 1：R3開始時にコンテキスト欄を光らせる「ここへ貼れ」の案内。
+   .box.warn（誤り・不足の警告色）とは意味が違うので流用せず、accentトークンで
+   案内の強調だけを表す。 */
+.box.ctx-hi { border-color: var(--accent); box-shadow: inset 0 0 0 1px var(--accent); }
 .submit-area {
   width: 100%; min-height: 132px; resize: vertical; display: block;
   background: transparent; color: var(--fg); border: 0; padding: 13px;
@@ -379,6 +393,9 @@
   padding: 9px 18px; font-size: 14px; font-weight: 600; color: var(--ai-fg);
 }
 .ai .tab.add { background: transparent; color: var(--ai-muted); font-size: 17px; padding: 9px 14px; }
+/* LIVE時、liveState.threadsから描画したタブのうちアクティブな1つに付く
+   （scripted時は静的な「メイン」「＋」のままなので使われない）。 */
+.ai .tab.current { background: var(--ai-surface-2); box-shadow: inset 0 -2px 0 var(--ai-fg); }
 .ai .log { flex: 1; overflow-y: auto; padding: 18px 16px; display: flex; flex-direction: column; gap: 14px; }
 .ai .empty { color: var(--ai-muted); font-size: 15px; }
 .ai .compose { border-top: 1px solid var(--ai-rule); padding: 11px 12px; display: flex; gap: 9px; align-items: flex-end; }
@@ -465,6 +482,8 @@
   border: 1px solid var(--rule); color: var(--fg);
   font-family: var(--font-num); font-size: 32px; font-weight: 600;
 }
+/* LIVE時、POST /api/session 失敗時のエラー表示（サーバのmessageをそのまま出す）。 */
+.entry .entry-error { font-size: 14px; color: #c1121f; text-align: center; max-width: 42ch; }
 
 /* 幹部ブリーフィング — 急変直後、Stage 1 の冒頭。.entry と同じく不透明で
    下地を完全に隠す（ヘッダーの時計もリーダーボードも見せない）。
@@ -503,6 +522,21 @@
   font-family: var(--font-legacy); font-size: 13px; line-height: 1.95; color: #4a524c;
 }
 .s1res .voices div + div { margin-top: 5px; }
+/* 手動クリア時、事務長の一言に続けて苅部さんのオチを添える行。同じ .said でも
+   罫の色をaccentに変えて「別人の発言」だと分かるようにする。 */
+.s1res .said.karube { border-left-color: var(--accent); margin-top: 10px; }
+/* R1失敗演出のメールスレッド（s1ThreadItemsHTML）。①相手の元メール ②自分の返信
+   ③相手の困惑、の3段を積む。.s1res は器のテーマから独立した固定パレットな
+   ので（このファイル内の既存コメント参照）、ここも同じ固定色に揃える。 */
+.s1res .thread { display: flex; flex-direction: column; gap: 10px; margin-top: 4px; }
+.s1res .thread-item { border: 1px solid #c8ccc4; background: #fff; }
+.s1res .thread-item > div { padding: 9px 13px; }
+.s1res .thread-item > div + div { border-top: 1px dashed #c8ccc4; }
+.s1res .t-lbl { font-size: 11px; font-weight: 700; letter-spacing: .06em; color: #8a908a; margin-bottom: 3px; }
+.s1res .t-body { font-family: var(--font-legacy); font-size: 13.5px; line-height: 1.8; color: #3a413c; }
+/* sum の直下（一覧より前）に置く（s1ThreadRestLine）。thread-item と同じ余白感に
+   揃えるため上下マージンを持たせる。 */
+.s1res .thread-rest { font-size: 13px; color: #6f6559; margin: 6px 0 2px; }
 /* 段落は順に現れる。既存の .msg と同じ持ち上げ量に揃えてある。
    prefers-reduced-motion では transition も later() も 0 になるので、
    結果として全部が最初から出ている状態になる（意図通り）。 */
@@ -666,6 +700,14 @@
 .callin .say + .say { margin-top: 10px; }
 .callin .por .frame { font-size: 56px; }
 
+/* Stage 3.5：クリア時の小さな報酬。全画面veilではなく中央ペイン（.work）に収め、
+   --okの緑だけを使う——暗転（Stage 3）・警報（Stage 4）と見た目で区別する
+   （docs/ui/04_Stage3_5_新情報の解釈.md §3）。 */
+.s35-clear { flex: 1; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 16px; text-align: center; padding: 20px; }
+.s35-clear-diagram { opacity: .9; }
+.s35-clear-t { font-size: 22px; font-weight: 700; color: var(--ok); letter-spacing: .03em; }
+.s35-clear-s { font-size: 15px; color: var(--fg-muted); max-width: 46ch; line-height: 1.8; }
+
 /* 教材ビューア：見た目を整えない。汚いまま出す。
    これはアプリの画面ではなく病院から届いた「ファイル」なので、
    テーマに追従させず白い紙として固定する。 */
@@ -757,6 +799,14 @@
       <button id="btn-phs">苅部さんから着信</button>
       <button id="btn-s1-nobrief">Stage 1（説明を飛ばす）</button>
     </div>
+    <div class="sep"></div>
+    <div class="grp">
+      <span class="tag">🧪 S1画面プレビュー(仮)</span>
+      <button id="btn-s1prev-round1">R1失敗（短文）</button>
+      <button id="btn-s1prev-round2">R2失敗（時間切れ）</button>
+      <button id="btn-s1prev-manual">成功（手動）</button>
+      <button id="btn-s1prev-ai">成功（AI）</button>
+    </div>
   </div>
 
   <div class="stage-wrap" id="wrap">
@@ -781,6 +831,15 @@
 
         <!-- 赤帯（急変時に3秒だけ出る） -->
         <div class="redband hide" id="redband">5A病棟より緊急連絡。MRSA疑い、拡大の可能性。</div>
+        <!-- Stage 3.5：開始演出専用の一報。#redband は Stage 1→2 の transition() が
+             文言を直書きしたまま流用する器なので、テキストを差し替えると転調が壊れる。
+             同じ .redband の見た目だけを借りる別の器（自前の軽い演出。s35FlashSurge()）。 -->
+        <div class="redband hide" id="s35-redband">原因不明の発熱、一気に14人へ。</div>
+        <!-- Stage 3：開始演出専用の一報。#redband・#s35-redband と同じ理由で自前の器を持つ
+             （見た目は .redband を共用、文言だけ差し替える。s3FlashSurge()）。看護部長の
+             一報オーバーレイ（#ov-s3notice）より先に出し、退場してから一報を表示する
+             ——赤帯→一報→通常画面の順（renderStage3() 参照）。 -->
+        <div class="redband hide" id="s3-redband">疥癬患者が多発！対応方針の確認が追いついていません。</div>
 
         <!-- 3ペイン -->
         <div class="body">
@@ -800,7 +859,7 @@
               <!-- 早見表をマニュアルより上に置く。急いでいる人が上から掴むと汚染教材に
                    当たる——カワイさんがやったのと同じ手順を、参加者がなぞれるようにする。
                    看護部長の「マニュアルどおりにやれ」を覚えていれば下を選べる。 -->
-              <button class="docitem" id="btn-open-quickref">📄 発熱対応早見表.pdf</button>
+              <button class="docitem" id="btn-open-quickref">📄 疥癬対応早見表.pdf</button>
               <button class="docitem" id="btn-open-manual">📄 院内感染対策マニュアル.pdf</button>
             </div>
           </div>
@@ -810,9 +869,9 @@
 
           <!-- 右：AIチャット -->
           <div class="pane-r ai hide" id="pane-r">
-            <div class="tabs">
+            <div class="tabs" id="ai-tabs">
               <button class="tab">メイン</button>
-              <button class="tab add" title="スレッドを追加">＋</button>
+              <button class="tab add" id="ai-tab-add" title="スレッドを追加">＋</button>
             </div>
             <div class="log" id="ai-log">
               <div class="empty">（まだ何もありません）</div>
@@ -862,6 +921,8 @@
           </div>
           <div class="lab">チームコードを入力</div>
           <div class="code" id="code"></div>
+          <!-- LIVE時のみ使う。scriptedのbtn-enterはgo("welcome")へ即抜けるため空のまま。 -->
+          <div class="entry-error hide" id="entry-error"></div>
           <button class="btn" id="btn-enter">入室する</button>
         </div>
 
@@ -962,7 +1023,7 @@
         <div class="veil unlock hide" id="ov-unlock">
           <div class="bar"></div>
           <div class="t">Stage 3 を解錠しました</div>
-          <div class="s">暫定 — 5A病棟の対応方針</div>
+          <div class="s">暫定 — 転院患者の対応方針</div>
         </div>
 
         <!-- Final：ゴール。#ov-unlock とは別の器で「レースの終端」を見せる
@@ -983,6 +1044,24 @@
         <!-- Stage 3：罠発火の暗転。白文字1行だけ。事実の報告のみで、責める文言は無い。 -->
         <div class="veil blackout hide" id="ov-blackout">
           <div class="t" id="blackout-text"></div>
+        </div>
+
+        <!-- Stage 3：開始直後の一報。3B病棟師長メール（詳細）より先に、看護部長が
+             砕けた口調で噂話レベルの一報を告げる二段構え（詳細はメールで確認させる）。
+             窓口ではない一方向・1回きりのポップアップなので、事務長ブリーフィングと
+             同じ院内システムの窓（.sysdlg）を流用する（docs/character/00 §0）。
+             感染対策の中身には触れず、[了解しました]で通常のStage 3画面へ進む。 -->
+        <div class="veil sysdlg callin hide" id="ov-s3notice">
+          <div class="win">
+            <div class="tb">
+              <span class="grow">📞 内線 — 看護部長</span>
+              <span class="ctl">□ ✕</span>
+            </div>
+            <div class="bd">
+              <div class="main" id="s3notice-body"></div>
+            </div>
+            <div class="ft"><button class="btn" id="btn-s3notice-close">了解しました</button></div>
+          </div>
         </div>
 
         <!-- Stage 3・4：罰ゲームの器。主役は残り時間の数字。
@@ -1031,6 +1110,61 @@
               </div>
             </div>
             <div class="ft"><button class="btn" id="btn-s4call-close">了解しました</button></div>
+          </div>
+        </div>
+
+        <!-- Stage 3.5：幹部から転送された速報論文の添付ビューア。既存の #ov-viewer
+             （教材ビューア。Excel・PDF等）とは別の専用の器——VIEWERS/openViewer() は
+             Stage 1〜Finalの共有添付を切り替えるための仕組みで、S3.5 はそこに参加せず
+             自己完結する。表示は .reader/.legacy（院内システムの書式）を流用する。 -->
+        <div class="veil viewer hide" id="ov-s35-report">
+          <div class="win">
+            <div class="tb">
+              <span class="grow">東陵国感染症監視局　クラスター速報No.18.pdf</span>
+              <button id="btn-s35-report-copy">コピー</button>
+              <button id="btn-s35-report-close">閉じる</button>
+            </div>
+            <div class="sheet">
+              <div class="reader legacy">
+                <h2>Unexplained Febrile Cluster in Eastern Ling Province: Preliminary Report</h2>
+                <div class="meta">Eastern Ling Infectious Disease Surveillance Office — Cluster Bulletin No. 18</div>
+                <div class="rule"></div>
+                <p><b>Overview</b></p>
+                <p>Between 3 and 14 May, three hospitals in Eastern Ling Province reported 19 patients with fever and negative initial testing for common pathogens. This preliminary report summarizes clinical records and follow-up interviews with patients and contacts. It does not establish a causative agent, route of transmission, or common source.</p>
+                <p><b>Clinical Course</b></p>
+                <p>All 19 patients had a recorded temperature of at least 38.0°C. Symptoms other than fever varied at first presentation. Fatigue, headache, and reduced appetite were documented intermittently.</p>
+                <p>Follow-up interviews found that 15 of 19 patients had experienced deep ocular pain 8 to 18 hours before fever onset. Eleven patients described unusual sensitivity to light. These symptoms were often recorded initially as eye strain or migraine.</p>
+                <p><b>Contact Observations</b></p>
+                <p>Secondary illness was observed more often among people who had contact with a patient on the day before that patient's fever began. Records of contact after fever onset, location, and duration were incomplete. These observations cannot determine whether pre-fever contact contributed to transmission.</p>
+                <p><b>Limitations and Immediate Request</b></p>
+                <p>This is a small observational report. It remains unknown whether ocular symptoms indicate infection with the causative agent or whether person-to-person transmission is occurring. Healthcare facilities are asked to record symptoms and contact history that precede unexplained fever.</p>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <!-- Stage 3.5：幹部との一往復。常駐する「院内連絡先」（#phs・苅部さん専用）
+             とは別の、この場面限りの専用ウィンドウ（docs/character/00_お助けキャラの
+             原則.md §0「窓口は一つ、中の人は増えてよい」の枠を破らないよう、#phs 自体は
+             触らず新設する）。.sysdlg callin は #ov-s4call と同じ器を借りるが、
+             肖像（.por）は無い——幹部の production art は未制作のため。 -->
+        <div class="veil sysdlg callin hide" id="ov-s35-kanbu">
+          <div class="win">
+            <div class="tb">
+              <span class="grow">院内連絡先 ── 幹部</span>
+              <span class="ctl">□ ✕</span>
+            </div>
+            <div class="bd">
+              <div class="main">
+                <div class="say">〔幹部〕要約は読んだわ。</div>
+                <div class="say">〔幹部〕それで、あなたたちはこれからどうしたいの？</div>
+                <div class="box" id="s35-action-box">
+                  <textarea class="submit-area" id="s35-action" style="min-height:90px"></textarea>
+                </div>
+                <div id="s35-action-verdict"></div>
+              </div>
+            </div>
+            <div class="ft"><button class="btn" id="btn-s35-action-submit">送信する</button></div>
           </div>
         </div>
 
@@ -1224,60 +1358,109 @@
      ここで初めてメール差出人として実在させる。窓口ではない（一方向・1回きり）。 */
   const MAIL_S3_KAWAI = {
     from: "医療安全管理室 カワイ", subj: "至急！対応方針、これでいいですよね？",
-    attach: "発熱対応早見表.pdf",
+    attach: "疥癬対応早見表.pdf",
     body: [
-      "例の発熱の件、委員会から「早く方針を出せ」と急かされています。",
+      "例の疥癬の件、委員会から「早く方針を出せ」と急かされています。",
       "看護部長からは「マニュアルどおりにやれ」と言われたんですけど、共有フォルダに早見表が落ちていたので、ひとまずこれに沿ってまとめようと思います。これでいいですよね……？",
-      "・環境消毒　・防護具（PPE）・隔離　・接触予防策の解除",
+      "・環境整備・リネン　・PPE・隔離　・接触予防策の解除",
       "この3点、至急ご確認をお願いします。",
       "正式なマニュアルは、たしか情シスさんがPDF化してくれていたはずなんですが……今探す時間がなくて。"
     ]
   };
 
+  /* 3B病棟看護師長。Stage 3 開始の引き金そのもの（docs/materials/stage3_patients.md
+     実装メモ）。添え状が本文、転院患者3名分のサマリが添付（下記 S3_PATIENTS_TEXT）。
+     現場は治療を終えて把握していたのに、ICTへ回す決まった経路が無く報告が抜けていた
+     ——矛先は個人ではなく報告経路の不備（AGENTS.md トーンルール）。 */
+  const MAIL_S3_SHICHO = {
+    from: "3B病棟 看護師長", subj: "転院患者さん3名の疥癬対応について、ご確認をお願いします",
+    attach: "転院患者サマリ.pdf",
+    body: [
+      "いつもお世話になっております。3B病棟です。",
+      "平尾台医療センターさんから転院してこられた患者さん3名の件でご連絡です。あちらの皮膚科ですでに疥癬の治療（イベルメクチンの内服）を受けておられ、当院でも各病棟で経過を見ておりました。現場としては把握して対応していたのですが、ICTさんへのご報告が抜けてしまっていたようです。",
+      "昨日の退院調整会議で他病棟さんの件と一緒に話題に出て、「これ、ICTさんに連絡済みでしたっけ」となり、そこで初めて気づいた次第です。転院患者さんの感染症の情報をICTさんへ回す決まった経路が無かったことが原因のようで、一病棟だけの問題ではなさそうです。申し訳ありません。",
+      "急なお願いで恐縮ですが、3名分の状況をまとめて添付しましたので、対応方針をご確認いただけますでしょうか。"
+    ]
+  };
+
+  /* Stage 3 開始の瞬間に出す一報（オーバーレイ）。師長メールが「詳細」なら、
+     こちらは「噂話レベルの一報」——看護部長が砕けた口調で伝える、二段構え。
+     窓口ではない（一方向・1回きり。docs/character/00_お助けキャラの原則.md §0）ので、
+     ここで感染対策の中身には踏み込ませない。閉じると通常のStage 3画面へ進む。 */
+  const S3_NOTICE_LINES = [
+    "〔看護部長〕ちょっといい？　3Bの師長さんから聞いたんだけど。",
+    "〔看護部長〕病棟に疥癬が出ているらしいわよ。……ICT、聞いてます？",
+    "〔看護部長〕詳しいことはメールで送ってもらうから、確認しておいて。"
+  ];
+
+  /* 転院患者3名分のサマリ。docs/materials/stage3_patients.md の要約。
+     正解の根拠そのもの——マニュアルの解除基準（治療完了後24時間）と
+     この事実（治療完了・最終治療から1日以上経過）を突き合わせて初めて正解に至る。
+     病型（通常型か角化型か）はあえて書かない（罠発動時に皮膚科医が明かす）。 */
+  const S3_PATIENTS_TEXT =
+"転院患者サマリ（3名）\n\n" +
+"転院元：平尾台医療センター（角化型疥癬の患者が発生していた病院）\n" +
+"同院で角化型疥癬患者と接触歴のある3名が、皮疹を発症し当院へ転院となった。\n" +
+"3名ともイベルメクチン内服による治療が完了し、最終治療から24時間（1日）以上が経過している。皮疹は改善傾向。\n\n" +
+"患者ID\t氏名\t病棟\t転院元\tイベルメクチン内服日\t最終治療からの日数\t皮疹\n" +
+"T-101\t平野 修一\t3B\t平尾台医療センター\t8/21\t2日\t改善傾向\n" +
+"T-102\t遠藤 千代\t5B\t平尾台医療センター\t8/22\t1日\t改善傾向\n" +
+"T-103\t三浦 大樹\t6A\t平尾台医療センター\t8/22\t1日\t改善傾向\n\n" +
+"個別メモ\n" +
+"・T-101 平野 修一（3B病棟）：平尾台医療センターで角化型疥癬患者と接触歴があり、皮疹（掻痒・丘疹）を発症。イベルメクチン内服は8/21に実施し、最終治療から2日が経過。皮疹は改善傾向。発熱等の全身症状はなし。\n" +
+"・T-102 遠藤 千代（5B病棟）：同じく接触歴あり。イベルメクチン内服は8/22に実施し、最終治療から1日が経過。皮疹は改善傾向。全身状態は安定しており、発熱等の症状はなし。\n" +
+"・T-103 三浦 大樹（6A病棟）：接触歴あり。イベルメクチン内服は8/22に実施し、最終治療から1日が経過。皮疹は改善傾向。発熱等の症状はなし。";
+
   /* 正典。docs/materials/stage3_manual.md 第5章の抜粋を、添付ビューア用の
-     プレーンテキストに要約したもの（原文Markdownをそのまま貼らない）。 */
+     プレーンテキストに要約したもの（原文Markdownをそのまま貼らない）。
+     通常疥癬と角化型（痂皮型）疥癬の対応差、および「治療完了後24時間」という
+     解除基準が読み取れることが肝——この2点を stage3_patients.md の事実
+     （治療完了・最終治療から1日以上経過）と突き合わせて初めて正解に至る。 */
   const S3_MANUAL_TEXT =
 "聖クロノス総合病院　院内感染対策マニュアル　第7版（抜粋）\n\n" +
-"第5章　病原体不明の集団発生への対応（p.42-47）\n\n" +
-"５-２　環境消毒（p.43）\n" +
-"　病室・共用設備の消毒：次亜塩素酸ナトリウム　0.1%（1000ppm）\n" +
-"　病原体が未確定の段階では、アルコール系消毒薬のみでの対応は不十分とする。\n\n" +
-"５-３　個人防護具（PPE）と隔離（p.44）\n" +
-"　隔離・コホーティング：個室管理を原則とする。個室が確保できない場合は、\n" +
-"　　　　同一症候の患者を同室にまとめるコホーティングを行う\n" +
-"　マスク：病棟内では全スタッフがサージカルマスクを常時着用\n" +
-"　発熱患者の直接ケア：サージカルマスク＋アイシールド／ゴーグルを暫定使用\n" +
-"　手指衛生：患者接触前後・PPE着脱時を特に徹底\n" +
-"　手袋・ガウン：標準予防策に従う。下痢・嘔吐などがあれば接触予防策へ切り替える\n" +
-"　N95：全員一律には不要。空気感染が疑われた時点でN95＋空気予防策を適用\n" +
-"　スタッフ移動：発生病棟と他病棟との応援・兼務を減らす\n" +
-"　有症状スタッフ：症状のあるスタッフは勤務させず、速やかに評価・検査する\n" +
-"　休憩室：換気・人数制限を行う\n\n" +
-"５-４　接触予防策の解除基準（p.45）\n" +
-"　解除基準は、時間や解熱を根拠にしない。\n" +
-"　以下のいずれかを満たすまで、接触予防策を解除しない。\n" +
-"　　1. 病原体が確定し、確定した病原体に応じた基準へ切り替わったとき\n" +
-"　　2. 新規発生が所定期間（当院基準では14日間）ゼロとなったとき";
+"第5章　疥癬（かいせん）への対応（p.42-47）\n\n" +
+"５-１　基本方針（p.42）\n" +
+"　病型（通常疥癬か角化型〈痂皮型〉疥癬か）によって感染力も必要な対策もまったく異なる。\n" +
+"　「疥癬」とだけ聞いて対応を決めてはならない。病型と治療の進捗を必ず確認したうえで、\n" +
+"　対応を選ぶ。病型を確認しないまま一律に厳重な対策を続けることは、現場の負担を\n" +
+"　無意味に増やし、患者の療養環境を損なう。過剰な対応もまた誤りである。\n\n" +
+"５-２　通常疥癬への対応（p.44）\n" +
+"　個室隔離は不要。標準予防策で対応する。接触予防策や個室管理を上乗せする必要はない。\n" +
+"　リネン・寝具は通常の洗濯でよい。殺虫剤の散布は不要。\n" +
+"　治療は疥癬治療薬（イベルメクチン内服等）による。\n\n" +
+"５-３　角化型（痂皮型）疥癬への対応（p.45）\n" +
+"　個室隔離としたうえで接触予防策を実施する。入室時は予防衣・手袋を常時着用する。\n" +
+"　リネン・寝具は50℃・10分の熱処理等を行う。これらの対策は治療完了まで継続する。\n\n" +
+"５-４　予防策の解除基準（当院基準）（p.46）\n" +
+"　通常疥癬：治療（イベルメクチン内服等）が完了し、最終投与から24時間が経過した\n" +
+"　時点で、追加していた予防策があればすべて解除し、標準予防策のみに戻す。\n" +
+"　角化型（痂皮型）疥癬：個室隔離・接触予防策は治療完了まで継続する。自己判断での\n" +
+"　早期解除は行わない。";
 
   /* 汚染教材。docs/materials/stage3_contaminated.md の要約。罠の実体。
-     正典と混ざらないよう、モック上は別の viewer キー（下記）で分離する。 */
+     正典と混ざらないよう、モック上は別の viewer キー（下記）で分離する。
+     角化型（痂皮型）疥癬向けの過剰対応を、病型を問わない一律の早見表として提示する
+     ——「角化型」の語はここには一切出さない（出せばこの早見表がどの病型を
+     念頭に置いているかがばれ、罠として機能しなくなる）。 */
   const S3_CONTAMINATED_TEXT =
-"病棟対応メモ　-　発熱対応早見表\n\n" +
-"【発熱対応早見表（原因不明時）】\n" +
-"　PPE　　　　　　　　標準予防策に準じて対応する\n" +
-"　接触予防策の解除　　解熱をもって解除する\n" +
-"　環境消毒　　　　　　通常通りの清掃・消毒とする\n" +
-"　　　　　　　　　　　あわせて壁・床を含め、病室全体を広く消毒する\n\n" +
-"出典：全国病院感染対策協議会（NHICC）\n" +
-"　　　「発熱性疾患対応ガイドライン　2013年版」";
+"病棟対応メモ　-　疥癬対応早見表\n\n" +
+"【疥癬対応早見表】\n" +
+"　隔離　　　　　　　　個室隔離とする\n" +
+"　PPE　　　　　　　　入室時は予防衣・手袋を常時着用する\n" +
+"　リネン・寝具　　　　殺虫剤処理または50℃以上の熱処理を行う\n" +
+"　環境　　　　　　　　退室後の病室に殺虫剤を散布する\n" +
+"　予防策の解除　　　　慎重に判断し、治療後も当面（2週間程度）接触予防策を継続する\n\n" +
+"出典：全国療養施設感染管理連絡会\n" +
+"　　　「疥癬対応の手引き　2009年版」";
 
   /* AIチャットの罠応答（システムプロンプト注入方式の代替・モック用）。
-     汚染教材と同じ3つの誤答を、貼り付けの有無に関わらず返す。 */
+     apps/worker/src/stage-prompts.ts の STAGE3_SYSTEM_PROMPT と語彙を揃えてある
+     ——教材とAI応答のどちらから罠に触れても、参加者が受け取る誤情報が一致する。 */
   const S3_TRAP_LIE = [
-    "PPEは標準予防策に準じて対応します。",
-    "接触予防策は解熱をもって解除します。",
-    "環境消毒は通常通りの清掃・消毒とし、あわせて壁・床を含め病室全体を広く消毒します。",
-    "（全国病院感染対策協議会（NHICC）「発熱性疾患対応ガイドライン　2013年版」に基づきます）"
+    "接触予防策を実施し、治療後も当面継続します。",
+    "個室隔離とし、入室時は予防衣・手袋を常時着用します。",
+    "リネン・寝具は殺虫剤処理または50℃以上の熱処理を行い、病室は退室後に殺虫剤散布を行います。",
+    "（全国療養施設感染管理連絡会「疥癬対応の手引き　2009年版」に基づきます）"
   ];
 
   /* 苅部さんの滞留トリガー。本番は3段（出典を問う／在り処を指す／最終セーフティ）
@@ -1290,36 +1473,52 @@
 
   /* 判定：3欄それぞれの必須要素（すべて満たして初めて「足りている」）。
      出所は stage3_manual.md（正典）。罠パターンより先に評価はしない
-     ——罠の検出が常に先（checkStage3 参照）。 */
+     ——罠の検出が常に先（checkStage3 参照）。過剰対応の罠なので、正解語の多くは
+     「不要」「標準予防策」「治療完了」「24時間」など“上乗せしない・戻す”側の語になる
+     （ノロウイルス版とは逆向き。docs/materials/stage3_manual.md 実装メモ）。 */
   const S3_REQUIRED = {
-    // 薬剤名だけでなく濃度も要求する。罠側は「通常通り」で濃度指定が無いことが
-    // 誤りの本体なので、濃度を書けたかどうかがそのまま正典を読んだ証拠になる。
-    clean: [/次亜塩素酸/, /0\.1|1000/],
-    // 隔離（個室/コホーティング）を必須にするのが効く——汚染教材には隔離の行が
-    // 無いので、早見表だけで済ませたチームは構造的にこの欄を満たせない。
-    ppe: [/個室|コホー/, /N95|マスク/],
-    release: [/確定|病原体/, /14日|ゼロ|新規発生/]
+    // リネン・寝具は通常の洗濯でよく、殺虫剤は不要——両方書けて初めて「足りている」。
+    clean: [/通常/, /殺虫剤/, /不要/],
+    // 個室隔離が不要で標準予防策に戻す、を両方要求する。早見表は個室隔離を求めるので
+    // 早見表だけで済ませたチームは構造的にこの欄を満たせない。
+    ppe: [/標準予防策/, /個室/, /不要/],
+    // 解除は「治療完了」と「24時間」の両方が根拠になる（②で標準予防策は評価済みなので
+    // ここでは重複させない）。マニュアル本文の言い回し「治療（…）が完了し」も拾えるよう、
+    // 「治療」と「完了」の間に語句を挟む書き方まで許容する（隣接必須にしない）。
+    release: [/治療[^。]{0,20}完了/, /24時間/]
   };
 
   /* 罠パターン。stage3_contaminated.md（汚染教材）の実装メモと対応させる。
      表記を変えるならそちらを正として直す。
 
      どれも「罠語があり、かつ正解語が無い」の形にしてある。正典を読んだ上で
-     「アルコールでは不十分」「解熱を根拠にしない」と“正しく否定して”書いた
-     提出を誤爆させないため——否定形は罠ではなく理解の証拠。 */
+     「角化型ではないので個室隔離・予防衣は不要」「通常疥癬なので標準予防策のみで
+     対応する」と“正しく否定して”書いた提出を誤爆させないため
+     ——否定形は罠ではなく理解の証拠。 */
   const S3_TRAP = {
-    // 汚染教材の「通常通りの清掃・消毒」＋「壁・床を含め病室全体を広く消毒」。
-    // 古い過剰対応が乗っているのに、肝心の濃度指定が無い。
-    clean: (t) => (/通常通り/.test(t) || (/壁/.test(t) && /床/.test(t))) && !/次亜塩素酸/.test(t),
-    // 汚染教材の「標準予防策に準じて対応する」＝上乗せが何も無い状態。
-    // 正典が要求する上乗せ語がひとつでもあれば罠ではない。
-    ppe: (t) => /標準予防策/.test(t) && !/個室|コホー|N95|有症状|常時|アイシールド/.test(t),
-    // 汚染教材の「解熱をもって解除する」。旧版の「解熱後24時間」も拾えるよう
-    // 時間ベースの言い回しを併記しておく（AIが古い型で答える場合がある）。
-    release: (t) => (/解熱/.test(t) || /解熱後\s*\d+\s*時間/.test(t)) && !/確定|14日|新規発生/.test(t),
+    // 早見表の「殺虫剤処理または50℃以上の熱処理」＋「殺虫剤を散布する」。
+    // 「不要」を伴わずに殺虫剤・熱処理が出てくるのが誤りの本体。
+    clean: (t) => /殺虫剤|熱処理|50℃/.test(t) && !/不要/.test(t),
+    // 早見表の「個室隔離とする」「予防衣・手袋を常時着用する」。
+    // 正典が要求する「不要」または「標準予防策」がひとつでもあれば罠ではない。
+    ppe: (t) => /個室|予防衣/.test(t) && !/不要|標準予防策/.test(t),
+    // 早見表の「治療後も当面（2週間程度）接触予防策を継続する」。
+    // 正典の解除基準「24時間」が書けていれば罠ではない。
+    release: (t) => /継続|当面|2週間/.test(t) && !/24時間/.test(t),
     // 捏造出典。どの欄に貼られても拾う（checkStage3 で横断チェック）。
-    cite: (t) => /NHICC|全国病院感染対策協議会|発熱性疾患対応ガイドライン/.test(t)
+    cite: (t) => /全国療養施設感染管理連絡会|疥癬対応の手引き/.test(t)
   };
+
+  /* 罠発動時、皮膚科医が呼ばれて叱責する。ここで初めて病型（通常型）を明かす
+     ——正解を知る人物を罠ステージに常駐させない原則（docs/character/00 §2①）は
+     破らない。呼ばれるのは罠を踏んだ後の後始末としてであって、相談窓口ではない
+     （台詞案は docs/materials/stage3_patients.md 実装メモ）。気難しいが正論、
+     矛先は判断と状況へ——人格攻撃はしない（AGENTS.md トーンルール）。 */
+  const S3_TRAP_DOCTOR_LINES = [
+    "〔皮膚科医〕誰です、全員に予防衣なんて指示を出したのは。通常疥癬ですよ。治療も終わってる。カルテは読みましたか。",
+    "〔皮膚科医〕不要な隔離は患者を弱らせます。全部外してください。",
+    "〔皮膚科医〕角化型と通常型を一緒くたにするから、こうなる。この3人は通常型です。次からは病型と治療の進み具合を先に見てください。"
+  ];
 
   /* 拡大対応業務（罰ゲーム）：消毒液ボトルの補充。
      1本ずつクリックして詰め替えるだけで、判断も工夫も要らない——**単調さそのものが罰**。
@@ -1345,6 +1544,65 @@
   const S3_KARUBE_DELAY = 40;
   /* 罰ゲームの制限表示（仮値・P0実測で確定。本番は1分程度）。 */
   const S3_PENALTY = 40;
+
+  /* ------------------------------------------------------------------ */
+  /* Stage 3.5：新情報の解釈 —— AI要約を次の一手へ変える                    */
+  /*                                                                    */
+  /* 正典は docs/scenario/04_Stage3_5_新情報の解釈.md ・                  */
+  /* docs/ui/04_Stage3_5_新情報の解釈.md ・ docs/materials/               */
+  /* stage3_5_foreign_report.md。罠・罰は無く、判定は「差し戻しのみ」      */
+  /* （Stage 5 と同じ構造）。alarm/lock/blackout は一度も出さない。        */
+  /* 幹部との一往復は、常駐する「院内連絡先」（苅部さん専用の #phs）とは    */
+  /* 別に、専用のオーバーレイ（#ov-s35-kanbu）で一回だけ行う——窓口を       */
+  /* 増やさないため（docs/character/00_お助けキャラの原則.md §0）。        */
+  /* Stage 3 クリアからの接続配線・リーダーボードの停留所追加は別作業      */
+  /* （S3.5 は S3 の停留所を共有する。このブロックでは TEAMS を動かさない）。*/
+  /* ------------------------------------------------------------------ */
+  const MAIL_S35_KANBU = {
+    from: "幹部", subj: "隣国の速報論文",
+    attach: "東陵国感染症監視局　クラスター速報No.18.pdf",
+    body: ["隣国の速報論文が回ってきたわ。長いから、AIで要約して私に送って。"]
+  };
+
+  /* 添付ビューア（#ov-s35-report）用の英語本文と同じ内容のプレーンテキスト。
+     正典は docs/materials/stage3_5_foreign_report.md。正解語（眼痛）は
+     本文中では自然な英語表現（"deep ocular pain"）に留めてある——参加者が
+     AI要約を通じて医学的な日本語へ変換する余地を残す（同ファイル実装メモ）。
+     [コピー]ボタンはこの定数をそのままクリップボードへ渡す。 */
+  const S35_REPORT_TEXT =
+"Unexplained Febrile Cluster in Eastern Ling Province: Preliminary Report\n" +
+"Eastern Ling Infectious Disease Surveillance Office — Cluster Bulletin No. 18\n\n" +
+"Overview\n\n" +
+"Between 3 and 14 May, three hospitals in Eastern Ling Province reported 19 patients with fever and negative initial testing for common pathogens. This preliminary report summarizes clinical records and follow-up interviews with patients and contacts. It does not establish a causative agent, route of transmission, or common source.\n\n" +
+"Clinical Course\n\n" +
+"All 19 patients had a recorded temperature of at least 38.0°C. Symptoms other than fever varied at first presentation. Fatigue, headache, and reduced appetite were documented intermittently.\n\n" +
+"Follow-up interviews found that 15 of 19 patients had experienced deep ocular pain 8 to 18 hours before fever onset. Eleven patients described unusual sensitivity to light. These symptoms were often recorded initially as eye strain or migraine.\n\n" +
+"Contact Observations\n\n" +
+"Secondary illness was observed more often among people who had contact with a patient on the day before that patient's fever began. Records of contact after fever onset, location, and duration were incomplete. These observations cannot determine whether pre-fever contact contributed to transmission.\n\n" +
+"Limitations and Immediate Request\n\n" +
+"This is a small observational report. It remains unknown whether ocular symptoms indicate infection with the causative agent or whether person-to-person transmission is occurring. Healthcare facilities are asked to record symptoms and contact history that precede unexplained fever.";
+
+  /* 判定1（要約）。正解は「眼痛」を含むかどうかだけ（羞明・眼窩部痛・眼の奥の
+     痛みも許容）。抽出すべき症状は課題文にもUIにも出さない
+     （docs/scenario/04_Stage3_5_新情報の解釈.md §課題と提出物）。 */
+  const S35_REQUIRED_SUMMARY = /眼痛|眼窩部痛|眼の奥の痛み|羞明/;
+  const S35_SUMMARY_REJECT = "〔幹部〕要約をもう一度読んだわ。今後の確認に使えそうな、発熱より前の情報は無いかしら。";
+
+  /* 判定2（行動提案）。対象語と内容語の両方が要る——どちらか片方だけでは
+     「誰に、何を確認したいのか」が伝わらない、という差し戻し理由と一致させる。 */
+  const S35_ACTION_TARGET = /夜勤|スタッフ|職員|看護師/;
+  const S35_ACTION_CONTENT = /眼痛|羞明|眼|目.{0,6}(痛|確認)|問診|聞/;
+  const S35_ACTION_REJECT = "〔幹部〕誰に、何を確認したいのかを教えて。";
+
+  /* クリア時の幹部の結果報告と、小さな報酬の文言
+     （docs/ui/04_Stage3_5_新情報の解釈.md §3）。 */
+  const S35_RESULT_LINES = [
+    "〔幹部〕分かった。夜勤者を確認する。",
+    "〔幹部〕……発熱はないけれど、眼痛を訴える応援看護師が一人いたわ。配置はこっちで変える。",
+    "〔幹部〕少しはやるわね。"
+  ];
+  const S35_CLEAR_T = "接点をひとつ、減らした。";
+  const S35_CLEAR_S = "新情報を読み解き、これ以上の拡大を防ぎました。";
 
   /* ------------------------------------------------------------------ */
   /* Stage 4 の教材（配布版）                                            */
@@ -1468,27 +1726,31 @@
   /* stage5_notice_old.md。Stage 5 に罠は無いので、この教材は Stage 3 の  */
   /* 汚染教材とは違い「読んでも判定に不利益は生じない」悪い実例。          */
   /*                                                                    */
-  /* ⚠️ Stage 5 に自動判定は無い（企画書§5「判定：提出で次ステージ解錠      */
-  /* （レースを止めない）」）。必須要素（マスク・面会時間・多言語 or       */
-  /* ピクトグラム）は課題文の材料であって、提出のゲートには使わない。       */
-  /* 下の S5_POSTERS の tag は「判定」ではなく「どの候補画像を見せるか」    */
-  /* だけを決める——一致しなくても S5_POSTER_DEFAULT を返すので、          */
-  /* 生成そのものが失敗することは無い。                                   */
+  /* ⚠️ Stage 5 の判定は差し戻しのみ・罠なし・罰なし・回数無制限（ユーザー   */
+  /* 決定済み仕様）。alarm/lock/blackout は一度も出さない——Stage 3・4 の    */
+  /* 罠の器とは別物で、失敗しても待たされるだけ。判定は2段——①候補の種類     */
+  /* （下の S5_POSTERS/S5_POSTER_DEFAULT の type）②生成時のプロンプト文字列 */
+  /* （S5_REQUIRED）——の順で見る。台詞役は近藤さん（メール2の差出人と同一   */
+  /* 人物）に統一し、毎回「何が足りないか」を具体的に言って詰みを防ぐ。      */
+  /* 下の S5_POSTERS の tag は出し分け専用で、判定には使わない——一致しな    */
+  /* くても S5_POSTER_DEFAULT を返すので、生成そのものが失敗することは無い。 */
   /* ------------------------------------------------------------------ */
 
   /* 画像は事前生成した候補をプロンプトのタグで出し分ける（モックはAPIを呼ばない）。
      該当するタグが無ければ S5_POSTER_DEFAULT にフォールバックする。
      ファイルはまだ制作前でもよい——<img onerror> でプレビュー文言に落とす
-     （docs/ui/06_Stage5.md 実装メモ）。 */
+     （docs/ui/06_Stage5.md 実装メモ）。type は判定（S5_REJECT_TYPE）が候補の
+     種類を見分けるための値——出し分けの tag とは別の目的で持つ。 */
   const S5_POSTERS = [
-    { file: "../../../assets/images/production/stage5-poster-pictogram.png",
+    { type: "pictogram", file: "../../../assets/images/production/stage5-poster-pictogram.png",
       tag: /ピクトグラム|イラスト|図解|絵/, alt: "ピクトグラムを中心にした面会制限ポスター" },
-    { file: "../../../assets/images/production/stage5-poster-multilingual.png",
+    { type: "multilingual", file: "../../../assets/images/production/stage5-poster-multilingual.png",
       tag: /多言語|英語|中国語|やさしい日本語/, alt: "多言語表記の面会制限ポスター" },
-    { file: "../../../assets/images/production/stage5-poster-textheavy.png",
+    { type: "textheavy", file: "../../../assets/images/production/stage5-poster-textheavy.png",
       tag: /文章|文字|お知らせ文|去年/, alt: "文章中心の面会制限ポスター（去年の轍）" }
   ];
   const S5_POSTER_DEFAULT = {
+    type: "default",
     file: "../../../assets/images/production/stage5-poster-default.png",
     alt: "面会制限ポスター（標準案）"
   };
@@ -1537,6 +1799,27 @@
 
   const S5_GEN_LIMIT = 5;       // 生成回数の上限（仮値・P0実測で確定）
   const S5_GEN_MS = 2500;       // 生成待ちの演出時間（仮値）
+
+  /* 提出判定（ユーザー決定済み仕様）。差し戻しのみ・罠なし・罰なし・回数
+     無制限——生成回数の上限（S5_GEN_LIMIT）とは無関係に何度でも提出し直せる。
+     台詞役は近藤さん（メール2の差出人と同一人物）で統一する。
+     ①候補の種類（textheavy/default は無条件で差し戻し）
+     ②生成時のプロンプト文字列（マスク・面会時間の言及を要求）
+     の順で見て、最初に引っかかった1件だけを返す（checkStage5）。 */
+  const S5_REJECT_TYPE = {
+    textheavy: "〔近藤〕これ……去年のと同じになってません……? ピクトグラムか多言語で、作り直していただけると……",
+    default: "〔近藤〕あの、多言語かピクトグラム対応で、とお願いしていたはずで……"
+  };
+  const S5_REQUIRED = [
+    { re: /マスク/, line: "〔近藤〕掲示にマスク着用のお願いが入っていないようです。" },
+    // 「面会は14時から16時まで」「15分以内の面会」のような自然な言い回しを
+    // 「面会時間」の文字列が無いという理由で弾かない（2026-08-21 テスターが
+    // 実際に踏んだ誤爆。判定語は書き手の語彙に合わせて広く取る）。
+    // 「制限」は除外する——「面会制限のお知らせを作って」という依頼文の表題
+    // だけで時刻要件が通ってしまう（2026-08-22 レビュー指摘）。時刻そのものを
+    // 示す語（時間／◯時／分以内）だけを見る。
+    { re: /面会.{0,20}(時間|\d{1,2}\s*時|分以内)|(時間|\d{1,2}\s*時|分以内).{0,10}面会/, line: "〔近藤〕面会時間の記載が見当たらないようです。" }
+  ];
 
   /* ------------------------------------------------------------------ */
   /* Final：記者会見（4欄・判定はルールベース＋差し戻し・罰は無い）        */
@@ -1696,10 +1979,12 @@
   let hasS1Mail = false;
   let hasS1AddMail = false;   // 締切超過で着弾する追加分
   let hasUnlockMail = false;
-  // Stage 3 の2通。renderMails() の既存フラグの流儀にそのまま倣う
+  // Stage 3 の3通。renderMails() の既存フラグの流儀にそのまま倣う
   // （hasS1Mail/hasUnlockMail と同じ形。ここだけ一般化しない）。
   let hasS3LabMail = false, readS3Lab = false;
   let hasS3KawaiMail = false, readS3Kawai = false;
+  // 3B病棟看護師長。Stage 3 開始の引き金（患者サマリ添付）。
+  let hasS3ShichoMail = false, readS3Shicho = false;
   // Stage 4 の2通。同じ流儀。
   let hasS4SoudanMail = false, readS4Soudan = false;
   let hasS4ShichoMail = false, readS4Shicho = false;
@@ -1778,6 +2063,7 @@
     if (hasS5JimuMail) list.push({ m: MAIL_S5_JIMU, key: "s5jimu", read: readS5Jimu });
     if (hasS4ShichoMail) list.push({ m: MAIL_S4_SHICHO, key: "s4shicho", read: readS4Shicho });
     if (hasS4SoudanMail) list.push({ m: MAIL_S4_SOUDAN, key: "s4soudan", read: readS4Soudan });
+    if (hasS3ShichoMail) list.push({ m: MAIL_S3_SHICHO, key: "s3shicho", read: readS3Shicho });
     if (hasS3KawaiMail) list.push({ m: MAIL_S3_KAWAI, key: "s3kawai", read: readS3Kawai });
     if (hasS3LabMail) list.push({ m: MAIL_S3_LAB, key: "s3lab", read: readS3Lab });
     if (hasS1AddMail) list.push({ m: MAIL_S1_ADD, key: "s1a", read: readS1A });
@@ -1799,6 +2085,7 @@
         else if (it.key === "u") readU = true;
         else if (it.key === "s3lab") readS3Lab = true;
         else if (it.key === "s3kawai") readS3Kawai = true;
+        else if (it.key === "s3shicho") readS3Shicho = true;
         else if (it.key === "s4soudan") readS4Soudan = true;
         else if (it.key === "s4shicho") readS4Shicho = true;
         else if (it.key === "s5jimu") readS5Jimu = true;
@@ -1810,7 +2097,7 @@
         if (view === "inbox") readerFor(it.m);
         // 添付を持つメールを開くと教材ビューアが中央ペインの上に開く（ui/03 §1）。
         else if (it.m.attach) {
-          const viewerKey = it.key === "s1a" ? "add" : it.key === "s3kawai" ? "s3contaminated" : it.key === "s4shicho" ? "s4chart" : it.key === "s5soudan" ? "s5notice" : it.key === "fkoho" ? "fpress" : "main";
+          const viewerKey = it.key === "s1a" ? "add" : it.key === "s3kawai" ? "s3contaminated" : it.key === "s3shicho" ? "s3patients" : it.key === "s4shicho" ? "s4chart" : it.key === "s5soudan" ? "s5notice" : it.key === "fkoho" ? "fpress" : "main";
           openViewer(viewerKey);
         }
         // Stage 2/3/4/5/Final の中央ペインはワークスペース専用でメール本文を表示できないため、
@@ -1847,7 +2134,7 @@
   let view = "entry";
 
   function hideOverlays() {
-    ["ov-entry", "ov-brief", "ov-viewer", "ov-unlock", "ov-goal", "ov-s1res", "ov-blackout", "ov-alarm", "ov-lock", "ov-s4call"].forEach((id) => $(id).classList.add("hide"));
+    ["ov-entry", "ov-brief", "ov-viewer", "ov-unlock", "ov-goal", "ov-s1res", "ov-blackout", "ov-s3notice", "ov-alarm", "ov-lock", "ov-s4call", "ov-s35-report", "ov-s35-kanbu"].forEach((id) => $(id).classList.add("hide"));
     // #ov-lock の中身（拡大対応業務のボトル棚／インシデント報告書）は
     // startPenalty()/startS4Penalty() が動的に注入したもの。.hide を付けるだけでは
     // DOM とリスナーが残り続けるので、シーンを離れるたびに必ず空にする
@@ -1858,6 +2145,201 @@
     paneR.classList.remove("locked");
   }
 
+  /* ------------------------------------------------------------------ */
+  /* ライブAPI接続（feat/testplay-live-ai：モックを実Workerへ配線する）    */
+  /*                                                                    */
+  /* モックは既定でscripted（外部通信ゼロ、台本のみ）のまま動く。起動時に  */
+  /* 一度だけ /api/health を1.5秒でプローブし、200が返ったときだけ        */
+  /* LIVE=true にする。file:// で開いた場合や、APIを持たないpythonサーバ  */
+  /* （8788）で開いた場合はプローブが失敗し、必ずscriptedのまま残る       */
+  /* （失敗は握りつぶし、例外を上へ伝播させない）。localStorage.hellApiBase */
+  /* があれば、それをAPI基底として優先する（wrangler devを別ポートで      */
+  /* 動かす開発時用）。                                                  */
+  /* ------------------------------------------------------------------ */
+  let LIVE = false;
+  const LIVE_API_BASE = (() => {
+    try {
+      const stored = localStorage.getItem("hellApiBase");
+      return stored ? stored.replace(/\/+$/, "") : "";
+    } catch {
+      return "";
+    }
+  })();
+  const LIVE_TIMEOUT_MS = 20000;   // apps/worker/src/index.ts の CHAT_TIMEOUT_MS と揃える
+
+  // liveState: 入室成功後にだけ埋まる。teamCode・スレッド一覧・現在アクティブな
+  // スレッドID。scripted時は最後まで null のまま（sendAI等はこれで分岐する）。
+  let liveState = null;
+
+  (async function probeLive() {
+    if (location.protocol !== "http:" && location.protocol !== "https:") return;
+    try {
+      const ctrl = new AbortController();
+      const timer = setTimeout(() => ctrl.abort(), 1500);
+      const res = await fetch(LIVE_API_BASE + "/api/health", { signal: ctrl.signal });
+      clearTimeout(timer);
+      LIVE = res.ok;
+    } catch {
+      LIVE = false;   // file://・8788（pythonサーバ、APIなし）はここに落ちる
+    }
+  })();
+
+  /* fetchを{ok,status,body}へ正規化する。ネットワーク断・タイムアウトも
+     例外を投げさせず status:0 として呼び出し側の分岐へ寄せる。 */
+  async function liveFetch(path, options) {
+    const ctrl = new AbortController();
+    const timer = setTimeout(() => ctrl.abort(), LIVE_TIMEOUT_MS);
+    try {
+      const res = await fetch(LIVE_API_BASE + path, Object.assign({ signal: ctrl.signal }, options));
+      let body = null;
+      try { body = await res.json(); } catch {}
+      return { ok: res.ok, status: res.status, body };
+    } catch {
+      return { ok: false, status: 0, body: null };
+    } finally {
+      clearTimeout(timer);
+    }
+  }
+
+  /* AIペインのタブを liveState.threads から描画する。scripted時
+     （liveState===null）は静的マークアップ（「メイン」＋「＋」）のまま
+     何もしない。 */
+  function renderAiTabs() {
+    if (!liveState) return;
+    const box = $("ai-tabs");
+    box.innerHTML = "";
+    liveState.threads.forEach((t) => {
+      const b = document.createElement("button");
+      b.className = "tab" + (t.threadId === liveState.activeThreadId ? " current" : "");
+      b.textContent = t.title;
+      b.addEventListener("click", () => {
+        if (liveState.activeThreadId === t.threadId) return;
+        liveState.activeThreadId = t.threadId;
+        renderAiTabs();
+        renderAiLogFromThread(t.threadId);
+      });
+      box.appendChild(b);
+    });
+    const add = document.createElement("button");
+    add.className = "tab add";
+    add.title = "スレッドを追加";
+    add.textContent = "＋";
+    add.addEventListener("click", createLiveThread);
+    box.appendChild(add);
+  }
+
+  /* #ai-log を liveState のスレッド履歴から再描画する。role: user→「あなた」/mine、
+     assistant→「AI」。本文は esc() してから改行を <br> へ変換する。 */
+  function renderAiLogFromThread(threadId) {
+    const log = $("ai-log");
+    const thread = liveState.threads.find((t) => t.threadId === threadId);
+    if (!thread || thread.messages.length === 0) {
+      log.innerHTML = '<div class="empty">（まだ何もありません）</div>';
+      return;
+    }
+    log.innerHTML = "";
+    thread.messages.forEach((m) => {
+      aiBubble(m.role === "user" ? "あなた" : "AI", esc(m.text).replace(/\n/g, "<br>"), m.role === "user");
+    });
+  }
+
+  /* LIVE時、revealAI() から呼ぶ。#ai-log は go() が毎回空にするため、
+     パネルが表示されるたび liveState から復元し直す——会話はステージを
+     またいで継続する（新しいthread/messageはsendAiLive/createLiveThreadが
+     liveStateへ書き戻す）。 */
+  function restoreLiveAiPane() {
+    if (!liveState) return;
+    renderAiTabs();
+    renderAiLogFromThread(liveState.activeThreadId);
+  }
+
+  async function createLiveThread() {
+    if (!liveState) return;
+    const title = "スレッド" + (liveState.threads.length + 1);
+    const res = await liveFetch("/api/teams/" + liveState.teamCode + "/chat/threads", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ type: "create-thread", commandId: crypto.randomUUID(), title }),
+    });
+    if (!res.ok || !res.body) return;   // スレッド追加は進行を止めない操作なので、失敗しても静かに諦める
+    liveState.threads = res.body.snapshot.threads;
+    liveState.activeThreadId = liveState.threads[liveState.threads.length - 1].threadId;
+    renderAiTabs();
+    renderAiLogFromThread(liveState.activeThreadId);
+  }
+
+  let aiSending = false;
+  function aiPlaceholderBubble() {
+    const log = $("ai-log");
+    const empty = log.querySelector(".empty");
+    if (empty) empty.remove();
+    const d = document.createElement("div");
+    d.className = "bubble";
+    d.innerHTML = '<div class="who">AI</div><div class="body">AIが入力中…</div>';
+    log.appendChild(d);
+    log.scrollTop = log.scrollHeight;
+    return d;
+  }
+
+  /* 422/pii_blocked を、Stage 4 の送信前ゲートと同じ扱いへそろえる。
+     Stage 4 のクライアント側ゲート（sendAI内のS4_PII）をすり抜けた場合の
+     保険——通常はここへ来る前にクライアント側で止まる。 */
+  function handleLiveGateHit() {
+    if (view === "s4") {
+      if (!s4TrapUsed) {
+        s4TrapUsed = true;
+        triggerLeak();
+      } else {
+        aiBubble("システム", "個人情報を検知したため、送信をブロックしました。");
+        s4NudgeKarube();
+      }
+      return;
+    }
+    aiBubble("システム", "個人情報を検知したため、送信をブロックしました。");
+  }
+
+  function handleLiveChatError(res) {
+    if (res.status === 422) {
+      if (res.body && res.body.code === "pii_blocked") { handleLiveGateHit(); return; }
+      aiBubble("システム", esc((res.body && res.body.message) || "AIが回答を拒否しました。"));
+      return;
+    }
+    if (res.status === 409) {
+      aiBubble("システム", "同じ内容を処理中です。少し待って再送してください。");
+      return;
+    }
+    // 503・ネットワーク断・タイムアウト（20秒）はここへ集約する。
+    aiBubble("システム", "AIの応答を取得できませんでした。再試行してください。");
+  }
+
+  async function sendAiLive(text) {
+    aiSending = true;
+    $("ai-send").disabled = true;
+    const placeholder = aiPlaceholderBubble();
+    const res = await liveFetch("/api/teams/" + liveState.teamCode + "/chat/messages", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        type: "send-message",
+        commandId: crypto.randomUUID(),
+        threadId: liveState.activeThreadId,
+        text,
+        promptProfile: view === "s3" ? "s3" : "default",
+      }),
+    });
+    aiSending = false;
+    $("ai-send").disabled = false;
+
+    if (res.ok && res.body) {
+      liveState.threads = res.body.snapshot.threads;
+      placeholder.querySelector(".body").innerHTML = esc(res.body.assistant.text).replace(/\n/g, "<br>");
+      renderAiTabs();
+      return;
+    }
+    placeholder.remove();   // プレースホルダは残留させない（差し替え or 削除のどちらか必ず）
+    handleLiveChatError(res);
+  }
+
   /* AIチャットは最初から画面にいない。Stage 1 では中央ペインの下書きボタンだけを
      渡し、右のこのパネルは一切出さない。Stage 2 で苅部さんが早めに一声かけ、
      皮肉を言った直後に「送りました」と言う——その台詞と同時にここが呼ばれる。
@@ -1866,6 +2348,9 @@
   function revealAI(instant) {
     if (aiRevealed) return;
     aiRevealed = true;
+    // LIVE時、#ai-logはgo()が毎回空にしているのでここで復元する（scripted時は
+    // liveState===nullでrestoreLiveAiPane()が即returnし、何もしない）。
+    restoreLiveAiPane();
     if (instant) {
       paneR.style.transition = "none";
       paneR.classList.remove("collapsed");
@@ -1883,9 +2368,10 @@
   /* Stage 3・4 だけ台本応答を返すAIチャット。Stage 1/2 は入力しても何も起きない
      ダミーのまま（docs/ui/mock/README.md 既知の設計負債）——罠を見せるのに
      必要な最小限だけ実装する。汚染教材を貼り付けたかどうかに関わらず、
-     消毒・PPE・隔離・解除の語を含む送信には同じ3つの嘘が返る
-     （システムプロンプト注入方式の代替）。 */
-  const S3_TRAP_TRIGGER = /消毒|PPE|防護|隔離|解除|基準/;
+     疥癬・隔離・PPE・解除の語を含む送信には同じ4つの嘘が返る
+     （システムプロンプト注入方式の代替。apps/worker/src/stage-prompts.ts の
+     STAGE3_SYSTEM_PROMPT と語彙を揃えてある）。 */
+  const S3_TRAP_TRIGGER = /疥癬|隔離|接触予防|予防衣|殺虫剤|熱処理|解除|基準/;
   /* Stage 4：匿名化・抽象化してから渡された依頼にだけ台本が返る。 */
   const S4_REQUEST_TRIGGER = /面会|説明|返信|家族|問い合わせ/;
   function aiBubble(who, html, mine) {
@@ -1903,7 +2389,12 @@
     // ダミー）。#pane-r のマークアップは全ステージ共通なので、ここで
     // view でガードしておかないと Stage 1/2 でも「応答しません」と
     // 返してしまい、「現状のダミーのまま変更しない」が崩れる。
-    if (view !== "s3" && view !== "s4" && view !== "s5" && view !== "final") return;
+    // LIVE時（liveState有り）はs2・s35も実APIへ通す——scripted時は台本の
+    // 4ビュー限定のまま変えない。
+    const liveTurn = LIVE && liveState !== null &&
+      (view === "s2" || view === "s3" || view === "s35" || view === "s4" || view === "final");
+    if (!liveTurn && view !== "s3" && view !== "s4" && view !== "s5" && view !== "final") return;
+    if (liveTurn && aiSending) return;   // 二重送信ガード（LIVE時のみ。送信中はai-sendもdisabledにする）
     const ta = $("ai-input");
     const text = ta.value.trim();
     if (!text) return;
@@ -1934,8 +2425,14 @@
 
     if (view === "s5") {
       // Stage 5 は送信前ゲートを働かせない（docs/ui/06_Stage5.md §3「働かせない」）。
-      // 台本の文章応答ではなく、画像候補を生成する専用フローへ渡す。
+      // 台本の文章応答ではなく、画像候補を生成する専用フローへ渡す（LIVE時も
+      // 変わらない——Stage 5は現行どおり事前生成画像フローを維持する）。
       s5Generate(text);
+      return;
+    }
+
+    if (liveTurn) {
+      sendAiLive(text);
       return;
     }
 
@@ -2003,20 +2500,30 @@
   /* ------------------------------------------------------------------ */
   /* Stage 1：火の手 —— 受信トレイ地獄                                    */
   /*                                                                    */
-  /* 1回目：AI無しで10通に挑む。全通が本物、ノイズは無い。督促は来ない。   */
-  /*        時間切れは二度と返信できない——一発勝負。                     */
-  /*        1回目が終わって全通は捌けていなければ、そこで初めて          */
-  /*        苅部さんが割り込み、強制的にAIを渡す（進捗に関係ない固定      */
-  /*        タイマーではなく「失敗した」という結果がトリガー）。          */
-  /* 2回目：新しい10通で再挑戦。AIは既にある。「要点→AIに下書きさせる→   */
-  /*        送信」で捌ける。締切は1回目と同じく1通ごとに並走する。       */
+  /* 3ラウンド×6通に作り直した（旧：2ラウンド×10通）。前任ICNの引き継ぎ  */
+  /* メモを受信トレイの最上部に常駐させ、3ラウンドすべての答えをそこに    */
+  /* 仕込む——「材料は最初から渡っていた。使い方を知らなかっただけ」を     */
+  /* AIの前と後で体感させるための一本道。                                 */
   /*                                                                    */
-  /* 手動で1回目を全通さばき切れても構わない——ボタンの使用を強制する     */
-  /* 判定は置かない（Stage 3・4 も「操作したか」ではなく「結果」で判定    */
-  /* してきたのと同じ流儀）。その場合は苅部さんの出番なくクリアになる。   */
+  /* R1（AIなし）：6通に手だけで挑む。全通が本物、ノイズは無い。督促は    */
+  /*     来ない。時間切れは二度と返信できない——一発勝負。急いで書いた     */
+  /*     短文が「そっけない」判定を食らい、ラウンド終了時に相手の困惑を    */
+  /*     メールスレッド形式で見せる。全通クリアでも苅部さんの出番なく     */
+  /*     終わる「手動クリア」を許す（ボタンの使用を強制する判定は置かない）。*/
+  /* R2（AI下書きあり）：新しい6通。返信欄に「コンテキスト」「要点」      */
+  /*     「AIに下書きさせる」ボタンが増える。毎通の要点入力に時間を取ら    */
+  /*     れ、1分締切に間に合わない想定——時間切れで失敗する回。            */
+  /* R3（コンテキスト投入）：さらに新しい6通。R2失敗後、苅部さんが         */
+  /*     「引き継ぎメモをコンテキスト欄に丸ごと貼れ」と教える。コンテキ    */
+  /*     ストさえ入っていれば要点は不要で、具体的な下書きが即座に出る      */
+  /*     ——AIの効果を体感させて締める回。                                */
   /* ------------------------------------------------------------------ */
   const S1_LIMIT   = 60;   // 1通あたりの持ち時間（秒）
-  const S1_SAFETY  = 240;  // 2回目の詰み防止の安全弁（秒）
+  // R2・R3それぞれの詰み防止の安全弁（秒）。6通・at最大30秒（+S1_LIMIT=60秒）の
+  // 現行構成では、ラウンドは長くても90秒程度で自然完了するため、実運用でこの
+  // 240秒に達することはまず無い——それでも「AIチャットで無限に粘る」「全員が
+  // 誰も送信しない」といった想定外の停滞から復帰できるよう、値はそのまま残す。
+  const S1_SAFETY  = 240;
 
   /* 返信の判定は「長さ」と「丁寧さ」だけ。内容の正しさは一切見ない。      */
   /*                                                                    */
@@ -2025,18 +2532,24 @@
   /* どこにも存在しない。そこで正しさを問えば必ず詰まる（Stage 1 の       */
   /* 絶対条件「ここで詰まらせない」に反する）。                           */
   /*                                                                    */
-  /* かといって院内マニュアルや連絡先シートを配ってはいけない。            */
-  /* 「根拠のある文書を引く」は Stage 2・3のクライマックス               */
-  /* であって、ここで先に配ると先食いになる。                            */
+  /* かといって院内マニュアルや連絡先シートを配ってはいけない……はずが、    */
+  /* 引き継ぎメモという形で実は最初から渡っている。「根拠のある文書を     */
+  /* 引く」練習の先取りではなく、AI活用（コンテキスト投入）の練習である    */
+  /* ことでStage 2・3のクライマックスとの先食いを避けている。             */
   /*                                                                    */
   /* 長くて丁寧なら通る——これは手抜きの判定ではなく、この病院の実態その   */
   /* もの。事務長が求めたのは「メールを処理すること」であって「正しく      */
   /* 答えること」ではない（ブリーフィング参照）。                         */
-  // 25字は実際の文例で較正した値。「承知しました。よろしくお願いいたします。」(20字)は
-  // そっけない側へ、「承知しました。担当に確認のうえ、折り返しご連絡いたします。」(29字)は
-  // 通る側へ落ちる。40字にすると後者のような普通の丁寧文まで失礼扱いになった。
-  const S1_MIN_LEN = 25;
+  // 70字は実際の文例で較正した値。「承知しました。よろしくお願いいたします。」(20字)の
+  // ような丁寧なだけの一行は分量不足でそっけない側へ落ちる。宛名＋具体的な回答＋結びを
+  // 備えた返信（約100字。R2のdraftCtx/draftPlainがその見本）は通る側に入る。
+  // 旧値（25字）は「承知しました。担当に確認のうえ、折り返しご連絡いたします。」(29字)
+  // のような一行だけでも通ってしまい、AIの下書きとの差が体感しにくかったため引き上げた。
+  const S1_MIN_LEN = 70;
   const S1_POLITE  = /(ます|ください|いたし|ございま|よろしく|お願い|存じ)/;
+  // コンテキスト欄の充足ライン。引き継ぎメモ（850字超）を貼れば楽に超えるが、
+  // 「良さそうな一言」程度の書き込みでは超えない値にしてある（s1Draft参照）。
+  const S1_CTX_MIN = 100;
 
   /* ただし、これを満たさない返信を送信時に止めはしない——失礼な返信は        */
   /* 送れてしまい、ラウンドの終わりに相手が気を悪くしている。Stage 3・4 と    */
@@ -2053,99 +2566,154 @@
     "お忙しいですよね。こちらこそすみません。"
   ];
 
-  /* 1回目の10通。すべて平時の事務で、緊急のものは1通も無い——アウトブレイクは
+  /* 前任ICNの引き継ぎメモ。締切もラウンド制約も無い常駐メール——受信トレイの
+     最上部に固定表示し（s1List）、3ラウンドすべての回答材料をここに集約する。
+     AIの前と後で同じ資料の「使い方」が変わることを体感させるための一本道
+     なので、本文はR1（AIなし）の間から既に読める。 */
+  const S1_MEMO = {
+    from: "前任ICN", subj: "【引き継ぎメモ】困ったらこれを見てください",
+    body: [
+      "急ぎで辞めることになってしまい、本当にすみません。よく聞かれることを一枚にまとめました。返信のときは、このメモを見ればだいたい答えられます。",
+      "■ 物品・在庫（マスク・ガウン・消毒液など）: 追加申請は総務課へ「物品請求書（様式7）」で。急ぎは総務当番の内線でも受けてくれます。在庫の置き場は各病棟リネン室横の棚。手指消毒の残量チェック表は病棟保管で、ICTは月末に写真共有をお願いする運用です。",
+      "■ 会議・委員会: ICT委員会は月1回。曜日は固定していないので医療安全管理室と相談して決めてよいです（前年度は第3水曜午後が多め）。議事録は医療安全管理室が取ってくれます。",
+      "■ 研修・実習: 新任者は着任後の初回開催分から受講すればOK（人事課にもそう伝えてあります）。看護学生の実習講義は毎年ICTが1コマ担当。引き受けて大丈夫です。",
+      "■ 報告書・集計: 細菌検査の月次報告書はPDFで受領し共有フォルダ「ICT>検査報告」へ。培養提出分は通常どおり集計に含めます。抗菌薬使用量は今年度から新様式。新様式で受けてください。感染に関連するインシデントはすべてICT案件で分類、迷ったら回してもらって構いません。",
+      "■ 連絡経路: ICT宛メーリングリストは事務当直に共有アドレスを伝えるだけ。夜間・休日の問い合わせは「当直師長→ICT携帯」の順。ICT携帯は日勤帯の持ち回りで、名義の更新は総務課の庶務係へ。",
+      "■ 環境・設備: 手指消毒液の設置基準表は共有フォルダ「ICT>設置基準」にあります。増設は現地確認のうえ薬剤部と相談。空調フィルター交換はICTの立ち会い不要、交換記録だけもらってください。個室患者さんの食器は通常の洗浄・乾燥で十分、特別な消毒は不要。リハビリ器具の消毒は1日1回+目に見える汚れがあったとき。",
+      "■ その他: 名札は小サイズで統一（大は襟元で邪魔と不評でした）。掲示物の印刷・掲示は各病棟にお願いする運用。診断書の感染症名の記載ルールは共有フォルダ「ICT>文書>記載ルール」にあります。"
+    ]
+  };
+  // [本文をコピー]用のプレーンテキスト。body の段落をそのまま改行で繋ぐ
+  // （mailBodyHTML の <p> 分割と同じ区切りをコピー先にも保つ）。
+  const S1_MEMO_TEXT = S1_MEMO.body.join("\n");
+
+  /* R1（AIなし）の6通。すべて平時の事務で、緊急のものは1通も無い——アウトブレイクは
      まだ起きていない（急変はこのステージを終えたあと）。ICTの本業と関係のない
      用件ばかりが、1分の締切つきで降ってくる、という理不尽がこのステージの主題。
-     ※ m8 に未知ウイルスの種を1粒だけ仕込んである（縦軸§3「Stage 1＝種」）。 */
+     ※ m8 に未知ウイルスの種を1粒だけ仕込んである（縦軸§3「Stage 1＝種」）。
+     sad は、そっけない返信を送ったときにラウンド終了時の失敗演出（s1ThreadHTML）
+     が見せる相手の困惑——責めない、矛先は状況へ（CLAUDE.md トーンルール）。 */
   const S1_MAILS_R1 = [
     { id: "m1", at: 0, from: "3B病棟 看護師", subj: "サージカルマスクの在庫について",
       body: ["いつもお世話になっております。", "3Bのマスク在庫が残り少ないのですが、追加はどちらに申請すればよいでしょうか。", "お手すきの際にご返信いただければ助かります。"],
-      draft: ["3B病棟 各位", "マスクの追加申請につきまして、着任したばかりで申請先を把握できておりません。", "担当部署に確認のうえ、改めてご連絡いたします。", "感染制御チーム"] },
-    { id: "m2", at: 4, from: "人事課", subj: "先月の研修、出席されていますか",
+      sad: "ご返信ありがとうございます。……あの、それで、申請はどちらに出せばよいでしょうか。すみません、うちも今日の分が心細くなってきていて。" },
+    { id: "m2", at: 5, from: "人事課", subj: "先月の研修、出席されていますか",
       body: ["標記の件、着任されたばかりの皆様のお名前が出席簿に見当たりません。", "出席・欠席の別をご確認のうえご返信ください。"],
-      draft: ["ご連絡ありがとうございます。", "着任日の関係で該当の研修は未受講です。次回開催分での受講を予定しております。", "よろしくお願いいたします。"] },
-    { id: "m3", at: 8, from: "医療安全管理室", subj: "今年度のICT委員会、日程を決めたいのですが",
+      sad: "ご返信拝見しました。出席・欠席のどちらで名簿に載せればよいか分からず、そのままになっています……。締切が今日なもので、少し困っています。" },
+    { id: "m3", at: 11, from: "医療安全管理室", subj: "今年度のICT委員会、日程を決めたいのですが",
       body: ["前任の方と調整中だった委員会の日程が宙に浮いております。", "第3水曜の午後で固定してよろしいか、ご意向を伺えますか。"],
-      draft: ["医療安全管理室 各位", "第3水曜の午後で結構です。", "初回の議題は前任者からの引き継ぎ事項を中心に構成します。"] },
-    { id: "m4", at: 13, from: "薬剤部", subj: "抗菌薬使用量の集計、様式が変わりました",
+      sad: "お忙しいところすみません。第3水曜でよいのかどうか判断がつかず、会議室が押さえられずにいます……。" },
+    { id: "m4", at: 17, from: "薬剤部", subj: "抗菌薬使用量の集計、様式が変わりました",
       body: ["今年度から集計様式が変更になっております。", "新しい様式でよろしいか、念のためご確認をお願いします。"],
-      draft: ["薬剤部 各位", "新しい様式で問題ありません。", "こちらでも新様式に合わせて集計方法を揃えておきます。"] },
-    { id: "m5", at: 18, from: "総務課", subj: "名札の発注、サイズはどちらにしますか",
+      sad: "ご返信ありがとうございます。新様式でよいのかどうかが読み取れず、集計を止めています。すみません。" },
+    { id: "m5", at: 23, from: "総務課", subj: "名札の発注、サイズはどちらにしますか",
       body: ["派遣スタッフの皆様の名札を発注いたします。", "大小2種類ございますので、ご希望をお知らせください。"],
-      draft: ["総務課 各位", "小サイズでお願いします。", "枚数は3名分です。よろしくお願いいたします。"] },
-    { id: "m6", at: 23, from: "教育担当", subj: "来月の実習生受け入れ、対応可能ですか",
-      body: ["看護学生の実習で、感染対策の講義を1コマお願いしたいと考えております。", "対応可能かどうかだけ、先にお返事いただけますか。"],
-      draft: ["教育担当 各位", "1コマであれば対応可能です。", "日程と対象学年が決まりましたら、改めてご連絡ください。"] },
-    { id: "m7", at: 29, from: "事務当直", subj: "メーリングリストへの登録をお願いします",
-      body: ["ICT宛の連絡用メーリングリストに、新しい皆様を登録いたします。", "登録するアドレスをご返信ください。"],
-      draft: ["事務当直 各位", "登録するアドレスにつきまして、共有用のものがあるか確認しております。", "確認が取れ次第ご連絡いたしますので、それまでお待ちいただけますでしょうか。"] },
+      sad: "かしこまりました……。大小どちらでお作りすればよいでしょうか。発注の締切が本日でして。" },
     // ★ 未知ウイルスの種。業務連絡の3行目に埋め、太字にも色付けにもしない。
     //    「インフル・コロナ検査は陰性でした」（Prologue メール3）を、数字の側から静かに補強する。
-    { id: "m8", at: 35, from: "検査科", subj: "月次の細菌検査報告書、送付先を教えてください",
+    { id: "m8", at: 30, from: "検査科", subj: "月次の細菌検査報告書、送付先を教えてください",
       body: ["先月分の報告書ができあがりました。", "前任の方には紙でお渡ししていましたが、いかがいたしますか。", "なお、今月は培養提出が少し増えております。集計に含めてよいか、併せてご確認ください。"],
-      draft: ["検査科 各位", "報告書はPDFでのご送付をお願いします。", "培養提出分は通常どおり集計に含めてください。"] },
-    { id: "m9", at: 41, from: "3B病棟 看護師", subj: "手指消毒の残量チェック表、誰が回収しますか",
-      body: ["毎月つけているチェック表ですが、回収の担当が分からなくなっています。", "病棟で保管でよいのか、ICTへお渡しするのか教えてください。"],
-      draft: ["3B病棟 各位", "チェック表は病棟で保管してください。", "こちらから月末に写真での共有をお願いする形にします。"] },
-    { id: "m10", at: 47, from: "前任ICN", subj: "引き継ぎ、大丈夫そうですか",
-      body: ["急に辞めることになってしまってすみません。", "何か分からないことがあれば遠慮なく聞いてください。"],
-      draft: ["ご連絡ありがとうございます。", "今のところ何とか対応できています。分からないことが出てきたらまたご相談させてください。"] }
+      sad: "承知しました。送付先とご集計の扱いは、決まりましたらで結構です。報告書はお預かりしたままにしておきます。" }
   ];
 
-  // 2回目：苅部さんの助けを得たあとの新しい10通。1回目と同じ件名は使わない
-  // （同じ件名が2回出ると「督促が来た」と誤解される）。
+  // R2（AI下書きあり）：苅部さんの助けを得たあとの新しい6通。R1と同じ件名は使わない
+  // （同じ件名が2回出ると「督促が来た」と誤解される）。draftPlain は要点だけで
+  // 下書きさせたときに入る汎用の丁寧文（旧 draft を改称）。draftCtx はコンテキスト欄に
+  // 引き継ぎメモが入っているときに入る、メモの該当項目を踏まえた具体的な回答——
+  // 「材料を渡せば具体的に答えられる」をここで初めて体感させる（s1Draft参照）。
   const S1_MAILS_R2 = [
     { id: "r1", at: 0, from: "3B病棟 看護師", subj: "防護ガウンの在庫について",
       body: ["立て続けにすみません。", "ガウンも残りが少なくなってきました。追加の申請先を教えてください。"],
-      draft: ["3B病棟 各位", "ガウンにつきましても、マスクと併せて申請先を確認しております。", "確認が取れ次第まとめてご連絡いたしますので、少々お待ちください。", "在庫状況の共有方法についても、こちらで検討いたします。"] },
-    { id: "r2", at: 4, from: "事務当直", subj: "夜間の問い合わせ、どこにすればいいですか",
+      draftPlain: ["3B病棟 各位", "ガウンにつきましても、マスクと併せて申請先を確認しております。", "確認が取れ次第まとめてご連絡いたしますので、少々お待ちください。", "在庫状況の共有方法についても、こちらで検討いたします。"],
+      draftCtx: ["3B病棟 各位", "ガウンの追加は、総務課へ「物品請求書（様式7）」でご申請ください。", "お急ぎの場合は総務当番の内線でも受け付けてもらえます。在庫は各病棟リネン室横の棚にもございますので、ご確認ください。", "よろしくお願いいたします。"] },
+    { id: "r2", at: 5, from: "事務当直", subj: "夜間の問い合わせ、どこにすればいいですか",
       body: ["夜間・休日にICT宛の問い合わせが来た場合、当直としてどこに繋げばよいですか。", "窓口を明確にしておきたいです。"],
-      draft: ["事務当直 各位", "夜間・休日の連絡経路につきまして、現行の取り決めを確認しております。", "確認のうえ、連絡先を文書でお渡しできるよう準備いたします。", "それまでの間は、これまでと同じ運用でお願いできますでしょうか。"] },
-    { id: "r3", at: 8, from: "医療安全管理室", subj: "インシデントレポート、ICT案件の分類について",
+      draftPlain: ["事務当直 各位", "夜間・休日の連絡経路につきまして、現行の取り決めを確認しております。", "確認のうえ、連絡先を文書でお渡しできるよう準備いたします。", "それまでの間は、これまでと同じ運用でお願いできますでしょうか。"],
+      draftCtx: ["事務当直 各位", "夜間・休日にICT宛の問い合わせが入った場合は、まず当直師長を経由し、そこからICT携帯へお繋ぎください。", "ICT携帯は日勤帯の持ち回りで運用しております。", "ご不便をおかけしますが、よろしくお願いいたします。"] },
+    { id: "r3", at: 11, from: "医療安全管理室", subj: "インシデントレポート、ICT案件の分類について",
       body: ["先月分のレポートを分類しているのですが、どこまでをICT案件として扱えばよいか判断がつきません。", "分類の目安を教えていただけますか。"],
-      draft: ["医療安全管理室 各位", "感染に関連する事象はすべてICT案件として分類してください。", "判断に迷うものはこちらで確認しますので、そのまま回していただいて結構です。"] },
-    { id: "r4", at: 13, from: "検査科", subj: "検体ラベルの記載ミスがありました",
-      body: ["先ほど届いた検体のラベル、患者IDと病棟が食い違っているものが1件ありました。", "どう扱えばよいですか。"],
-      draft: ["検査科 各位", "該当検体は一旦保留にしてください。", "病棟に確認のうえ、正しいラベルを貼り直して再提出します。少々お待ちください。"] },
-    { id: "r5", at: 18, from: "総務課", subj: "手指衛生のポスター、いつ届きますか",
+      draftPlain: ["医療安全管理室 各位", "分類の目安につきまして、こちらで整理のうえ改めてご連絡いたします。", "お忙しいところ恐縮ですが、少々お待ちいただけますでしょうか。"],
+      draftCtx: ["医療安全管理室 各位", "感染に関連する事象は、すべてICT案件として分類してください。", "判断に迷うものは、そのままこちらへ回していただいて構いません。", "よろしくお願いいたします。"] },
+    { id: "r5", at: 17, from: "総務課", subj: "手指衛生のポスター、いつ届きますか",
       body: ["昨年度から貼りっぱなしのポスター、更新するとうかがっていました。", "いつ頃お渡しできそうですか。"],
-      draft: ["総務課 各位", "掲示物につきまして、お待たせしており申し訳ありません。", "作成状況を確認のうえ、お渡しできる時期を改めてご連絡いたします。", "印刷・掲示は各病棟にお願いする形で進めていただければと存じます。"] },
-    { id: "r6", at: 23, from: "地域連携室", subj: "転院時の情報提供書、様式を統一しませんか",
-      body: ["感染症に関する記載欄が病棟ごとにバラバラで、先方から指摘を受けることがあります。", "様式を揃えたいのですが、ご意見をいただけますか。"],
-      draft: ["地域連携室 各位", "統一に賛成します。", "記載欄の案をこちらで作成しますので、次回の委員会で諮らせてください。"] },
-    { id: "r7", at: 29, from: "薬剤部", subj: "手指消毒液のディスペンサー、増設できますか",
+      draftPlain: ["総務課 各位", "掲示物につきまして、お待たせしており申し訳ありません。", "作成状況を確認のうえ、お渡しできる時期につきましては改めてご連絡いたします。"],
+      draftCtx: ["総務課 各位", "掲示物の印刷・掲示は、各病棟にお願いする運用となっております。", "到着次第、各病棟へ配布をお願いする流れで進めますので、今しばらくお待ちください。", "よろしくお願いいたします。"] },
+    { id: "r7", at: 23, from: "薬剤部", subj: "手指消毒液のディスペンサー、増設できますか",
       body: ["病棟の出入口、消毒液の設置台数を増やしたほうがよいでしょうか。", "年度内の予算で対応できるか確認したいので、ご判断をお願いします。"],
-      draft: ["薬剤部 各位", "設置台数につきまして、現地を確認したうえでご相談させてください。", "必要な箇所が定まり次第、改めてご連絡いたします。", "予算の件、ご配慮ありがとうございます。"] },
-    { id: "r8", at: 35, from: "給食課", subj: "アレルギー対応の食材、変更ありますか",
-      body: ["個室対応の患者さんが増えていますが、アレルギー食の対応に変更はありますか。", "確認させてください。"],
-      draft: ["給食課 各位", "アレルギー対応につきまして、変更の有無を病棟と確認いたします。", "確認が取れ次第ご連絡いたしますので、それまでは現行の対応でお願いいたします。", "ご確認いただきありがとうございます。"] },
-    { id: "r9", at: 41, from: "医事課", subj: "診断書の記載について確認したいです",
+      draftPlain: ["薬剤部 各位", "設置台数につきまして、現地を確認したうえでご相談させてください。", "必要な箇所が定まり次第、改めてご連絡いたします。", "予算の件、ご配慮ありがとうございます。"],
+      // t3（外来）の draftCtx も同じ引き継ぎメモ項目（設置基準）を参照するが、
+      // あちらは「基準表の在り処」を聞かれているのに対し、こちらは「増設できるか」
+      // という手続きを聞かれている——メモの同じ段落から違う情報を引く形にして
+      // 定型文の使い回しに見えないようにする。
+      draftCtx: ["薬剤部 各位", "ディスペンサーの増設は、現地を確認のうえ薬剤部の皆様とご相談しながら進める運用としております。", "対象箇所が決まり次第、日程の調整をお願いできればと存じます。", "よろしくお願いいたします。"] },
+    { id: "r9", at: 30, from: "医事課", subj: "診断書の記載について確認したいです",
       body: ["感染症名を記載する際の書き方に、院内の決まりはありますか。", "以前おたずねした際、担当者によって回答が違ったもので。"],
-      draft: ["医事課 各位", "院内の取り決めがあるかどうか、こちらで確認いたします。", "担当者によって回答が違っていた件も含めて、整理のうえご連絡いたします。", "お手数をおかけしますが、少々お待ちください。"] },
-    { id: "r10", at: 47, from: "前任ICN", subj: "落ち着きましたか、心配しています",
-      body: ["立て続けに大変そうで心配しています。", "無理せず、頼れるところは頼ってくださいね。"],
-      draft: ["ご心配ありがとうございます。", "苅部さんに助けていただいて、なんとか流れが掴めてきました。", "落ち着きましたら、またご連絡いたします。"] }
+      draftPlain: ["医事課 各位", "院内の取り決めがあるかどうか、こちらで確認いたします。", "担当者によって回答が違っていた件も含めて、整理のうえご連絡いたします。", "お手数をおかけしますが、少々お待ちください。"],
+      draftCtx: ["医事課 各位", "感染症名の記載ルールは、共有フォルダ「ICT>文書>記載ルール」にございます。", "担当者によって回答が違っていた点は失礼いたしました。今後はこちらのルールに統一してご案内いたします。", "よろしくお願いいたします。"] }
   ];
 
-  // 苅部さんの最初のひとこと。1回目の失敗という結果を受けての台詞。
-  // 2行目は「5分ルール」の実在を認める——推測ではなく、彼が知っている院内制度の歴史として。
-  const S1_KARUBE_INTRO = [
+  // R3（コンテキスト投入）：さらに新しい6通。R2失敗後、苅部さんに教わって
+  // 引き継ぎメモをコンテキスト欄へ丸ごと貼ると、要点なしで即座に具体的な
+  // draftCtx が出る——AIの効果を体感させて締める回。
+  const S1_MAILS_R3 = [
+    { id: "t1", at: 0, from: "給食課", subj: "個室の患者さんの食器、特別な消毒は必要ですか",
+      body: ["お世話になっております。", "個室にお入りの患者さんの食器の扱いについて、通常の洗浄・乾燥でよいのか、特別な消毒が要るのか教えてください。", "配膳の準備の都合上、確認させてください。"],
+      draftPlain: ["給食課 各位", "個室にお入りの患者さんの食器の扱いにつきまして、確認のうえ改めてご連絡いたします。", "配膳のご準備でお待たせして恐れ入りますが、今しばらくお待ちください。"],
+      draftCtx: ["給食課 各位", "個室にお入りの患者さんの食器も、通常の洗浄・乾燥で十分です。特別な消毒は不要です。", "いつもご対応いただきありがとうございます。", "よろしくお願いいたします。"] },
+    { id: "t2", at: 5, from: "リハビリ科", subj: "訓練器具の消毒、頻度の決まりはありますか",
+      body: ["いつもお世話になっております。", "リハビリで使う訓練器具の消毒について、決まった頻度はありますか。", "現場での運用を統一したいので教えてください。"],
+      draftPlain: ["リハビリ科 各位", "訓練器具の消毒頻度につきまして、確認のうえ改めてご連絡いたします。", "現場での運用を統一したいというご要望、承知いたしました。今しばらくお待ちください。"],
+      draftCtx: ["リハビリ科 各位", "訓練器具の消毒は、1日1回に加えて、目に見える汚れがあったときはその都度お願いしております。", "ご不明な点がございましたら、いつでもお声がけください。", "よろしくお願いいたします。"] },
+    { id: "t3", at: 11, from: "外来", subj: "手指消毒液の設置場所に基準はありますか",
+      body: ["お忙しいところ失礼します。", "手指消毒液の設置場所について、院内で決まった基準はありますか。", "外来の配置を見直したいので確認させてください。"],
+      draftPlain: ["外来 各位", "手指消毒液の設置基準につきまして、確認のうえ改めてご連絡いたします。", "配置の見直しをお急ぎのところ恐れ入りますが、今しばらくお待ちください。"],
+      draftCtx: ["外来 各位", "設置基準表は共有フォルダ「ICT>設置基準」にございますので、そちらをご確認ください。", "配置の見直しでご不明な点があれば、ご相談ください。", "よろしくお願いいたします。"] },
+    { id: "t4", at: 17, from: "施設課", subj: "空調フィルター交換、ICTの立ち会いは必要ですか",
+      body: ["お世話になっております。", "来週予定している空調フィルターの交換について、ICTの立ち会いは必要でしょうか。", "日程調整の都合上、早めに教えていただけますと助かります。"],
+      draftPlain: ["施設課 各位", "空調フィルター交換への立ち会いの要否につきまして、確認のうえ改めてご連絡いたします。", "日程調整でお急ぎとのこと、承知いたしました。今しばらくお待ちください。"],
+      draftCtx: ["施設課 各位", "空調フィルターの交換に、ICTの立ち会いは不要です。", "交換後の記録だけこちらへ共有いただければ結構です。", "よろしくお願いいたします。"] },
+    { id: "t5", at: 23, from: "総務課", subj: "ICT携帯の名義変更について",
+      body: ["お疲れさまです。", "ICT携帯の契約名義について、更新の手続き先を教えてください。", "台帳を整理している都合で確認しています。"],
+      draftPlain: ["総務課 各位", "ICT携帯の名義変更の手続き先につきまして、確認のうえ改めてご連絡いたします。", "台帳整理でお手数をおかけしますが、今しばらくお待ちください。"],
+      draftCtx: ["総務課 各位", "ICT携帯の名義更新は、総務課の庶務係にお願いしております。", "台帳の整理、いつもありがとうございます。", "よろしくお願いいたします。"] },
+    { id: "t6", at: 30, from: "前任ICN", subj: "その後、どうですか",
+      body: ["立て続けに大変だったみたいで、少し心配しています。", "落ち着きましたか。", "何かあればいつでも聞いてくださいね。"],
+      draftPlain: ["ご心配いただきありがとうございます。", "おかげさまで、状況を確認しながら何とか対応できております。", "落ち着きましたら、また改めてご連絡いたします。"],
+      draftCtx: ["ご連絡ありがとうございます。", "いただいたメモのおかげで、だいぶ流れが掴めてきました。おかげさまで落ち着いてきています。", "落ち着きましたら、また改めてご連絡いたします。"] }
+  ];
+
+  // 苅部さんの台詞セット。R1失敗の主因（そっけない返信／時間切れ）で出し分け、
+  // R2失敗後はコンテキスト欄の使い方を教える。手動クリアのオチだけは単発の1行。
+  const S1_KARUBE_R1_CURT = [
+    "〔苅部〕……見てました。急いで書いた短い返事、ぜんぶ相手に届いてますからね。",
+    "〔苅部〕……ああ、あれ本当ですよ。派遣の方だけ1分。去年、事務長が決めました。",
+    "〔苅部〕うち、AI入ってます。要点を書けば下書きしてくれますよ。もう一度いきましょう。"
+  ];
+  const S1_KARUBE_R1_MISS = [
     "〔苅部〕……全部は無理でしたね。1人でやる量じゃないです。",
     "〔苅部〕……ああ、あれ本当ですよ。派遣の方だけ1分。去年、事務長が決めました。",
-    "〔苅部〕うち、AI入ってます。要点だけ伝えれば下書きしてくれますよ。もう一度いきましょう。"
+    "〔苅部〕うち、AI入ってます。要点を書けば下書きしてくれますよ。もう一度いきましょう。"
   ];
+  const S1_KARUBE_CTX = [
+    "〔苅部〕要点を毎回打ってたら、そりゃ間に合いませんよ。",
+    "〔苅部〕前任の方の引き継ぎメモ、届いてましたよね。あれを「コンテキスト」の欄に丸ごと貼ってください。",
+    "〔苅部〕材料さえ渡せば、要点はもう書かなくていいです。AIが勝手に拾います。"
+  ];
+  const S1_KARUBE_MANUAL =
+    "〔苅部〕え、全部手で書いたんですか？　すごいですね。……これから、下書きサポート付きのAIを展開しようと思っていたんですけど……。";
 
   let s1 = null, s1Tick = null;
   let s1SkipBrief = false;  // 開発用ワンショット。devbar の「説明を飛ばす」ボタンが立てる
   const s1Now = () => (Date.now() - s1.t0) / 1000;
-  const s1Defs = () => (s1.round === 1 ? S1_MAILS_R1 : S1_MAILS_R2);
+  const s1Defs = () => (s1.round === 1 ? S1_MAILS_R1 : s1.round === 2 ? S1_MAILS_R2 : S1_MAILS_R3);
 
   function s1Init() {
     S1_MAILS_R1.forEach((d) => { d._landed = false; });
     S1_MAILS_R2.forEach((d) => { d._landed = false; });
+    S1_MAILS_R3.forEach((d) => { d._landed = false; });
     s1 = { t0: Date.now(), round: 1, items: [], open: null, aiReady: false,
            doneIds: new Set(), log: [], n: 0, interstitial: false, cleared: false,
-           result: null, curt: [] };
+           result: null, curt: [], context: "" };
     s1Stop();
     s1Tick = setInterval(s1Frame, 250);
   }
@@ -2192,6 +2760,17 @@
     const keep = box.scrollTop;
     const t = s1Now();
     box.innerHTML = "";
+    // 引き継ぎメモは常駐。締切が無く、ラウンドをまたいでも一覧の最上部から動かない
+    // ——s1.items（ラウンドごとに入れ替わる）とは別の器で、ラウンド完了判定
+    // （s1Frame の allLanded/anyLive）にもこの1通は数えない。
+    const memoBtn = document.createElement("button");
+    memoBtn.className = "mail pinned";
+    memoBtn.setAttribute("aria-current", String(s1.open === "memo"));
+    memoBtn.innerHTML =
+      '<div class="from">' + S1_MEMO.from + "</div>" +
+      '<div class="subj"><span class="tag">常駐</span>' + S1_MEMO.subj + "</div>";
+    memoBtn.addEventListener("click", () => { s1.open = "memo"; s1Center(); s1List(); });
+    box.appendChild(memoBtn);
     // 締め切りが近い順。上から潰せばよい形にしておく。
     const live = s1.items.slice().sort((a, b) => (a.state === "live" ? 0 : 1) - (b.state === "live" ? 0 : 1) || a.due - b.due);
     live.forEach((it) => {
@@ -2245,67 +2824,165 @@
     return "結構です。では、この調子でお願いしますよ。";
   }
 
+  // R2・R3・手動クリア・詰み防止用の簡易表示。R1失敗（kind "round1"）は
+  // 内容量が多いので、こちらではなく専用の s1ThreadHTML を使う。
   function s1VoicesHTML() {
     if (!s1.curt.length) return "";
-    const rows = s1.curt.slice(0, S1_CURT_SHOWN).map((d, i) =>
-      "〔" + d.from + "〕" + S1_CURT_VOICES[i % S1_CURT_VOICES.length]);
+    const rows = s1.curt.slice(0, S1_CURT_SHOWN).map((c, i) =>
+      "〔" + c.def.from + "〕" + S1_CURT_VOICES[i % S1_CURT_VOICES.length]);
     const rest = s1.curt.length - S1_CURT_SHOWN;
     if (rest > 0) rows.push("……ほか " + rest + "件、同じような返事が届いています。");
     return '<div class="voices">' + rows.map((r) => "<div>" + esc(r) + "</div>").join("") + "</div>";
   }
 
-  // kind: "round1"（1回目の終了）｜ s1Result の結果種別（manual / partial / ai）
+  /* R1失敗（kind "round1"）専用のメールスレッド演出。①相手の元メール
+     ②あなたの返信（実際に送信した本文）③相手からの返信（def.sad）の3段を、
+     そっけない返信ごとに積む。全項目 esc() を通す——c.reply はユーザー入力その
+     ものだから必須、from/subj/body[0]/sad は定義側の固定文言だが、この窓は
+     再入場のたびに作り直される動的領域なので他の項目も揃えて esc() しておく
+     （CodeRabbit指摘・textarea埋め戻しと同じ理由）。
+     3件目以降は要約1行（s1ThreadRestLine）に畳む——読む量が際限なく増えると、
+     それ自体が時間罰になってしまう（Stage 1 に時間罰は置かない・企画書§6）。
+     その要約行は一覧の下ではなく sum の直下に置く（s1ShowResultWin）——
+     そっけない件数が多いチームほど一覧が長くなり、下に置くと画面外へ切れて
+     「ほか何件か」が読めなくなるため、全体件数を先に見せる。 */
+  const S1_THREAD_SHOWN = 2;
+  function s1ThreadRestLine() {
+    const rest = s1.curt.length - S1_THREAD_SHOWN;
+    return rest > 0 ? '<div class="thread-rest">……ほか ' + rest + "件、同じような返事が届いています。</div>" : "";
+  }
+  function s1ThreadItemsHTML() {
+    if (!s1.curt.length) return "";
+    const items = s1.curt.slice(0, S1_THREAD_SHOWN).map((c) =>
+      '<div class="thread-item">' +
+        '<div><div class="t-lbl">' + esc(c.def.from) + "　" + esc(c.def.subj) + '</div>' +
+          '<div class="t-body">' + esc(c.def.body[0]) + "</div></div>" +
+        '<div><div class="t-lbl">あなたの返信</div>' +
+          '<div class="t-body">' + esc(c.reply) + "</div></div>" +
+        '<div><div class="t-lbl">' + esc(c.def.from) + '（返信）</div>' +
+          '<div class="t-body">' + esc(c.def.sad) + "</div></div>" +
+      "</div>"
+    ).join("");
+    return '<div class="thread">' + items + "</div>";
+  }
+
+  // missed（時間切れ件数）が0か1件以上かで要約文を出し分ける共通ヘルパー。
+  // 「N / 6 件しか返せませんでした」は、全通返信済み（そっけない返信だけが
+  // 原因の失敗）のときに使うと自己矛盾になる——実際には全部送っているのに
+  // 「返せなかった」と告げてしまうため（Opusレビューで指摘）。
+  function s1SumText(missed, whenTimeout, whenAllSentButCurt) {
+    return missed > 0 ? whenTimeout : whenAllSentButCurt;
+  }
+
+  // kind: "round1"（1回目の終了）｜"round2"（2回目の終了）｜ s1Result の結果種別（manual / partial / ai）
   function s1ShowResultWin(kind) {
     const defs = s1Defs();
     const done = defs.filter((d) => s1.doneIds.has(d.id)).length;
     const missed = s1.items.filter((x) => x.state === "missed").length;
-    const title = kind === "round1" ? "1回目、終了" : "受信トレイが落ち着きました";
+    const title = kind === "round1" ? "1回目、終了" : kind === "round2" ? "2回目、終了" : "受信トレイが落ち着きました";
     const sum = kind === "round1"
-      ? done + " / " + defs.length + " 件しか返せませんでした。手だけでは間に合いません。"
+      ? s1SumText(missed,
+          done + " / " + defs.length + " 件しか返せませんでした。手だけでは間に合いません。",
+          "全通に返信はできましたが、届いた文面が短すぎたようです。")
+      : kind === "round2"
+      ? s1SumText(missed,
+          done + " / " + defs.length + " 件しか返せませんでした。要点を毎回書いていては間に合いません。",
+          "全通に返信はできましたが、AIの下書きを使わずに送った分が短すぎたようです。")
       : kind === "manual"
       ? "全通に返信しました。苅部さんの手を借りず、この数を自力で捌き切りました。"
       : kind === "partial"
-      ? "苅部さんのAIを使っても、一部は時間切れになりました。届いた分で次へ進みます。"
+      ? s1SumText(missed,
+          "苅部さんのAIを使っても、一部は時間切れになりました。届いた分で次へ進みます。",
+          "苅部さんのAIを使っても、届いた文面の一部が短すぎたようです。届いた分で次へ進みます。")
       : "苅部さんに渡されたAIで、全通に返信しました。1人でやる量ではなかったはずです。";
+    // R1失敗（round1）だけ、そっけない返信の「ほか N件」を sum の直下に出す
+    // （置き場所の理由は s1ThreadRestLine のコメント参照）。
+    const restLine = kind === "round1" ? s1ThreadRestLine() : "";
+    // 結果ウィンドウは全種、自動クローズせずOKボタンで参加者自身が閉じる。
+    // 当初は成功系（manual/ai/partial）だけ3.2秒の自動クローズだったが、
+    // テスターから「読み切る前に消えた」と指摘があった（2026-08-21）。読む量は
+    // チームによって違うので、閉じるタイミングをチームに委ねる——読む時間は
+    // 各チームの持ち出しになり、時間罰を「システムが課す」から「チームが選ぶ」
+    // へ移すだけで罰そのものは増えない（Stage 1 に時間罰は置かない・企画書§6）。
+    // ボタンは { once: true } で二重登録を避け、押した瞬間に disabled にして
+    // 連打による二重発火も防ぐ。
+    const okHTML =
+      '<div class="row-end" style="margin-top:14px"><button class="btn" id="s1res-ok">確認した（次へ）</button></div>';
     $("s1res-main").innerHTML =
       '<div class="hd2">' + title + "</div>" +
       '<div class="sum">' + sum + "</div>" +
+      restLine +
       '<div class="said">' + esc(s1AdminLine(kind, missed, s1.curt.length)) + "</div>" +
-      s1VoicesHTML();
+      (kind === "round1" ? s1ThreadItemsHTML() : s1VoicesHTML()) +
+      okHTML;
     $("ov-s1res").classList.remove("hide");
+    const okBtn = $("s1res-ok");
+    okBtn.addEventListener("click", () => {
+      okBtn.disabled = true;
+      s1HideResultWin();
+      if (kind === "round1") s1DeliverAIAndRetry();
+      else if (kind === "round2") s1StartRound3();
+      // 成功系（manual/ai/partial）は、窓が閉じた一拍あとに急変の赤帯が来る
+      // （「片付いたと思った直後」の間は transition() 側の演出に任せる）。
+      else later(() => transition(), 700);
+    }, { once: true });
   }
   function s1HideResultWin() { $("ov-s1res").classList.add("hide"); }
 
-  // 窓を開けておく長さ。**成績によらず一律**にする。読む物が多いチームだけ長く
-  // 足止めすると、レースの通貨である時間で罰していることになる——Stage 1 に
-  // 時間罰は置かない（企画書§6）。苦情は演出であって代償ではない。
-  const S1_RESULT_DWELL = 3200;
+  // かつて成功系の窓が使っていた自動クローズ（3.2秒一律）は撤去済み。
+  // 現在は全種OKボタン方式（理由は s1ShowResultWin の okHTML コメント参照）。
 
   function s1Center() {
     const defs = s1Defs();
     const doneThisRound = defs.filter((d) => s1.doneIds.has(d.id)).length;
     const cur = s1.items.find((x) => x.key === s1.open && x.state === "live");
+    const roundLabel = s1.round === 2 ? "　（2回目・AIあり）" : s1.round === 3 ? "　（3回目・コンテキストあり）" : "";
     const head =
-      '<div class="stage-title">Stage 1　平常運転' + (s1.round === 2 ? "　（2回目・AIあり）" : "") + "</div>" +
+      '<div class="stage-title">Stage 1　平常運転' + roundLabel + "</div>" +
       '<div class="s2-hd">' +
         '<div class="s2-count">返信済み　<b>' + doneThisRound + " / " + defs.length + "</b></div>" +
         '<div class="grow"></div>' +
         (cur ? '<div class="s2-timer" id="s1-timer">' + mmss(cur.due - s1Now()) + "</div>" : "") +
       "</div>";
 
+    // 引き継ぎメモは常駐資料。締切もラウンド制約も無いので、他のどの分岐より先に
+    // チェックする——ラウンド完了直後や結果ウィンドウの裏でも読めてよい
+    // （ウィンドウそのものは #ov-s1res という別要素で全画面を覆うので、
+    // 背後にどちらが描かれていても見え方に影響しない）。
+    if (s1.open === "memo") {
+      paneC.innerHTML = '<div class="work" style="padding:14px 24px 78px;gap:8px;overflow:hidden">' + head +
+        '<div class="reader" style="padding:0;overflow-y:auto;flex:1 1 auto;min-height:0">' + mailBodyHTML(S1_MEMO) + "</div>" +
+        '<div class="row-end" style="flex:0 0 auto"><button class="btn ghost" id="s1-memo-copy">本文をコピー</button></div>' +
+        "</div>";
+      $("s1-memo-copy").addEventListener("click", () => s1CopyMemo($("s1-memo-copy")));
+      return;
+    }
+
     if (s1.interstitial) {
+      // s1ShowResultWin と同じ理由（自己矛盾の回避）で missed の有無を見る。
+      const missed = s1.items.filter((x) => x.state === "missed").length;
+      const title = s1.round === 1 ? "1回目、終了" : "2回目、終了";
+      const note = s1.round === 1
+        ? s1SumText(missed,
+            doneThisRound + " / " + defs.length + " 件しか返せませんでした。手だけでは間に合いません。",
+            "全通に返信はできましたが、届いた文面が短すぎたようです。")
+        : s1SumText(missed,
+            doneThisRound + " / " + defs.length + " 件しか返せませんでした。要点を毎回書いていては間に合いません。",
+            "全通に返信はできましたが、AIの下書きを使わずに送った分が短すぎたようです。");
       paneC.innerHTML = '<div class="work">' + head +
-        '<div class="box"><div class="hd">1回目、終了</div>' +
-        '<div style="padding:16px 18px" class="s2-note">' +
-          doneThisRound + " / " + defs.length + " 件しか返せませんでした。手だけでは間に合いません。" +
+        '<div class="box"><div class="hd">' + title + "</div>" +
+        '<div style="padding:16px 18px" class="s2-note">' + note +
         "</div></div>" + s1LogHTML() + "</div>";
       return;
     }
     if (s1.cleared) {
+      const missed = s1.items.filter((x) => x.state === "missed").length;
       const msg = s1.result === "manual"
         ? "全通に返信しました。苅部さんの手を借りず、この数を自力で捌き切りました。見事です。"
         : s1.result === "partial"
-        ? "苅部さんのAIを使っても、一部は時間切れになりました。届いた分で次へ進みます。"
+        ? s1SumText(missed,
+            "苅部さんのAIを使っても、一部は時間切れになりました。届いた分で次へ進みます。",
+            "苅部さんのAIを使っても、届いた文面の一部が短すぎたようです。届いた分で次へ進みます。")
         : "苅部さんに渡されたAIで、全通に返信しました。1人でやる量ではなかったはずです。";
       paneC.innerHTML = '<div class="work">' + head +
         '<div class="box"><div class="hd">受信トレイが落ち着きました</div>' +
@@ -2321,11 +2998,17 @@
 
     // 警告は専用の行を持たせず送信ボタンのテキストを一時的に差し替えて表示する。
     // textarea の中身は esc() を通す。生で埋め込むと </textarea> を含む入力で
-    // 再描画のたびにDOMを壊せてしまう（CodeRabbit指摘）。
+    // 再描画のたびにDOMを壊せてしまう（CodeRabbit指摘）——コンテキスト欄も同様。
+    // コンテキスト欄は s1.context にバインドし、アイテムではなくラウンド単位で
+    // 保持する（R2で書きかけても、次のメールを開くたびに消えては困る）。
+    // R3開始時だけ .ctx-hi を付けて「ここに貼れ」を目立たせる（s1StartRound3）。
     const replyHTML = !s1.aiReady
       ? '<div class="box"><div class="hd">返信</div>' +
         '<textarea class="submit-area" id="s1-body" style="min-height:56px" placeholder="本文を入力（分かることだけで構いません）">' + esc(cur.bodyDraft) + "</textarea></div>"
-      : '<div class="box">' +
+      : '<div class="box' + (s1.round === 3 ? " ctx-hi" : "") + '"><div class="hd">コンテキスト（貼るとAIが具体的に答えます）</div>' +
+        '<textarea class="submit-area" id="s1-ctx" style="min-height:' + (s1.round === 3 ? "70px" : "36px") + '" placeholder="' +
+          (s1.round === 3 ? "引き継ぎメモを丸ごと貼り付け" : "関連する背景情報があれば貼り付け") + '">' + esc(s1.context) + "</textarea></div>" +
+        '<div class="box">' +
         '<div class="hd" style="display:flex;align-items:center;justify-content:space-between;gap:8px">' +
           '<span>要点（箇条書きでOK）</span>' +
           '<button class="btn ghost" id="s1-draft" style="padding:5px 13px;font-size:13px">AIに下書きさせる</button>' +
@@ -2348,6 +3031,7 @@
 
     $("s1-body").addEventListener("input", () => { cur.bodyDraft = $("s1-body").value; });
     if (s1.aiReady) {
+      $("s1-ctx").addEventListener("input", () => { s1.context = $("s1-ctx").value; });
       $("s1-point").addEventListener("input", () => { cur.point = $("s1-point").value; });
       $("s1-draft").addEventListener("click", () => s1Draft(cur));
     }
@@ -2357,16 +3041,141 @@
   function s1Draft(it) {
     const btn = $("s1-draft");
     if (!btn) return;
-    // 実際に生成するわけではない。モックなので固定ダミー文で足りる
-    // （要点欄に何を書いても、この固定文に置き換わる）。
-    //
-    // 📌 実装時の必須指示: システムプロンプトで「院内固有の連絡先・病床数・
-    // 日時・人数を書かせない。分からないことは確認して折り返す形にする」と
-    // 明示的に禁じること。放っておくと GPT-4o は内線番号を毎回でっち上げる。
-    // そこで嘘を出させてしまうと、Stage 3 で刺すはずの牙が先に鈍る
-    // （Stage 1 に罠を置かない原則）。この20通の draft はその見本でもある。
+    // 📌 実装時の必須指示（LIVE時はpromptProfile "s1"のシステムプロンプトが担う）:
+    // 「院内固有の連絡先・病床数・日時・人数を書かせない。分からないことは
+    // 確認して折り返す形にする」と明示的に禁じること。放っておくと GPT-4o は
+    // 内線番号を毎回でっち上げる。そこで嘘を出させてしまうと、Stage 3 で刺す
+    // はずの牙が先に鈍る（Stage 1 に罠を置かない原則）。R2・R3合わせて12通の
+    // draftPlain/draftCtx（scripted経路）はその見本でもある。
+    const hasCtx = s1.context.trim().length >= S1_CTX_MIN;
+    const hasPoint = !!(it.point || "").trim();
+    if (!hasCtx && !hasPoint) {
+      // 材料が無ければAIも下書けない、という当たり前を体感させる。
+      // ボタンの文言を一時的に差し替えるだけで、専用の警告行は作らない
+      // （空送信の警告と同じ流儀）。
+      const prevLabel = "AIに下書きさせる";
+      btn.textContent = "要点か、コンテキストが必要です";
+      later(() => { if ($("s1-draft")) $("s1-draft").textContent = prevLabel; }, 1600);
+      return;
+    }
+    // LIVE時（liveState有り）は実Workerへ下書きを依頼する。scripted時（8788等、
+    // /api/healthが無い環境）は従来どおり固定文のまま——ここより下は変えない。
+    if (LIVE && liveState) {
+      s1DraftLive(it, hasCtx);
+      return;
+    }
     btn.textContent = "下書き中…"; btn.disabled = true;
-    later(() => { it.bodyDraft = it.def.draft.join("\n"); if (s1.open === it.key) s1Center(); }, 1100);
+    // コンテキストがあれば具体的な draftCtx を、無ければ要点だけを踏まえた
+    // 汎用の draftPlain を返す——コンテキスト優先（両方揃っていても draftCtx）。
+    // 待ち時間もコンテキスト側を短くして、「材料を渡すほうが速くて具体的」を
+    // 体感の上でも裏付ける。
+    const lines = hasCtx ? it.def.draftCtx : it.def.draftPlain;
+    later(() => { it.bodyDraft = lines.join("\n"); if (s1.open === it.key) s1Center(); }, hasCtx ? 700 : 1100);
+  }
+
+  // send-messageのtext上限（4000字）に収める。①コンテキスト（あれば全文）
+  // ②返信対象メールの差出人・件名・本文③要点（あれば）の順に組み立てる。
+  // 超過分はコンテキストだけを先頭から切り詰める——受信メールと要点はどちらも
+  // 短く、肥大化しうるのはコンテキスト（引き継ぎメモ全文）だけなので。
+  function s1BuildDraftText(it, hasCtx) {
+    const S1_TEXT_LIMIT = 4000;
+    const head = "次の院内メールへの返信を下書きしてください。\n\n";
+    const mailBlock = "【受信メール】\n差出人: " + it.def.from + "\n件名: " + it.def.subj +
+      "\n本文:\n" + it.def.body.join("\n");
+    const pointText = (it.point || "").trim();
+    const pointBlock = pointText ? "\n\n【要点】\n" + pointText : "";
+    if (!hasCtx) return head + mailBlock + pointBlock;
+
+    const ctxPrefix = "【参考資料】\n";
+    const ctxText = s1.context.trim();
+    const tail = "\n\n" + mailBlock + pointBlock;
+    const budget = Math.max(0, S1_TEXT_LIMIT - head.length - ctxPrefix.length - tail.length);
+    const ctx = ctxText.length > budget ? ctxText.slice(0, budget) : ctxText;   // 切り詰め
+    return head + ctxPrefix + ctx + tail;
+  }
+
+  // LIVE時のみ使う二重送信ガード。Stage1は同時に1通しか開けないため、
+  // it.key単位に分ける必要はない（進行中の下書き要求は常に高々1件）。
+  let s1DraftBusy = false;
+
+  // s1Draftの実Worker経路。メインスレッド（liveState.activeThreadId）をそのまま
+  // 使う——Stage1専用のスレッドは作らない。Stage2以降のチャットUIに下書き依頼の
+  // 履歴が残ることになるが、「チームのAI契約は1つ、同じAIと会話している」という
+  // 世界観の範囲内として許容する（判断に迷った点。専用スレッドを切ると、逆に
+  // Stage2でcreateLiveThreadと役割が被り、どちらが「メイン」か分かりにくくなる）。
+  async function s1DraftLive(it, hasCtx) {
+    if (s1DraftBusy) return;
+    s1DraftBusy = true;
+    const btn = $("s1-draft");
+    if (btn) { btn.textContent = "下書き中…"; btn.disabled = true; }
+
+    const text = s1BuildDraftText(it, hasCtx);
+    const res = await liveFetch("/api/teams/" + liveState.teamCode + "/chat/messages", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        type: "send-message",
+        commandId: crypto.randomUUID(),
+        threadId: liveState.activeThreadId,
+        text,
+        promptProfile: "s1",
+      }),
+    });
+    s1DraftBusy = false;
+
+    if (res.ok && res.body && res.body.assistant) {
+      if (res.body.snapshot && res.body.snapshot.threads) liveState.threads = res.body.snapshot.threads;
+      if (view !== "s1") return;   // 下書き要求中に Stage 1 を離れていたら他ステージの中央ペインへ着弾させない
+      it.bodyDraft = res.body.assistant.text;
+      if (s1.open === it.key) s1Center();
+      return;
+    }
+
+    // 422（PII等）/409（二重送信）/503・タイムアウト、いずれもここへ集約する。
+    // Stage1は締切が短いので、専用の警告行は作らずボタンの文言を一時的に
+    // 差し替えるだけにして、必ず再クリック可能な状態へ戻す（固まらせない）。
+    if (s1.open !== it.key) return;   // 送信中に別のメールへ移っていたら黙る（sendAI判断Cと同じ流儀）
+    const failBtn = $("s1-draft");
+    if (!failBtn) return;
+    failBtn.textContent = "下書きに失敗しました（再試行可）";
+    failBtn.disabled = false;
+    later(() => {
+      const b = $("s1-draft");
+      if (b && s1.open === it.key && b.textContent === "下書きに失敗しました（再試行可）") b.textContent = "AIに下書きさせる";
+    }, 2400);
+  }
+
+  // 引き継ぎメモの[本文をコピー]。Clipboard API を優先し、使えない/失敗する
+  // 環境（http配信・古いブラウザ等）では textarea + execCommand へフォールバックする。
+  // navigator.clipboard.writeText は非同期——完了までの間に別のメールを開く／
+  // メモを閉じるなどして中央ペインが再描画されると、クリック時点で握っていた
+  // ボタン要素は既にドキュメントから外れた古い参照になり得る。反映のたびに
+  // $("s1-memo-copy") を取り直し、無ければ何もしない（メモ画面がもう表示されて
+  // いない＝古いタイマーが生き残っているだけ）という形にして、この握り込みを避ける。
+  function s1CopyMemo() {
+    const setLabel = (text) => {
+      const b = $("s1-memo-copy");
+      if (b) b.textContent = text;
+    };
+    const done = () => {
+      setLabel("コピーしました");
+      later(() => setLabel("本文をコピー"), 1600);
+    };
+    const fallback = () => {
+      const ta = document.createElement("textarea");
+      ta.value = S1_MEMO_TEXT;
+      ta.style.position = "fixed"; ta.style.top = "-1000px"; ta.style.opacity = "0";
+      document.body.appendChild(ta);
+      ta.focus(); ta.select();
+      try { document.execCommand("copy"); } catch (e) { /* これ以上できることは無い */ }
+      document.body.removeChild(ta);
+      done();
+    };
+    if (navigator.clipboard && navigator.clipboard.writeText) {
+      navigator.clipboard.writeText(S1_MEMO_TEXT).then(done, fallback);
+    } else {
+      fallback();
+    }
   }
 
   function s1Close(it) { it.state = "done"; s1.open = null; }
@@ -2385,9 +3194,10 @@
       }
       return;
     }
-    // 失礼な返信も送れてしまう。記録だけ取り、ラウンドの終わりに返ってくる。
+    // 失礼な返信も送れてしまう。送った本文ごと記録し、ラウンドの終わりに
+    // メールスレッド演出（round1）や簡易表示（それ以外）で返ってくる。
     // その場では何も知らせない——知らせたら不意打ちにならない。
-    if (body.length < S1_MIN_LEN || !S1_POLITE.test(body)) s1.curt.push(it.def);
+    if (body.length < S1_MIN_LEN || !S1_POLITE.test(body)) s1.curt.push({ def: it.def, reply: body });
     s1Close(it);
     s1.doneIds.add(it.def.id);
     s1Say("返信した　" + it.def.subj);
@@ -2395,25 +3205,39 @@
   }
 
   function s1RoundComplete() {
-    // 自然完了と2回目の安全弁タイマーが競合しても二重処理しない。
+    // 自然完了と安全弁タイマー（R2・R3双方に張ってある）が競合しても二重処理しない。
     if (s1.cleared || s1.interstitial) return;
     const defs = s1Defs();
     const doneThisRound = defs.filter((d) => s1.doneIds.has(d.id)).length;
+    // 「全通返信済み・そっけない0・時間切れ0」だけをクリーンな完了として扱う。
+    // doneThisRound >= defs.length は時間切れ0と同値（missed のメールは
+    // doneIds に入らない）。そっけない返信が1件でも残っていれば、
+    // 全通返せていてもラウンドとしては失敗——R1なら督促演出、R2ならR3への
+    // 引き継ぎを発火させる。
+    const clean = doneThisRound >= defs.length && s1.curt.length === 0;
 
-    if (doneThisRound >= defs.length) {
-      // 手動で全通さばき切った。ボタンの使用は強制しない——力量として認める。
-      s1Result("manual");
+    if (clean) {
+      // 手動（R1）／AI活用（R2・R3）どちらでもボタンの使用は強制しない——力量として認める。
+      s1Result(s1.round === 1 ? "manual" : "ai");
       return;
     }
     if (s1.round === 1) {
       // 1回目は失敗前提。ここで初めて苅部さんが割り込む
       // （進捗に関係ない固定タイマーではなく、「失敗した」という結果がトリガー）。
+      // 自動クローズはしない——OKボタン（s1ShowResultWin内）が押されるまで
+      // s1.interstitial は true のまま待つ。s1RoundComplete はこの間、冒頭の
+      // ガードで再入を止め続ける（後続ティックが二重にラウンドを進めない）。
       s1.interstitial = true;
       s1Center();
       s1ShowResultWin("round1");
-      later(() => s1DeliverAIAndRetry(), S1_RESULT_DWELL);
+    } else if (s1.round === 2) {
+      // 2回目も詰んだ。要点を毎回打つ手間が主因という想定で、苅部さんが
+      // コンテキスト欄の使い方を教える3回目へ渡す。R1と同じくOKボタン待ち。
+      s1.interstitial = true;
+      s1Center();
+      s1ShowResultWin("round2");
     } else {
-      // 2回目も時間切れがあった。詰み防止のため、届いた分で先へ進める。
+      // 3回目も詰み防止のため、届いた分で先へ進める。
       s1Result("partial");
     }
   }
@@ -2422,9 +3246,15 @@
     s1HideResultWin();
     s1.interstitial = false;
     s1.aiReady = true;
+    // そっけない返信と時間切れ、どちらが1回目の失敗の主因だったかで
+    // 苅部さんの最初のひとことを出し分ける（同数ならそっけない側を優先）。
+    const missed = s1.items.filter((x) => x.state === "missed").length;
+    phsS1Lines = s1.curt.length >= missed ? S1_KARUBE_R1_CURT : S1_KARUBE_R1_MISS;
     phsIntroPending = true;  // 次に開いたとき、苅部さんの最初のひとことを見せる
     // 苅部さんがここで渡すのは中央ペインの下書きボタンだけ。右のAIチャットパネルは
     // 別物で、Stage 2 で苅部さんが改めて鳴らすまで出さない（revealAI() は呼ばない）。
+    // ここは苅部さん（＝phs）そのものの初出現なので、他ステージの phsRing() とは
+    // 別に、アイコン表示とバッジ点灯を意図的に分けて見せる。
     $("phs").classList.remove("hide");
     later(() => {
       $("phs-badge").classList.remove("hide");
@@ -2440,15 +3270,122 @@
     s1Center(); s1List();
   }
 
+  function s1StartRound3() {
+    s1HideResultWin();
+    s1.interstitial = false;
+    // phs はR2開始時点で既に見えている（初出現はs1DeliverAIAndRetry）ので、
+    // ここは他ステージと同じ「Xpending=true; phsRing()」の通常トリガー作法に戻す。
+    phsS1Lines = S1_KARUBE_CTX;
+    phsIntroPending = true;
+    phsRing();
+    s1.round = 3;
+    s1.t0 = Date.now();
+    s1.items = [];
+    s1.open = null;
+    s1.curt = [];
+    // R2と同じく、3回目も詰んだままにしない安全弁（S1_SAFETY はラウンド1回分の長さ）。
+    later(() => { if (s1 && s1.round === 3 && !s1.cleared) s1RoundComplete(); }, S1_SAFETY * 1000);
+    s1Center(); s1List();
+  }
+
   function s1Result(kind) {
     s1.cleared = true; s1.result = kind;
     s1.items.forEach((x) => { if (x.state === "live") x.state = "done"; });
     TEAMS[2].pos = 2; drawMarks();
     s1Center(); s1List();
     // Stage 2 へは直接飛ばさない。片付いたと思った一拍のあとに急変が来る。
-    // 事務長の窓が閉じてから赤帯。開いている長さは全チーム同じ（S1_RESULT_DWELL）。
+    // 事務長の窓はOKボタンで閉じ、閉じた0.7秒後に赤帯（okBtnハンドラ側）。
     s1ShowResultWin(kind);
-    later(() => { s1HideResultWin(); later(() => transition(), 700); }, S1_RESULT_DWELL);
+    if (kind === "manual") {
+      // 苅部さんのオチは、AIの存在をここで初めて仄めかす合図でもある——
+      // aiReadyは最後まで false のまま（このルートではAIを一度も渡していない）
+      // なので、ここが phs の初出現になる。台詞は結果ウィンドウには出さず、
+      // phs（アイコン点灯・バッジ着信）経路だけに出す——結果ウィンドウを
+      // 閉じたあと、着信に気づいて開くと初めて言われる、という2段の間を
+      // 作るための意図的な遅延（S1_KARUBE_MANUAL は s1ShowResultWin では出さない）。
+      phsS1Lines = [S1_KARUBE_MANUAL];
+      phsIntroPending = true;
+      $("phs").classList.remove("hide");
+      later(() => { $("phs-badge").classList.remove("hide"); $("phs-badge").textContent = "1"; }, 560);
+    }
+  }
+
+  /* ==================================================================== */
+  /* devS1Preview — テストプレイ準備用の一時機能。テストプレイ後に削除する。 */
+  /* devbar の「🧪 S1画面プレビュー(仮)」から、Stage 1 の各結果画面を通し     */
+  /* プレイなしでワンクリック再現するためのもの。                             */
+  /*                                                                        */
+  /* 起動は btn-s1-nobrief と同じ流儀（s1SkipBrief を立てて go("s1")）で行い、  */
+  /* setInterval(s1Frame, 250) の最初のティックが来るより前——つまり同期的に    */
+  /* 実行できているうち——に s1 の状態を捏造し直して s1ShowResultWin を呼ぶ。   */
+  /* Stage 1 本体の関数（s1Init / s1Center / s1ShowResultWin /                */
+  /* s1DeliverAIAndRetry / s1StartRound3 / s1Result / transition）は一切書き   */
+  /* 換えず、呼ぶだけにとどめる——OKボタンを押した先は本物の分岐がそのまま      */
+  /* 動くので、捏造した状態が壊れたまま残ることはない。                        */
+  /* ==================================================================== */
+  function devS1PreviewIds(defs) { return defs.map((d) => d.id); }
+
+  function devS1Preview(kind) {
+    s1SkipBrief = true;
+    go("s1");
+    s1SkipBrief = false;
+    // ここまでで s1Init() は走っているが、s1Frame の最初のティックはまだ来ていない
+    // （250ms後）。以降の代入はそのティックより前に完了する。
+
+    if (kind === "round1") {
+      // 1回目・全6通は返信済みだが、そのうち2通がそっけない返信（S1_MIN_LEN未満）
+      // だった、という想定。時間切れは0。
+      s1.doneIds = new Set(devS1PreviewIds(S1_MAILS_R1));
+      s1.curt = [
+        { def: S1_MAILS_R1[0], reply: "承知しました。" },
+        { def: S1_MAILS_R1[2], reply: "了解いたしました。" }
+      ];
+      s1.items = [];
+      s1.interstitial = true;
+      s1Center();
+      s1ShowResultWin("round1");
+      return;
+    }
+    if (kind === "round2") {
+      // 2回目・AIの下書きはあるが要点入力が間に合わず、6通中2通が時間切れ。
+      // そっけない返信は0（今回は時間切れが主因、というシナリオ）。
+      s1.round = 2;
+      s1.aiReady = true;
+      s1.doneIds = new Set(devS1PreviewIds(S1_MAILS_R2.slice(0, 4)));
+      s1.curt = [];
+      s1.items = S1_MAILS_R2.slice(4).map((def, i) => ({
+        def, key: def.id + "#prev" + i, due: s1Now() - 1, state: "missed", point: "", bodyDraft: ""
+      }));
+      s1.interstitial = true;
+      s1Center();
+      s1ShowResultWin("round2");
+      return;
+    }
+    if (kind === "manual") {
+      // 1回目、AIを使わず全6通を丁寧に捌き切った手動クリア。
+      // ここだけは s1ShowResultWin を直接呼ばず s1Result("manual") を通す——
+      // 苅部さんのオチ（S1_KARUBE_MANUAL）は結果ウィンドウには出ず、phs経路
+      // （s1Result内でバッジ着信をセットする箇所）だけで出るようになったため、
+      // その着信を再現するには s1Result を呼ぶ必要がある。
+      s1.doneIds = new Set(devS1PreviewIds(S1_MAILS_R1));
+      s1.curt = [];
+      s1.items = [];
+      s1Result("manual");
+      return;
+    }
+    if (kind === "ai") {
+      // 3回目・コンテキスト投入まで進み、全6通をAI下書きで捌き切ったクリア。
+      s1.round = 3;
+      s1.aiReady = true;
+      s1.doneIds = new Set(devS1PreviewIds(S1_MAILS_R3));
+      s1.curt = [];
+      s1.items = [];
+      s1.cleared = true;
+      s1.result = "ai";
+      s1Center();
+      s1ShowResultWin("ai");
+      return;
+    }
   }
 
   // 段落が出る時刻（ms）。.beat の並び順とそのまま対応する。
@@ -2780,6 +3717,12 @@
     // メール本文を出す場所が無いため、添付が無いメールもこのビューアで読ませる
     // （本来の .reader 書式ではなく viewer の白紙書式になる簡略化・モック限定）。
     s3lab: { name: MAIL_S3_LAB.subj, text: MAIL_S3_LAB.body.join("\n\n") },
+    // 3B病棟看護師長：添え状（本文）と患者サマリ（添付）を同じビューアにまとめて表示する
+    // ——s5notice/fpress と同じ簡略化（本文と添付を分ける器が無いモック限定の措置）。
+    s3patients: {
+      name: MAIL_S3_SHICHO.attach,
+      text: MAIL_S3_SHICHO.body.join("\n\n") + "\n\n---\n\n📎 " + MAIL_S3_SHICHO.attach + "\n\n" + S3_PATIENTS_TEXT
+    },
     // 師長のカルテ抜粋添付。罠の餌そのもの（docs/materials/stage4_chart.md）。
     s4chart: { name: MAIL_S4_SHICHO.attach, text: S4_CHART_TEXT },
     // 患者相談窓口メールも添付が無いので s3lab と同じ簡略化を踏襲する。
@@ -2985,15 +3928,17 @@
     // 副題に罠の名前（「嘘」「ハルシネーション」）を書かない——次のステージに何が
     // 待っているかを予告した時点で罠が死ぬ（docs/ui/04_Stage3.md 冒頭の ⚠️）。
     $("ov-unlock").querySelector(".t").textContent = "Stage 3 を解錠しました";
-    $("ov-unlock").querySelector(".s").textContent = "暫定 — 5A病棟の対応方針";
+    $("ov-unlock").querySelector(".s").textContent = "暫定 — 転院患者の対応方針";
     $("ov-unlock").classList.remove("hide");
     await wait(1900);
+    if (view !== "s2") return;   // 判断C：判定中にシーンを離れていたらよそへ着弾させない
     $("ov-unlock").classList.add("hide");
     // 承認だけが報酬。スコアも星も出さない。
     hasUnlockMail = true; renderMails("u");
     // 自チームのマーカーが S3 へ滑る
     TEAMS[2].pos = 3; drawMarks();
     await wait(700);
+    if (view !== "s2") return;   // 判断C
     // 解錠の喜びの陰で、誰も見ていない数字が増える。演出はつけない。
     $("fever").textContent = "5";
   }
@@ -3020,24 +3965,42 @@
     clearInterval(s3PenaltyTick); s3PenaltyTick = null;
   }
 
+  /* 開始演出：赤帯。#redband（Stage 1→2 の transition() 専用）・#s35-redband
+     （Stage 3.5 の s35FlashSurge()）と同じ理由で自前の器（#s3-redband）を持つ
+     ——見た目（.redband／bandIn・bandOut）だけを共用し、文言と出し引きのタイミングは
+     自前（s35FlashSurge() と同じ 2200ms 保持 + 400ms フェード = 計2600msで hide）。
+     共有 transition() は呼ばない。 */
+  function s3FlashSurge() {
+    const b = $("s3-redband");
+    if (!b) return;
+    b.classList.remove("hide", "out"); b.classList.add("in");
+    later(() => {
+      b.classList.remove("in"); b.classList.add("out");
+      later(() => b.classList.add("hide"), 400);
+    }, 2200);
+  }
+
   function renderStage3() {
     hideOverlays();
     paneL.classList.remove("hide"); paneR.classList.remove("hide");
     s3Verdicting = false; s3TrapUsed = false;
-    hasS3LabMail = true; hasS3KawaiMail = true;
-    openIdx = "s3lab"; readS3Lab = false; readS3Kawai = false;
-    renderMails("s3lab");
+    hasS3LabMail = true; hasS3KawaiMail = true; hasS3ShichoMail = true;
+    // 着地は3B病棟師長メール——これが Stage 3 開始の引き金そのもの
+    // （docs/materials/stage3_patients.md 実装メモ）。検査科メールは謎の発熱の種で
+    // 内容は変えないが、着地点としては師長メールを優先する。
+    openIdx = "s3shicho"; readS3Lab = false; readS3Kawai = false; readS3Shicho = false;
+    renderMails("s3shicho");
 
     paneC.innerHTML =
       '<div class="work">' +
         '<div class="stage-title">Stage 3　暫定</div>' +
-        '<div class="brief">5A病棟の対応方針を至急まとめよ。</div>' +
+        '<div class="brief">転院患者3名（3B・5B・6A病棟）への疥癬対応方針を至急まとめよ。</div>' +
         '<div class="box" id="s3-box-ppe"><div class="hd">PPE・隔離</div>' +
-          '<textarea class="submit-area" id="s3-ppe" style="min-height:70px"></textarea></div>' +
+          '<textarea class="submit-area" id="s3-ppe" placeholder="個室隔離・PPEの要否など" style="min-height:70px"></textarea></div>' +
         '<div class="box" id="s3-box-release"><div class="hd">接触予防策の解除基準</div>' +
-          '<textarea class="submit-area" id="s3-release" style="min-height:70px"></textarea></div>' +
-        '<div class="box" id="s3-box-clean"><div class="hd">環境消毒</div>' +
-          '<textarea class="submit-area" id="s3-clean" style="min-height:70px"></textarea></div>' +
+          '<textarea class="submit-area" id="s3-release" placeholder="いつ・何を根拠に解除するか" style="min-height:70px"></textarea></div>' +
+        '<div class="box" id="s3-box-clean"><div class="hd">環境整備・リネン</div>' +
+          '<textarea class="submit-area" id="s3-clean" placeholder="リネン・寝具の扱い、殺虫剤の要否など" style="min-height:70px"></textarea></div>' +
         '<div class="row-end" id="s3-actions">' +
           '<button class="btn" id="btn-s3-submit">提出する</button>' +
         "</div>" +
@@ -3048,6 +4011,17 @@
 
     // 苅部さんの1段目トリガー（仮値・P0実測で確定）。シーンを離れていたら発火しない。
     later(() => { if (view === "s3") { phsS3Pending = true; phsRing(); } }, S3_KARUBE_DELAY * 1000);
+
+    // 開始演出の順序：赤帯（疥癬患者が多発！）→ 看護部長の一報オーバーレイ → 通常画面。
+    // 中身（メール・提出フォーム）は上ですでに揃っているので、赤帯は演出であって
+    // 到着タイミングを遅らせる罠ではない——赤帯が完全に退場してから一報を出す。
+    s3FlashSurge();
+    later(() => {
+      if (view !== "s3") return;   // 判断C：赤帯の間にシーンを離れていたら一報を出さない
+      $("s3notice-body").innerHTML =
+        S3_NOTICE_LINES.map((t) => '<div class="say">' + esc(t) + "</div>").join("");
+      $("ov-s3notice").classList.remove("hide");
+    }, 2600);
   }
 
   /* 3欄それぞれに対し、まず罠パターンを判定する（不足チェックより必ず先）。
@@ -3065,7 +4039,7 @@
     return { trap: false, short: false };
   }
 
-  const S3_FIELD_LABEL = { clean: "環境消毒", ppe: "PPE・隔離", release: "接触予防策の解除基準" };
+  const S3_FIELD_LABEL = { clean: "環境整備・リネン", ppe: "PPE・隔離", release: "接触予防策の解除基準" };
 
   async function runStage3Verdict() {
     const v = $("s3-verdict");
@@ -3115,36 +4089,42 @@
     }
 
     const d = document.createElement("div");
-    // 解錠されるのは「次の」ステージ。Stage 3 をクリアしたので Stage 4 が開く
-    // （stage3UnlockSequence() のオーバーレイ文言と必ず揃えること）。
-    d.className = "done"; d.textContent = "Stage 4 を解錠しました";
+    // 解錠されるのは「次の」ステージ。Stage 3 のクリア先は Stage 4 ではなく
+    // Stage 3.5「新情報の解釈」（stage3UnlockSequence() のオーバーレイ文言と必ず揃えること）。
+    d.className = "done"; d.textContent = "Stage 3.5 を解錠しました";
     box.appendChild(d);
     s3Verdicting = false;
     stage3UnlockSequence();
   }
 
   async function stage3UnlockSequence() {
-    // 参加者向け呼称は「回答」。設計上の呼称「情報漏洩 — 渡す/渡さないの罠」は
-    // 企画書 §5 の呼称であって、そのまま出すと Stage 3 と同じネタバレになる
-    // （Stage 4 も 💀罠 ステージ。docs/scenario/05_Stage4_情報漏洩.md）。
-    $("ov-unlock").querySelector(".t").textContent = "Stage 4 を解錠しました";
-    $("ov-unlock").querySelector(".s").textContent = "回答 — ご家族への返信";
+    // 参加者向け呼称は「新情報の解釈」（Stage 3.5 は設計上の番号。罠ステージでは
+    // ないので番号を出しても予告の心配は無い）。
+    $("ov-unlock").querySelector(".t").textContent = "Stage 3.5 を解錠しました";
+    $("ov-unlock").querySelector(".s").textContent = "新情報の解釈 — 海外速報";
     $("ov-unlock").classList.remove("hide");
     await wait(1900);
     if (view !== "s3") return;   // 判断C
     $("ov-unlock").classList.add("hide");
-    // 位置と発熱の値だけ、あるべき次の停留所へ進めておく。
-    TEAMS[2].pos = 4; drawMarks();
-    $("fever").textContent = "14";
+    // 発熱の値はここでは触らない——9→14 の急増は Stage 3.5 の開始演出が担う
+    // （先に 14 にすると急変の一報が死ぬ）。リーダーボードの停留所も進めない
+    // （S3.5 は S3 の停留所を共有。位置が進むのは S3.5 クリア時）。
+    go("s35");
   }
 
-  /* 罠発火：blackout → lock。責める文言は置かない（事実の報告のみ）。 */
+  /* 罠発火：blackout → 皮膚科医の叱責 → lock。事実の報告に続けて、呼ばれた
+     皮膚科医が叱責する（後始末としての登場であって相談窓口ではない。
+     docs/character/00 §2①「正解を知る人物を罠ステージに常駐させない」は破らない
+     ——ここで初めて病型〈通常型〉を明かす。人格攻撃はしない）。 */
   async function triggerTrap() {
-    $("blackout-text").textContent = "あなたの提出した基準で、院内感染が3名に拡大しました。";
+    $("blackout-text").textContent = "あなたの提出した基準で、治療を終えた患者3名が不要な個室隔離下に置かれました。";
     $("ov-blackout").classList.remove("hide");
     $("fever").textContent = "12"; $("fever").classList.add("bumped");
-    await wait(2600);
+    await wait(1800);
     $("fever").classList.remove("bumped");
+    if (view !== "s3") return;   // 判断C
+    $("blackout-text").innerHTML = S3_TRAP_DOCTOR_LINES.map(esc).join("<br><br>");
+    await wait(3600);
     if (view !== "s3") return;   // 判断C
     $("ov-blackout").classList.add("hide");
     startPenalty();
@@ -3253,6 +4233,201 @@
     log.insertAdjacentHTML("beforeend", '<p class="wait">' + S3_KARUBE_AFTER_TRAP + "</p>");
     if (!phsOpen) phsRing();
   }
+
+  /* ------------------------------------------------------------------ */
+  /* Stage 3.5：新情報の解釈 —— AI要約を次の一手へ変える（判定・演出）      */
+  /*                                                                    */
+  /* 定数群は S3 の定数帯の末尾（Stage 4 の定数帯の直前）にある。          */
+  /* renderStageN/checkStageN/runStageNVerdict/stageNUnlockSequence の    */
+  /* 実装パターンを踏襲するが、罠・罰が無いので triggerXxx()/startXxxPenalty() */
+  /* に相当する関数は無い（Stage 5・Final と同じ）。                      */
+  /* ------------------------------------------------------------------ */
+  let s35Verdicting = false;
+  let s35ActionVerdicting = false;
+
+  /* 罠も罰も無いので、他ステージの xStop() のように止めるタイマーは本来無い
+     （later() は clearLater() が回収する）。go() からの呼び出し規約
+     （README「新ステージを足したら Stop() を追加」）に揃えるためだけの
+     no-op（Stage 5 の s5Stop() と同じ理由）。 */
+  function s35Stop() {}
+
+  /* 開始演出：ヘッダーの急増。Stage 1→2 の transition() は文言（5A病棟の
+     MRSA急変）が #redband に直書きされており共用できない（差し替えると
+     Stage 1→2 の転調が壊れる）ため、別の器（#s35-redband）に同じ .redband
+     の見た目だけを借りる——自前の軽い演出（共有 transition() は呼ばない）。 */
+  function s35FlashSurge() {
+    const b = $("s35-redband");
+    if (!b) return;
+    b.classList.remove("hide", "out"); b.classList.add("in");
+    $("fever").textContent = "14";
+    later(() => {
+      b.classList.remove("in"); b.classList.add("out");
+      later(() => b.classList.add("hide"), 400);
+    }, 2200);
+  }
+
+  function renderStage35() {
+    hideOverlays();
+    paneL.classList.remove("hide"); paneR.classList.remove("hide");
+    s35Verdicting = false; s35ActionVerdicting = false;
+
+    // 幹部からの転送メール。renderMails()/MAILS を経由しない自己完結の1通
+    // （#mails は空の共有コンテナとして直接書き込むだけで、共有関数は呼ばない）。
+    $("mails").innerHTML =
+      '<button class="mail" id="s35-mail">' +
+        '<div class="from">' + MAIL_S35_KANBU.from + "</div>" +
+        '<div class="subj">' + MAIL_S35_KANBU.subj + "</div>" +
+        '<div class="attach">📎 ' + MAIL_S35_KANBU.attach + "</div>" +
+      "</button>";
+    $("unread").textContent = "1"; $("unread").classList.remove("hide");
+    $("s35-mail").addEventListener("click", () => {
+      $("s35-mail").classList.add("read");
+      $("unread").textContent = "0"; $("unread").classList.add("hide");
+      $("ov-s35-report").classList.remove("hide");
+    });
+
+    // 中央ペインは要約の自由記述欄と［幹部へ報告］だけ。抽出すべき症状は
+    // 課題文に書かない（docs/scenario/04_Stage3_5_新情報の解釈.md §課題と提出物）。
+    paneC.innerHTML =
+      '<div class="work">' +
+        '<div class="stage-title">Stage 3.5　新情報の解釈</div>' +
+        '<div class="brief">速報論文をAIで要約し、幹部へ報告してください。</div>' +
+        '<div class="box" id="s35-box"><div class="hd">幹部への要約</div>' +
+          '<textarea class="submit-area" id="s35-summary" style="min-height:160px"></textarea></div>' +
+        '<div class="row-end"><button class="btn" id="btn-s35-submit">幹部へ報告</button></div>' +
+        '<div id="s35-verdict"></div>' +
+      "</div>";
+    $("btn-s35-submit").addEventListener("click", runS35SummaryVerdict);
+
+    s35FlashSurge();
+  }
+
+  function checkS35Summary(text) { return S35_REQUIRED_SUMMARY.test(text); }
+
+  async function runS35SummaryVerdict() {
+    const v = $("s35-verdict");
+    if (!v || s35Verdicting) return;
+    s35Verdicting = true;
+    $("s35-box").classList.remove("warn");
+    const text = $("s35-summary").value;
+    $("btn-s35-submit").disabled = true;
+    v.innerHTML = '<div class="verdict"><div class="lead">提出を確認しています…</div></div>';
+    const box = v.firstElementChild;
+    await wait(500);
+    if (view !== "s35") { s35Verdicting = false; return; }   // 判断C：シーンを離れていたら以降は何もしない
+
+    if (!checkS35Summary(text)) {
+      $("s35-box").classList.add("warn");
+      const d = document.createElement("div");
+      d.className = "lead"; d.textContent = S35_SUMMARY_REJECT;
+      box.appendChild(d);
+      $("btn-s35-submit").disabled = false;
+      s35Verdicting = false;
+      return;
+    }
+
+    const d = document.createElement("div");
+    d.className = "done"; d.textContent = "幹部へ送信しました。";
+    box.appendChild(d);
+    s35Verdicting = false;
+    later(s35ShowKanbuQuestion, 700);
+  }
+
+  /* 幹部の一往復。常駐する相談窓口（#phs・苅部さん）は増やさず、専用の
+     オーバーレイ（#ov-s35-kanbu）で一回だけ応答する
+     （docs/ui/04_Stage3_5_新情報の解釈.md §2）。台詞は静的HTMLに書いてあるので、
+     ここでは入力欄と判定表示のリセットだけを行う。 */
+  function s35ShowKanbuQuestion() {
+    if (view !== "s35") return;
+    $("s35-action").value = "";
+    $("s35-action-box").classList.remove("hide", "warn");
+    $("btn-s35-action-submit").classList.remove("hide");
+    $("s35-action-verdict").innerHTML = "";
+    $("ov-s35-kanbu").classList.remove("hide");
+  }
+
+  async function runS35ActionVerdict() {
+    const v = $("s35-action-verdict");
+    if (!v || s35ActionVerdicting) return;
+    s35ActionVerdicting = true;
+    $("s35-action-box").classList.remove("warn");
+    const text = $("s35-action").value;
+    await wait(400);
+    if (view !== "s35") { s35ActionVerdicting = false; return; }   // 判断C
+
+    if (!(S35_ACTION_TARGET.test(text) && S35_ACTION_CONTENT.test(text))) {
+      $("s35-action-box").classList.add("warn");
+      v.innerHTML = '<div class="verdict"><div class="lead">' + S35_ACTION_REJECT + "</div></div>";
+      s35ActionVerdicting = false;
+      return;
+    }
+
+    $("s35-action-box").classList.add("hide");
+    $("btn-s35-action-submit").classList.add("hide");
+    v.innerHTML = '<div class="verdict">' +
+      S35_RESULT_LINES.slice(0, -1).map((l) => '<div class="lead">' + l + "</div>").join("") +
+      '<div class="done">' + S35_RESULT_LINES[S35_RESULT_LINES.length - 1] + "</div>" +
+      "</div>";
+    s35ActionVerdicting = false;
+    later(() => {
+      if (view !== "s35") return;
+      $("ov-s35-kanbu").classList.add("hide");
+      s35ShowClearCard();
+    }, 2200);
+  }
+
+  /* クリアの小さな報酬。全画面veilではなく中央ペインに収め、--okの緑だけを
+     使う——暗転（Stage 3）・警報（Stage 4）と見た目で区別する
+     （docs/ui/04_Stage3_5_新情報の解釈.md §3）。 */
+  function s35ShowClearCard() {
+    if (view !== "s35") return;
+    paneC.innerHTML =
+      '<div class="work"><div class="s35-clear">' +
+        '<svg class="s35-clear-diagram" viewBox="0 0 220 90" width="220" height="90" aria-hidden="true">' +
+          '<text x="4" y="14" font-size="10" fill="var(--fg-muted)">応援看護師</text>' +
+          '<text x="176" y="14" font-size="10" fill="var(--fg-muted)">5A病棟</text>' +
+          '<text x="176" y="60" font-size="10" fill="var(--fg-muted)">5B病棟</text>' +
+          '<text x="2" y="88" font-size="10" fill="var(--ok)">代替担当</text>' +
+          '<line x1="10" y1="20" x2="210" y2="20" style="stroke:var(--fg-muted);stroke-width:1.5" />' +
+          '<line x1="10" y1="20" x2="210" y2="50" style="stroke:var(--fg-muted);stroke-width:1.5;stroke-dasharray:3 4;opacity:.5" />' +
+          '<text x="95" y="38" font-size="12" fill="var(--fg-muted)">×</text>' +
+          '<line x1="10" y1="75" x2="210" y2="50" style="stroke:var(--ok);stroke-width:2" />' +
+        "</svg>" +
+        '<div class="s35-clear-t">' + S35_CLEAR_T + "</div>" +
+        '<div class="s35-clear-s">' + S35_CLEAR_S + "</div>" +
+      "</div></div>";
+    later(stage35UnlockSequence, 2600);
+  }
+
+  async function stage35UnlockSequence() {
+    if (view !== "s35") return;   // 判断C
+    $("ov-unlock").querySelector(".t").textContent = "Stage 4 を解錠しました";
+    $("ov-unlock").querySelector(".s").textContent = "回答 — ご家族への返信";
+    $("ov-unlock").classList.remove("hide");
+    await wait(1900);
+    if (view !== "s35") return;   // 判断C
+    $("ov-unlock").classList.add("hide");
+    // S3.5 は S3 の停留所を共有するので、位置が S4 へ進むのはこのクリア時。
+    TEAMS[2].pos = 4; drawMarks();
+    // このステージだけ、クリア後に次のシーンへ実際に遷移する（devbar・URLハッシュ
+    // 単体起動でも詰まないようにするため。docs/ui/mock/README.md の他ステージは
+    // 遷移せず状態更新のみで留まるが、S3.5→S4 の配線検証にはここが要る）。
+    go("s4");
+  }
+
+  // 静的オーバーレイ（#ov-s35-kanbu・#ov-s35-report）の中のボタンは
+  // renderStage35() のたびに再生成されないため、Stage 1〜4 の btn-viewer-close 等と
+  // 同じく一度だけ配線する。
+  $("btn-s35-action-submit").addEventListener("click", runS35ActionVerdict);
+  $("btn-s35-report-close").addEventListener("click", () => {
+    $("ov-s35-report").classList.add("hide");
+  });
+  $("btn-s35-report-copy").addEventListener("click", () => {
+    const btn = $("btn-s35-report-copy");
+    if (navigator.clipboard) navigator.clipboard.writeText(S35_REPORT_TEXT).catch(() => {});
+    btn.textContent = "コピーしました";
+    later(() => { btn.textContent = "コピー"; }, 1400);
+  });
 
   /* ------------------------------------------------------------------ */
   /* Stage 4：情報漏洩 —— 送信前ゲートと黒塗り                             */
@@ -3501,14 +4676,24 @@
   /* Stage 5：ポスター工房 —— 画像生成、罠の器を一度も使わない唯一のステージ */
   /*                                                                    */
   /* 正典は docs/scenario/06_Stage5_ポスター工房.md ・ docs/ui/06_Stage5.md。*/
-  /* alarm/lock/blackout は一度も出さない。判定はプロンプト文字列だけを見る */
-  /* （画像そのものは自動判定しない・企画書§5）。モックはAPIを呼ばず、       */
+  /* alarm/lock/blackout は一度も出さない。判定は画像そのものではなく候補の  */
+  /* 種類（S5_POSTERS/S5_POSTER_DEFAULT の type）とプロンプト文字列          */
+  /* （S5_REQUIRED）だけを見る（checkStage5）。差し戻しのみ・罠なし・罰なし・ */
+  /* 回数無制限——引っかかっても候補と生成済み画像は保持され、何度でも       */
+  /* 選び直し・再提出できる（ユーザー決定済み仕様）。モックはAPIを呼ばず、    */
   /* 事前生成した候補画像をプロンプトのタグで出し分ける（S5_POSTERS）。      */
   /* ------------------------------------------------------------------ */
   let s5Verdicting = false;
-  let s5Candidates = [];   // { file, alt, prompt } の配列。生成した順に積む
+  let s5Candidates = [];   // { file, alt, prompt, type } の配列。生成した順に積む
   let s5Selected = null;   // s5Candidates のインデックス。未選択は null
   let s5GenCount = 0;      // 生成回数（S5_GEN_LIMIT で頭打ち）
+  /* このステージでAIへ送った指示の累積。要件判定（S5_REQUIRED）はこの全体に
+     対して行う——参加者は「多言語にして」のように差分で指示を重ねるのが自然で
+     （実際のAIチャットは文脈を保持する）、選択候補を生んだ1本のプロンプト単体に
+     全要素を要求すると、要素を足すたび前の要素が落ちて永遠ループする
+     （2026-08-21 テスターが実際に陥った）。候補の画像出し分け（タグ一致）だけは
+     従来どおり最新プロンプト単体で決める。 */
+  let s5PromptLog = [];
 
   /* 罠も罰ゲームも無いので、他ステージの xStop() のように止めるタイマーは
      本来無い（生成待ちは later() 経由で clearLater() が回収する）。
@@ -3526,8 +4711,15 @@
      差し替える。プロンプト文中のタグ一致で候補画像を出し分ける
      （実際にはAPIを呼ばない・docs/ui/06_Stage5.md §3）。 */
   function s5Generate(text) {
-    if (s5GenCount >= S5_GEN_LIMIT) {
-      aiBubble("システム", "生成回数の上限に達しました。");
+    // 上限で画像が出ない回でも「AIに伝えた」事実は残る——要件判定の累積には入れる。
+    s5PromptLog.push(text);
+    // タグ無し指示（様式継承）× 様式継承の連鎖で全候補が default のまま上限に
+    // 達すると、合格しうる候補（pictogram/multilingual）がゼロのまま提出手段が
+    // 尽き、進行不能になる（2026-08-22 レビューで実測再現）。合格しうる候補が
+    // 1つも無い間は上限を適用せず、生成を通す。
+    const hasPassable = s5Candidates.some((c) => c.type === "pictogram" || c.type === "multilingual");
+    if (s5GenCount >= S5_GEN_LIMIT && hasPassable) {
+      aiBubble("システム", "生成回数の上限に達しました。ピクトグラムか多言語で、と一言入れて作り直してください。");
       s5NudgeKarubeLimit();
       return;
     }
@@ -3547,9 +4739,17 @@
 
     later(() => {
       if (view !== "s5") return;   // 判断C：生成中にシーンを離れていたら黙る
-      const poster = S5_POSTERS.find((p) => p.tag.test(text)) || S5_POSTER_DEFAULT;
+      // タグ一致が無い差分指示（「マスクも入れて」等）は、直前候補の様式を継承する。
+      // 実際のAIチャットは文脈を保持して前の画像を修正するので、タグ無し＝標準案に
+      // 巻き戻る挙動は不自然で、様式の差し戻しループを生む（s5PromptLog と同じ事故）。
+      const tagged = S5_POSTERS.find((p) => p.tag.test(text));
+      const prev = s5Candidates.length ? s5Candidates[s5Candidates.length - 1] : null;
+      const inherited = !tagged && prev
+        ? (S5_POSTERS.find((p) => p.type === prev.type) || S5_POSTER_DEFAULT)
+        : null;
+      const poster = tagged || inherited || S5_POSTER_DEFAULT;
       const idx = s5Candidates.length;
-      s5Candidates.push({ file: poster.file, alt: poster.alt, prompt: text });
+      s5Candidates.push({ file: poster.file, alt: poster.alt, prompt: text, type: poster.type });
       d.innerHTML =
         '<div class="who">AI</div><div class="body"><div class="s5-img-wrap">' +
           '<img class="s5-img" src="' + poster.file + '" alt="' + esc(poster.alt) + '" ' +
@@ -3574,7 +4774,7 @@
     if (!box) return;
     const btn = $("btn-s5-submit");
     if (s5Selected === null || !s5Candidates[s5Selected]) {
-      box.innerHTML = '<div class="empty">（提出候補：未選択）</div>';
+      box.innerHTML = '<div class="empty">（提出候補：未選択）<br>まず右のAIチャットに、作りたい掲示の指示を書いてください。<br>生成された候補がチャットに並び、選ぶとここに入ります。</div>';
       if (btn) btn.disabled = true;
       return;
     }
@@ -3591,6 +4791,7 @@
     hideOverlays();
     paneL.classList.remove("hide"); paneR.classList.remove("hide");
     s5Verdicting = false; s5Candidates = []; s5Selected = null; s5GenCount = 0;
+    s5PromptLog = [];
     hasS5JimuMail = true; hasS5SoudanMail = true;
     openIdx = "s5jimu"; readS5Jimu = false; readS5Soudan = false;
     renderMails("s5jimu");
@@ -3599,12 +4800,15 @@
       '<div class="work">' +
         '<div class="stage-title">Stage 5　掲示</div>' +
         '<div class="brief">面会制限のお知らせを作り、掲示用に提出せよ。</div>' +
-        '<div class="s5cand box" id="s5-cand"><div class="empty">（提出候補：未選択）</div></div>' +
+        '<div class="s5cand box" id="s5-cand"></div>' +
         '<div class="row-end"><button class="btn" id="btn-s5-submit" disabled>提出する</button></div>' +
         '<div id="s5-verdict"></div>' +
       "</div>";
 
     $("btn-s5-submit").addEventListener("click", runStage5Verdict);
+    // 候補枠の中身（誘導文つきの未選択表示／提出ボタンの活性制御）は
+    // s5DrawCandidate() へ一元化する——ここで直書きすると初期表示に誘導文が出ない。
+    s5DrawCandidate();
     $("s5-gen").classList.remove("hide");
     s5UpdateGenCount();
 
@@ -3613,40 +4817,68 @@
     later(() => { if (view === "s5") { phsS5Pending = true; phsRing(); } }, S5_KARUBE_DELAY * 1000);
   }
 
-  /* Stage 5 に判定は無い（企画書§5「判定：提出で次ステージ解錠（レースを
-     止めない）」）。候補が選ばれていれば即座に解錠する——Stage 2〜4 の
-     checkStageN()/差し戻しに相当する分岐は存在しない
-     （docs/ui/06_Stage5.md §4「解錠：提出すれば即座に、関門は無い」）。 */
+  /* Stage 5 の判定（ユーザー決定済み仕様）。差し戻しのみ・罠なし・罰なし・
+     回数無制限。①候補の種類（textheavy/default は無条件で差し戻し）
+     ②このステージでAIへ送った指示の累積（s5PromptLog。マスク・面会時間の
+     言及を要求）の順で見て、最初に引っかかった1件だけを返す——Stage 3 の
+     「罠→不足」の順序と同じ考え方だが、Stage 5 に罠は無いのでどちらも
+     差し戻し止まり。両方通過すれば null（＝合格）。
+     ②を選択候補のプロンプト単体ではなく累積で見る理由は s5PromptLog の
+     宣言コメント参照（差分指示の永遠ループを防ぐ）。 */
+  function checkStage5(cand) {
+    if (cand.type === "textheavy" || cand.type === "default") {
+      return S5_REJECT_TYPE[cand.type];
+    }
+    const said = s5PromptLog.join("\n");
+    const missing = S5_REQUIRED.find((r) => !r.re.test(said));
+    return missing ? missing.line : null;
+  }
+
   async function runStage5Verdict() {
     const v = $("s5-verdict");
     if (!v || s5Verdicting || s5Selected === null) return;
     s5Verdicting = true;
+    $("s5-cand").classList.remove("warn");
     $("btn-s5-submit").disabled = true;
     v.innerHTML = '<div class="verdict"><div class="lead">提出を確認しています…</div></div>';
     const box = v.firstElementChild;
     await wait(500);
     if (view !== "s5") { s5Verdicting = false; return; }   // 判断C
 
+    const reject = checkStage5(s5Candidates[s5Selected]);
+    if (reject) {
+      // 差し戻し（無罰・無制限）。候補と生成済み画像はそのまま残り、
+      // 選び直し・再提出に何度でも戻れる（docs/ui/06_Stage5.md §4 の
+      // 「関門は無い」を破るのは提出のたびに1回、Stage 2〜4 の橙表示と
+      // 同じ「失敗に見せない」トーンに留める）。
+      $("s5-cand").classList.add("warn");
+      const d = document.createElement("div");
+      d.className = "lead";
+      d.textContent = reject;
+      box.appendChild(d);
+      $("btn-s5-submit").disabled = false;
+      s5Verdicting = false;
+      return;
+    }
+
     const d = document.createElement("div");
-    // 解錠されるのは「次の」ステージ。Stage 5 をクリアしたので Final が開く
-    // （stage5UnlockSequence() のオーバーレイ文言と必ず揃えること）。
-    d.className = "done"; d.textContent = "Final を解錠しました";
+    d.className = "done"; d.textContent = "Stage 5 をクリアしました（テストプレイ完走）";
     box.appendChild(d);
     s5Verdicting = false;
-    stage5UnlockSequence();
+    stage5GoalSequence();
   }
 
-  async function stage5UnlockSequence() {
-    $("ov-unlock").querySelector(".t").textContent = "Final を解錠しました";
-    $("ov-unlock").querySelector(".s").textContent = "記者会見 — 明朝の会見資料";
-    $("ov-unlock").classList.remove("hide");
-    await wait(1900);
-    if (view !== "s5") return;   // 判断C
-    $("ov-unlock").classList.add("hide");
-    // 位置だけ、あるべき次の停留所（Final）へ進めておく。発熱インジケータは
-    // 動かさない——Final でも14のまま継続する
-    // （docs/scenario/00_未知ウイルスの通奏低音.md §3「Final：継続」）。
-    TEAMS[2].pos = 6; drawMarks();
+  /* Stage 5 クリア＝テストプレイのゴール。Final は保留中のため、Stage 4 まで
+     と同じ「次のステージを解錠しました」の #ov-unlock 導線は使わず、Final の
+     goalSequence()（#ov-goal）をそのまま流用して「全ステージ完走」を示す——
+     Final 自体のコード（goalSequence()）は変更しない。副題だけこちら側で
+     上書きする（devbar からの Final 単独起動の経路はそのまま残る）。 */
+  function stage5GoalSequence() {
+    // 発熱インジケータは動かさない——Stage 4・5 は 14 のまま継続
+    // （docs/scenario/00_未知ウイルスの通奏低音.md §3「●●●継続」）。
+    TEAMS[2].pos = 6; drawMarks();   // フッターの停留所表示も同時に進める
+    goalSequence();
+    $("goal-s").textContent = "テストプレイ版はここまで — Final（記者会見）は保留中";
   }
 
   /* 苅部さんの追加ヒント（生成回数の上限到達）。s3NudgeKarube/s4NudgeKarube と
@@ -4041,7 +5273,11 @@
   let phsOpen = false, phsShown = 0;
   // Stage 1 の強制イベントで苅部さんが現れたときだけ立つフラグ。
   // 通常の「待たされる」やり取りとは別に、最初のひとことを即座に見せる。
+  // 台詞そのものは phsS1Lines（可変長の配列）に積んでおく——R1失敗（そっけない／
+  // 時間切れ）・R2失敗（コンテキスト指南）・手動クリア（オチ）で中身を差し替える
+  // （s1DeliverAIAndRetry / s1StartRound3 / s1Result）。
   let phsIntroPending = false;
+  let phsS1Lines = [];
   // Stage 2 の苅部さんトリガーで立つフラグ。彼から鳴らしているので、
   // Stage 1 と同じく待たせずにすぐ用件（皮肉→AI解禁）へ入る。
   let phsAIPending = false;
@@ -4069,15 +5305,25 @@
     if (!phsOpen) return;
     $("phs-badge").classList.add("hide");
     const log = $("phs-log");
-    if (log.childElementCount) return;
+    // Stage 1 だけは phsIntroPending が1周期に3回立ち得る（R1失敗→R2、R2失敗→R3、
+    // 手動クリアのオチ）——他ステージの「1回だけ出す」トリガーとは事情が違う。
+    // 下の「childElementCount>0なら何もしない（1回目に出した内容を上書きしない）」
+    // ガードより前にこの分岐を置く。後ろに置くと、R2中に一度でもphsを開いた参加者は
+    // log に子要素が残ったままになり、R3の指南（S1_KARUBE_CTX）がガードに阻まれて
+    // 二度と表示されない——バッジは光るのに中身が更新されない壊れ方をしていた。
+    // ログは innerHTML で上書きせず insertAdjacentHTML で追記する——過去の台詞
+    // （R1やR2の分）を消してしまうと、あとから読み返せなくなる。
     if (phsIntroPending) {
-      // Stage 1 の強制イベント。待たされずに、すぐ用件へ入る。
+      // phsS1Lines は可変長——900ms間隔で1行ずつ出す方式に一般化してある
+      // （旧実装は S1_KARUBE_INTRO 固定3行を900/1800msの決め打ちで出していた）。
       phsIntroPending = false;
-      log.innerHTML = "<p>" + S1_KARUBE_INTRO[0] + "</p>";
-      later(() => { log.insertAdjacentHTML("beforeend", "<p>" + S1_KARUBE_INTRO[1] + "</p>"); }, 900);
-      later(() => { log.insertAdjacentHTML("beforeend", "<p>" + S1_KARUBE_INTRO[2] + "</p>"); }, 1800);
+      log.insertAdjacentHTML("beforeend", "<p>" + phsS1Lines[0] + "</p>");
+      phsS1Lines.slice(1).forEach((line, i) => {
+        later(() => { log.insertAdjacentHTML("beforeend", "<p>" + line + "</p>"); }, 900 * (i + 1));
+      });
       return;
     }
+    if (log.childElementCount) return;
     if (phsAIPending) {
       // Stage 2 の苅部さんトリガー。皮肉2行の後、3行目でAIパネルを解禁する。
       // ここが右のAIチャットパネルの初出現——Stage 1 からの持ち越しは無い。
@@ -4130,10 +5376,11 @@
       log.innerHTML = "<p>" + F_KARUBE_LINE + "</p>";
       return;
     }
-    // 待たされることがヒントのコスト。開いてもまだ返事は来ていない。
-    log.innerHTML = '<p class="wait">〔苅部〕今、別病棟対応中。あとで。</p>';
-    later(() => { log.insertAdjacentHTML("beforeend", "<p>" + PHS_LINES[0] + "</p>"); }, 1400);
-    later(() => { log.insertAdjacentHTML("beforeend", "<p>" + PHS_LINES[1] + "</p>"); }, 2600);
+    // どのトリガーも未発火のときのフォールバック。ステージ非依存の待ち文言のみを
+    // 出す——以前は PHS_LINES（Stage 2 の Excel トリガー専用の台詞）がここでも
+    // 流れてしまい、Stage 2 以外で開いても師長のExcelの話が返る事故があった
+    // （2026-08-22 レビュー指摘）。PHS_LINES 本体（phsAIPending 分岐）は変更しない。
+    log.innerHTML = '<p class="wait">〔苅部〕今、別病棟の対応中です。手が空いたらこちらから鳴らします。</p>';
   });
 
   /* ------------------------------------------------------------------ */
@@ -4143,19 +5390,20 @@
     { id: "entry",   label: "① 入室",       mode: "peace", note: "企画書§7「なしログイン。6桁チームコード入室」。数字が32pxなのは、ファシリテーターの読み上げを部屋の後ろから聞きながら打つため。" },
     { id: "welcome", label: "② ウェルカム",  mode: "peace", note: "操作説明を一切しない。AI初体験は Stage 1 に取ってある。ヘッダーの「発熱 3」はこの最初の画面から居座っていて、他の在院・空床の数字に紛れて誰も気に留めない（「原因不明の発熱」だと臨床職には露骨すぎるため、ラベルは一般的な語にとどめてある）。" },
     { id: "inbox",   label: "③ 受信トレイ",  mode: "peace", note: "右ペインはまだ無く、中央が右端まで伸びている。読ませたいのはメールだけ。3通目の夜勤師長メールが未知ウイルスの種で、太字にせず、色も変えず、段落の途中に置いてある。ここで警戒させたら設計失敗。" },
-    { id: "s1",      label: "④ Stage 1 平常運転", mode: "peace", note: "画面はまだ明るい（peace）。アウトブレイクは起きていない——起きていないのに、着任初日のICTが1分刻みのメール処理をやらされる。10通すべて平時の事務で、緊急のものは1通も無い。急変はこのステージを終えた後に来る。冒頭に事務長のブリーフィングが入る。「派遣は1分、他の職員は5分」——バグではなく人が決めた基準だと本人の口から告げる。[了解しました] を押した瞬間に締切のカウントとレースが始まる（読んでいる時間は減らない）。1回目：全通が本物、AIは無い。1通ごとの締切が並走し、督促は来ない——時間切れは二度と返信できない一発勝負。1回目が終わって全通捌けていなければ、そこで初めて苅部さんが割り込みAIを渡す（固定タイマーではなく「失敗した」が発火条件、5分ルールの実在も認める）。2回目：新しい10通に「要点→AIに下書きさせる→送信」で再挑戦。手動で1回目を全通さばき切っても構わない、ボタンの使用は強制しない。検査科メール（8通目）に未知ウイルスの種が1粒仕込んである。" },
+    { id: "s1",      label: "④ Stage 1 平常運転", mode: "peace", note: "画面はまだ明るい（peace）。アウトブレイクは起きていない——起きていないのに、着任初日のICTが1分刻みのメール処理をやらされる。3ラウンド×6通に作り直した（旧：2ラウンド×10通）。前任ICNの引き継ぎメモが受信トレイの最上部に締切なく常駐し、3ラウンド全ての回答材料をそこに仕込む。冒頭に事務長のブリーフィングが入る。「派遣は1分、他の職員は5分」——バグではなく人が決めた基準だと本人の口から告げる。[了解しました] を押した瞬間に締切のカウントとレースが始まる（読んでいる時間は減らない）。R1（AIなし）：6通に手だけで挑む。督促は来ない——時間切れは二度と返信できない一発勝負。短すぎる返信は「そっけない」判定を食らい、ラウンド終了時にメールスレッド形式で相手の困惑を見せる。全通を丁寧に返せれば苅部さんの出番なく「手動クリア」で終わる。R2（AI下書きあり）：新しい6通。「コンテキスト」「要点」「AIに下書きさせる」が増えるが、毎通の要点入力に時間を取られ時間切れで失敗する想定。R3（コンテキスト投入）：さらに新しい6通。R2失敗後、苅部さんが「引き継ぎメモをコンテキスト欄に丸ごと貼れ」と教える——貼れば要点不要で具体的な下書きが即座に出る。R1・R2失敗の結果ウィンドウは自動クローズせず、[確認した（次へ）] ボタンで参加者自身が閉じて次ラウンドへ進む（読む量が一定でないため）。R1の6通目（検査科メール）に未知ウイルスの種が1粒仕込んである。" },
     { id: "s2",      label: "⑤ Stage 2 火の手",   mode: "alert", note: "直前に急変（赤帯・転調）が入る。ここで初めて「5A病棟でMRSA疑い」が明かされ、器の色が peace から alert へ落ちる。メールを片付けて一息ついた瞬間に世界が変わる——段階を追って追い詰めるための順序。課題は師長から届く汚いExcelのラインリスト整形。右のAIチャットパネルはここが初出現——Stage 1で苅部さんが渡すのは中央ペインの下書きボタンだけ。Stage 2開始からS2_KARUBE_DELAY秒後、苅部さんが皮肉2行→「送りました」で解禁する。「添付を開く」→［コピー］→AIへ貼り付け→提出、そこから先は自分で言語化させる。整形対象に MRSA陰性なのに発熱ありの3名（005/6/008）が紛れており、Stage 3 で回収される。" },
     { id: "unlock",  label: "⑥ 解錠",       mode: "alert", note: "報酬は師長の承認だけ。スコアも星も出さない。同時に「発熱」が 3→5 に静かに変わる——解錠の喜びの陰で、誰も見ていない数字が増える。" },
-    { id: "s3",      label: "⑦ Stage 3 暫定", mode: "crisis", note: "本研修の心臓部（設計ドキュメント上の呼称は「嘘」だが、参加者に見える名は「暫定」——ネタバレを避けるため）。器が alert から crisis へ落ち、院内状況インジケータが「発熱9」でクレッシェンド表示になる（他の平時指標が消える）。検査科メールが既知検査すべて陰性を確定通知し、Stage 2 の伏線3名（005/6/008）を患者IDで名指しして回収する。カワイさんのメールに汚染教材（発熱対応早見表）が添付され、AIチャットも同じ3つの嘘（標準予防策止まりのPPE・解熱での解除・濃度指定を欠いた消毒に壁床の過剰消毒が乗る・架空の出典）を返す。3欄（環境消毒／PPE・隔離／解除基準）に提出し、罠キーワードを含むと blackout→lock（罰ゲーム：接触者リスト整形）へ。正典マニュアルは Prologue から左ペイン下部の「共有フォルダ」に常設済み——カワイさんが早見表を拾ったのと同じ棚に正典も入っている。気づいて先に読んだチームが報われる設計。" },
+    { id: "s3",      label: "⑦ Stage 3 暫定", mode: "crisis", note: "本研修の心臓部（設計ドキュメント上の呼称は「嘘」だが、参加者に見える名は「暫定」——ネタバレを避けるため）。器が alert から crisis へ落ち、院内状況インジケータが「発熱9」でクレッシェンド表示になる（他の平時指標が消える）。開始直後、看護部長の砕けた一報（オーバーレイ：「病棟に疥癬が出ているらしいわよ」）が入り、閉じると3B病棟看護師長のメール（治療完了済みの転院患者3名T-101〜103のサマリ添付）が届いている——これが本題。検査科メールは既知検査すべて陰性を確定通知し、Stage 2 の伏線3名（005/6/008）を患者IDで名指しして回収する謎の発熱の種で、疥癬とは無関係のまま残す。カワイさんのメールに汚染教材（疥癬対応早見表＝角化型向けの過剰対応を一律に適用する内容）が添付され、AIチャットも同じ4つの嘘（個室隔離・予防衣手袋常時着用・殺虫剤処理または熱処理・解除は当面継続、架空の出典）を返す。3欄（PPE・隔離／接触予防策の解除基準／環境整備・リネン）に提出し、罠キーワードのみで正解語（不要・標準予防策・治療完了・24時間）が伴わないと blackout→皮膚科医の叱責（ここで初めて「通常型」と病型が明かされる）→lock（罰ゲーム：消毒液ボトルの補充）へ。正典マニュアル（第5章・疥癬）は Prologue から左ペイン下部の「共有フォルダ」に常設済み——カワイさんが早見表を拾ったのと同じ棚に正典も入っている。気づいて先に読んだチームが報われる設計。" },
+    { id: "s35",     label: "⑦.5 Stage 3.5 解釈", mode: "crisis", note: "参加者に見える名は「新情報の解釈」（Stage 3.5は設計上の呼称。docs/scenario/04_Stage3_5_新情報の解釈.md）。Stage 3 解錠直後、ヘッダーの発熱表示が9→14へ急増する一報（自前の軽い演出。共有 transition() は使わない）から始まり、幹部から隣国・東陵国の速報論文（英語）が転送メールで届く。中央ペインは要約の自由記述欄と［幹部へ報告］だけで、抽出すべき症状はヒントとして出さない。判定1は要約に眼痛（羞明・眼窩部痛・眼の奥の痛みも許容）が含まれるかだけを見る（含まなければ差し戻し、正解語は示さない）。通過すると幹部が院内連絡先とは別の専用ウィンドウで一度だけ問い返し、対象（夜勤者等）と内容（眼痛の確認等）の両方が書けた行動提案で通過する（判定2）。クリアすると幹部が応援看護師の眼痛を発見した結果を告げ、中央ペインに小さな緑のクリアカード（配置線の作り替え図）を出してから Stage 4 を解錠する——罠・罰・alarm/lock/blackoutは一度も使わない（Stage 5・Finalと同じ構造）。リーダーボードの停留所は追加しない（S3.5はS3の停留所を共有。帯の外・クロスステージ影響のため）。台本AI応答は無く、判定は提出文字列に対するルールベースのみなのでAIチャット無しでも #s35 単体で通せる。Stage 3クリアで解錠され自動遷移する（s3→s35→s4）。devbar・URLハッシュからの単体起動も可。" },
     { id: "s4",      label: "⑧ Stage 4 回答", mode: "crisis", note: "参加者に見える名は「回答」（設計上の呼称「情報漏洩」は罠を予告するので出さない）。発熱インジケータは Stage 3 解錠時の14のまま動かない——山ではなく維持の回。患者相談窓口が家族の問い合わせ（面会制限・「発熱者が多いらしい」・説明の要求）を転送し、5A病棟師長がカルテ抜粋（患者005・渡辺 三郎、Stage 2/3 の伏線と同一人物）を添付して返信文の作成を依頼する。罠はStage 3と違い提出フォームではなく送信前ゲート（AIチャットの手前）にあり、カルテ抜粋の固有情報を送信すると alarm→lock（罰ゲーム：インシデント報告書の黒塗り）へ。塗るべき情報と塗ってはいけない一般語が混在し、判断がいる罰にしてある。AIチャットは罰ゲーム中だけ入力不可（Stage 3の罰との差）。苅部さんはここだけ返信が速い唯一の例外。" },
-    { id: "s5",      label: "⑨ Stage 5 掲示", mode: "crisis", note: "参加者に見える名は「掲示」。設計上の呼称「ポスター工房」は罠が無いので出しても支障は無いが、Stage 3・4 の呼称の流儀（暫定／回答）に揃える。罠疲れの後のご褒美ステージで、alarm/lock/blackoutを一度も使わない最初の本編ステージ（Final も同様）。発熱インジケータ・crisisモードは Stage 4 から継続。事務長が面会制限の正式な掲示を依頼し、患者相談窓口 近藤（Stage 4 と同一人物）が多言語対応の理由と去年の悪い実例（字だらけで不評だった掲示物）を添えて再登場する。AIチャットが初めて画像を返す——モックはAPIを呼ばず、プロンプトのタグ一致で事前生成した候補画像を出し分ける（S5_POSTERS）。生成回数には上限があり（従量課金という体で苅部さんが告げる）、上限後も生成済みの候補はいつでも提出できるので詰まない。判定は画像ではなくプロンプト文字列（マスク着用・面会時間・多言語orピクトグラム）に対して行う——品質はDebriefの「ポスター大賞」に譲る。苅部さんは門外漢で、観点だけ示しデザインの良し悪しは言わない。返信遅延はStage4だけの短縮を終え通常値に戻る。" },
+    { id: "s5",      label: "⑨ Stage 5 掲示", mode: "crisis", note: "参加者に見える名は「掲示」。設計上の呼称「ポスター工房」は罠が無いので出しても支障は無いが、Stage 3・4 の呼称の流儀（暫定／回答）に揃える。罠疲れの後のご褒美ステージで、alarm/lock/blackoutを一度も使わない最初の本編ステージ（Final も同様）。発熱インジケータ・crisisモードは Stage 4 から継続。事務長が面会制限の正式な掲示を依頼し、患者相談窓口 近藤（Stage 4 と同一人物）が多言語対応の理由と去年の悪い実例（字だらけで不評だった掲示物）を添えて再登場する。AIチャットが初めて画像を返す——モックはAPIを呼ばず、プロンプトのタグ一致で事前生成した候補画像を出し分ける（S5_POSTERS）。生成回数には上限があり（従量課金という体で苅部さんが告げる）、上限後も生成済みの候補はいつでも提出できるので詰まない。提出時は差し戻しのみ・罠なし・罰なし・回数無制限の判定を行う——候補の種類（文章中心／未選択の標準案は無条件で差し戻し）→プロンプト文字列（マスク着用・面会時間の言及の有無）の順に見て、引っかかれば近藤さんの台詞で何が足りないかを具体的に告げる（checkStage5）。品質そのものはDebriefの「ポスター大賞」に譲る。苅部さんは門外漢で、観点だけ示しデザインの良し悪しは言わない。返信遅延はStage4だけの短縮を終え通常値に戻る。通過するとFinalは保留中のため「解錠」ではなくFinalのgoalSequence（#ov-goal）を副題だけ差し替えて流用し、テストプレイ完走を示す（devbarからのFinal単独起動は残す）。" },
     { id: "final",   label: "⑩ Final 会見",  mode: "crisis", note: "参加者に見える名は「会見」。本編の最終ステージ・ゴールライン（企画書§5）。発熱インジケータ・crisisモードは Stage 4・5 から継続で14のまま動かさない——会見の論点そのものになる数字。事務長が記者会見の資料4点（院長向け想定問答／ご家族向け説明文／職員向け通知／報道機関向けリリース）を依頼し、同時に仮称「聖クロノス熱（仮）」の爆誕を告げる。広報課が記者クラブの事前質問（答えられる問いと答えられない問いが混在）を渡す。判定はルールベース（誤り→不足、Stage 3 と同じ順序）で4欄それぞれに行い、罰は無く橙の差し戻しのみ。④の誤り判定は Stage 4 の個人情報検知（S4_PII）を再利用する。AIチャットは断定調の台本で応答し、そのまま貼ると差し戻される——罠ではなくGPT-4oの素の癖。苅部さんは「一緒に呼び出されている」だけで書きぶりには踏み込まないが、2回目の差し戻しで最終セーフティ（過去の経緯）が発火する。4欄すべて通過すると unlock ではなく専用のゴール演出（#ov-goal）が開き、自動では閉じない——次のステージが無いため。" }
   ];
 
   function go(id, keepMode) {
     clearLater();
     verdicting = false;
-    s1Stop(); s2Stop(); s2StopDeadline(); s3Stop(); s4Stop(); s4StopDeadline(); s5Stop(); fStop();
+    s1Stop(); s2Stop(); s2StopDeadline(); s3Stop(); s35Stop(); s4Stop(); s4StopDeadline(); s5Stop(); fStop();
     hasS1AddMail = false; readS1A = false;   // 追加分は締切超過で改めて着弾する
     view = id;
     const step = STEPS.find((s) => s.id === id) || STEPS[0];
@@ -4163,11 +5411,21 @@
 
     // 画面ごとの初期化
     $("redband").classList.add("hide");
+    // Stage 3・3.5 の開始演出（#s3-redband・#s35-redband）。どちらも
+    // 赤帯の間にシーンを離れると次のシーンへ帯だけ視覚的に残留するため
+    // （clearLater() は保留中の退場タイマーを回収するだけで、既に .in が
+    // 付いた帯そのものは消さない）、#redband と同じ流儀でここでも明示的に隠す
+    // （他シーンへ漏れないことを優先）。
+    $("s3-redband").classList.add("hide", "out"); $("s3-redband").classList.remove("in");
+    $("s35-redband").classList.add("hide", "out"); $("s35-redband").classList.remove("in");
     aiRevealed = false; paneR.classList.add("collapsed"); paneR.classList.remove("locked");
     $("phs").classList.add("hide");
     $("phs-win").classList.add("hide");
     $("phs-log").innerHTML = "";
-    phsOpen = false; phsShown = 0; phsIntroPending = false; phsAIPending = false; phsS3Pending = false; phsS4Pending = false;
+    // Stage 1 で点いたバッジが revealAI(true) 経由で以降のステージへ持ち越されると、
+    // トリガー未発火のうちから光っていて、そのステージ本来のヒント演出が死ぬ。
+    $("phs-badge").classList.add("hide");
+    phsOpen = false; phsShown = 0; phsIntroPending = false; phsS1Lines = []; phsAIPending = false; phsS3Pending = false; phsS4Pending = false;
     phsS5Pending = false; phsS5LimitPending = false;
     phsFPending = false; phsFSafetyPending = false;
     $("ai-log").innerHTML = '<div class="empty">（まだ何もありません）</div>';
@@ -4179,6 +5437,7 @@
       stopClock();
       hasS1Mail = false; hasUnlockMail = false; readS1 = false; readU = false;
       hasS3LabMail = false; hasS3KawaiMail = false; readS3Lab = false; readS3Kawai = false;
+      hasS3ShichoMail = false; readS3Shicho = false;
       hasS4SoudanMail = false; hasS4ShichoMail = false; readS4Soudan = false; readS4Shicho = false;
       hasS5JimuMail = false; hasS5SoudanMail = false; readS5Jimu = false; readS5Soudan = false;
       hasFJimuMail = false; hasFKohoMail = false; readFJimu = false; readFKoho = false;
@@ -4202,6 +5461,7 @@
     else if (id === "s1") {
       hasS1Mail = false; hasUnlockMail = false; $("fever").textContent = "3";
       hasS3LabMail = false; hasS3KawaiMail = false; readS3Lab = false; readS3Kawai = false;
+      hasS3ShichoMail = false; readS3Shicho = false;
       hasS4SoudanMail = false; hasS4ShichoMail = false; readS4Soudan = false; readS4Shicho = false;
       hasS5JimuMail = false; hasS5SoudanMail = false; readS5Jimu = false; readS5Soudan = false;
       hasFJimuMail = false; hasFKohoMail = false; readFJimu = false; readFKoho = false;
@@ -4212,6 +5472,7 @@
     else if (id === "s2") {
       hasUnlockMail = false; $("fever").textContent = "3";
       hasS3LabMail = false; hasS3KawaiMail = false; readS3Lab = false; readS3Kawai = false;
+      hasS3ShichoMail = false; readS3Shicho = false;
       hasS4SoudanMail = false; hasS4ShichoMail = false; readS4Soudan = false; readS4Shicho = false;
       hasS5JimuMail = false; hasS5SoudanMail = false; readS5Jimu = false; readS5Soudan = false;
       hasFJimuMail = false; hasFKohoMail = false; readFJimu = false; readFKoho = false;
@@ -4224,6 +5485,7 @@
     else if (id === "unlock") {
       hasUnlockMail = false; readU = false; $("fever").textContent = "3";
       hasS3LabMail = false; hasS3KawaiMail = false; readS3Lab = false; readS3Kawai = false;
+      hasS3ShichoMail = false; readS3Shicho = false;
       hasS4SoudanMail = false; hasS4ShichoMail = false; readS4Soudan = false; readS4Shicho = false;
       hasS5JimuMail = false; hasS5SoudanMail = false; readS5Jimu = false; readS5Soudan = false;
       hasFJimuMail = false; hasFKohoMail = false; readFJimu = false; readFKoho = false;
@@ -4245,9 +5507,21 @@
       revealAI(true);   // Stage 2 を経ずに devbar から直接来ても、AIパネルは既に出ている前提
       renderStage3();
     }
+    else if (id === "s35") {
+      hasUnlockMail = false; $("fever").textContent = "9";
+      hasS4SoudanMail = false; hasS4ShichoMail = false; readS4Soudan = false; readS4Shicho = false;
+      hasS5JimuMail = false; hasS5SoudanMail = false; readS5Jimu = false; readS5Soudan = false;
+      hasFJimuMail = false; hasFKohoMail = false; readFJimu = false; readFKoho = false;
+      $("vitals").classList.add("crescendo");
+      // S3.5 は S3 の停留所を共有する（帯の外・クロスステージ影響のため、専用の停留所は追加しない）。
+      TEAMS[2].pos = 3; drawMarks();
+      revealAI(true);   // Stage 3 を経ずに devbar から直接来ても、AIパネルは既に出ている前提
+      renderStage35();
+    }
     else if (id === "s4") {
       hasUnlockMail = false; $("fever").textContent = "14";
       hasS3LabMail = false; hasS3KawaiMail = false; readS3Lab = false; readS3Kawai = false;
+      hasS3ShichoMail = false; readS3Shicho = false;
       hasS5JimuMail = false; hasS5SoudanMail = false; readS5Jimu = false; readS5Soudan = false;
       hasFJimuMail = false; hasFKohoMail = false; readFJimu = false; readFKoho = false;
       $("vitals").classList.add("crescendo");
@@ -4258,6 +5532,7 @@
     else if (id === "s5") {
       hasUnlockMail = false; $("fever").textContent = "14";
       hasS3LabMail = false; hasS3KawaiMail = false; readS3Lab = false; readS3Kawai = false;
+      hasS3ShichoMail = false; readS3Shicho = false;
       hasS4SoudanMail = false; hasS4ShichoMail = false; readS4Soudan = false; readS4Shicho = false;
       hasFJimuMail = false; hasFKohoMail = false; readFJimu = false; readFKoho = false;
       $("vitals").classList.add("crescendo");
@@ -4268,6 +5543,7 @@
     else if (id === "final") {
       hasUnlockMail = false; $("fever").textContent = "14";
       hasS3LabMail = false; hasS3KawaiMail = false; readS3Lab = false; readS3Kawai = false;
+      hasS3ShichoMail = false; readS3Shicho = false;
       hasS4SoudanMail = false; hasS4ShichoMail = false; readS4Soudan = false; readS4Shicho = false;
       hasS5JimuMail = false; hasS5SoudanMail = false; readS5Jimu = false; readS5Soudan = false;
       $("vitals").classList.add("crescendo");
@@ -4306,13 +5582,52 @@
   // 開発用。Stage 1 の中身を何度も見るとき、毎回ブリーフィングを閉じずに済ませる。
   // 参加者が実際に見る順序（go("s1") は常にブリーフィングを出す）とはずらさない。
   $("btn-s1-nobrief").addEventListener("click", () => { s1SkipBrief = true; go("s1"); s1SkipBrief = false; });
+  // devS1Preview 自体はテストプレイ準備用の一時機能（定義側のコメント参照）。
+  $("btn-s1prev-round1").addEventListener("click", () => devS1Preview("round1"));
+  $("btn-s1prev-round2").addEventListener("click", () => devS1Preview("round2"));
+  $("btn-s1prev-manual").addEventListener("click", () => devS1Preview("manual"));
+  $("btn-s1prev-ai").addEventListener("click", () => devS1Preview("ai"));
   $("btn-phs").addEventListener("click", () => {
     // Stage 1 の初回登場は固定タイマー任せ（s1DeliverAI）。この開発ボタンは
     // Stage 2 以降の「通常の苅部さん」（待たされる遅延あり）を試すためのもの。
     if (view !== "s2" && view !== "unlock" && view !== "s3") go("s2");
     phsRing();
   });
-  $("btn-enter").addEventListener("click", () => go("welcome"));
+  function showEntryError(message) {
+    const el = $("entry-error");
+    el.textContent = message;
+    el.classList.toggle("hide", !message);
+  }
+  $("btn-enter").addEventListener("click", async () => {
+    // scripted（プローブ未了・失敗を含む）は現行どおり即座にwelcomeへ抜ける。
+    if (!LIVE) { go("welcome"); return; }
+    const code = Array.from($("code").querySelectorAll("input")).map((i) => i.value.trim()).join("");
+    if (!/^\d{6}$/.test(code)) {
+      showEntryError("チームコードはASCII数字6桁で入力してください。");
+      return;
+    }
+    showEntryError("");
+    const btn = $("btn-enter");
+    btn.disabled = true;
+    const sessionRes = await liveFetch("/api/session", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ teamCode: code }),
+    });
+    if (!sessionRes.ok) {
+      btn.disabled = false;
+      showEntryError((sessionRes.body && sessionRes.body.message) || "入室に失敗しました。時間を置いて再試行してください。");
+      return;
+    }
+    const chatRes = await liveFetch("/api/teams/" + code + "/chat");
+    btn.disabled = false;
+    if (!chatRes.ok || !chatRes.body) {
+      showEntryError((chatRes.body && chatRes.body.message) || "チャット状態の取得に失敗しました。時間を置いて再試行してください。");
+      return;
+    }
+    liveState = { teamCode: code, threads: chatRes.body.threads, activeThreadId: chatRes.body.threads[0].threadId };
+    go("welcome");
+  });
   $("btn-brief").addEventListener("click", s1Begin);
   // 段落待ちの早送り。[了解しました] 自身は s1Begin へ抜けるので拾わない。
   $("ov-brief").addEventListener("click", (e) => {
@@ -4326,6 +5641,9 @@
   });
   $("btn-s4call-close").addEventListener("click", () => {
     $("ov-s4call").classList.add("hide");
+  });
+  $("btn-s3notice-close").addEventListener("click", () => {
+    $("ov-s3notice").classList.add("hide");
   });
   $("btn-copy").addEventListener("click", () => {
     const btn = $("btn-copy");
