@@ -21,8 +21,9 @@ Stage 2 の手作業はアプリ内の編集可能グリッドで行う（[../ui
 | `stage2_linelist.tsv` | **配布版**。Stage 2 のグリッド初期値 | ✅ 読む |
 | `stage2_linelist_addendum.tsv` | **配布版・追加分**。締切超過で着弾する10行 | ✅ 読む |
 | `stage2_linelist.annotated.tsv` | **設計用**。伏線3名に `★` 印が付いている | ❌ **絶対に読ませない** |
-| [`stage3_manual.md`](stage3_manual.md) | **配布版・正典**。院内感染対策マニュアル第7版・第5章（アプリ内ビューアの照会先） | ✅ 読む（PDF化して配布） |
-| [`stage3_contaminated.md`](stage3_contaminated.md) | **配布版・汚染教材**。カワイさんの添付＝罠の実体 | ✅ 読む（PDF化して配布） |
+| [`stage3_manual.md`](stage3_manual.md) | **配布版・正典**。院内感染対策マニュアル第7版・第5章「疥癬への対応」（アプリ内ビューアの照会先） | ✅ 読む（PDF化して配布） |
+| [`stage3_contaminated.md`](stage3_contaminated.md) | **配布版・汚染教材**。「疥癬対応早見表」＝カワイさんの添付＝罠の実体 | ✅ 読む（PDF化して配布） |
+| [`stage3_patients.md`](stage3_patients.md) | **配布版・正解の根拠**。転院患者3名（通常疥癬・治療完了済み）のサマリ | ✅ 読む（添付ビューアで開く） |
 | [`stage3_5_foreign_report.md`](stage3_5_foreign_report.md) | **配布版・正典**。東陵国の原因不明発熱クラスターに関する英語速報論文 | ✅ 読む（添付ビューアで開く） |
 | [`stage4_chart.md`](stage4_chart.md) | **配布版**。患者005（渡辺 三郎）のカルテ抜粋＝師長の添付＝PII検知の対象そのもの | ✅ 読む（添付ビューアで開く） |
 | [`stage5_notice_old.md`](stage5_notice_old.md) | **配布版**。去年の面会制限のお知らせ＝近藤さんの添付＝**罠ではない**悪い実例 | ✅ 読む（添付ビューアで開く） |
@@ -71,8 +72,14 @@ MRSA 陰性なのに発熱ありの3名（`005` / `6` / `008`）は、原因不�
 
 ## Stage 3 の教材
 
-- `stage3_manual.md`（正典）・`stage3_contaminated.md`（汚染教材）は**Markdown が正典で PDF は派生物**
+- Stage 3 は疥癬（かいせん）を題材にする。通常疥癬の患者（`stage3_patients.md`）に対し、角化型
+  （痂皮型）疥癬向けの過剰対応（汚染教材 `stage3_contaminated.md`）を続けてしまう**過剰対応の罠**
+  である。従来のノロウイルス版（対応不足を突く罠）とは罠の向きが逆になる。
+- `stage3_manual.md`（正典）・`stage3_contaminated.md`（汚染教材）・`stage3_patients.md`
+  （正解の根拠＝転院患者3名のサマリ）は**Markdown が正典で PDF は派生物**
   （TSV/xlsx と同じ原則をここでも踏襲。§原則 参照）。添付ビューアに渡すのは生成した PDF。
+  `stage3_manual.md` だけでは病型・治療状況が分からず、`stage3_patients.md` だけでは解除基準が
+  分からない——両方を突き合わせて初めて「標準予防策へ戻してよい」に到達する設計。
 - **罰ゲームに教材ファイルは要らない。** 罠発火時の拡大対応業務は「消毒液ボトルの補充」で、
   データではなく本数だけを扱う（定数は `S3_BOTTLES_5A` / `S3_BOTTLES_5B`）。
   かつて使っていた `stage3_contacts.tsv`（接触者リスト）は、罰の内容を差し替えた際に**削除した**——
