@@ -1,0 +1,18 @@
+/*
+ * docs/ui/00_共通シェルと通奏低音.md §3のトークン表を移植する。
+ * 名前はモックからそのまま持ち越す（同ファイル §実装メモ）。
+ * alert/crisisはStage 2・3のPRで追記する——Stage 1は最後までpeaceのまま。
+ */
+[data-mode="peace"] {
+  --bg: #f5f1e8;
+  --surface: #fffdf8;
+  --surface-2: #efe9dc;
+  --fg: #2b2724;
+  --fg-muted: #6f6559;
+  --accent: #3f7d78;
+  --rule: #ddd5c6;
+  --ok: #3f7d78;
+  --warn: #b8862b;
+  --ai-surface: #f7f9fa;
+  --ai-fg: #1a1d20;
+}

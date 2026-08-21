@@ -1,29 +1,31 @@
 import {
-  chatMessageResultSchema,
   commandResultSchema,
-  createThreadResultSchema,
   leaderboardSnapshotSchema,
   teamCodeSchema,
   teamSnapshotSchema,
   teamSyncMessageSchema,
 } from "@hell-ict/domain";
 import type {
-  ChatSnapshot,
   CommandResult,
   LeaderboardSnapshot,
+  Stage1EmailId,
   TeamSnapshot,
 } from "@hell-ict/domain";
 import { useCallback, useEffect, useRef, useState } from "react";
 
-import { ChatPane } from "./chat-pane.js";
 import { postJson } from "./http-client.js";
+import { BriefingOverlay } from "./stage1/briefing-overlay.js";
+import { Stage1Screen } from "./stage1/stage1-screen.js";
 
 const savedTeamCodeKey = "hell-ict-team-code";
 const isTeamCode = (value: string): boolean => teamCodeSchema.safeParse(value).success;
 const socketUrl = (path: string): string =>
   `${location.protocol === "https:" ? "wss" : "ws"}://${location.host}${path}`;
 
-const submitStage1 = async (snapshot: TeamSnapshot, commandId: string): Promise<CommandResult> => {
+const submitEnterStage1 = async (
+  snapshot: TeamSnapshot,
+  commandId: string,
+): Promise<CommandResult> => {
   const parsed = commandResultSchema.safeParse(
     await postJson(`/api/teams/${snapshot.teamCode}/commands`, {
       type: "enter-stage1",
@@ -35,38 +37,21 @@ const submitStage1 = async (snapshot: TeamSnapshot, commandId: string): Promise<
   return parsed.data;
 };
 
-const submitCreateThread = async (
-  teamCode: string,
-  commandId: string,
-  title: string,
-): Promise<ChatSnapshot> => {
-  const parsed = createThreadResultSchema.safeParse(
-    await postJson(`/api/teams/${teamCode}/chat/threads`, {
-      type: "create-thread",
-      commandId,
-      title,
+const submitStage1Reply = async (
+  snapshot: TeamSnapshot,
+  params: { commandId: string; emailId: Stage1EmailId; text: string },
+): Promise<CommandResult> => {
+  const parsed = commandResultSchema.safeParse(
+    await postJson(`/api/teams/${snapshot.teamCode}/commands`, {
+      type: "submit-stage1-reply",
+      commandId: params.commandId,
+      expectedRevision: snapshot.revision,
+      emailId: params.emailId,
+      text: params.text,
     }),
   );
   if (!parsed.success) throw new Error();
-  return parsed.data.snapshot;
-};
-
-const submitChatMessage = async (
-  teamCode: string,
-  commandId: string,
-  threadId: string,
-  text: string,
-): Promise<ChatSnapshot> => {
-  const parsed = chatMessageResultSchema.safeParse(
-    await postJson(`/api/teams/${teamCode}/chat/messages`, {
-      type: "send-message",
-      commandId,
-      threadId,
-      text,
-    }),
-  );
-  if (!parsed.success) throw new Error();
-  return parsed.data.snapshot;
+  return parsed.data;
 };
 
 export const App = () => {
@@ -76,11 +61,12 @@ export const App = () => {
     return saved !== null && isTeamCode(saved) ? saved : null;
   });
   const [snapshot, setSnapshot] = useState<TeamSnapshot | null>(null);
-  const [chatSnapshot, setChatSnapshot] = useState<ChatSnapshot | null>(null);
   const [leaderboard, setLeaderboard] = useState<LeaderboardSnapshot | null>(null);
-  const [leaderboardPending, setLeaderboardPending] = useState(false);
   const [message, setMessage] = useState("6桁のチームコードを入力してください。");
-  const commandId = useRef<string | null>(null);
+  const enterStage1CommandId = useRef<string | null>(null);
+  // ラウンド1は複数のメールへ並行して返信しうるため、emailIdごとにcommandIdを保持する。
+  // 同じメールへの再試行は同じcommandIdを再利用し、二重適用を防ぐ（enterStage1と同じ考え方）。
+  const replyCommandIds = useRef(new Map<Stage1EmailId, string>());
   const teamGeneration = useRef(0);
   const leaderboardGeneration = useRef(0);
 
@@ -90,18 +76,13 @@ export const App = () => {
     );
   }, []);
 
-  const acceptChatSnapshot = useCallback((next: ChatSnapshot) => {
-    setChatSnapshot((current) =>
-      current === null || next.revision >= current.revision ? next : current,
-    );
-  }, []);
-
+  // チームsyncはteam/chatの両envelopeを配信するが、AIチャットペインはラウンド1では
+  // 存在しないため（docs/ui/02_Stage1.md §狙い）、ここではchat kindを無視する。
   const acceptTeamSyncMessage = useCallback(
-    (next: { kind: "team"; snapshot: TeamSnapshot } | { kind: "chat"; snapshot: ChatSnapshot }) => {
+    (next: { kind: "team"; snapshot: TeamSnapshot } | { kind: "chat" }) => {
       if (next.kind === "team") acceptTeamSnapshot(next.snapshot);
-      else acceptChatSnapshot(next.snapshot);
     },
-    [acceptChatSnapshot, acceptTeamSnapshot],
+    [acceptTeamSnapshot],
   );
 
   const connect = useCallback(
@@ -182,39 +163,29 @@ export const App = () => {
     }
   };
 
-  const enterStage1 = async (): Promise<void> => {
+  const acknowledgeBriefing = async (): Promise<void> => {
     if (snapshot === null) return;
-    commandId.current ??= crypto.randomUUID();
+    enterStage1CommandId.current ??= crypto.randomUUID();
     try {
-      const result = await submitStage1(snapshot, commandId.current);
+      const result = await submitEnterStage1(snapshot, enterStage1CommandId.current);
       acceptTeamSnapshot(result.snapshot);
-      setLeaderboardPending(result.leaderboardPending);
-      if (!result.leaderboardPending) commandId.current = null;
-      setMessage(
-        result.leaderboardPending
-          ? "リーダーボードの同期が未完了です。再試行してください。"
-          : "Stage 1へ進みました。",
-      );
+      enterStage1CommandId.current = null;
     } catch {
       setMessage("結果を確認できません。もう一度押すと同じ操作を安全に再試行します。");
     }
   };
 
-  const createThread = async (threadCommandId: string, title: string): Promise<void> => {
-    if (joinedCode === null) throw new Error();
-    acceptChatSnapshot(await submitCreateThread(joinedCode, threadCommandId, title));
+  const submitReply = async (emailId: Stage1EmailId, text: string): Promise<void> => {
+    if (snapshot === null) throw new Error();
+    let commandId = replyCommandIds.current.get(emailId);
+    commandId ??= crypto.randomUUID();
+    replyCommandIds.current.set(emailId, commandId);
+    const result = await submitStage1Reply(snapshot, { commandId, emailId, text });
+    acceptTeamSnapshot(result.snapshot);
+    replyCommandIds.current.delete(emailId);
   };
 
-  const sendChatMessage = async (
-    messageCommandId: string,
-    threadId: string,
-    text: string,
-  ): Promise<void> => {
-    if (joinedCode === null) throw new Error();
-    acceptChatSnapshot(await submitChatMessage(joinedCode, messageCommandId, threadId, text));
-  };
-
-  if (snapshot === null)
+  if (snapshot === null || joinedCode === null)
     return (
       <main>
         <p className="eyebrow">聖クロノス総合病院 / ICT研修</p>
@@ -241,56 +212,21 @@ export const App = () => {
       </main>
     );
 
-  return (
-    <main>
-      <header>
-        <p className="eyebrow">聖クロノス総合病院 / ICT研修</p>
-        <h1>地獄のICT</h1>
-        <p>在院 398/400・空床 2・原因不明の発熱 3</p>
-      </header>
-      <section>
-        <h2>{snapshot.state.stage === "prologue" ? "Prologue: 着任" : "Stage 1: 平常運転"}</h2>
-        <p>
-          {snapshot.state.stage === "prologue"
-            ? "何も起きていません。いい一日になりますように。"
-            : "事務長からの通達により、メール処理を開始します。"}
-        </p>
-        {snapshot.state.stage === "prologue" && (
-          <button
-            type="button"
-            onClick={() => {
-              void enterStage1();
-            }}
-          >
-            了解しました
-          </button>
-        )}
-        {snapshot.state.stage === "stage1" && leaderboardPending && (
-          <button
-            type="button"
-            onClick={() => {
-              void enterStage1();
-            }}
-          >
-            リーダーボード同期を再試行
-          </button>
-        )}
-        <p role="status">{message}</p>
-      </section>
-      <aside>
-        <h2>リーダーボード</h2>
-        {leaderboard?.entries.map((entry) => (
-          <p key={entry.marker}>
-            {entry.marker}
-            {entry.isSelf ? "（自チーム）" : ""}: {entry.stage}
-          </p>
-        ))}
-      </aside>
-      <ChatPane
-        snapshot={chatSnapshot}
-        onCreateThread={createThread}
-        onSendMessage={sendChatMessage}
+  if (snapshot.state.stage === "prologue")
+    return (
+      <BriefingOverlay
+        onAcknowledge={() => {
+          void acknowledgeBriefing();
+        }}
       />
-    </main>
+    );
+
+  return (
+    <Stage1Screen
+      state={snapshot.state}
+      teamCode={joinedCode}
+      leaderboard={leaderboard}
+      onSubmitReply={submitReply}
+    />
   );
 };

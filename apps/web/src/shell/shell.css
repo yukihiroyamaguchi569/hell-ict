@@ -1,0 +1,91 @@
+/*
+ * docs/ui/00_共通シェルと通奏低音.md §2のレイアウト寸法をそのまま移植する。
+ * 基準解像度1280×720。左260px固定・中央可変（最小620px）・右ペインは
+ * このPRでは未使用（ラウンド1の間、右のAIチャットペインは存在しない）。
+ */
+.shell {
+  display: grid;
+  grid-template-rows: 56px 1fr 48px;
+  min-height: 100vh;
+  background: var(--bg);
+  color: var(--fg);
+}
+
+.shell__header {
+  display: flex;
+  align-items: center;
+  gap: 1.5rem;
+  padding: 0 1rem;
+  background: var(--surface);
+  border-bottom: 1px solid var(--rule);
+}
+
+.shell__hospital {
+  font-size: 16px;
+  font-weight: 700;
+  margin: 0;
+}
+
+.shell__vitals {
+  font-size: 14px;
+  color: var(--fg-muted);
+  font-variant-numeric: tabular-nums;
+  margin: 0;
+}
+
+.shell__clock {
+  font-size: 32px;
+  font-variant-numeric: tabular-nums;
+  margin: 0 0 0 auto;
+}
+
+.shell__team {
+  font-size: 16px;
+  margin: 0;
+}
+
+.shell__body {
+  display: grid;
+  grid-template-columns: 260px minmax(620px, 1fr);
+  min-height: 0;
+}
+
+.shell__left {
+  border-right: 1px solid var(--rule);
+  background: var(--surface);
+  overflow-y: auto;
+  padding: 0.5rem;
+}
+
+.shell__center {
+  overflow-y: auto;
+  padding: 1rem;
+}
+
+.shell__center .prose {
+  max-width: 62ch;
+}
+
+.leaderboard-bar {
+  display: grid;
+  grid-template-rows: 1fr 1fr;
+  align-items: center;
+  padding: 0 1rem;
+  background: var(--surface-2);
+  border-top: 1px solid var(--rule);
+  font-size: 14px;
+}
+
+.leaderboard-bar__stops,
+.leaderboard-bar__markers {
+  display: flex;
+  gap: 1rem;
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+
+.leaderboard-bar__markers .is-self {
+  color: var(--accent);
+  font-weight: 700;
+}

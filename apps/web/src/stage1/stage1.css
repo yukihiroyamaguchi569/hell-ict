@@ -1,0 +1,76 @@
+/* docs/ui/02_Stage1.md §0・§1・§2・§9 の要点をCSSへ落とす。 */
+
+.briefing-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 60;
+  display: grid;
+  place-items: center;
+  background: var(--bg, #f5f1e8);
+  color: var(--fg, #2b2724);
+  padding: 2rem;
+}
+
+.briefing-overlay__window {
+  max-width: 640px;
+  width: 100%;
+  font-family: var(--font-legacy, ui-monospace, monospace);
+}
+
+.briefing-overlay__speaker {
+  display: flex;
+  align-items: center;
+  gap: 1rem;
+}
+
+.briefing-overlay__portrait {
+  width: 64px;
+  height: 64px;
+  border-radius: 4px;
+  background: var(--surface-2, #efe9dc);
+}
+
+.briefing-overlay__warn {
+  color: var(--warn, #b8862b);
+  font-weight: 700;
+}
+
+.briefing-overlay__notice {
+  border: 1px solid var(--rule, #ddd5c6);
+  padding: 0.75rem 1rem;
+  font-size: 14px;
+}
+
+.briefing-overlay__ack {
+  margin-top: 1rem;
+}
+
+/* 病院から届くもの（メール本文）は2003年書式で描く（docs/ui/00_共通シェルと通奏低音.md §9）。 */
+.email-inbox__from,
+.email-inbox__subject {
+  display: block;
+  font-family: var(--font-legacy, ui-monospace, monospace);
+}
+
+.email-inbox__status {
+  display: block;
+  font-size: 14px;
+  color: var(--fg-muted, #6f6559);
+  font-variant-numeric: tabular-nums;
+}
+
+.is-urgent .email-inbox__status {
+  color: var(--warn, #b8862b);
+  font-weight: 700;
+}
+
+.reply-form .prose {
+  font-family: var(--font-legacy, ui-monospace, monospace);
+}
+
+.result-window {
+  border: 1px solid var(--rule, #ddd5c6);
+  background: var(--surface, #fffdf8);
+  padding: 1rem 1.5rem;
+  max-width: 62ch;
+}

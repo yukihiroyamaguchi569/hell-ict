@@ -6,11 +6,15 @@ test("チームが入室してStage 1へ進み、再読込後も復元する", a
   await page.goto("/");
   await page.getByLabel("チームコード").fill(uniqueTeamCode());
   await page.getByRole("button", { name: "入室する" }).click();
-  await expect(page.getByRole("heading", { name: "Prologue: 着任" })).toBeVisible();
+
+  const briefing = page.getByRole("dialog", { name: "事務長ブリーフィング" });
+  await expect(briefing).toBeVisible();
+  await briefing.click(); // 演出を飛ばして全ビートを表示する
   await page.getByRole("button", { name: "了解しました" }).click();
-  await expect(page.getByRole("heading", { name: "Stage 1: 平常運転" })).toBeVisible();
+
+  await expect(page.getByRole("navigation", { name: "受信トレイ" })).toBeVisible();
   await page.reload();
-  await expect(page.getByRole("heading", { name: "Stage 1: 平常運転" })).toBeVisible();
+  await expect(page.getByRole("navigation", { name: "受信トレイ" })).toBeVisible();
 });
 
 test("不正なチームコードを拒否する", async ({ page }) => {
