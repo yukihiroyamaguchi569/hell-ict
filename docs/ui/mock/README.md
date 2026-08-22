@@ -70,7 +70,7 @@ JS 構造そのものは資産ではない。単一ファイル・フレーム�
 - **`hideOverlays()`**（2128-）— オーバーレイIDの配列を舐めて閉じる。新しいオーバーレイを足したらこの配列に追加。Stage 3.5 の `#ov-s35-report`/`#ov-s35-kanbu` もここに入っている。
 - **`transition()`**（5125-）— 急変（Stage 1→2 の転調）専用。`go()` を経由しない。
 - **自動遷移は3か所ある**（2026-08-22追加。それまではファシリテーターがdevbarで送っていた）。
-  Prologue→Stage 1（`inboxStartAuto()`/`inboxNoteRead()`——3通とも開封で20秒後、または入室から
+  Prologue→Stage 1（`inboxStartAuto()`/`inboxNoteRead()`——3通とも開封で7秒後、または入室から
   2分で `go("s1")`）、Stage 2クリア→Stage 3（`unlockSequence()` 末尾）、Stage 4クリア→Stage 5
   （`stage4UnlockSequence()` 末尾）。既存の Stage 3→3.5（`stage3UnlockSequence()`）と合わせ、
   Prologue から Final 手前までが繋がる。**3.5→4（`stage35UnlockSequence()`）だけは自動ではなく、
@@ -328,7 +328,8 @@ Stage 5 に罠は無く、`sendAI()`（2379）は `view === "s5"` のとき `S4_
 - **各種タイマー定数は仮値。** `S1_LIMIT`（60秒）/`S1_SAFETY`（240秒）/`S3_KARUBE_DELAY`（40秒）/
   `S3_BOTTLE_FILL_MS`（700ms）/`S4_GATE_MS`（450ms）/`S4_DEADLINE`（2分）/
   `S5_KARUBE_DELAY`（40秒）/`S5_GEN_LIMIT`（5回）/`S5_GEN_MS`（2.5秒）/
-  `INBOX_AUTO_MS`（2分）/`INBOX_READ_GRACE_MS`（20秒）は、いずれも2026-08-23テストプレイ向けの仮値。
+  `INBOX_AUTO_MS`（2分）/`INBOX_READ_GRACE_MS`（7秒。[../01_Prologue.md](../01_Prologue.md) §実装上の注意
+  「3通そろってから7秒」と一致させてある）は、いずれも2026-08-23テストプレイ向けの仮値。
   当日朝の通しプレイで較正した値に置き換える（`S4_DEADLINE`は特に実測の裏付けが要る）。
   **罰ゲームの長さを決める定数はもう無い**（`S3_PENALTY`/`S4_PENALTY` は削除）——終わるのは作業を
   終えたときなので、狙いの1分に近づけるにはボトルの本数（`S3_BOTTLES_5A`/`5B`）と1本あたりの
