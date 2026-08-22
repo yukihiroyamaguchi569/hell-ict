@@ -7,7 +7,7 @@ import {
   teamSyncMessageSchema,
 } from "@hell-ict/domain";
 import { FakeAiGateway } from "@hell-ict/domain/fakes";
-import type { AiGateway, ChatSnapshot } from "@hell-ict/domain";
+import type { AiGateway, ChatSnapshot, PromptProfile } from "@hell-ict/domain";
 import { describe, expect, it } from "vitest";
 
 import { handleChatMessage } from "../src/index.js";
@@ -23,7 +23,7 @@ const sendMessage = (
     commandId: string;
     threadId: string;
     text: string;
-    promptProfile?: "default" | "s1" | "s3";
+    promptProfile?: PromptProfile;
   },
   aiGateway: FakeAiGateway,
 ): Promise<Response> =>
@@ -39,7 +39,9 @@ const sendMessage = (
 
 type PromptProfileCase = {
   readonly label: string;
-  readonly promptProfile?: "s1" | "s3";
+  // 未指定（undefined）が"default"のケースを兼ねるので、明示できるのは残りのprofileだけ。
+  // 共有の`PromptProfile`から引くことで、profileが増えたらここも自動で追従する。
+  readonly promptProfile?: Exclude<PromptProfile, "default">;
   readonly teamCode: string;
   readonly threadCommandId: string;
   readonly messageCommandId: string;
@@ -307,6 +309,48 @@ describe("P1C チャット骨格", () => {
     const thread = final.threads.find((t) => t.threadId === threadId);
     expect(thread?.messages).toEqual([]);
   });
+
+  // 送信前ゲートはpromptProfileより前に効く——ステージ別の振る舞いを足しても、
+  // 「PIIをOpenAIへ送らない」（企画書§7）だけは全profileで降ろさない。判定を持たない
+  // Final（promptProfile未指定＝default）や、参加者がコンテキスト欄へ名簿を貼りうる
+  // Stage 1の下書き（`s1`）でも同じく止まることを、profileごとに固定する。
+  it.each([
+    { label: "未指定（Final）", teamCode: "400110", promptProfile: undefined },
+    { label: "default", teamCode: "400111", promptProfile: "default" },
+    { label: "s1", teamCode: "400112", promptProfile: "s1" },
+    { label: "s3", teamCode: "400113", promptProfile: "s3" },
+  ] as const)(
+    "promptProfile=$labelでもPIIは送信前に止まり、AI呼び出しは0回",
+    async ({ teamCode, promptProfile }) => {
+      await session(teamCode);
+      const created = await createThread(
+        teamCode,
+        `00000000-0000-4000-8000-0000000009${teamCode.slice(-2)}`,
+        "副",
+      );
+      const { snapshot } = createThreadResultSchema.parse(await created.json());
+      const threadId = snapshot.threads[0]?.threadId;
+      if (threadId === undefined) throw new Error("unexpected");
+
+      const gateway = new FakeAiGateway([]);
+      const response = await sendMessage(
+        teamCode,
+        {
+          commandId: `00000000-0000-4000-8000-0000000008${teamCode.slice(-2)}`,
+          threadId,
+          text: "長峰 静香さんの件をまとめてください",
+          promptProfile,
+        },
+        gateway,
+      );
+
+      expect(response.status).toBe(422);
+      expect(gateway.requests).toHaveLength(0);
+      expect(httpErrorSchema.parse(await response.json()).code).toBe("pii_blocked");
+      const stored = await chatSnapshotOf(teamCode);
+      expect(stored.threads.find((t) => t.threadId === threadId)?.messages).toEqual([]);
+    },
+  );
 
   it("匿名化した依頼はゲートを素通りしてAIへ届く", async () => {
     await session("400010");
