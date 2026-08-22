@@ -9,6 +9,10 @@ test-results/
 .stryker-tmp/
 apps/worker/public/*
 !apps/worker/public/.gitkeep
-.dev.vars
+# 効果音（効果音ラボ）の音源。規約が素材の再配布を禁じており、このリポジトリは
+# 公開なのでmp3そのものはコミットしない。各自が assets/sounds/ へ置き、
+# scripts/build-testplay.sh が配信版へコピーする（docs/ui/mock/README.md §効果音）。
+assets/sounds/
+.dev.vars*
 *.tsbuildinfo
 .mulmoterminal.json
