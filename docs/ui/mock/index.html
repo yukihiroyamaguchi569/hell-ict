@@ -2990,12 +2990,30 @@
   let hasFJimuMail = false, readFJimu = false;
   let hasFKohoMail = false, readFKoho = false;
 
-  /* 6桁コード入力欄 */
+  /* 6桁コード入力欄。空欄で始める（2026-08-22 ユーザー決定）。
+     開発中は固定の6桁を流し込んでいたが、本番では上書きし忘れたチームが
+     そのまま入室ボタンを押し、全チームが同じ部屋へ入る事故になる。
+     チームコードはファシリテーターが読み上げるので、空から打たせる。 */
   $("code").innerHTML = "";
-  "482103".split("").forEach((ch) => {
+  for (let n = 0; n < 6; n++) {
     const i = document.createElement("input");
-    i.maxLength = 1; i.value = ch; i.setAttribute("aria-label", "チームコード");
+    i.maxLength = 1; i.value = ""; i.setAttribute("aria-label", "チームコード");
+    i.setAttribute("inputmode", "numeric");
     $("code").appendChild(i);
+  }
+  /* 空欄開始だと1桁打つたびに次の枠をクリックさせることになるので、
+     入力で次へ、Backspaceで前へ、フォーカスを送る。読み上げを聞きながら
+     6桁を続けて打てるようにするためで、判定（/^\d{6}$/）は触らない。 */
+  $("code").addEventListener("input", (e) => {
+    const boxes = Array.from($("code").querySelectorAll("input"));
+    const at = boxes.indexOf(e.target);
+    if (at >= 0 && e.target.value && at + 1 < boxes.length) boxes[at + 1].focus();
+  });
+  $("code").addEventListener("keydown", (e) => {
+    if (e.key !== "Backspace" || e.target.value) return;
+    const boxes = Array.from($("code").querySelectorAll("input"));
+    const at = boxes.indexOf(e.target);
+    if (at > 0) boxes[at - 1].focus();
   });
 
   /* ------------------------------------------------------------------ */
