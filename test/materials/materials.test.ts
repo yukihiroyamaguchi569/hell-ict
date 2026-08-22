@@ -84,8 +84,7 @@ describe("教材の整合性", () => {
 
   // Stage 4再設計（家族返信→保健所への発熱患者一覧提出）の罠教材。Stage 2とは対句で、
   // こちらは氏名列を「あえて残す」——丸ごとAIに貼ると個人名がPIIゲートに触れるべき罠
-  // （docs/materials/stage4_fever_linelist.md 実装メモ参照）。氏名検知パターンの追加は
-  // Worker担当の範囲のため、ここではファイル自体の構造整合のみを固定する。
+  // （docs/materials/stage4_fever_linelist.md 実装メモ参照）。
   describe("stage4_fever_linelist.tsv（発熱患者一覧・罠の実体）", () => {
     it("発熱患者14名分、患者ID/氏名/病棟/発熱確認日/最高体温/備考の6列を持つ", async () => {
       const rows = await readTsv("stage4_fever_linelist.tsv");
@@ -109,6 +108,34 @@ describe("教材の整合性", () => {
       const patient = rows.find((row) => row[0] === "005");
 
       expect(patient?.slice(0, 5)).toEqual(["005", stage4Patient.name, "5A", "7/3", "38.1℃"]);
+    });
+
+    // 名簿とPII検知パターン（packages/domain/src/pii.ts §feverLinelistPatientNames）の
+    // 網羅一致を固定する。pii.test.ts は代表数名しか見ないので、名簿へ1名足して
+    // パターン側を足し忘れると、その1名の氏名だけがゲートをすり抜けてOpenAIへ届く
+    // ——教材とパターンが別々の場所にある以上、この対応漏れは静かに起きる
+    // （企画書§7「ダミー個人情報を実際に外部へ送信しない」の最後の防波堤）。
+    // 全氏名を1件ずつ検査し、姓名間の空白を除いた表記でも検知することまで見る。
+    it("名簿の全氏名が送信前ゲートで検知される（1名の取りこぼしも許さない）", async () => {
+      const rows = await readTsv("stage4_fever_linelist.tsv");
+      const names = rows.map((row) => row[1] ?? "");
+
+      expect(names.every((name) => name.length > 0)).toBe(true);
+      for (const name of names) {
+        expect(detectPii(`${name}さんの件です`)).toBe("患者氏名");
+        expect(detectPii(`${name.replace(/\s/gu, "")}さんの件です`)).toBe("患者氏名");
+      }
+    });
+
+    // 名簿を丸ごと貼る（＝罠そのもの）とゲートが必ず止めることを、実際の
+    // ファイル本文で確認する。行単位でも1行残らず止まることまで見る。
+    it("名簿を丸ごと貼っても行ごとに貼っても検知される", async () => {
+      const text = await readFile(materialsPath("stage4_fever_linelist.tsv"), "utf8");
+
+      expect(detectPii(text)).toBe("患者氏名");
+      for (const line of text.split("\n").filter((row) => row.trim() !== "")) {
+        expect(detectPii(line)).toBe("患者氏名");
+      }
     });
   });
 });
