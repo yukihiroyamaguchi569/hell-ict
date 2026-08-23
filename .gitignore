@@ -13,6 +13,9 @@ apps/worker/public/*
 # 公開なのでmp3そのものはコミットしない。各自が assets/sounds/ へ置き、
 # scripts/build-testplay.sh が配信版へコピーする（docs/ui/mock/README.md §効果音）。
 assets/sounds/
+# テストプレイのアンケート回答。参加者の自由記述を含み、このリポジトリは公開なので
+# CSVはコミットしない。ローカルの docs/testplay/ に置いて参照する。
+docs/testplay/*.csv
 .dev.vars*
 *.tsbuildinfo
 .mulmoterminal.json
