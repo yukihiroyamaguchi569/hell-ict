@@ -84,6 +84,9 @@ importers:
       '@hell-ict/domain':
         specifier: workspace:*
         version: link:../../packages/domain
+      zod:
+        specifier: 4.1.12
+        version: 4.1.12
     devDependencies:
       '@cloudflare/vitest-pool-workers':
         specifier: 0.22.0
