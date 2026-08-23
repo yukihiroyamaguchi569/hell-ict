@@ -8,6 +8,7 @@ repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 mock_html="${repo_root}/docs/ui/mock/index.html"
 assets_src="${repo_root}/assets/images/production"
 sounds_src="${repo_root}/assets/sounds"
+dashboard_html="${repo_root}/apps/worker/dashboard/index.html"
 public_dir="${repo_root}/apps/worker/public"
 
 rm -rf "${public_dir}"
@@ -80,5 +81,9 @@ if [ -d "${sounds_src}" ]; then
 else
   echo "sounds: skipped (${sounds_src} not found)"
 fi
+
+# 会場前面ディスプレイ用の進捗ボード（/dashboard.html）。public_dirは毎回rm -rfするので、
+# ソースはapps/worker/dashboard/に置き、生成のたびにコピーする。
+cp "${dashboard_html}" "${public_dir}/dashboard.html"
 
 echo "built: ${public_dir}"

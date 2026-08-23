@@ -9,7 +9,8 @@
     "test": "vitest run"
   },
   "dependencies": {
-    "@hell-ict/domain": "workspace:*"
+    "@hell-ict/domain": "workspace:*",
+    "zod": "4.1.12"
   },
   "devDependencies": {
     "@cloudflare/vitest-pool-workers": "0.22.0",

@@ -3298,6 +3298,26 @@
     }
   }
 
+  /* ステージ進行をサーバへ通知する。fire-and-forget——await せず結果も見ない。
+     liveFetch は例外を投げない（失敗は status:0）ので、送信が失敗しても
+     ゲームの進行は止まらない。scripted時（LIVE=false）と未入室時
+     （liveState=null）は何も送らない。 */
+  function reportProgress(pos, kind) {
+    if (!LIVE || !liveState || !liveState.teamCode) return;
+    liveFetch("/api/progress", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        teamCode: liveState.teamCode,
+        teamName: (teamName || "").slice(0, 24),
+        pos: pos,
+        view: view,
+        kind: kind,
+        clientAt: new Date().toISOString(),
+      }),
+    });
+  }
+
   /* AIペインのタブを liveState.threads から描画する。scripted時
      （liveState===null）は静的マークアップ（「メイン」＋「＋」）のまま
      何もしない。 */
@@ -4698,7 +4718,7 @@
   function s1Result(kind) {
     s1.cleared = true; s1.result = kind;
     s1.items.forEach((x) => { if (x.state === "live") x.state = "done"; });
-    TEAMS[2].pos = 2; drawMarks();
+    TEAMS[2].pos = 2; drawMarks(); reportProgress(2, "clear");
     s1Center(); s1List();
     // Stage 2 へは直接飛ばさない。片付いたと思った一拍のあとに急変が来る。
     // 事務長の窓はOKボタンで閉じ、閉じた0.7秒後に赤帯（okBtnハンドラ側）。
@@ -5413,7 +5433,7 @@
     hasUnlockMail = true; renderMails("u");
     sfx("decision1");   // 師長の承認メールが着弾する
     // 自チームのマーカーが S3 へ滑る
-    TEAMS[2].pos = 3; drawMarks();
+    TEAMS[2].pos = 3; drawMarks(); reportProgress(3, "clear");
     await wait(700);
     if (view !== "s2") return;   // 判断C
     // 解錠の喜びの陰で、誰も見ていない数字が増える。演出はつけない。
@@ -5610,7 +5630,7 @@
     // （先に 14 にすると急変の一報が死ぬ）。
     // 停留所は 2026-08-22 の表示番号振り直しで S4 が独立したので、ここで進める
     // （以前は S3 の停留所を共有していたため進めなかった）。
-    TEAMS[2].pos = 4; drawMarks();
+    TEAMS[2].pos = 4; drawMarks(); reportProgress(4, "clear");
     go("s35");
   }
 
@@ -5974,7 +5994,7 @@
     if (view !== "s35") return;   // 判断C
     $("ov-unlock").classList.add("hide");
     // 表示番号振り直し後、このクリアで進むのは S5（旧 Stage 4）の停留所。
-    TEAMS[2].pos = 5; drawMarks();
+    TEAMS[2].pos = 5; drawMarks(); reportProgress(5, "clear");
     // このステージだけ、クリア後に次のシーンへ実際に遷移する（devbar・URLハッシュ
     // 単体起動でも詰まないようにするため。docs/ui/mock/README.md の他ステージは
     // 遷移せず状態更新のみで留まるが、S3.5→S4 の配線検証にはここが要る）。
@@ -6187,7 +6207,7 @@
     // devbarで送る必要があった）。
     // 発熱インジケータは動かさない——Stage 4・5 は 14 のまま継続
     // （docs/scenario/00_未知ウイルスの通奏低音.md §3「●●●継続」）。
-    TEAMS[2].pos = 6; drawMarks();
+    TEAMS[2].pos = 6; drawMarks(); reportProgress(6, "clear");
     await wait(900);
     if (view !== "s4") return;   // 判断C
     go("s5");
@@ -6556,7 +6576,7 @@
   function stage5GoalSequence() {
     // 発熱インジケータは動かさない——Stage 4・5 は 14 のまま継続
     // （docs/scenario/00_未知ウイルスの通奏低音.md §3「●●●継続」）。
-    TEAMS[2].pos = 7; drawMarks();   // フッターの停留所表示も同時に進める
+    TEAMS[2].pos = 7; drawMarks(); reportProgress(7, "clear");   // フッターの停留所表示も同時に進める
     goalSequence();
     $("goal-s").textContent = "レース終了 — このあと振り返りへ進みます";
     // .onclick への代入（addEventListener の積み増しではなく上書き）——
@@ -7060,7 +7080,7 @@
     // 置いていったことが見えるほうが、このステージの主題に合う。
     s2.left = 0;
     s2.items.forEach((x) => { if (x.state === "live") { x.state = "left"; s2.left++; } });
-    TEAMS[2].pos = 3; drawMarks();
+    TEAMS[2].pos = 3; drawMarks(); reportProgress(3, "clear");
     // 通奏低音は Stage 2 で 9 名（docs/ui/00 §4）。1回だけ薄く光らせる。
     const f = $("fever");
     f.textContent = "9"; f.classList.add("bumped");
@@ -7305,7 +7325,7 @@
       hasFJimuMail = false; hasFKohoMail = false; readFJimu = false; readFKoho = false;
       $("fever").textContent = "3";
       $("vitals").classList.remove("crescendo");
-      TEAMS[2].pos = 1; drawMarks();
+      TEAMS[2].pos = 1; drawMarks(); reportProgress(1, "jump");
     } else if (id === "s1") {
       // レースが始まるのは事務長の [了解しました] から（s1Begin）。
       // 話を読んでいる間はボードも時計も出さない——他チームの位置が見えたら、
@@ -7328,7 +7348,7 @@
       hasS5JimuMail = false; hasS5SoudanMail = false; readS5Jimu = false; readS5Soudan = false;
       hasFJimuMail = false; hasFKohoMail = false; readFJimu = false; readFKoho = false;
       $("vitals").classList.remove("crescendo");
-      TEAMS[2].pos = 1; drawMarks();
+      TEAMS[2].pos = 1; drawMarks(); reportProgress(1, "jump");
       renderStage1Flood(s1SkipBrief);
     }
     else if (id === "s2") {
@@ -7339,7 +7359,7 @@
       hasS5JimuMail = false; hasS5SoudanMail = false; readS5Jimu = false; readS5Soudan = false;
       hasFJimuMail = false; hasFKohoMail = false; readFJimu = false; readFKoho = false;
       $("vitals").classList.remove("crescendo");
-      TEAMS[2].pos = 2; drawMarks();
+      TEAMS[2].pos = 2; drawMarks(); reportProgress(2, "jump");
       // AIパネルはここでは出さない。Stage 2 独自の苅部さんトリガー
       // （renderStage2Excel() 内で仕込む）が解禁する。
       renderStage2Excel();
@@ -7365,7 +7385,7 @@
       hasS5JimuMail = false; hasS5SoudanMail = false; readS5Jimu = false; readS5Soudan = false;
       hasFJimuMail = false; hasFKohoMail = false; readFJimu = false; readFKoho = false;
       $("vitals").classList.add("crescendo");
-      TEAMS[2].pos = 3; drawMarks();
+      TEAMS[2].pos = 3; drawMarks(); reportProgress(3, "jump");
       revealAI(true);   // Stage 2 を経ずに devbar から直接来ても、AIパネルは既に出ている前提
       renderStage3();
     }
@@ -7377,7 +7397,7 @@
       $("vitals").classList.add("crescendo");
       // 2026-08-22 の表示番号振り直しで、このステージ（内部ID s35）は Stage 4 として
       // 専用の停留所を持つ。以前は S3 の停留所を共有していた。
-      TEAMS[2].pos = 4; drawMarks();
+      TEAMS[2].pos = 4; drawMarks(); reportProgress(4, "jump");
       revealAI(true);   // Stage 3 を経ずに devbar から直接来ても、AIパネルは既に出ている前提
       renderStage35();
     }
@@ -7388,7 +7408,7 @@
       hasS5JimuMail = false; hasS5SoudanMail = false; readS5Jimu = false; readS5Soudan = false;
       hasFJimuMail = false; hasFKohoMail = false; readFJimu = false; readFKoho = false;
       $("vitals").classList.add("crescendo");
-      TEAMS[2].pos = 5; drawMarks();
+      TEAMS[2].pos = 5; drawMarks(); reportProgress(5, "jump");
       revealAI(true);   // Stage 3 を経ずに devbar から直接来ても、AIパネルは既に出ている前提
       renderStage4();
     }
@@ -7399,7 +7419,7 @@
       hasS4JimuMail = false; readS4Jimu = false;
       hasFJimuMail = false; hasFKohoMail = false; readFJimu = false; readFKoho = false;
       $("vitals").classList.add("crescendo");
-      TEAMS[2].pos = 6; drawMarks();
+      TEAMS[2].pos = 6; drawMarks(); reportProgress(6, "jump");
       revealAI(true);   // Stage 4 を経ずに devbar から直接来ても、AIパネルは既に出ている前提
       renderStage5();
     }
@@ -7410,7 +7430,7 @@
       hasS4JimuMail = false; readS4Jimu = false;
       hasS5JimuMail = false; hasS5SoudanMail = false; readS5Jimu = false; readS5Soudan = false;
       $("vitals").classList.add("crescendo");
-      TEAMS[2].pos = 7; drawMarks();
+      TEAMS[2].pos = 7; drawMarks(); reportProgress(7, "jump");
       // 他ステージと違い revealAI() は呼ばない——Final は右ペインごと畳む
       // （renderFinal 内のコメント）。苅部さんも登場しないので #phs も出さない。
       renderFinal();
@@ -7525,6 +7545,8 @@
     }
     liveState = { teamCode: code, threads: chatRes.body.threads, activeThreadId: chatRes.body.threads[0].threadId };
     commitTeamName(code, name);
+    // チーム名がサーバへ届く最初の機会。commitTeamName の後（teamName 確定後）に送る。
+    reportProgress(TEAMS[2].pos, "entry");
     go("welcome");
   });
   $("btn-brief").addEventListener("click", s1Begin);

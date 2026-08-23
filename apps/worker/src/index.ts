@@ -18,6 +18,7 @@ import type {
 
 import { error, isWebSocketRequest, json, parseJson, teamCodeFromPath } from "./http.js";
 import { createAiGateway, OpenAiRefusalError } from "./openai-gateway.js";
+import { handleProgressPost, handleProgressSummary } from "./progress.js";
 import { RaceLeaderboard } from "./race-leaderboard.js";
 import { systemPromptFor } from "./stage-prompts.js";
 import { TeamRoom } from "./team-room.js";
@@ -201,6 +202,7 @@ const handleLeaderboardSync = (request: Request, env: Env): Promise<Response> =>
 
 const handlePost = (request: Request, env: Env, url: URL): Promise<Response> => {
   if (url.pathname === "/api/session") return handleSession(request, env);
+  if (url.pathname === "/api/progress") return handleProgressPost(request, env);
   const threadsTeamCode = teamCodeFromPath(url.pathname, "/api/teams/", "/chat/threads");
   if (threadsTeamCode !== null) return handleCreateThread(request, env, threadsTeamCode);
   const messagesTeamCode = teamCodeFromPath(url.pathname, "/api/teams/", "/chat/messages");
@@ -222,6 +224,7 @@ const handleChatSnapshot = async (env: Env, teamCode: TeamCode): Promise<Respons
 };
 
 const handleGet = (request: Request, env: Env, url: URL): Promise<Response> => {
+  if (url.pathname === "/api/progress/summary") return handleProgressSummary(env);
   const teamCode = teamCodeFromPath(url.pathname, "/api/teams/", "/sync");
   if (teamCode !== null) return handleTeamSync(request, env, teamCode);
   const chatTeamCode = teamCodeFromPath(url.pathname, "/api/teams/", "/chat");
