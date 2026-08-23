@@ -372,8 +372,16 @@
          * 取得に失敗しても前回の描画をそのまま残す（会場の盤面が空になるのが一番困る）。
          * ネットワークエラー（try/catch）とHTTPエラー（!ok）の両方を落ちたものとして扱い、
          * 右上に「接続断」を出す。次に成功したら消す。
+         *
+         * ポーリング間隔(3秒)よりタイムアウト(4秒)が長いので、前回が終わらないうちに
+         * 次の番が来る。多重に走らせると、遅れて返ってきた古い応答が新しい表示を
+         * 上書きしたり、古い失敗が成功後に「接続断」を点け直したりする。
+         * 実行中は次を見送り、1本だけが走るようにする。
          */
+        let pollInFlight = false;
         const poll = async () => {
+          if (pollInFlight) return;
+          pollInFlight = true;
           const controller = new AbortController();
           const timer = setTimeout(() => {
             controller.abort();
@@ -391,6 +399,7 @@
             link.classList.add("down");
           } finally {
             clearTimeout(timer);
+            pollInFlight = false;
           }
         };
 

@@ -23,20 +23,30 @@ export const progressSchemaSql = [
 
 /**
  * schema/progress.sqlの適用忘れで当日リクエストが全滅しないよう、初回アクセス時に
- * テーブルを作る。毎リクエストでDDLを流さないようモジュールスコープで1回に抑えるが、
- * 失敗したときはフラグを戻して次のリクエストで再試行する（1度の失敗で
- * 以後ずっとテーブル無しのまま動き続ける状態を作らない）。
+ * テーブルを作る。毎リクエストでDDLを流さないようモジュールスコープで1回に抑える。
+ *
+ * 「実行中」を真偽値ではなくPromiseそのもので覚える。コールドスタート直後に複数の
+ * リクエストが重なると、真偽値では2本目が初期化の完了を待たずに先へ進み、まだ
+ * テーブルが無い状態でINSERTして503になる。全員が同じPromiseをawaitすれば、
+ * DDLは1回だけ流れ、後続は完了を待ってから進む。
+ *
+ * 失敗したときはnullへ戻し、次のリクエストで作り直しを試みる（1度の失敗で以後ずっと
+ * テーブル無しのまま動き続ける状態を作らない）。
  */
-let schemaReady = false;
-const ensureSchema = async (db: D1Database): Promise<void> => {
-  if (schemaReady) return;
-  schemaReady = true;
-  try {
-    await db.exec(progressSchemaSql);
-  } catch (caught) {
-    schemaReady = false;
-    throw caught;
-  }
+/** ensureSchemaが必要とするのはexecだけ。テストからFakeを渡せるよう最小限へ絞る。 */
+export type SchemaRunner = Pick<D1Database, "exec">;
+
+let schemaReady: Promise<void> | null = null;
+export const ensureSchema = (db: SchemaRunner): Promise<void> => {
+  if (schemaReady !== null) return schemaReady;
+  schemaReady = db.exec(progressSchemaSql).then(
+    () => undefined,
+    (caught: unknown) => {
+      schemaReady = null;
+      throw caught;
+    },
+  );
+  return schemaReady;
 };
 
 /**

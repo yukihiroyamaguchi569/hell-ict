@@ -59,16 +59,28 @@ const DROP_TABLE = "DROP TABLE IF EXISTS progress_events;";
 
 // このpoolではD1の中身がテスト間で巻き戻らない（KVやDOと違い持ち越される）ため、
 // 各テストの冒頭でテーブルごと作り直して白紙から始める。
-// 1本目だけは、テーブルが無い状態からWorker自身のensureSchemaが作る経路を通すので、
-// スキーマを流さずにDROPだけしておく。
+//
+// ensureSchemaの初期化状態はモジュールスコープのPromiseで、テストファイル内で
+// 持ち越される。「まだ一度も初期化していない」状態を踏めるのはファイル先頭の
+// このテストだけなので、コールドスタート関連はここへ集約する。
+// スキーマは流さずDROPだけして、Worker自身にテーブルを作らせる。
 describe("進捗記録: スキーマ未適用のD1", () => {
-  it("マイグレーション未適用でもWorkerがテーブルを作って記録する", async () => {
+  it("マイグレーション未適用でも、同時に届いた複数リクエストを取りこぼさない", async () => {
     await env.PROGRESS_DB.exec(DROP_TABLE);
 
-    const response = await postJson("/api/progress", event());
-    expect(response.status).toBe(200);
-    await expect(response.json()).resolves.toEqual({ ok: true });
-    expect((await summary()).teams).toMatchObject([{ teamCode: "100001", pos: 1 }]);
+    // 初期化が1回きりのフラグ方式だと、2本目がテーブル作成の完了を待たずに
+    // INSERTへ進んで503になる。共有Promiseを待つので両方とも200になる。
+    const responses = await Promise.all([
+      postJson("/api/progress", event({ pos: 1, view: "s1" })),
+      postJson("/api/progress", event({ teamCode: "100002", teamName: "第二班", pos: 3 })),
+    ]);
+
+    expect(responses.map((response) => response.status)).toEqual([200, 200]);
+    await expect(responses[0]?.json()).resolves.toEqual({ ok: true });
+    expect((await summary()).teams).toMatchObject([
+      { teamCode: "100002", pos: 3 },
+      { teamCode: "100001", pos: 1 },
+    ]);
   });
 });
 
