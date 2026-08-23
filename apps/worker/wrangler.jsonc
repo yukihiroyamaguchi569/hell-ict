@@ -14,17 +14,14 @@
     "directory": "./public",
     "run_worker_first": ["/api/*"],
   },
-  // テストプレイ当日の進捗記録用。database_idはプレースホルダであり、実在のDBを指していない。
-  // デプロイ直前に `wrangler d1 create hell-ict-testplay` を実行し、出力された実IDへ
-  // 差し替えること。差し替えないままdeployすると本番で進捗記録だけが落ちる
-  // （--dry-runとローカル実行はプレースホルダのままでも通る）。
+  // テストプレイ当日の進捗記録用（2026-08-23に `wrangler d1 create hell-ict-testplay` で作成）。
   // スキーマは ./schema/progress.sql。src/progress.tsのensureSchemaが初回アクセス時にも
   // CREATE TABLE IF NOT EXISTSを流すので、適用忘れでリクエストが落ちることはない。
   "d1_databases": [
     {
       "binding": "PROGRESS_DB",
       "database_name": "hell-ict-testplay",
-      "database_id": "00000000-0000-0000-0000-000000000000",
+      "database_id": "cac14ad2-c5d1-44de-9a5a-c644cabbc146",
     },
   ],
   "durable_objects": {
