@@ -400,6 +400,20 @@
   font-family: var(--font-legacy); margin-top: 4px;
 }
 .verdict .done { font-size: 17px; font-weight: 700; color: var(--ok); padding-top: 6px; }
+/* 判定が「動いている」ことを見せる（issue #69）。差し戻しの文言が前回と同じだと
+   画面が一切変わらず、確認されたのか分からなかった。確認中は回る輪を出し、
+   結果の行は毎回改めて浮かび上がらせる。 */
+.verdict > .lead, .verdict > .done { animation: verdictIn .28s ease both; }
+.verdict .checking::before {
+  content: ""; display: inline-block; width: 12px; height: 12px; margin-right: 8px;
+  vertical-align: -1px; border-radius: 50%;
+  border: 2px solid var(--fg-muted); border-top-color: transparent;
+  animation: verdictSpin .8s linear infinite;
+}
+/* 結果の行が下に付いたら輪は止める。JS側で消し忘れないようCSSで自動にする。 */
+.verdict .checking:not(:last-child)::before { display: none; }
+@keyframes verdictIn { from { opacity: 0; transform: translateY(3px); } to { opacity: 1; transform: none; } }
+@keyframes verdictSpin { to { transform: rotate(360deg); } }
 
 /* --- AIチャット：暗い病院の中で、ここだけが白い ------------------------ */
 .ai { background: var(--ai-surface); color: var(--ai-fg); display: flex; flex-direction: column; min-height: 0; }
@@ -1834,6 +1848,12 @@
   const paneL = $("pane-l"), paneC = $("pane-c"), paneR = $("pane-r");
   const reduce = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
   const wait = (ms) => new Promise((r) => setTimeout(r, reduce ? 0 : ms));
+  /* 判定枠を「確認中」に置き直し、結果の行を足していく器（.verdict）を返す。
+     全ステージの提出判定がここを通るので、確認中の見せ方（.checking の輪）が揃う。 */
+  function verdictChecking(v) {
+    v.innerHTML = '<div class="verdict"><div class="lead checking">提出を確認しています…</div></div>';
+    return v.firstElementChild;
+  }
   let timers = [];
   const later = (fn, ms) => { timers.push(setTimeout(fn, reduce ? 0 : ms)); };
   const clearLater = () => { timers.forEach(clearTimeout); timers = []; };
@@ -5371,8 +5391,7 @@
     $("actions").classList.add("hide");
     $("folded").classList.remove("hide");
     $("btn-reopen").classList.add("hide");
-    v.innerHTML = '<div class="verdict"><div class="lead">提出を確認しています…</div></div>';
-    const box = v.firstElementChild;
+    const box = verdictChecking(v);
     const failAt = bad ? bad.at : -1;
     // 不合格のときだけここで鳴らす。合格は直後の unlockSequence() が解錠音を出すので、
     // ここで足すと「判定音→解錠音」が続けて鳴って忙しい。
@@ -5561,8 +5580,7 @@
       release: $("s3-release").value
     };
     $("s3-actions").classList.add("hide");
-    v.innerHTML = '<div class="verdict"><div class="lead">提出を確認しています…</div></div>';
-    const box = v.firstElementChild;
+    const box = verdictChecking(v);
     await wait(500);
     if (view !== "s3") { s3Verdicting = false; return; }   // 判断C：シーンを離れていたら以降は何もしない
 
@@ -5867,8 +5885,7 @@
     $("s35-box").classList.remove("warn");
     const text = $("s35-summary").value;
     $("btn-s35-submit").disabled = true;
-    v.innerHTML = '<div class="verdict"><div class="lead">提出を確認しています…</div></div>';
-    const box = v.firstElementChild;
+    const box = verdictChecking(v);
     await wait(500);
     if (view !== "s35") { s35Verdicting = false; return; }   // 判断C：シーンを離れていたら以降は何もしない
 
@@ -5909,6 +5926,7 @@
     s35ActionVerdicting = true;
     $("s35-action-box").classList.remove("warn");
     const text = $("s35-action").value;
+    const box = verdictChecking(v);
     await wait(400);
     if (view !== "s35") { s35ActionVerdicting = false; return; }   // 判断C
 
@@ -5918,8 +5936,10 @@
       const toPatients = S35_ACTION_CONTENT.test(text) && S35_ACTION_PATIENT.test(text);
       $("s35-action-box").classList.add("warn");
       sfx("cancel");   // 差し戻し（患者向け・汎用のどちらでも同じ音）
-      v.innerHTML = '<div class="verdict"><div class="lead">'
-        + esc(toPatients ? S35_ACTION_PATIENT_REJECT : S35_ACTION_REJECT) + "</div></div>";
+      const d = document.createElement("div");
+      d.className = "lead";
+      d.textContent = toPatients ? S35_ACTION_PATIENT_REJECT : S35_ACTION_REJECT;
+      box.appendChild(d);
       s35ActionVerdicting = false;
       return;
     }
@@ -6152,8 +6172,7 @@
     $("s4-box").classList.remove("warn");
     const text = $("s4-reply").value;
     $("s4-actions").classList.add("hide");
-    v.innerHTML = '<div class="verdict"><div class="lead">提出を確認しています…</div></div>';
-    const box = v.firstElementChild;
+    const box = verdictChecking(v);
     await wait(500);
     if (view !== "s4") { s4Verdicting = false; return; }   // 判断C
 
@@ -6278,21 +6297,31 @@
 
   /* 提出時に判定する。塗り漏れ・過剰黒塗りとも差し戻し（無制限・無罰）——
      Stage 3 の再提出と同じ扱い（docs/ui/05_Stage4.md §4）。 */
-  function submitReport() {
+  let s4ReportVerdicting = false;
+
+  async function submitReport() {
     const v = $("s4-report-verdict");
+    if (!v || s4ReportVerdicting) return;
+    s4ReportVerdicting = true;
     const missing = S4_REPORT.some((seg, i) => seg.pii === true && !s4Masked.has(i));
     const over = S4_REPORT.some((seg, i) => seg.pii === false && s4Masked.has(i));
-    if (missing) {
-      v.innerHTML = '<div class="verdict"><div class="lead">個人情報が残っています。</div></div>';
+    const box = verdictChecking(v);
+    await wait(500);
+    s4ReportVerdicting = false;
+    // 判断C：待っている間に罰ゲームが片付いた／シーンを離れていたら、以降は何もしない
+    if (view !== "s4" || !v.isConnected) return;
+
+    const d = document.createElement("div");
+    if (missing || over) {
+      d.className = "lead";
+      d.textContent = missing ? "個人情報が残っています。"
+        : "日時や部署名まで黒く塗られていて、何が起きたのか分かりません。";
+      box.appendChild(d);
       sfx("cancel");   // 差し戻し（無罰・無制限）
       return;
     }
-    if (over) {
-      v.innerHTML = '<div class="verdict"><div class="lead">日時や部署名まで黒く塗られていて、何が起きたのか分かりません。</div></div>';
-      sfx("cancel");   // 差し戻し（無罰・無制限）
-      return;
-    }
-    v.innerHTML = '<div class="verdict"><div class="done">報告書を医療安全管理室へ送信しました。</div></div>';
+    d.className = "done"; d.textContent = "報告書を医療安全管理室へ送信しました。";
+    box.appendChild(d);
     later(finishS4Penalty, 1200);
   }
 
@@ -6534,8 +6563,7 @@
     s5Verdicting = true;
     $("s5-cand").classList.remove("warn");
     $("btn-s5-submit").disabled = true;
-    v.innerHTML = '<div class="verdict"><div class="lead">提出を確認しています…</div></div>';
-    const box = v.firstElementChild;
+    const box = verdictChecking(v);
     await wait(500);
     if (view !== "s5") { s5Verdicting = false; return; }   // 判断C
 
