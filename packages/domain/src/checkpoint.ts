@@ -39,6 +39,36 @@ const detectRegression = (
 };
 
 /**
+ * 現在の状態と受信bodyを単調に合成する。
+ *
+ * 離脱時のkeepalive送信（flush）は応答を待てない——`sendBeacon`/`keepalive: true`は
+ * 投げっぱなしで、409が返っても再送する主体がもうページに居ない。revisionのCASで
+ * 弾くと、その送信に載っていた罠フラグや進行位置が黙って消える。送信中の通常保存が
+ * 先に確定して revision が進んでいるのは正常な競合であり、内容の衝突ではない。
+ *
+ * 合成の向きは既存の後退拒否（detectRegression）と同じ——罠はOR、posとelapsedMsはmax。
+ * どの項目も単調にしか動かないので、合成結果に対して後退検査を掛ける必要はない。
+ * viewとdataは「その位置に居た側」を採る。posが同値なら受信側を新しいとみなす
+ * （同じ停留所の中では後から届いた画面のほうが後の状態）。
+ */
+export const mergeCheckpoint = (
+  current: CheckpointBody,
+  incoming: CheckpointBody,
+): CheckpointBody => {
+  const source = incoming.pos >= current.pos ? incoming : current;
+  return {
+    view: source.view,
+    data: source.data,
+    pos: Math.max(current.pos, incoming.pos),
+    elapsedMs: Math.max(current.elapsedMs, incoming.elapsedMs),
+    trap: {
+      s3Used: current.trap.s3Used || incoming.trap.s3Used,
+      s4Used: current.trap.s4Used || incoming.trap.s4Used,
+    },
+  };
+};
+
+/**
  * チェックポイントの保存可否を決める純粋関数。`current`がnullなら未保存であり、
  * その場合のexpectedRevisionは0だけを許す（初回保存の結果はrevision 1になる）。
  * 競合は後退より先に判定する——revisionが合っていない保存は中身を見るまでもなく
@@ -50,16 +80,17 @@ export const applyCheckpoint = (
   context: { teamCode: TeamCode; now: string },
 ): CheckpointResult => {
   const revision = current?.revision ?? 0;
+  const committed = (body: CheckpointBody): CheckpointResult => ({
+    ok: true,
+    snapshot: { teamCode: context.teamCode, revision: revision + 1, savedAt: context.now, body },
+  });
+  // flush（離脱時のkeepalive）はCASを掛けず単調マージで確定させる。合成が単調なので
+  // 後退検査も要らない（理由はmergeCheckpoint）。
+  if (command.flush === true) {
+    return committed(current === null ? command.body : mergeCheckpoint(current.body, command.body));
+  }
   if (command.expectedRevision !== revision) return { ok: false, reason: "conflict" };
   const regression = current === null ? null : detectRegression(current.body, command.body);
   if (regression !== null) return { ok: false, reason: regression };
-  return {
-    ok: true,
-    snapshot: {
-      teamCode: context.teamCode,
-      revision: revision + 1,
-      savedAt: context.now,
-      body: command.body,
-    },
-  };
+  return committed(command.body);
 };

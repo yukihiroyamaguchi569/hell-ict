@@ -545,39 +545,52 @@ export class TeamRoom extends DurableObject<Env> {
 
     const applied = applyCheckpoint(current, command, { teamCode, now });
     if (!applied.ok) return { rejected: applied.reason };
-    const serialized = JSON.stringify(applied.snapshot);
-    // 状態更新と冪等台帳は必ず同時に成立させる。片方だけ書けると、revisionだけ
-    // 進んで台帳に記録が無い状態になり、同じcommandIdの再送が現在のsnapshotではなく
-    // 新規の保存として再適用されてしまう（AGENTS.mdの「保存失敗・重複イベント」）。
-    // CASが0行だった場合は、returnではロールバックできないので例外で抜けて
-    // トランザクションごと巻き戻し、ここで受けてconflictへ写す。
     try {
-      this.ctx.storage.transactionSync(() => {
-        // 既存commandと同じくrevisionのCASで書く。想定外の並行更新があれば0行になる。
-        const written =
-          current === null
-            ? this.ctx.storage.sql.exec(
-                "INSERT OR IGNORE INTO checkpoint_state (id, snapshot) VALUES (1, ?)",
-                serialized,
-              ).rowsWritten
-            : this.ctx.storage.sql.exec(
-                "UPDATE checkpoint_state SET snapshot = ? WHERE id = 1 AND json_extract(snapshot, '$.revision') = ?",
-                serialized,
-                command.expectedRevision,
-              ).rowsWritten;
-        if (written === 0) throw new CheckpointConflictError();
-        this.ctx.storage.sql.exec(
-          "INSERT INTO processed_checkpoint_commands (command_id, revision, created_at) VALUES (?, ?, ?)",
-          command.commandId,
-          applied.snapshot.revision,
-          now,
-        );
-      });
+      this.writeCheckpoint(applied.snapshot, command, current);
     } catch (caught) {
       if (caught instanceof CheckpointConflictError) return { rejected: "conflict" };
       throw caught;
     }
     return applied.snapshot;
+  }
+
+  /**
+   * 状態更新と冪等台帳を1トランザクションで書く。片方だけ書けると、revisionだけ進んで
+   * 台帳に記録が無い状態になり、同じcommandIdの再送が現在のsnapshotではなく新規の保存
+   * として再適用されてしまう（AGENTS.mdの「保存失敗・重複イベント」）。CASが0行だった
+   * 場合はreturnではロールバックできないので、例外で抜けてトランザクションごと巻き戻す。
+   * saveCheckpointの複雑度を下げるための切り出し。
+   */
+  private writeCheckpoint(
+    snapshot: CheckpointSnapshot,
+    command: SaveCheckpointCommand,
+    current: CheckpointSnapshot | null,
+  ): void {
+    // flushはCASを掛けずに確定させるので、照合はクライアントが申告したexpectedRevision
+    // ではなく、直前に読んだ現在のrevision（合成の土台）で行う。通常の保存は従来どおり。
+    const casRevision = command.flush === true ? current?.revision : command.expectedRevision;
+    const serialized = JSON.stringify(snapshot);
+    this.ctx.storage.transactionSync(() => {
+      // 既存commandと同じくrevisionのCASで書く。想定外の並行更新があれば0行になる。
+      const written =
+        current === null
+          ? this.ctx.storage.sql.exec(
+              "INSERT OR IGNORE INTO checkpoint_state (id, snapshot) VALUES (1, ?)",
+              serialized,
+            ).rowsWritten
+          : this.ctx.storage.sql.exec(
+              "UPDATE checkpoint_state SET snapshot = ? WHERE id = 1 AND json_extract(snapshot, '$.revision') = ?",
+              serialized,
+              casRevision ?? 0,
+            ).rowsWritten;
+      if (written === 0) throw new CheckpointConflictError();
+      this.ctx.storage.sql.exec(
+        "INSERT INTO processed_checkpoint_commands (command_id, revision, created_at) VALUES (?, ?, ?)",
+        command.commandId,
+        snapshot.revision,
+        snapshot.savedAt,
+      );
+    });
   }
 
   // ---- WebSocket ----

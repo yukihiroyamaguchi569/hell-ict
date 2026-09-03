@@ -38,6 +38,7 @@ const save = (
     expectedRevision: number;
     body?: Partial<CheckpointBody>;
     rawBody?: unknown;
+    flush?: boolean;
   },
   nowIso: string = now,
 ): Promise<Response> =>
@@ -47,6 +48,7 @@ const save = (
       commandId: command.commandId,
       expectedRevision: command.expectedRevision,
       body: command.rawBody ?? body(command.body),
+      ...(command.flush === undefined ? {} : { flush: command.flush }),
     }),
     env,
     teamCode,
@@ -610,6 +612,65 @@ describe("チェックポイントAPI", () => {
       await expect(load(teamCode)).resolves.toMatchObject({
         checkpoint: { revision: 1, body: { data: { memo: { deep: "ただのメモ" } } } },
       });
+    });
+  });
+  describe("離脱時のflush", () => {
+    // keepaliveは応答を待てないため、送信中の通常保存が先に確定していても、
+    // 後から着いた罠フラグを409で捨てない（単調マージで確定させる）。
+    it("送信中の通常保存が先に確定した後でも、古いexpectedRevisionのflushが通る", async () => {
+      const teamCode = "500140";
+      const first = await save(teamCode, {
+        commandId: id("140"),
+        expectedRevision: 0,
+        body: { pos: 3, elapsedMs: 5000, trap: { s3Used: false, s4Used: false } },
+      });
+      expect(first.status).toBe(200);
+
+      // ここでrevisionは1。離脱時のflushはrevision 0のまま投げられる。
+      const flushed = await save(teamCode, {
+        commandId: id("141"),
+        expectedRevision: 0,
+        body: { pos: 2, elapsedMs: 1000, trap: { s3Used: true, s4Used: false } },
+        flush: true,
+      });
+
+      expect(flushed.status).toBe(200);
+      const state = await load(teamCode);
+      expect(state.checkpoint).toMatchObject({
+        revision: 2,
+        // 罠は残り、posとelapsedMsは後退しない。
+        body: { pos: 3, elapsedMs: 5000, trap: { s3Used: true, s4Used: false } },
+      });
+    });
+
+    it("flushでも冪等台帳は通常どおり働き、再送は状態を進めない", async () => {
+      const teamCode = "500141";
+      await save(teamCode, { commandId: id("142"), expectedRevision: 0 });
+      const flushId = id("143");
+      const flushed = await save(teamCode, {
+        commandId: flushId,
+        expectedRevision: 0,
+        body: { trap: { s3Used: true, s4Used: false } },
+        flush: true,
+      });
+      expect(flushed.status).toBe(200);
+
+      const resent = await save(teamCode, {
+        commandId: flushId,
+        expectedRevision: 0,
+        body: { trap: { s3Used: true, s4Used: false } },
+        flush: true,
+      });
+      expect(resent.status).toBe(200);
+      await expect(load(teamCode)).resolves.toMatchObject({ checkpoint: { revision: 2 } });
+    });
+
+    it("flushを付けなければ従来どおり409 conflict", async () => {
+      const teamCode = "500142";
+      await save(teamCode, { commandId: id("144"), expectedRevision: 0 });
+      const stale = await save(teamCode, { commandId: id("145"), expectedRevision: 0 });
+      expect(stale.status).toBe(409);
+      expect(httpErrorSchema.parse(await stale.json()).code).toBe("conflict");
     });
   });
 });

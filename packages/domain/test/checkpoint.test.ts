@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import { applyCheckpoint } from "../src/checkpoint.js";
+import { applyCheckpoint, mergeCheckpoint } from "../src/checkpoint.js";
 import {
   CHECKPOINT_DATA_MAX_BYTES,
   CHECKPOINT_DATA_MAX_DEPTH,
@@ -364,5 +364,111 @@ describe("チェックポイントのschema", () => {
       body: body(),
     });
     expect(parsed.success).toBe(false);
+  });
+});
+
+describe("mergeCheckpoint（離脱時flushの単調合成）", () => {
+  const current = body({
+    view: "stage3-manual",
+    pos: 3,
+    elapsedMs: 5000,
+    trap: { s3Used: true, s4Used: false },
+    data: { from: "current" },
+  });
+
+  it("trapはOR、posとelapsedMsはmaxで合成する", () => {
+    const incoming = body({
+      view: "stage4",
+      pos: 2,
+      elapsedMs: 1000,
+      trap: { s3Used: false, s4Used: true },
+      data: { from: "incoming" },
+    });
+    const merged = mergeCheckpoint(current, incoming);
+    expect(merged.trap).toEqual({ s3Used: true, s4Used: true });
+    expect(merged.pos).toBe(3);
+    expect(merged.elapsedMs).toBe(5000);
+  });
+
+  it("viewとdataはposが大きい側を採る", () => {
+    const ahead = body({ view: "stage4", pos: 5, data: { from: "incoming" } });
+    expect(mergeCheckpoint(current, ahead)).toMatchObject({
+      view: "stage4",
+      pos: 5,
+      data: { from: "incoming" },
+    });
+
+    const behind = body({ view: "stage2", pos: 1, data: { from: "incoming" } });
+    expect(mergeCheckpoint(current, behind)).toMatchObject({
+      view: "stage3-manual",
+      pos: 3,
+      data: { from: "current" },
+    });
+  });
+
+  it("posが同値なら受信側を新しいとみなす", () => {
+    const same = body({ view: "stage3-notice", pos: 3, data: { from: "incoming" } });
+    expect(mergeCheckpoint(current, same)).toMatchObject({
+      view: "stage3-notice",
+      data: { from: "incoming" },
+    });
+  });
+});
+
+describe("applyCheckpointのflush", () => {
+  const saved = snapshot(7, {
+    view: "stage3-manual",
+    pos: 3,
+    elapsedMs: 5000,
+    trap: { s3Used: true, s4Used: false },
+  });
+
+  const flushCommand = (expectedRevision: number, bodyOverrides: Partial<CheckpointBody> = {}) =>
+    saveCheckpointCommandSchema.parse({
+      type: "save-checkpoint",
+      commandId,
+      expectedRevision,
+      body: body(bodyOverrides),
+      flush: true,
+    });
+
+  it("古いrevisionのflushでも確定し、trapは落ちない", () => {
+    // keepaliveは応答を待てないので、CASで弾くと罠フラグが黙って消える。
+    const result = applyCheckpoint(
+      saved,
+      flushCommand(2, { trap: { s3Used: false, s4Used: true } }),
+      {
+        teamCode: "000000",
+        now,
+      },
+    );
+    expect(result.ok).toBe(true);
+    if (!result.ok) throw new Error("unexpected");
+    expect(result.snapshot.revision).toBe(8);
+    expect(result.snapshot.body.trap).toEqual({ s3Used: true, s4Used: true });
+  });
+
+  it("flushはposとelapsedMsを後退させない", () => {
+    const result = applyCheckpoint(saved, flushCommand(2, { pos: 1, elapsedMs: 10 }), {
+      teamCode: "000000",
+      now,
+    });
+    expect(result.ok).toBe(true);
+    if (!result.ok) throw new Error("unexpected");
+    expect(result.snapshot.body).toMatchObject({ pos: 3, elapsedMs: 5000 });
+  });
+
+  it("未保存へのflushは受信bodyをそのまま採る", () => {
+    const result = applyCheckpoint(null, flushCommand(0, { pos: 4 }), { teamCode: "000000", now });
+    expect(result.ok).toBe(true);
+    if (!result.ok) throw new Error("unexpected");
+    expect(result.snapshot).toMatchObject({ revision: 1, body: { pos: 4 } });
+  });
+
+  it("flushが無ければ従来どおり古いrevisionはconflict", () => {
+    expect(applyCheckpoint(saved, command(2), { teamCode: "000000", now })).toEqual({
+      ok: false,
+      reason: "conflict",
+    });
   });
 });

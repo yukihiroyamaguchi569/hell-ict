@@ -126,6 +126,9 @@ export const saveCheckpointCommandSchema = z
     commandId: commandIdSchema,
     expectedRevision: revisionSchema,
     body: checkpointBodySchema,
+    // 離脱時のkeepalive送信であることの印。応答を待てない経路なので、revisionの
+    // CASで弾かず単調マージで確定させる（domain/checkpoint.tsのmergeCheckpoint）。
+    flush: z.boolean().optional(),
   })
   .strict();
 
