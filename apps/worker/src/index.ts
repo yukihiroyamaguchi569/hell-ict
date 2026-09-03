@@ -20,7 +20,10 @@ import type {
   TeamCommand,
 } from "@hell-ict/domain";
 
+import { handleActivityPost, logActivity, redactPiiText } from "./activity-log.js";
+import type { ActivityEvent } from "./activity-log.js";
 import { error, isWebSocketRequest, json, parseJson, teamCodeFromPath } from "./http.js";
+import type { RequestScope } from "./http.js";
 import { createAiGateway, OpenAiRefusalError } from "./openai-gateway.js";
 import { handleProgressPost, handleProgressSummary } from "./progress.js";
 import { RaceLeaderboard } from "./race-leaderboard.js";
@@ -68,9 +71,13 @@ const handleCommand = async (request: Request, env: Env, teamCode: TeamCode): Pr
   }
 };
 
-const handleCreateThread = async (
+/**
+ * `waitUntil`へ逃がした活動ログの完了をテストから待てるよう、handleChatMessageと
+ * 同じくハンドラ自体を公開する（テスト側でExecutionContextを作って渡す）。
+ */
+export const handleCreateThread = async (
   request: Request,
-  env: Env,
+  scope: RequestScope,
   teamCode: TeamCode,
 ): Promise<Response> => {
   let command: CreateThreadCommand;
@@ -80,10 +87,19 @@ const handleCreateThread = async (
     return error("commandの形式が不正です。", 400);
   }
   try {
-    const result: CreateThreadResult = await env.TEAM_ROOM.getByName(teamCode).createThread(
+    const result: CreateThreadResult = await scope.env.TEAM_ROOM.getByName(teamCode).createThread(
       teamCode,
       command,
     );
+    // 作成されたスレッドは末尾へ足される（domainのcreateThread）。分析で
+    // 「いつ文脈を分けたか」を追えるよう、そのthreadIdごと記録する。
+    logActivity(scope, {
+      teamCode,
+      kind: "thread.create",
+      threadId: result.snapshot.threads.at(-1)?.threadId,
+      commandId: command.commandId,
+      meta: { title: command.title },
+    });
     return json(result);
   } catch {
     return error("スレッドの作成に失敗しました。時間を置いて再試行してください。", 503);
@@ -149,9 +165,58 @@ const blockHistoryPii = async (
     : error("会話履歴に個人情報を検知したため、送信をブロックしました。", 422);
 };
 
+/** 1回の送信に紐づく活動ログの書き手。kindごとの差分だけを渡せば済むようにする。 */
+type ChatLogger = (kind: string, extra?: Partial<ActivityEvent>) => void;
+
+/**
+ * teamCode・threadId・commandIdといった毎回同じ値を閉じ込めた書き手を作る。
+ * handleChatMessageは既に複雑度の上限にいるため、`promptProfile`の既定値の解決も
+ * ここへ寄せて、呼び出し側へ分岐を増やさない。
+ */
+const chatLogger = (
+  scope: RequestScope,
+  teamCode: TeamCode,
+  command: SendMessageCommand,
+): ChatLogger => {
+  const promptProfile = command.promptProfile ?? "default";
+  // この書き手を通る本文は種別を問わずPIIゲートへ掛ける。送信前ゲートを抜けた
+  // ユーザー本文だけでなくAI応答も対象にし、kindを足したときに素通りする口を作らない。
+  return (kind, extra) => {
+    logActivity(scope, {
+      teamCode,
+      kind,
+      threadId: command.threadId,
+      commandId: command.commandId,
+      ...extra,
+      ...redactPiiText(extra?.text, { promptProfile, ...extra?.meta }),
+    });
+  };
+};
+
+/** AI応答の顛末を1行書く。handleChatMessageへ分岐を増やさないための切り出し。 */
+const logChatOutcome = (
+  log: ChatLogger,
+  result: ChatMessageResult | { retry: true } | null,
+  refusal: string | null,
+): void => {
+  if (result !== null && !("retry" in result)) {
+    log("chat.assistant", {
+      role: "assistant",
+      text: result.assistant.text,
+      messageId: result.assistant.messageId,
+    });
+    return;
+  }
+  if (refusal !== null) {
+    log("chat.refusal", { meta: { refusal } });
+    return;
+  }
+  log("chat.failure");
+};
+
 export const handleChatMessage = async (
   request: Request,
-  env: Env,
+  scope: RequestScope,
   teamCode: TeamCode,
   aiGateway: AiGateway,
 ): Promise<Response> => {
@@ -165,11 +230,15 @@ export const handleChatMessage = async (
   // 送信前PIIゲート（企画書§7）。DO・AiGatewayのどちらにも触れる前に止める——
   // ユーザーメッセージを保存させず、OpenAIへも一切送らない。何も保存していないので
   // "pii_blocked"を付け、クライアントが新しいcommandIdで書き直せることを示す。
+  // 本文はD1にも残さない（外部へ出さないのと同じ理由。長さだけ残して、
+  // 「どのくらいの分量を書いていて弾かれたか」を分析で追えるようにする）。
+  const log = chatLogger(scope, teamCode, command);
   if (detectPii(command.text) !== null) {
+    log("chat.pii_blocked", { meta: { length: command.text.length } });
     return error("個人情報を検知したため、送信をブロックしました。", 422, "pii_blocked");
   }
 
-  const room = env.TEAM_ROOM.getByName(teamCode);
+  const room = scope.env.TEAM_ROOM.getByName(teamCode);
   const begin = await room.beginChatMessage(teamCode, command).catch(() => null);
   if (begin === null)
     return error("メッセージの処理に失敗しました。時間を置いて再試行してください。", 503);
@@ -178,8 +247,15 @@ export const handleChatMessage = async (
   if (begin.kind === "in-progress")
     return error("同じ内容が既に送信処理中です。少し待って再試行してください。", 409);
 
+  // ここまで来た送信だけを1行として記録する（already-processedの再送は
+  // 新しい発言ではないので記録しない。同じcommandIdの再試行はINSERT OR IGNOREで潰れる）。
+  log("chat.user", { role: "user", text: command.text });
+
   const historyBlock = await blockHistoryPii(room, command.commandId, begin.history);
-  if (historyBlock !== null) return historyBlock;
+  if (historyBlock !== null) {
+    log("chat.history_pii");
+    return historyBlock;
+  }
 
   // ステージ別システムプロンプトは送信時にだけ前置し、DOへ保存される履歴には含めない
   // （保存対象はユーザー/アシスタントのやり取りのみ。企画書§5のStage別罠設計）。
@@ -189,6 +265,7 @@ export const handleChatMessage = async (
   ];
   const { outcome, refusal } = await runAiCompletion(aiGateway, historyWithSystemPrompt);
   const result = await room.completeChatMessage(command.commandId, outcome).catch(() => null);
+  logChatOutcome(log, result, refusal);
   return respondToCompletion(result, refusal);
 };
 
@@ -258,14 +335,17 @@ const handleLeaderboardSync = (request: Request, env: Env): Promise<Response> =>
     ? env.RACE_LEADERBOARD.getByName("global").fetch(request)
     : Promise.resolve(error("WebSocket接続が必要です。", 426));
 
-const handlePost = (request: Request, env: Env, url: URL): Promise<Response> => {
+const handlePost = (request: Request, scope: RequestScope, url: URL): Promise<Response> => {
+  const { env } = scope;
   if (url.pathname === "/api/session") return handleSession(request, env);
   if (url.pathname === "/api/progress") return handleProgressPost(request, env);
+  const activityTeamCode = teamCodeFromPath(url.pathname, "/api/teams/", "/activity");
+  if (activityTeamCode !== null) return handleActivityPost(request, env, activityTeamCode);
   const threadsTeamCode = teamCodeFromPath(url.pathname, "/api/teams/", "/chat/threads");
-  if (threadsTeamCode !== null) return handleCreateThread(request, env, threadsTeamCode);
+  if (threadsTeamCode !== null) return handleCreateThread(request, scope, threadsTeamCode);
   const messagesTeamCode = teamCodeFromPath(url.pathname, "/api/teams/", "/chat/messages");
   if (messagesTeamCode !== null)
-    return handleChatMessage(request, env, messagesTeamCode, createAiGateway(env));
+    return handleChatMessage(request, scope, messagesTeamCode, createAiGateway(env));
   const checkpointTeamCode = teamCodeFromPath(url.pathname, "/api/teams/", "/checkpoint");
   if (checkpointTeamCode !== null) return handleSaveCheckpoint(request, env, checkpointTeamCode);
   const commandTeamCode = teamCodeFromPath(url.pathname, "/api/teams/", "/commands");
@@ -297,12 +377,12 @@ const handleGet = (request: Request, env: Env, url: URL): Promise<Response> => {
 };
 
 const worker = {
-  async fetch(request: Request, env: Env): Promise<Response> {
+  async fetch(request: Request, env: Env, ctx: ExecutionContext): Promise<Response> {
     const url = new URL(request.url);
     if (request.method === "GET" && url.pathname === "/api/health") {
       return json({ status: "ok" });
     }
-    if (request.method === "POST") return handlePost(request, env, url);
+    if (request.method === "POST") return handlePost(request, { env, ctx }, url);
     if (request.method === "GET") return handleGet(request, env, url);
     return new Response("Not found", { status: 404 });
   },

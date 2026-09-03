@@ -7,6 +7,10 @@
   "vars": {
     "OPENAI_BASE_URL": "https://api.openai.com/v1",
     "OPENAI_MODEL": "gpt-4o",
+    // 活動ログ（activity_events.event_id）へ書く開催回の識別子。
+    // 本番はデプロイ前にこの値を開催回へ書き換え、`wrangler types` を流し直す
+    // （生成される型はこの文字列リテラルなので、書き換えるとCIのtypecheckが落ちる）。
+    "EVENT_ID": "dev",
   },
   // テストプレイ用の静的配信。/api/* は必ずWorkerへ届かせ、それ以外の
   // パスだけAssetsから返す（scripts/build-testplay.shが生成するpublic/を配信対象とする）。
@@ -14,9 +18,10 @@
     "directory": "./public",
     "run_worker_first": ["/api/*"],
   },
-  // テストプレイ当日の進捗記録用（2026-08-23に `wrangler d1 create hell-ict-testplay` で作成）。
-  // スキーマは ./schema/progress.sql。src/progress.tsのensureSchemaが初回アクセス時にも
-  // CREATE TABLE IF NOT EXISTSを流すので、適用忘れでリクエストが落ちることはない。
+  // テストプレイ当日の進捗記録・活動ログ用（2026-08-23に `wrangler d1 create hell-ict-testplay` で作成）。
+  // スキーマは ./schema/progress.sql と ./schema/activity.sql。src/progress.tsと
+  // src/activity-log.tsのensureSchemaが初回アクセス時にもCREATE TABLE IF NOT EXISTSを
+  // 流すので、適用忘れでリクエストが落ちることはない。
   "d1_databases": [
     {
       "binding": "PROGRESS_DB",
