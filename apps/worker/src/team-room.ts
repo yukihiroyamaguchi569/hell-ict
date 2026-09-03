@@ -83,6 +83,16 @@ const PENDING_MESSAGE_EXPIRY_MS = 6 * 60 * 60 * 1000;
  */
 const CLAIM_TIMEOUT_MS = 45 * 1000;
 
+/**
+ * チェックポイントの冪等台帳に残す最新件数。台帳の行はsnapshot全体（dataは最大64KB）
+ * を持つので、オートセーブのたびに新しいcommandIdが増えるこの用途では、
+ * pending_message_commandsの時間ベースの掃除（PENDING_MESSAGE_EXPIRY_MS）と同じ考えで
+ * 上限を設ける——ただしチェックポイントは件数で切る。台帳が要るのは再送を吸収する
+ * 数秒〜数分の窓だけで、クライアントは500msデバウンスで保存し、失敗時も同じcommandIdを
+ * 1回再試行するだけなので、直近20件あれば正当な再送が古い行に当たらない。
+ */
+const CHECKPOINT_LEDGER_KEEP = 20;
+
 export class TeamRoom extends DurableObject<Env> {
   constructor(ctx: DurableObjectState, env: Env) {
     super(ctx, env);
@@ -108,7 +118,7 @@ export class TeamRoom extends DurableObject<Env> {
       "CREATE TABLE IF NOT EXISTS checkpoint_state (id INTEGER PRIMARY KEY CHECK (id = 1), snapshot TEXT NOT NULL)",
     );
     this.ctx.storage.sql.exec(
-      "CREATE TABLE IF NOT EXISTS processed_checkpoint_commands (command_id TEXT PRIMARY KEY, result TEXT NOT NULL)",
+      "CREATE TABLE IF NOT EXISTS processed_checkpoint_commands (command_id TEXT PRIMARY KEY, result TEXT NOT NULL, created_at TEXT NOT NULL)",
     );
   }
 
@@ -434,9 +444,16 @@ export class TeamRoom extends DurableObject<Env> {
               ).rowsWritten;
         if (written === 0) throw new CheckpointConflictError();
         this.ctx.storage.sql.exec(
-          "INSERT INTO processed_checkpoint_commands (command_id, result) VALUES (?, ?)",
+          "INSERT INTO processed_checkpoint_commands (command_id, result, created_at) VALUES (?, ?, ?)",
           command.commandId,
           serialized,
+          now,
+        );
+        // 同じトランザクションで古い台帳行を落とす。created_atが同値になる連続保存でも
+        // 挿入順で切れるよう、rowidを第2キーにする。
+        this.ctx.storage.sql.exec(
+          "DELETE FROM processed_checkpoint_commands WHERE command_id NOT IN (SELECT command_id FROM processed_checkpoint_commands ORDER BY created_at DESC, rowid DESC LIMIT ?)",
+          CHECKPOINT_LEDGER_KEEP,
         );
       });
     } catch (caught) {
