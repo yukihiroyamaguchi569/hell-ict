@@ -51,6 +51,12 @@ type UnknownThreadReply = { unknownThread: true };
 /** チェックポイント保存の拒否理由。conflictとtrap-regressionはWorkerで文言を分ける。 */
 export type CheckpointRejection = { rejected: "conflict" | "trap-regression" };
 
+/**
+ * transactionSyncを巻き戻すためだけの内部シグナル。CASが0行だったことを
+ * 例外として伝え、saveCheckpointの外でconflictへ写す。DOの外へは漏らさない。
+ */
+class CheckpointConflictError extends Error {}
+
 export type BeginChatMessageOutcome =
   | { kind: "already-processed"; result: ChatMessageResult }
   | { kind: "pending"; history: AiMessage[] }
@@ -407,24 +413,36 @@ export class TeamRoom extends DurableObject<Env> {
     const applied = applyCheckpoint(current, command, { teamCode, now });
     if (!applied.ok) return { rejected: applied.reason };
     const serialized = JSON.stringify(applied.snapshot);
-    // 既存commandと同じくrevisionのCASで書く。想定外の並行更新があれば0行になる。
-    const written =
-      current === null
-        ? this.ctx.storage.sql.exec(
-            "INSERT OR IGNORE INTO checkpoint_state (id, snapshot) VALUES (1, ?)",
-            serialized,
-          ).rowsWritten
-        : this.ctx.storage.sql.exec(
-            "UPDATE checkpoint_state SET snapshot = ? WHERE id = 1 AND json_extract(snapshot, '$.revision') = ?",
-            serialized,
-            command.expectedRevision,
-          ).rowsWritten;
-    if (written === 0) return { rejected: "conflict" };
-    this.ctx.storage.sql.exec(
-      "INSERT INTO processed_checkpoint_commands (command_id, result) VALUES (?, ?)",
-      command.commandId,
-      serialized,
-    );
+    // 状態更新と冪等台帳は必ず同時に成立させる。片方だけ書けると、revisionだけ
+    // 進んで台帳が無い状態になり、同じcommandIdの再送が保存済み結果ではなく
+    // conflictとして返ってしまう（AGENTS.mdの「保存失敗・重複イベント」）。
+    // CASが0行だった場合は、returnではロールバックできないので例外で抜けて
+    // トランザクションごと巻き戻し、ここで受けてconflictへ写す。
+    try {
+      this.ctx.storage.transactionSync(() => {
+        // 既存commandと同じくrevisionのCASで書く。想定外の並行更新があれば0行になる。
+        const written =
+          current === null
+            ? this.ctx.storage.sql.exec(
+                "INSERT OR IGNORE INTO checkpoint_state (id, snapshot) VALUES (1, ?)",
+                serialized,
+              ).rowsWritten
+            : this.ctx.storage.sql.exec(
+                "UPDATE checkpoint_state SET snapshot = ? WHERE id = 1 AND json_extract(snapshot, '$.revision') = ?",
+                serialized,
+                command.expectedRevision,
+              ).rowsWritten;
+        if (written === 0) throw new CheckpointConflictError();
+        this.ctx.storage.sql.exec(
+          "INSERT INTO processed_checkpoint_commands (command_id, result) VALUES (?, ?)",
+          command.commandId,
+          serialized,
+        );
+      });
+    } catch (caught) {
+      if (caught instanceof CheckpointConflictError) return { rejected: "conflict" };
+      throw caught;
+    }
     return applied.snapshot;
   }
 

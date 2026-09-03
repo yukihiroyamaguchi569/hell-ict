@@ -130,6 +130,30 @@ describe("チェックポイントAPI", () => {
     expect(state.checkpoint?.body.pos).toBe(2);
   });
 
+  it("conflictで拒否されたcommandIdは台帳に残らず、正しいrevisionで再送すれば成功する", async () => {
+    await save("500015", { commandId: id("115"), expectedRevision: 0 });
+    const retried = id("116");
+    const conflict = await save("500015", {
+      commandId: retried,
+      expectedRevision: 0,
+      body: { pos: 5 },
+    });
+    expect(conflict.status).toBe(409);
+
+    // 台帳へ書かれていれば、この再送は保存済み結果（conflict時のsnapshot）を
+    // 返すか失敗する。状態更新と台帳が同じトランザクションで巻き戻る保証を固定する。
+    const accepted = await save(
+      "500015",
+      { commandId: retried, expectedRevision: 1, body: { pos: 5 } },
+      later,
+    );
+
+    expect(accepted.status).toBe(200);
+    await expect(load("500015")).resolves.toMatchObject({
+      checkpoint: { revision: 2, savedAt: later, body: { pos: 5 } },
+    });
+  });
+
   it("発動済みの罠をfalseへ戻す保存は409で拒否し、保存されない", async () => {
     await save("500006", {
       commandId: id("106"),
