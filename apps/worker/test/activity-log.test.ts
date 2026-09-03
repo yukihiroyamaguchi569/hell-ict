@@ -1,4 +1,4 @@
-import { env } from "cloudflare:workers";
+import { env, exports } from "cloudflare:workers";
 import { createExecutionContext, waitOnExecutionContext } from "cloudflare:test";
 import { createThreadResultSchema } from "@hell-ict/domain";
 import { FakeAiGateway } from "@hell-ict/domain/fakes";
@@ -437,6 +437,19 @@ describe("活動ログ", () => {
       expect(metaOf((await rows())[0])).toEqual({ piiRedacted: true });
     });
 
+    it("識別子として妥当なキー（英数字と_.-）は受け付ける", async () => {
+      const response = await postJson(
+        "/api/teams/500115/activity",
+        activity({ meta: { "stage_2.ok": true, "k-1": 1, [`${"k".repeat(64)}`]: null } }),
+      );
+      expect(response.status).toBe(200);
+      expect(metaOf((await rows())[0])).toEqual({
+        "stage_2.ok": true,
+        "k-1": 1,
+        [`${"k".repeat(64)}`]: null,
+      });
+    });
+
     it("1つのフィールドに収まった電話番号は、meta全体の置換で落とす", async () => {
       const response = await postJson(
         "/api/teams/500113/activity",
@@ -460,6 +473,12 @@ describe("活動ログ", () => {
       ["metaの値がネストしたobject", activity({ meta: { nested: { a: 1 } } })],
       ["metaの値が配列", activity({ meta: { arr: [1, 2] } })],
       ["metaの値が201文字", activity({ meta: { long: "x".repeat(201) } })],
+      // キーは識別子に限る。自由文を許すと、値ではなくキー側にPIIを書けてしまう——
+      // boolean値のキーは値の個別検査に掛からず、JSON全体の検査も改行のエスケープで
+      // すり抜けるため、入口の書式制限が唯一の防波堤になる。
+      ["metaのキーが日本語（PII）", activity({ meta: { "渡辺\n三郎さん": true } })],
+      ["metaのキーに空白", activity({ meta: { "a b": 1 } })],
+      ["metaのキーが65文字", activity({ meta: { ["k".repeat(65)]: 1 } })],
       ["clientAtが欠落", { commandId: activity().commandId, kind: "resume", view: "s1" }],
       // 任意文字列のままだとPIIゲートを通らない列が残る。書式で塞いだことを固定する。
       ["clientAtが電話番号", activity({ clientAt: "090-1234-5678" })],
@@ -494,6 +513,32 @@ describe("活動ログ", () => {
         }),
       );
       expect(rejected.status).toBe(400);
+      await expect(rows()).resolves.toHaveLength(1);
+    });
+
+    // schemaの検証は本文をJSONへ展開した後にしか効かない。展開前にバイト数で
+    // 打ち切ることを、Content-Lengthを見る経路と実バイト数を測る経路の両方で固定する。
+    it.each([
+      ["Content-Lengthどおりの巨大な本文", {}],
+      // ヘッダは偽装できるので、小さく申告された巨大な本文も実バイト数で弾く。
+      ["Content-Lengthを小さく偽装した本文", { "Content-Length": "42" }],
+    ])("64KBを超える本文(%s)は413で拒否し、行を増やさない", async (_label, headers) => {
+      const huge = JSON.stringify({ ...activity(), pad: "x".repeat(65 * 1024) });
+      const response = await exports.default.fetch(
+        new Request("https://example.test/api/teams/500116/activity", {
+          method: "POST",
+          body: huge,
+          headers,
+        }),
+      );
+      expect(response.status).toBe(413);
+      await expect(rows()).resolves.toEqual([]);
+    });
+
+    it("上限以内の本文はこれまでどおり処理される", async () => {
+      // 上限判定がバイト数で行われ、通常の本文を巻き込まないことの確認。
+      const response = await postJson("/api/teams/500117/activity", activity());
+      expect(response.status).toBe(200);
       await expect(rows()).resolves.toHaveLength(1);
     });
 
