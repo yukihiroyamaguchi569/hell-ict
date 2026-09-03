@@ -160,6 +160,13 @@ const activityKindSchema = z.enum([
 /** metaは自由なJSONだが、1行が肥大して分析クエリが重くなるのを粗い上限で止める。 */
 const META_LIMIT_BYTES = 4096;
 
+/**
+ * 上限はバイト数で測る。`String.length`はUTF-16のコード単位なので、日本語のmetaだと
+ * 実際の保存サイズ（UTF-8）の1/3程度に見積もられ、上限が事実上効かない。
+ */
+const encoder = new TextEncoder();
+const jsonByteLength = (value: unknown): number => encoder.encode(JSON.stringify(value)).length;
+
 const clientActivitySchema = z.object({
   commandId: z.uuid(),
   kind: activityKindSchema,
@@ -171,7 +178,7 @@ const clientActivitySchema = z.object({
   text: z.string().max(20000).optional(),
   meta: z
     .record(z.string(), z.unknown())
-    .refine((meta) => JSON.stringify(meta).length <= META_LIMIT_BYTES)
+    .refine((meta) => jsonByteLength(meta) <= META_LIMIT_BYTES)
     .optional(),
   // 任意文字列にすると、textとmetaのPIIゲートを通らない自由記述の列が1つ残る
   // （実際に電話番号がそのまま保存できてしまう）。書式を固定して抜け道を塞ぐ。

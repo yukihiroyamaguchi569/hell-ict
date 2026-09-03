@@ -419,6 +419,27 @@ describe("活動ログ", () => {
       await expect(rows()).resolves.toEqual([]);
     });
 
+    // `String.length`で測るとUTF-16のコード単位になり、日本語のmetaでは上限が
+    // 実質3倍に緩む。バイト数で測っていることを境界の両側で固定する。
+    it("マルチバイトのmetaは4096バイトちょうどまで受け付け、1バイト超で拒否する", async () => {
+      // {"blob":"…"} の固定部分11バイト＋「あ」1361文字（3バイト×1361＝4083）＋
+      // ASCII 2文字＝ちょうど4096バイト。
+      const fit = "あ".repeat(1361) + "xx";
+      const accepted = await postJson(
+        "/api/teams/500109/activity",
+        activity({ meta: { blob: fit } }),
+      );
+      expect(accepted.status).toBe(200);
+      await expect(rows()).resolves.toHaveLength(1);
+
+      const rejected = await postJson(
+        "/api/teams/500109/activity",
+        activity({ commandId: "00000000-0000-4000-8000-0000000000a2", meta: { blob: fit + "x" } }),
+      );
+      expect(rejected.status).toBe(400);
+      await expect(rows()).resolves.toHaveLength(1);
+    });
+
     it("metaが4KBちょうどまでは受け付ける", async () => {
       // {"blob":"x…"} の固定部分11文字を差し引いて、ちょうど4096バイトへ揃える。
       const response = await postJson(
