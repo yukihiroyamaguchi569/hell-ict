@@ -196,6 +196,44 @@ describe("チェックポイントAPI", () => {
     expect(state.checkpoint).toMatchObject({ revision: 1, body: { elapsedMs: 60_000, pos: 2 } });
   });
 
+  it("進行位置を巻き戻す保存は409で拒否し、保存されない", async () => {
+    await save("500019", { commandId: id("121"), expectedRevision: 0, body: { pos: 4 } });
+
+    const regression = await save("500019", {
+      commandId: id("122"),
+      expectedRevision: 1,
+      body: { pos: 3, elapsedMs: 120_000 },
+    });
+
+    expect(regression.status).toBe(409);
+    expect(httpErrorSchema.parse(await regression.json()).message).toContain("進行位置");
+    const state = await load("500019");
+    expect(state.checkpoint).toMatchObject({ revision: 1, body: { pos: 4, elapsedMs: 60_000 } });
+  });
+
+  it("同じposのままviewだけ切り替える保存はできる", async () => {
+    await save("500020", {
+      commandId: id("123"),
+      expectedRevision: 0,
+      body: { pos: 4, view: "stage3-quiz" },
+    });
+
+    const next = await save(
+      "500020",
+      {
+        commandId: id("124"),
+        expectedRevision: 1,
+        body: { pos: 4, view: "stage3-manual" },
+      },
+      later,
+    );
+
+    expect(next.status).toBe(200);
+    await expect(load("500020")).resolves.toMatchObject({
+      checkpoint: { revision: 2, body: { pos: 4, view: "stage3-manual" } },
+    });
+  });
+
   it("経過時間が同値なら保存できる", async () => {
     await save("500018", {
       commandId: id("119"),
@@ -290,7 +328,7 @@ describe("チェックポイントAPI", () => {
       const response = await save(teamCode, {
         commandId,
         expectedRevision: index,
-        body: { pos: index % 8 },
+        body: { pos: Math.min(index, 7) },
       });
       expect(response.status).toBe(200);
     }
@@ -310,7 +348,7 @@ describe("チェックポイントAPI", () => {
     const kept = await save(teamCode, { commandId: commandIds[20], expectedRevision: 20 });
     expect(kept.status).toBe(200);
     const { snapshot } = saveCheckpointResultSchema.parse(await kept.json());
-    expect(snapshot).toMatchObject({ revision: 21, body: { pos: 20 % 8 } });
+    expect(snapshot).toMatchObject({ revision: 21, body: { pos: 7 } });
     await expect(load(teamCode)).resolves.toMatchObject({ checkpoint: snapshot });
   });
 

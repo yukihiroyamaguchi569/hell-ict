@@ -274,6 +274,7 @@ const CHECKPOINT_REJECTION_MESSAGES = {
   conflict: "チェックポイントが競合しました。最新を取得し直してください。",
   "trap-regression": "発動済みの罠を取り消すチェックポイントは保存できません。",
   "elapsed-regression": "経過時間を巻き戻すチェックポイントは保存できません。",
+  "pos-regression": "進行位置を巻き戻すチェックポイントは保存できません。",
 } as const satisfies Record<CheckpointRejectionReason, string>;
 
 /**
