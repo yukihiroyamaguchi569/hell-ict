@@ -3223,8 +3223,11 @@
     drawMarks();
   }
 
+  /* 入室前（liveState===null）は回さない。まだどのチームでもない画面で
+     他チームの位置を取りに行っても描く相手がおらず、entry を開いたまま
+     置かれた端末が10秒ごとにサーバを叩き続けるだけになる。 */
   async function pollSummary() {
-    if (!LIVE) return;
+    if (!LIVE || !liveState) return;
     const res = await liveFetch("/api/progress/summary", { method: "GET" }, LIVE_RESTORE_TIMEOUT_MS);
     if (res.ok && res.body && Array.isArray(res.body.teams)) syncTeamsFromSummary(res.body.teams);
   }

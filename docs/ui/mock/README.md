@@ -139,7 +139,7 @@ JS 構造そのものは資産ではない。単一ファイル・フレーム�
   ——`renderStage3()`/`renderStage4()` が入場のたびにリセットするため。
 - **活動ログ**（`logActivity()`）と**全チームの帯**。提出・判定・罠・復帰を
   `POST /api/teams/:code/activity` へ fire-and-forget で積み（Stage 4のPII罠と保健所提出だけは
-  本文を送らない）、`GET /api/progress/summary` を10秒ごとにポーリングして他チームの位置を
+  本文を送らない）、`GET /api/progress/summary` を（入室済みのときだけ）10秒ごとにポーリングして他チームの位置を
   `TEAMS` へ流し込む（`syncTeamsFromSummary()`）。帯は自チームを最下段に、同じ停留所のチームを
   3段まで縦に積み、溢れた分は「ほかNチーム」へまとめる（`drawMarks()`）。
 
