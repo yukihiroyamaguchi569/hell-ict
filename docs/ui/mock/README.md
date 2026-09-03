@@ -105,6 +105,11 @@ JS 構造そのものは資産ではない。単一ファイル・フレーム�
   下書き（`draftCtx`/`draftPlain`）に落ちる。
 - Stage 5 はLIVE時も画像生成APIを呼ばない。`s5Generate()` が事前生成の候補画像をプロンプトの
   タグ一致で出し分ける従来どおりの専用フローのまま。
+- **422 の扱いは `code` で分ける**（2026-09-04追加）。`pii_blocked`（送信前ゲート／未保存）のときだけ
+  再送用の `commandId` を破棄する。`history_pii`・`ai_refusal` は**ユーザー発言が保存済み**（AI未応答）なので
+  IDを保持し、`GET /api/teams/:code/chat` を取り直して再描画する——同じ本文を送り直すと同じ`commandId`で
+  送られ、DO側の冪等性に当たって二重保存にならない（`isUnsavedRejection()`。AIチャットとStage 1の下書きで共通）。
+  `code`を持たない422は「保存済み」側へ倒す（取り違えたときの損が片側だけ大きいため）。エラー文言は従来どおり。
 - **429（レート制限）は「失敗」ではなく「待て」として出す**（2026-09-04追加）。`liveFetch()` が
   `Retry-After`（秒）を `retryAfter` として返し、AIチャット（`handleLiveChatError()`）とStage 1の
   下書き（`s1DraftLive()`）が「送信が多すぎます。N 秒待ってからもう一度送ってください。」を表示する
