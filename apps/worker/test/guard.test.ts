@@ -1,15 +1,23 @@
 import { env, exports } from "cloudflare:workers";
 import { listDurableObjectIds } from "cloudflare:test";
 import { chatSnapshotSchema, createThreadResultSchema } from "@hell-ict/domain";
+import { FakeAiGateway } from "@hell-ict/domain/fakes";
+import type { FakeAiOutcome } from "@hell-ict/domain/fakes";
 import { describe, expect, it, vi } from "vitest";
 
 import {
+  DEFAULT_CHAT_RATE_LIMIT,
   isOriginAllowed,
   isOriginlessRequestAllowed,
   isTeamCodeAllowed,
   parseAllowedOrigins,
+  parseChatRateLimit,
   parseTeamCodes,
+  RATE_LIMIT_WINDOW_MS,
+  rateLimitBucket,
+  rateLimitRetryAfterSeconds,
 } from "../src/guard.js";
+import { handleChatMessage } from "../src/index.js";
 import { get, postJson, session, TEST_ORIGIN } from "./support.js";
 
 const OTHER_ORIGIN = "https://evil.test";
@@ -61,6 +69,25 @@ const prepareThread = async (teamCode: string, commandId: string): Promise<strin
 const messageCommandId = (index: number): string =>
   `00000000-0000-4000-8000-${String(index).padStart(12, "0")}`;
 
+const successOutcomes = (count: number): FakeAiOutcome[] =>
+  Array.from({ length: count }, () => ({ kind: "success", response: "応答" }) as const);
+
+const sendChat = (
+  teamCode: string,
+  body: { commandId: string; threadId: string; text: string },
+  gateway: FakeAiGateway,
+  nowMs: number,
+): Promise<Response> =>
+  handleChatMessage(
+    new Request(`${TEST_ORIGIN}/api/teams/${teamCode}/chat/messages`, {
+      method: "POST",
+      body: JSON.stringify({ type: "send-message", ...body }),
+    }),
+    env,
+    teamCode,
+    { aiGateway: gateway, nowMs },
+  );
+
 const messageCountOf = async (teamCode: string): Promise<number> => {
   const response = await get(`/api/teams/${teamCode}/chat`);
   const snapshot = chatSnapshotSchema.parse(await response.json());
@@ -110,6 +137,30 @@ describe("チームコード許可リスト（Pure Function）", () => {
     expect(isTeamCodeAllowed("100001", allowlist)).toBe(true);
     expect(isTeamCodeAllowed("100002", allowlist)).toBe(true);
     expect(isTeamCodeAllowed("100003", allowlist)).toBe(false);
+  });
+});
+
+describe("レート制限の窓（Pure Function）", () => {
+  it("同じ窓に入る時刻は同じbucketになり、窓が変われば変わる", () => {
+    expect(rateLimitBucket(0, RATE_LIMIT_WINDOW_MS)).toBe("0");
+    expect(rateLimitBucket(59_999, RATE_LIMIT_WINDOW_MS)).toBe("0");
+    expect(rateLimitBucket(60_000, RATE_LIMIT_WINDOW_MS)).toBe("1");
+  });
+
+  it("Retry-Afterは窓が明けるまでの秒数で、最低1秒を返す", () => {
+    expect(rateLimitRetryAfterSeconds(0, RATE_LIMIT_WINDOW_MS)).toBe(60);
+    expect(rateLimitRetryAfterSeconds(59_500, RATE_LIMIT_WINDOW_MS)).toBe(1);
+    expect(rateLimitRetryAfterSeconds(59_999, RATE_LIMIT_WINDOW_MS)).toBe(1);
+  });
+
+  it("CHAT_RATE_LIMIT_PER_MINUTEは正の整数だけ採用し、それ以外は既定へ倒す", () => {
+    expect(parseChatRateLimit("5")).toBe(5);
+    expect(parseChatRateLimit(undefined)).toBe(DEFAULT_CHAT_RATE_LIMIT);
+    expect(parseChatRateLimit("")).toBe(DEFAULT_CHAT_RATE_LIMIT);
+    expect(parseChatRateLimit("0")).toBe(DEFAULT_CHAT_RATE_LIMIT);
+    expect(parseChatRateLimit("-3")).toBe(DEFAULT_CHAT_RATE_LIMIT);
+    expect(parseChatRateLimit("2.5")).toBe(DEFAULT_CHAT_RATE_LIMIT);
+    expect(parseChatRateLimit("たくさん")).toBe(DEFAULT_CHAT_RATE_LIMIT);
   });
 });
 
@@ -233,5 +284,104 @@ describe("入口ガード（チームコード許可リスト）", () => {
       expect(command.status).toBe(404);
       await expect(listDurableObjectIds(env.TEAM_ROOM)).resolves.toEqual(before);
     });
+  });
+});
+
+describe("チャット送信のレート制限", () => {
+  const windowStartMs = 1_756_000_000_000;
+
+  it("既定の上限まで通し、超えた分は429でAIを呼ばず保存もしない", async () => {
+    const threadId = await prepareThread("500011", messageCommandId(1));
+    const gateway = new FakeAiGateway(successOutcomes(DEFAULT_CHAT_RATE_LIMIT));
+    for (let index = 0; index < DEFAULT_CHAT_RATE_LIMIT; index += 1) {
+      const response = await sendChat(
+        "500011",
+        { commandId: messageCommandId(100 + index), threadId, text: "本文" },
+        gateway,
+        windowStartMs,
+      );
+      expect(response.status).toBe(200);
+    }
+    const stored = await messageCountOf("500011");
+
+    const blocked = await sendChat(
+      "500011",
+      { commandId: messageCommandId(200), threadId, text: "本文" },
+      gateway,
+      windowStartMs,
+    );
+
+    expect(blocked.status).toBe(429);
+    expect(blocked.headers.get("Retry-After")).toBe(
+      String(rateLimitRetryAfterSeconds(windowStartMs, RATE_LIMIT_WINDOW_MS)),
+    );
+    await expect(blocked.json()).resolves.toMatchObject({
+      message: "送信が多すぎます。少し待ってから再試行してください。",
+    });
+    expect(gateway.requests).toHaveLength(DEFAULT_CHAT_RATE_LIMIT);
+    await expect(messageCountOf("500011")).resolves.toBe(stored);
+  });
+
+  it("窓が変われば再び送れる", async () => {
+    const threadId = await prepareThread("500012", messageCommandId(1));
+    const gateway = new FakeAiGateway(successOutcomes(DEFAULT_CHAT_RATE_LIMIT + 1));
+    for (let index = 0; index < DEFAULT_CHAT_RATE_LIMIT; index += 1) {
+      await sendChat(
+        "500012",
+        { commandId: messageCommandId(300 + index), threadId, text: "本文" },
+        gateway,
+        windowStartMs,
+      );
+    }
+    expect(
+      (
+        await sendChat(
+          "500012",
+          { commandId: messageCommandId(400), threadId, text: "本文" },
+          gateway,
+          windowStartMs,
+        )
+      ).status,
+    ).toBe(429);
+
+    const revived = await sendChat(
+      "500012",
+      { commandId: messageCommandId(401), threadId, text: "本文" },
+      gateway,
+      windowStartMs + RATE_LIMIT_WINDOW_MS,
+    );
+    expect(revived.status).toBe(200);
+  });
+
+  it("処理済みcommandIdの再送は枠を消費せず、同じ結果を返す", async () => {
+    const threadId = await prepareThread("500013", messageCommandId(1));
+    const gateway = new FakeAiGateway(successOutcomes(DEFAULT_CHAT_RATE_LIMIT));
+    for (let index = 0; index < DEFAULT_CHAT_RATE_LIMIT; index += 1) {
+      await sendChat(
+        "500013",
+        { commandId: messageCommandId(500 + index), threadId, text: "本文" },
+        gateway,
+        windowStartMs,
+      );
+    }
+
+    // 枠は使い切っているが、再送は「新しい送信」ではないので通り、AIも呼び直さない。
+    const resent = await sendChat(
+      "500013",
+      { commandId: messageCommandId(500), threadId, text: "本文" },
+      gateway,
+      windowStartMs,
+    );
+    expect(resent.status).toBe(200);
+    expect(gateway.requests).toHaveLength(DEFAULT_CHAT_RATE_LIMIT);
+
+    // 一方で、新しいcommandIdは同じ窓の中では拒否されたままである。
+    const fresh = await sendChat(
+      "500013",
+      { commandId: messageCommandId(600), threadId, text: "本文" },
+      gateway,
+      windowStartMs,
+    );
+    expect(fresh.status).toBe(429);
   });
 });

@@ -4,6 +4,16 @@ import type { HttpErrorCode, TeamCode } from "@hell-ict/domain";
 export const json = (value: unknown, status = 200): Response => Response.json(value, { status });
 export const error = (message: string, status: number, code?: HttpErrorCode): Response =>
   json(code === undefined ? { message } : { message, code }, status);
+/** Retry-Afterのように追加ヘッダーを伴うエラー応答（429）用。本文の形はerrorと同じ。 */
+export const errorWithHeaders = (
+  message: string,
+  status: number,
+  headers: Record<string, string>,
+): Response =>
+  new Response(JSON.stringify({ message }), {
+    status,
+    headers: { "content-type": "application/json", ...headers },
+  });
 export const parseJson = async (request: Request): Promise<unknown> => request.json();
 export const isWebSocketRequest = (request: Request): boolean =>
   request.headers.get("Upgrade")?.toLowerCase() === "websocket";

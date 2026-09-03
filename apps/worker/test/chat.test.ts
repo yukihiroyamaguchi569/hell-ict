@@ -26,6 +26,7 @@ const sendMessage = (
     promptProfile?: PromptProfile;
   },
   aiGateway: FakeAiGateway,
+  nowMs = Date.now(),
 ): Promise<Response> =>
   handleChatMessage(
     new Request(`https://example.test/api/teams/${teamCode}/chat/messages`, {
@@ -34,7 +35,7 @@ const sendMessage = (
     }),
     env,
     teamCode,
-    aiGateway,
+    { aiGateway, nowMs },
   );
 
 type PromptProfileCase = {
@@ -276,7 +277,7 @@ describe("P1C チャット骨格", () => {
       }),
       env,
       "400008",
-      refusalGateway,
+      { aiGateway: refusalGateway, nowMs: Date.now() },
     );
     expect(response.status).toBe(422);
     const body = await response.json();

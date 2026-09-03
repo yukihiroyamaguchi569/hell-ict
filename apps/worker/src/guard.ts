@@ -1,7 +1,7 @@
 /**
- * 公開Worker APIの入口ガード（Origin検証・チームコード許可リスト）。判定はすべて
- * 副作用のないPure Functionとして置き、index.tsのfetch入口からは
- * 「決めた結果」だけを使う。
+ * 公開Worker APIの入口ガード（Origin検証・チームコード許可リスト・チーム単位の
+ * レート制限）。判定はすべて副作用のないPure Functionとして置き、index.tsの
+ * fetch入口とTeamRoomからは「決めた結果」だけを使う。
  *
  * 前提: 本番（2026年9月の集合研修）はモックHTMLをWorkerのAssetsから配信するため、
  * ブラウザとAPIは同一オリジンになる。ALLOWED_ORIGINSを設定しなくても動くのが
@@ -73,3 +73,27 @@ export const parseTeamCodes = (raw: string | undefined): ReadonlySet<string> | n
 /** 許可リストが無ければ何でも通す（ローカル開発とE2Eの互換）。 */
 export const isTeamCodeAllowed = (code: string, allowlist: ReadonlySet<string> | null): boolean =>
   allowlist === null || allowlist.has(code);
+
+// ---- チャット送信のレート制限（固定窓） ----
+
+/** 固定窓の幅。`CHAT_RATE_LIMIT_PER_MINUTE`が「1分あたり」を意味する根拠。 */
+export const RATE_LIMIT_WINDOW_MS = 60_000;
+
+/** 既定の上限。研修中の1チームが1分に20通を超えるのは操作ミスか暴走とみなす。 */
+export const DEFAULT_CHAT_RATE_LIMIT = 20;
+
+/** `CHAT_RATE_LIMIT_PER_MINUTE`を上限値へ。未設定・不正値は既定へ倒す（設定ミスでAPIを止めない）。 */
+export const parseChatRateLimit = (raw: string | undefined): number => {
+  const parsed = Number(raw);
+  return Number.isInteger(parsed) && parsed > 0 ? parsed : DEFAULT_CHAT_RATE_LIMIT;
+};
+
+/** 固定窓のキー。同じ窓に入る時刻は同じ文字列になる。 */
+export const rateLimitBucket = (nowMs: number, windowMs: number): string =>
+  String(Math.floor(nowMs / windowMs));
+
+/** 現在の窓が明けるまでの秒数。0秒を返さないよう最低1秒に切り上げる。 */
+export const rateLimitRetryAfterSeconds = (nowMs: number, windowMs: number): number => {
+  const windowEndMs = (Math.floor(nowMs / windowMs) + 1) * windowMs;
+  return Math.max(1, Math.ceil((windowEndMs - nowMs) / 1000));
+};

@@ -20,10 +20,12 @@ import {
   isApiRequestAllowed,
   isTeamCodeAllowed,
   parseAllowedOrigins,
+  parseChatRateLimit,
   parseTeamCodes,
 } from "./guard.js";
 import {
   error,
+  errorWithHeaders,
   isWebSocketRequest,
   json,
   parseJson,
@@ -163,12 +165,50 @@ const blockHistoryPii = async (
     : error("会話履歴に個人情報を検知したため、送信をブロックしました。", 422);
 };
 
+/**
+ * 送信前ゲート。PII検知（企画書§7）とチーム単位のレート制限を、どちらもDOへ
+ * ユーザーメッセージを保存させず、AiGatewayにも触れずに止める（`room`は
+ * スタブを取るだけでDOを起こさない）。通す場合はnullを返す。
+ *
+ * PIIは何も保存していないので"pii_blocked"を付け、クライアントが新しいcommandIdで
+ * 書き直せることを示す。レート制限はRetry-Afterで待つべき秒数を返す。
+ * handleChatMessageの複雑度を下げるための切り出し。
+ */
+const blockBeforeSend = async (
+  room: DurableObjectStub<TeamRoom>,
+  command: SendMessageCommand,
+  nowMs: number,
+  limit: number,
+): Promise<Response | null> => {
+  if (detectPii(command.text) !== null) {
+    return error("個人情報を検知したため、送信をブロックしました。", 422, "pii_blocked");
+  }
+  const verdict = await room.checkChatRateLimit(command.commandId, nowMs, limit).catch(() => null);
+  if (verdict === null)
+    return error("メッセージの処理に失敗しました。時間を置いて再試行してください。", 503);
+  return verdict.allowed
+    ? null
+    : errorWithHeaders("送信が多すぎます。少し待ってから再試行してください。", 429, {
+        "Retry-After": String(verdict.retryAfterSeconds),
+      });
+};
+
+/**
+ * `handleChatMessage`の交換可能な境界。AI接続に加えて基準時刻も外から渡すことで、
+ * レート制限の固定窓をテストから固定できる（max-paramsを超えないよう1つへまとめる）。
+ */
+export type ChatMessageDeps = {
+  readonly aiGateway: AiGateway;
+  readonly nowMs: number;
+};
+
 export const handleChatMessage = async (
   request: Request,
   env: Env,
   teamCode: TeamCode,
-  aiGateway: AiGateway,
+  deps: ChatMessageDeps,
 ): Promise<Response> => {
+  const { aiGateway, nowMs } = deps;
   let command: SendMessageCommand;
   try {
     command = sendMessageCommandSchema.parse(await parseJson(request));
@@ -176,14 +216,17 @@ export const handleChatMessage = async (
     return error("commandの形式が不正です。", 400);
   }
 
-  // 送信前PIIゲート（企画書§7）。DO・AiGatewayのどちらにも触れる前に止める——
-  // ユーザーメッセージを保存させず、OpenAIへも一切送らない。何も保存していないので
-  // "pii_blocked"を付け、クライアントが新しいcommandIdで書き直せることを示す。
-  if (detectPii(command.text) !== null) {
-    return error("個人情報を検知したため、送信をブロックしました。", 422, "pii_blocked");
-  }
-
   const room = env.TEAM_ROOM.getByName(teamCode);
+  // 送信前ゲートはbeginChatMessageより前に置く。ここで止まればユーザーメッセージは
+  // 保存されず、OpenAIへも一切送られない（冪等再送が枠を消費しない理由はTeamRoom側）。
+  const blocked = await blockBeforeSend(
+    room,
+    command,
+    nowMs,
+    parseChatRateLimit(env.CHAT_RATE_LIMIT_PER_MINUTE),
+  );
+  if (blocked !== null) return blocked;
+
   const begin = await room.beginChatMessage(teamCode, command).catch(() => null);
   if (begin === null)
     return error("メッセージの処理に失敗しました。時間を置いて再試行してください。", 503);
@@ -225,7 +268,10 @@ const handlePost = (request: Request, env: Env, url: URL): Promise<Response> => 
   if (threadsTeamCode !== null) return handleCreateThread(request, env, threadsTeamCode);
   const messagesTeamCode = teamCodeFromPath(url.pathname, "/api/teams/", "/chat/messages");
   if (messagesTeamCode !== null)
-    return handleChatMessage(request, env, messagesTeamCode, createAiGateway(env));
+    return handleChatMessage(request, env, messagesTeamCode, {
+      aiGateway: createAiGateway(env),
+      nowMs: Date.now(),
+    });
   const commandTeamCode = teamCodeFromPath(url.pathname, "/api/teams/", "/commands");
   return commandTeamCode === null
     ? Promise.resolve(new Response("Not found", { status: 404 }))

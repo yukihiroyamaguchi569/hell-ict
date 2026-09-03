@@ -30,6 +30,7 @@ import type {
 } from "@hell-ict/domain";
 import { DurableObject } from "cloudflare:workers";
 
+import { RATE_LIMIT_WINDOW_MS, rateLimitBucket, rateLimitRetryAfterSeconds } from "./guard.js";
 import { error, isWebSocketRequest } from "./http.js";
 
 type StoredCommand = { result: string };
@@ -38,6 +39,7 @@ type StoredChatState = { snapshot: string };
 type StoredThreadCommand = { result: string };
 type StoredMessageCommand = { result: string };
 type StoredPendingMessage = { thread_id: string; claimed_at: string | null };
+type StoredRateLimit = { count: number };
 type ConflictReply = { conflict: true };
 type UnknownThreadReply = { unknownThread: true };
 
@@ -47,6 +49,10 @@ export type BeginChatMessageOutcome =
   | { kind: "in-progress" };
 
 export type CompleteChatMessageOutcome = { kind: "success"; text: string } | { kind: "failure" };
+
+export type RateLimitVerdict =
+  | { readonly allowed: true }
+  | { readonly allowed: false; readonly retryAfterSeconds: number };
 
 /**
  * AI呼び出しが失敗し続け、クライアントが二度と同じcommandIdで再送しない場合に
@@ -87,6 +93,9 @@ export class TeamRoom extends DurableObject<Env> {
     );
     this.ctx.storage.sql.exec(
       "CREATE TABLE IF NOT EXISTS pending_message_commands (command_id TEXT PRIMARY KEY, thread_id TEXT NOT NULL, created_at TEXT NOT NULL, claimed_at TEXT)",
+    );
+    this.ctx.storage.sql.exec(
+      "CREATE TABLE IF NOT EXISTS rate_limit (bucket TEXT PRIMARY KEY, count INTEGER NOT NULL)",
     );
   }
 
@@ -199,6 +208,59 @@ export class TeamRoom extends DurableObject<Env> {
     );
     this.broadcastChat(created.snapshot);
     return result;
+  }
+
+  /**
+   * チーム単位のチャット送信レート制限（固定窓）。beginChatMessageの手前で呼ぶ前提で、
+   * 拒否したときはユーザーメッセージを保存せず、AiGatewayにも触れさせない。
+   *
+   * 冪等再送——既にprocessed、または送信途中でpendingに残っているcommandId——は
+   * 枠を消費させない。beginChatMessage側のalready-processed/in-progress分岐と同じ
+   * 「これは新しい送信ではない」判定をここでも先に行う。逆順（先に窓を数える）にすると、
+   * 通信が不安定で再送を繰り返しているチームが、1通も新しく送っていないのに429で
+   * 詰んでしまう。窓を消費してよいのは、これから本当にAIを呼ぶ送信だけである。
+   *
+   * `nowMs`はWorkerから渡す。DO内でDate.now()を直書きすると窓をテストから固定できない。
+   */
+  async checkChatRateLimit(
+    commandId: string,
+    nowMs: number,
+    limit: number,
+  ): Promise<RateLimitVerdict> {
+    if (this.isResendOf(commandId)) return { allowed: true };
+    const bucket = rateLimitBucket(nowMs, RATE_LIMIT_WINDOW_MS);
+    // 固定窓なので過去の窓の行は不要。1行だけ残す。
+    this.ctx.storage.sql.exec("DELETE FROM rate_limit WHERE bucket <> ?", bucket);
+    const stored =
+      this.ctx.storage.sql
+        .exec<StoredRateLimit>("SELECT count FROM rate_limit WHERE bucket = ?", bucket)
+        .toArray()[0] ?? null;
+    const count = stored?.count ?? 0;
+    if (count >= limit) {
+      return {
+        allowed: false,
+        retryAfterSeconds: rateLimitRetryAfterSeconds(nowMs, RATE_LIMIT_WINDOW_MS),
+      };
+    }
+    this.ctx.storage.sql.exec(
+      "INSERT INTO rate_limit (bucket, count) VALUES (?, 1) ON CONFLICT(bucket) DO UPDATE SET count = count + 1",
+      bucket,
+    );
+    return { allowed: true };
+  }
+
+  /** 処理済み、または送信途中として記録済みのcommandIdか（＝新規送信ではない再送か）。 */
+  private isResendOf(commandId: string): boolean {
+    const known = this.ctx.storage.sql
+      .exec<{
+        found: number;
+      }>(
+        "SELECT 1 AS found FROM processed_message_commands WHERE command_id = ? UNION ALL SELECT 1 AS found FROM pending_message_commands WHERE command_id = ?",
+        commandId,
+        commandId,
+      )
+      .toArray();
+    return known.length > 0;
   }
 
   async beginChatMessage(
