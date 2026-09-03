@@ -29,6 +29,7 @@ import type {
   TeamSyncMessage,
 } from "@hell-ict/domain";
 import { DurableObject } from "cloudflare:workers";
+import { z } from "zod";
 
 import { RATE_LIMIT_WINDOW_MS, rateLimitBucket, rateLimitRetryAfterSeconds } from "./guard.js";
 import { error, isWebSocketRequest } from "./http.js";
@@ -39,7 +40,6 @@ type StoredChatState = { snapshot: string };
 type StoredThreadCommand = { result: string };
 type StoredMessageCommand = { result: string };
 type StoredPendingMessage = { thread_id: string; claimed_at: string | null };
-type StoredRateLimit = { count: number };
 type ConflictReply = { conflict: true };
 type UnknownThreadReply = { unknownThread: true };
 
@@ -69,6 +69,9 @@ const PENDING_MESSAGE_EXPIRY_MS = 6 * 60 * 60 * 1000;
  * 終わった場合だけクレームを回収できるようにする。
  */
 const CLAIM_TIMEOUT_MS = 45 * 1000;
+
+/** rate_limitの行。壊れた値でレート制限が黙って無効化されないよう実行時に検証する。 */
+const storedRateLimitSchema = z.object({ count: z.number().int().nonnegative() });
 
 export class TeamRoom extends DurableObject<Env> {
   constructor(ctx: DurableObjectState, env: Env) {
@@ -219,20 +222,36 @@ export class TeamRoom extends DurableObject<Env> {
    */
   private consumeRateLimit(nowMs: number, limit: number): number | null {
     const bucket = rateLimitBucket(nowMs, RATE_LIMIT_WINDOW_MS);
-    // 固定窓なので過去の窓の行は不要。1行だけ残す。
+    const count = this.rateLimitCount(bucket);
+    if (count >= limit) return rateLimitRetryAfterSeconds(nowMs, RATE_LIMIT_WINDOW_MS);
+    // 固定窓なので過去の窓の行は不要。消費するときに掃除して1行だけ残す
+    // （超過で戻るときは1行も書かないよう、判定より後に置く）。
     this.ctx.storage.sql.exec("DELETE FROM rate_limit WHERE bucket <> ?", bucket);
-    const stored =
-      this.ctx.storage.sql
-        .exec<StoredRateLimit>("SELECT count FROM rate_limit WHERE bucket = ?", bucket)
-        .toArray()[0] ?? null;
-    if ((stored?.count ?? 0) >= limit) {
-      return rateLimitRetryAfterSeconds(nowMs, RATE_LIMIT_WINDOW_MS);
-    }
+    // `count + 1`ではなく読み取った値からの上書きにする。壊れた行へ加算し続けると
+    // 上限へ永久に届かず、制限が黙って無効化される。
     this.ctx.storage.sql.exec(
-      "INSERT INTO rate_limit (bucket, count) VALUES (?, 1) ON CONFLICT(bucket) DO UPDATE SET count = count + 1",
+      "INSERT OR REPLACE INTO rate_limit (bucket, count) VALUES (?, ?)",
       bucket,
+      count + 1,
     );
     return null;
+  }
+
+  /**
+   * 現在の窓のカウンタを読む。行が無い、または値が壊れている（型が違う、負数）ときは0を返す。
+   *
+   * 自前で書いている行だが、SQLiteは列の型を強制しないので、手作業のSQLや将来の
+   * スキーマ変更で数値以外が入りうる。素通しするとNaNとの比較が常にfalseになり、
+   * レート制限が例外もログも出さずに効かなくなる。壊れた行は0として扱い、
+   * consumeRateLimitの上書きで正しい値へ戻す。
+   */
+  private rateLimitCount(bucket: string): number {
+    const row =
+      this.ctx.storage.sql
+        .exec("SELECT count FROM rate_limit WHERE bucket = ?", bucket)
+        .toArray()[0] ?? null;
+    if (row === null) return 0;
+    return storedRateLimitSchema.safeParse(row).data?.count ?? 0;
   }
 
   /**
@@ -292,19 +311,25 @@ export class TeamRoom extends DurableObject<Env> {
     };
     const appended = appendMessage(snapshot, { threadId: command.threadId, message: userMessage });
     if (!appended.ok) return { unknownThread: true };
-    // ここまでは何も永続化していない。枠を消費するのはこの直後の保存とpending行作成の
-    // ためだけであり、超過なら何も書かずに戻る。
-    const retryAfterSeconds = this.consumeRateLimit(nowMs, limit);
+    // ここまでは何も永続化していない。「枠の加算・snapshotの保存・pending行の作成」は
+    // 全部そろって初めて意味を持つので、1つのトランザクションにまとめる。途中で
+    // ストレージが失敗しても、枠だけ減ってメッセージが残らない中途半端な状態にしない。
+    // 超過のときはconsumeRateLimitが1行も書かずに戻るため、この中では何も起きない。
+    const retryAfterSeconds = this.ctx.storage.transactionSync(() => {
+      const retry = this.consumeRateLimit(nowMs, limit);
+      if (retry !== null) return retry;
+      this.saveChatSnapshot(appended.snapshot);
+      const now = new Date().toISOString();
+      this.ctx.storage.sql.exec(
+        "INSERT INTO pending_message_commands (command_id, thread_id, created_at, claimed_at) VALUES (?, ?, ?, ?)",
+        command.commandId,
+        command.threadId,
+        now,
+        now,
+      );
+      return null;
+    });
     if (retryAfterSeconds !== null) return { kind: "rate-limited", retryAfterSeconds };
-    this.saveChatSnapshot(appended.snapshot);
-    const now = new Date().toISOString();
-    this.ctx.storage.sql.exec(
-      "INSERT INTO pending_message_commands (command_id, thread_id, created_at, claimed_at) VALUES (?, ?, ?, ?)",
-      command.commandId,
-      command.threadId,
-      now,
-      now,
-    );
     this.broadcastChat(appended.snapshot);
     return { kind: "pending", history: this.historyFor(appended.snapshot, command.threadId) };
   }

@@ -1,9 +1,10 @@
 import { env, exports } from "cloudflare:workers";
-import { listDurableObjectIds } from "cloudflare:test";
+import { listDurableObjectIds, runInDurableObject } from "cloudflare:test";
 import { chatSnapshotSchema, createThreadResultSchema } from "@hell-ict/domain";
 import { FakeAiGateway } from "@hell-ict/domain/fakes";
 import type { FakeAiOutcome } from "@hell-ict/domain/fakes";
 import { describe, expect, it, vi } from "vitest";
+import { z } from "zod";
 
 import {
   corsHeadersFor,
@@ -88,6 +89,28 @@ const sendChat = (
     teamCode,
     { aiGateway: gateway, nowMs },
   );
+
+/** レート制限の判定で書き換わりうる3つの記録をまとめて数える（原子性の確認用）。 */
+const storageCountsOf = async (
+  teamCode: string,
+  nowMs: number,
+): Promise<{ rateLimit: number; messages: number; pending: number }> => {
+  const bucket = rateLimitBucket(nowMs, RATE_LIMIT_WINDOW_MS);
+  const messages = await messageCountOf(teamCode);
+  return runInDurableObject(env.TEAM_ROOM.getByName(teamCode), (_instance, state) => {
+    const rateLimit = state.storage.sql
+      .exec("SELECT count FROM rate_limit WHERE bucket = ?", bucket)
+      .toArray();
+    const pending = state.storage.sql
+      .exec("SELECT command_id FROM pending_message_commands")
+      .toArray();
+    return {
+      rateLimit: z.number().parse(rateLimit[0]?.count ?? 0),
+      messages,
+      pending: pending.length,
+    };
+  });
+};
 
 const messageCountOf = async (teamCode: string): Promise<number> => {
   const response = await get(`/api/teams/${teamCode}/chat`);
@@ -567,6 +590,68 @@ describe("チャット送信のレート制限", () => {
       windowStartMs,
     );
     expect(blocked.status).toBe(429);
+  });
+
+  it("上限に達した送信は枠・snapshot・pendingのどれも変えない", async () => {
+    const threadId = await prepareThread("500017", messageCommandId(1));
+    const gateway = new FakeAiGateway(successOutcomes(DEFAULT_CHAT_RATE_LIMIT));
+    for (let index = 0; index < DEFAULT_CHAT_RATE_LIMIT; index += 1) {
+      await sendChat(
+        "500017",
+        { commandId: messageCommandId(1400 + index), threadId, text: "本文" },
+        gateway,
+        windowStartMs,
+      );
+    }
+    const before = await storageCountsOf("500017", windowStartMs);
+
+    const blocked = await sendChat(
+      "500017",
+      { commandId: messageCommandId(1500), threadId, text: "本文" },
+      gateway,
+      windowStartMs,
+    );
+
+    expect(blocked.status).toBe(429);
+    await expect(storageCountsOf("500017", windowStartMs)).resolves.toEqual(before);
+  });
+
+  it("rate_limitの行が壊れていても制限は効き続ける", async () => {
+    const threadId = await prepareThread("500018", messageCommandId(1));
+    // 型違いと負数を直接書き込む。素通しするとNaN比較で制限が黙って無効化される。
+    const brokenValues: readonly (string | number)[] = ["こわれた", -5];
+    for (const [round, broken] of brokenValues.entries()) {
+      // 窓ごとにカウンタを分けて、ラウンド間で枠を引き継がないようにする。
+      const roundNowMs = windowStartMs + round * RATE_LIMIT_WINDOW_MS;
+      const roundBucket = rateLimitBucket(roundNowMs, RATE_LIMIT_WINDOW_MS);
+      await runInDurableObject(env.TEAM_ROOM.getByName("500018"), (_instance, state) => {
+        state.storage.sql.exec(
+          "INSERT OR REPLACE INTO rate_limit (bucket, count) VALUES (?, ?)",
+          roundBucket,
+          broken,
+        );
+      });
+
+      const gateway = new FakeAiGateway(successOutcomes(DEFAULT_CHAT_RATE_LIMIT));
+      // 壊れた行は0扱いで上書きされるので、ここから上限ぶんちょうど通る。
+      const base = 1600 + round * 100;
+      for (let index = 0; index < DEFAULT_CHAT_RATE_LIMIT; index += 1) {
+        const response = await sendChat(
+          "500018",
+          { commandId: messageCommandId(base + index), threadId, text: "本文" },
+          gateway,
+          roundNowMs,
+        );
+        expect(response.status, `${String(broken)}#${String(index)}`).toBe(200);
+      }
+      const blocked = await sendChat(
+        "500018",
+        { commandId: messageCommandId(base + 50), threadId, text: "本文" },
+        gateway,
+        roundNowMs,
+      );
+      expect(blocked.status, String(broken)).toBe(429);
+    }
   });
 
   it("上限に達した送信はpending行を残さず、窓が明ければ同じcommandIdで再送できる", async () => {
