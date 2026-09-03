@@ -167,6 +167,50 @@ describe("チェックポイントの純粋関数", () => {
     expect(result).toEqual({ ok: false, reason: "trap-regression" });
   });
 
+  it("posを巻き戻す保存を拒否する", () => {
+    const result = applyCheckpoint(snapshot(1, { pos: 4 }), command(1, { pos: 3 }), {
+      teamCode: "000000",
+      now,
+    });
+    expect(result).toEqual({ ok: false, reason: "pos-regression" });
+  });
+
+  it.each([
+    { label: "同値", pos: 4 },
+    { label: "前進", pos: 5 },
+  ])("posが$labelなら許可する", ({ pos }) => {
+    const result = applyCheckpoint(snapshot(1, { pos: 4 }), command(1, { pos }), {
+      teamCode: "000000",
+      now,
+    });
+    if (!result.ok) throw new Error("unexpected");
+    expect(result.snapshot.body.pos).toBe(pos);
+  });
+
+  it("未保存への初回保存はposを比較しない", () => {
+    const result = applyCheckpoint(null, command(0, { pos: 0 }), { teamCode: "000000", now });
+    expect(result.ok).toBe(true);
+  });
+
+  it("同じposのままviewだけ戻る保存は許可する", () => {
+    const result = applyCheckpoint(
+      snapshot(1, { pos: 4, view: "stage3-quiz" }),
+      command(1, { pos: 4, view: "stage3-manual" }),
+      { teamCode: "000000", now },
+    );
+    if (!result.ok) throw new Error("unexpected");
+    expect(result.snapshot.body.view).toBe("stage3-manual");
+  });
+
+  it("elapsedMs後退とpos後退が同時に成立する場合はelapsedMsを優先する", () => {
+    const result = applyCheckpoint(
+      snapshot(1, { pos: 4, elapsedMs: 60_000 }),
+      command(1, { pos: 3, elapsedMs: 0 }),
+      { teamCode: "000000", now },
+    );
+    expect(result).toEqual({ ok: false, reason: "elapsed-regression" });
+  });
+
   it("競合と罠後退が同時に成立する場合は競合を優先する", () => {
     const result = applyCheckpoint(
       snapshot(1, { trap: { s3Used: true, s4Used: false } }),
