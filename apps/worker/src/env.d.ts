@@ -19,10 +19,26 @@ export {};
  * 未設定を型で表すため`string | undefined`とし、guard.tsのパーサが既定へ倒す。
  */
 declare global {
-  interface Env {
+  interface HellIctVars {
     OPENAI_API_KEY: string;
     ALLOWED_ORIGINS?: string;
     TEAM_CODES?: string;
     CHAT_RATE_LIMIT_PER_MINUTE?: string;
   }
+
+  // 中身が空のinterfaceでの拡張は、宣言マージで既存の型へ項目を足すための
+  // 唯一の書き方である（型エイリアスではマージできない）。定義を1か所に保つため、
+  // ここだけ no-empty-object-type を外す。
+  /* eslint-disable @typescript-eslint/no-empty-object-type */
+  interface Env extends HellIctVars {}
+
+  /**
+   * `wrangler types`が生成する`Cloudflare.Env`へも同じ項目を足す。テストが
+   * `import { env } from "cloudflare:workers"`で受け取る値はこちらの型で、
+   * グローバルな`Env`とは別物のため、片方だけではテスト側が型エラーになる。
+   */
+  namespace Cloudflare {
+    interface Env extends HellIctVars {}
+  }
+  /* eslint-enable @typescript-eslint/no-empty-object-type */
 }
