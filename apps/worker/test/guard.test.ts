@@ -19,7 +19,7 @@ import {
   rateLimitRetryAfterSeconds,
 } from "../src/guard.js";
 import { handleChatMessage } from "../src/index.js";
-import { get, postJson, session, TEST_ORIGIN } from "./support.js";
+import { get, postJson, session, TEST_ORIGIN, upgrade } from "./support.js";
 
 const OTHER_ORIGIN = "https://evil.test";
 
@@ -127,10 +127,19 @@ describe("Origin判定（Pure Function）", () => {
 });
 
 describe("チームコード許可リスト（Pure Function）", () => {
-  it("未設定・空文字はnull（＝何でも通す）", () => {
+  it("未設定だけがnull（＝何でも通す）", () => {
     expect(parseTeamCodes(undefined)).toBeNull();
-    expect(parseTeamCodes("  ,  ")).toBeNull();
     expect(isTeamCodeAllowed("999999", null)).toBe(true);
+  });
+
+  it("設定されているが空なら、fail-closedで全コードを拒否する", () => {
+    // 「許可リストを効かせるつもりで値を間違えた」ケース。fail-openへ倒すと、
+    // 設定したつもりのまま誰でも入れる状態を無言で作ってしまう。
+    for (const raw of ["", "   ", ",", " , "]) {
+      const allowlist = parseTeamCodes(raw);
+      expect(allowlist, raw).not.toBeNull();
+      expect(isTeamCodeAllowed("100001", allowlist), raw).toBe(false);
+    }
   });
 
   it("設定した6桁だけを通す（空白は無視する）", () => {
@@ -352,6 +361,47 @@ describe("入口ガード（チームコード許可リスト）", () => {
       });
       expect(command.status).toBe(404);
       await expect(listDurableObjectIds(env.TEAM_ROOM)).resolves.toEqual(before);
+    });
+  });
+});
+
+describe("入口ガード（リーダーボード）", () => {
+  it("TEAM_CODES設定時、未登録コードのリーダーボード購読は404でDOを作らない", async () => {
+    await withEnv({ TEAM_CODES: "500030" }, async () => {
+      const before = await listDurableObjectIds(env.RACE_LEADERBOARD);
+      const rejected = await exports.default.fetch(
+        new Request(`${TEST_ORIGIN}/api/leaderboard/sync?teamCode=500031`, {
+          headers: { Upgrade: "websocket", Origin: TEST_ORIGIN },
+        }),
+      );
+      expect(rejected.status).toBe(404);
+      expect(rejected.webSocket).toBeNull();
+      await expect(listDurableObjectIds(env.RACE_LEADERBOARD)).resolves.toEqual(before);
+    });
+  });
+
+  it("TEAM_CODES設定時、登録済みコードのリーダーボード購読は通る", async () => {
+    await withEnv({ TEAM_CODES: "500032" }, async () => {
+      await session("500032");
+      const response = await upgrade("/api/leaderboard/sync?teamCode=500032");
+      expect(response.status).toBe(101);
+      response.webSocket?.accept();
+      response.webSocket?.close();
+    });
+  });
+});
+
+describe("ヘルスチェックのguards", () => {
+  it("運用値の設定状況を返し、値そのものは伏せる", async () => {
+    await withEnv({ TEAM_CODES: "100001,100002", ALLOWED_ORIGINS: OTHER_ORIGIN }, async () => {
+      const response = await get("/api/health");
+      const body = await response.json();
+      expect(body).toEqual({
+        status: "ok",
+        guards: { teamCodes: true, allowedOrigins: true, chatRateLimitPerMinute: 20 },
+      });
+      expect(JSON.stringify(body)).not.toContain("100001");
+      expect(JSON.stringify(body)).not.toContain(OTHER_ORIGIN);
     });
   });
 });

@@ -96,16 +96,28 @@ export const corsHeadersFor = (
   return { "Access-Control-Allow-Origin": origin, Vary: "Origin" };
 };
 
-/** カンマ区切りの`TEAM_CODES`を集合へ。未設定・空文字はnull（＝許可リストなし＝何でも通す）。 */
+/**
+ * カンマ区切りの`TEAM_CODES`を集合へ。
+ *
+ * 「未設定」と「設定されているが空」を区別する。未設定（undefined）だけがnull＝
+ * 許可リスト無し＝何でも通す。ローカル開発とE2Eを壊さないための意図的なfail-openで、
+ * この既定は維持する（設定漏れは`GET /api/health`のguardsで検知する）。
+ *
+ * 一方、空文字や","だけを設定した場合は「許可リストを効かせるつもりで値を間違えた」と
+ * みなし、空集合を返してすべて拒否する（fail-closed）。fail-openへ倒すと、設定した
+ * つもりのまま誰でも入れる状態を無言で作ってしまう。
+ */
 export const parseTeamCodes = (raw: string | undefined): ReadonlySet<string> | null => {
-  const codes = (raw ?? "")
-    .split(",")
-    .map((code) => code.trim())
-    .filter((code) => code.length > 0);
-  return codes.length === 0 ? null : new Set(codes);
+  if (raw === undefined) return null;
+  return new Set(
+    raw
+      .split(",")
+      .map((code) => code.trim())
+      .filter((code) => code.length > 0),
+  );
 };
 
-/** 許可リストが無ければ何でも通す（ローカル開発とE2Eの互換）。 */
+/** 許可リストが無ければ（＝TEAM_CODES未設定なら）何でも通す。 */
 export const isTeamCodeAllowed = (code: string, allowlist: ReadonlySet<string> | null): boolean =>
   allowlist === null || allowlist.has(code);
 

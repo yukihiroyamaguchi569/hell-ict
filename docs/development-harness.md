@@ -41,7 +41,7 @@ pnpm verify:full
 | 変数 | 未設定時の既定 | 設定する場面 |
 |---|---|---|
 | `ALLOWED_ORIGINS` | リクエストURLと同じoriginだけ許可 | 別オリジンのページからAPIを叩くとき（開発時に`localStorage.hellApiBase`で別ポートの`wrangler dev`へ向ける場合など）。カンマ区切り、末尾スラッシュと空白は無視する。許可した別オリジンには`Access-Control-Allow-Origin`と`Vary: Origin`を返し、`OPTIONS /api/*`のpreflightへ204を返す |
-| `TEAM_CODES` | 6桁なら任意のコードで入室できる | 本番。事前配布した6桁コードをカンマ区切りで列挙する。列挙外のコードは404で拒否し、Durable Objectも作らない |
+| `TEAM_CODES` | 6桁なら任意のコードで入室できる（ローカル開発とE2Eを壊さないための意図的なfail-open） | 本番。事前配布した6桁コードをカンマ区切りで列挙する。列挙外のコードは入室・チーム操作・リーダーボード購読・進捗記録のすべてで404になり、Durable ObjectもD1の行も作らない。**空文字や`,`だけを設定した場合は「設定し損ね」とみなして全コードを拒否する（fail-closed）** |
 | `CHAT_RATE_LIMIT_PER_MINUTE` | 20 | 1チームが1分あたりに送れるチャット数を変えるとき。超過は429と`Retry-After`で返し、OpenAIを呼ばずユーザーメッセージも保存しない |
 
 本番デプロイ前の手順は次のとおり。
@@ -49,4 +49,5 @@ pnpm verify:full
 1. 当日配布するチームコードを決める（2026-08-23のテストプレイはチームA〜Gへ`100001`〜`100007`を配った）。
 2. `wrangler deploy --var TEAM_CODES:100001,100002,...` で設定する。Cloudflareダッシュボードの Workers &gt; 対象Worker &gt; Settings &gt; Variables から入れてもよい。
 3. 配信版はモックHTMLをWorkerのAssetsから同一オリジンで配るため、`ALLOWED_ORIGINS`は未設定のままでよい。別オリジン配信へ切り替えたときだけ設定する。
-4. デプロイ後、ブラウザから配布コードで入室できることと、配布していないコードが404で弾かれることを確認する。素の`curl -X POST https://<worker>/api/session -d '{"teamCode":"100001"}'`はOriginが無いので403になるが、これはガードが配線されている確認であって防御の強さの確認ではない（`-H "Origin: https://<worker>"`を付ければ通る。上の注記を参照）。
+4. デプロイ後、`GET /api/health`の`guards`で設定が効いているか確認する。`{"status":"ok","guards":{"teamCodes":true,"allowedOrigins":false,"chatRateLimitPerMinute":20}}`のように返るので、**`teamCodes`が`true`であること**を必ず見る（`false`なら`TEAM_CODES`の設定漏れで、6桁なら誰でも入れる状態のまま本番を迎えることになる）。値そのものは伏せてあるので、この応答から配布コードや許可オリジンは漏れない。
+5. ブラウザから配布コードで入室できることと、配布していないコードが404で弾かれることを確認する。素の`curl -X POST https://<worker>/api/session -d '{"teamCode":"100001"}'`はOriginが無いので403になるが、これはガードが配線されている確認であって防御の強さの確認ではない（`-H "Origin: https://<worker>"`を付ければ通る。上の注記を参照）。

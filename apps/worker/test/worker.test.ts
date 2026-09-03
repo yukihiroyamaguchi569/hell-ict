@@ -18,7 +18,11 @@ describe("P1B Worker", () => {
     const response = await exports.default.fetch(new Request("https://example.test/api/health"));
 
     expect(response.status).toBe(200);
-    await expect(response.json()).resolves.toEqual({ status: "ok" });
+    await expect(response.json()).resolves.toEqual({
+      status: "ok",
+      // 運用値の設定状況。テスト環境ではどれも未設定なので既定のまま出る。
+      guards: { teamCodes: false, allowedOrigins: false, chatRateLimitPerMinute: 20 },
+    });
     await expect(listDurableObjectIds(env.TEAM_ROOM)).resolves.toEqual([]);
     await expect(listDurableObjectIds(env.RACE_LEADERBOARD)).resolves.toEqual([]);
   });
