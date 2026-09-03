@@ -1,4 +1,5 @@
 import { env, exports } from "cloudflare:workers";
+import { runInDurableObject } from "cloudflare:test";
 import {
   checkpointStateSchema,
   httpErrorSchema,
@@ -130,6 +131,30 @@ describe("チェックポイントAPI", () => {
     expect(state.checkpoint?.body.pos).toBe(2);
   });
 
+  it("conflictで拒否されたcommandIdは台帳に残らず、正しいrevisionで再送すれば成功する", async () => {
+    await save("500015", { commandId: id("115"), expectedRevision: 0 });
+    const retried = id("116");
+    const conflict = await save("500015", {
+      commandId: retried,
+      expectedRevision: 0,
+      body: { pos: 5 },
+    });
+    expect(conflict.status).toBe(409);
+
+    // 台帳へ書かれていれば、この再送は保存済み結果（conflict時のsnapshot）を
+    // 返すか失敗する。状態更新と台帳が同じトランザクションで巻き戻る保証を固定する。
+    const accepted = await save(
+      "500015",
+      { commandId: retried, expectedRevision: 1, body: { pos: 5 } },
+      later,
+    );
+
+    expect(accepted.status).toBe(200);
+    await expect(load("500015")).resolves.toMatchObject({
+      checkpoint: { revision: 2, savedAt: later, body: { pos: 5 } },
+    });
+  });
+
   it("発動済みの罠をfalseへ戻す保存は409で拒否し、保存されない", async () => {
     await save("500006", {
       commandId: id("106"),
@@ -216,6 +241,39 @@ describe("チェックポイントAPI", () => {
 
     expect(response.status).toBe(400);
     await expect(load("500010")).resolves.toMatchObject({ checkpoint: null });
+  });
+
+  it("台帳は直近20件だけを残し、溢れた古いcommandIdの再送は競合になる", async () => {
+    const teamCode = "500016";
+    // 上限を1件だけ超えるまで保存する。savedAtは全て同じなので、created_atが
+    // 同値のときにrowidで挿入順に切れることもここで固定される。
+    const commandIds = Array.from({ length: 21 }, (_, index) => id(String(200 + index)));
+    for (const [index, commandId] of commandIds.entries()) {
+      const response = await save(teamCode, {
+        commandId,
+        expectedRevision: index,
+        body: { pos: index % 8 },
+      });
+      expect(response.status).toBe(200);
+    }
+
+    const rows = await runInDurableObject(env.TEAM_ROOM.getByName(teamCode), (_instance, state) =>
+      state.storage.sql
+        .exec("SELECT count(*) AS count FROM processed_checkpoint_commands")
+        .toArray(),
+    );
+    expect(rows[0]?.count).toBe(20);
+
+    // 溢れた最古のcommandIdは台帳に無いので、通常の競合として扱われる。
+    const evicted = await save(teamCode, { commandId: commandIds[0], expectedRevision: 0 });
+    expect(evicted.status).toBe(409);
+
+    // 直近のcommandIdは台帳に残っており、再送しても状態を進めず同じsnapshotを返す。
+    const kept = await save(teamCode, { commandId: commandIds[20], expectedRevision: 20 });
+    expect(kept.status).toBe(200);
+    const { snapshot } = saveCheckpointResultSchema.parse(await kept.json());
+    expect(snapshot).toMatchObject({ revision: 21, body: { pos: 20 % 8 } });
+    await expect(load(teamCode)).resolves.toMatchObject({ checkpoint: snapshot });
   });
 
   it("チームごとにチェックポイントが分離される", async () => {
