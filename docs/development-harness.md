@@ -31,3 +31,20 @@ pnpm verify:full
 `apps/worker/wrangler.jsonc`をWorker設定の正とする。compatibility dateは設定時点の日付で、DOはSQLite migration（`v1`）を宣言する。型は`wrangler types`の出力を更新し、設定を変えたPRで型検査に含める。
 
 フロントエンドはCloudflare Pagesへ、WorkerはCloudflare Workersへ配備する予定である。P1Aは本番リソースや秘密情報を作成・接続しない。ローカルWorkerのDurable ObjectはWranglerのローカル永続化を使う。
+
+### 公開APIガードの環境変数
+
+`/api/*`の入口ガード（`apps/worker/src/guard.ts`）が読む運用値。秘匿情報ではないので`wrangler secret`にはしないが、会ごとに変わるため`wrangler.jsonc`の`vars`へ値を書かない。3つとも未設定のままでも既定動作で動くので、ローカル開発とE2Eでは設定不要である。
+
+| 変数 | 未設定時の既定 | 設定する場面 |
+|---|---|---|
+| `ALLOWED_ORIGINS` | リクエストURLと同じoriginだけ許可 | 別オリジンのページからAPIを叩くとき（開発時に`localStorage.hellApiBase`で別ポートの`wrangler dev`へ向ける場合など）。カンマ区切り、末尾スラッシュと空白は無視する |
+| `TEAM_CODES` | 6桁なら任意のコードで入室できる | 本番。事前配布した6桁コードをカンマ区切りで列挙する。列挙外のコードは404で拒否し、Durable Objectも作らない |
+| `CHAT_RATE_LIMIT_PER_MINUTE` | 20 | 1チームが1分あたりに送れるチャット数を変えるとき。超過は429と`Retry-After`で返し、OpenAIを呼ばずユーザーメッセージも保存しない |
+
+本番デプロイ前の手順は次のとおり。
+
+1. 当日配布するチームコードを決める（2026-08-23のテストプレイはチームA〜Gへ`100001`〜`100007`を配った）。
+2. `wrangler deploy --var TEAM_CODES:100001,100002,...` で設定する。Cloudflareダッシュボードの Workers &gt; 対象Worker &gt; Settings &gt; Variables から入れてもよい。
+3. 配信版はモックHTMLをWorkerのAssetsから同一オリジンで配るため、`ALLOWED_ORIGINS`は未設定のままでよい。別オリジン配信へ切り替えたときだけ設定する。
+4. デプロイ後、`curl -X POST https://<worker>/api/session -d '{"teamCode":"100001"}'`が403で拒否されること（Originが無いPOST）と、ブラウザから配布コードで入室できることを確認する。
