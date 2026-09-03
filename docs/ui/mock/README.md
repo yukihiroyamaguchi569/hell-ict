@@ -117,9 +117,11 @@ JS 構造そのものは資産ではない。単一ファイル・フレーム�
 
 - **チェックポイント**（`saveCheckpoint()`／`postCheckpoint()`）。ステージ遷移（`go()` の末尾）・
   罠の発動・停留所の前進のたびに、`view`・`pos`・経過時間・罠のフラグを
-  `POST /api/teams/:code/checkpoint` へ500msデバウンスで保存する。409はサーバの `revision` と
-  突き合わせて理由を判別し、競合なら同じbodyを1回だけ再送、後退（罠・経過時間・停留所）なら
-  サーバ値を採用して再送しない（`adoptServerState()`）。
+  `POST /api/teams/:code/checkpoint` へ500msデバウンスで保存する。409は応答の `code`
+  （`conflict` / `trap-regression` / `elapsed-regression` / `pos-regression`）で分岐し、
+  競合なら`revision`を取り直して同じbodyを1回だけ再送、後退（罠・経過時間・停留所）なら
+  サーバ値を採用して再送しない（`adoptServerState()`）。`code` を持たない応答へは、
+  送った`expectedRevision`とサーバの`revision`のずれで競合かどうかを見分けるフォールバックがある。
 - **入室時の自動復帰**（`resumeFromCheckpoint()`）。`btn-enter` のLIVE経路で
   `GET /api/teams/:code/checkpoint` を取り、保存済みのステージがあればそこへ戻す
   ——進行台本 §5-1 の「ファシリテーターがdevbarで手動ジャンプして復帰させる」手順が要らなくなる。

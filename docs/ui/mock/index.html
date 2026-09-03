@@ -3497,14 +3497,12 @@
       return;
     }
     // 409 以外（通信断・503・404）はそのまま諦める。次の保存でまた送られる。
-    if (res.status !== 409 || retried) return;
+    if (res.status !== 409) return;
 
     // 409 の理由は4種類（conflict／trap-regression／elapsed-regression／
-    // pos-regression）だが、サーバはどれも日本語のmessageでしか区別を返さない。
-    // 文言を読む代わりに revision で見分ける——最新を取り直したとき、送った
-    // expectedRevision とサーバの revision がずれていれば conflict（同じPCで
-    // 複数タブが開かれた等）、一致していれば「revisionは合っていたのに中身が
-    // 後退していた」＝3つの regression のいずれか、と構造で決まる。
+    // pos-regression）。サーバが機械可読な code で返すので、それで分岐する
+    // ——日本語のmessageを文字列一致で読むと、文言を直したとたんに壊れる。
+    const code = (res.body && typeof res.body.code === "string") ? res.body.code : null;
     const latest = await liveFetch("/api/teams/" + teamCode + "/checkpoint", { method: "GET" }, LIVE_RESTORE_TIMEOUT_MS);
     if (!liveState || liveState.teamCode !== teamCode) return;
     if (!latest.ok || !latest.body) return;
@@ -3512,14 +3510,23 @@
     const serverRevision = snapshot ? snapshot.revision : 0;
     liveState.checkpointRevision = serverRevision;
     liveState.checkpointTrap = snapshot ? snapshot.body.trap : null;
-    if (serverRevision !== sentRevision) {
-      // conflict。revision を合わせて、同じ body を「もう一度だけ」送る
-      // （無限再送はしない。commandId は毎回新規なので冪等台帳とも噛み合う）。
-      postCheckpoint(body, true);
+    // code を持たない応答（codeを載せる前のサーバ）へのフォールバック。送った
+    // expectedRevision とサーバの revision がずれていれば conflict、一致して
+    // いれば「revisionは合っていたのに中身が後退していた」＝ regression、と
+    // 構造だけで見分けられる。
+    const conflicted = code === null ? serverRevision !== sentRevision : code === "conflict";
+    if (conflicted) {
+      // 同じPCで複数タブが開かれた等でrevisionがずれただけ。revisionを合わせて、
+      // 同じ body を「もう一度だけ」送る（無限再送はしない。commandId は毎回
+      // 新規なので冪等台帳とも噛み合う）。
+      if (!retried) postCheckpoint(body, true);
       return;
     }
-    // regression。サーバ値を採用して再送はしない——次の保存（ステージ遷移・
-    // 停留所の前進）が、取り込んだ値を含む新しい body で自然に送られる。
+    // trap-regression／elapsed-regression／pos-regression。サーバ値を採用して
+    // 再送はしない——次の保存（ステージ遷移・停留所の前進）が、取り込んだ値を
+    // 含む新しい body で自然に送られる。取り込みは再送後（retried）でも行う
+    // ——競合を直して送り直した先が後退だった、という順で来ることがあり、
+    // ここで諦めると追いつきが次の保存まで一巡遅れる。
     adoptServerState(snapshot ? snapshot.body : null);
   }
 
@@ -7912,9 +7919,6 @@
     s3TrapUsed = body.trap.s3Used;
     s4TrapUsed = body.trap.s4Used;
 
-    // ⚠️ apps/worker/src/progress.ts の kind enum は entry/clear/jump しか受けず、
-    // "resume" は現状400で弾かれる（fire-and-forgetなので進行には影響しない）。
-    // 直前に "entry" を送っているので生存確認は落ちない。enum への追加はWorker側の宿題。
     reportProgress(TEAMS[2].pos, "resume");
     logActivity("resume", undefined, { view: body.view, elapsedMs: elapsed * 1000 });
   }
