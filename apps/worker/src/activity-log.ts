@@ -91,9 +91,25 @@ const orEmpty = (value: string | undefined): string => value ?? "";
  * textとmetaは独立に判定する。metaにPIIが混ざったことを理由にtextまで捨てると、
  * 較正の主材料である本文を不必要に失うため。
  */
+/**
+ * metaのPII検査。JSON全体を1回見るだけでは足りない——値が別々のフィールドへ
+ * 分かれていると、JSON上ではキー名や区切り記号を挟んで分断され、一致しなくなる。
+ * 各string値も個別に通し、両側から挟む。
+ *
+ * ただし検出器の語彙を跨ぐ分割（姓と名を別フィールドへ置くなど）は原理的に拾えない。
+ * これはdetectPiiの限界であり、ここで塞げるものではない。
+ */
+const metaHasPii = (meta: Record<string, unknown> | undefined): boolean => {
+  const fields = meta ?? {};
+  if (detectPii(JSON.stringify(fields)) !== null) return true;
+  return Object.values(fields).some(
+    (value) => typeof value === "string" && detectPii(value) !== null,
+  );
+};
+
 const redactPii = (event: ActivityEvent): ActivityEvent => {
   const textHit = detectPii(orEmpty(event.text)) !== null;
-  const metaHit = detectPii(JSON.stringify(event.meta ?? {})) !== null;
+  const metaHit = metaHasPii(event.meta);
   if (!textHit && !metaHit) return event;
   return {
     ...event,
@@ -167,6 +183,14 @@ const META_LIMIT_BYTES = 4096;
 const encoder = new TextEncoder();
 const jsonByteLength = (value: unknown): number => encoder.encode(JSON.stringify(value)).length;
 
+/**
+ * metaは平坦なrecordに限り、値はstring・number・boolean・nullだけを許す。
+ * ネストや配列を許すと、PII検査が全てのstring値を漏れなく見て回る保証が持てない
+ * （深さの分だけ見落としの口が増える）。分析の補助情報にその自由度は要らない。
+ * サーバが書くmeta（promptProfile・length・refusal・title）も同じ形に収まっている。
+ */
+const metaValueSchema = z.union([z.string().max(200), z.number(), z.boolean(), z.null()]);
+
 const clientActivitySchema = z.object({
   commandId: z.uuid(),
   kind: activityKindSchema,
@@ -177,7 +201,7 @@ const clientActivitySchema = z.object({
     .regex(/^[a-z0-9-]+$/),
   text: z.string().max(20000).optional(),
   meta: z
-    .record(z.string(), z.unknown())
+    .record(z.string(), metaValueSchema)
     .refine((meta) => jsonByteLength(meta) <= META_LIMIT_BYTES)
     .optional(),
   // 任意文字列にすると、textとmetaのPIIゲートを通らない自由記述の列が1つ残る

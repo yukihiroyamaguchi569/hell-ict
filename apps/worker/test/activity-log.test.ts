@@ -113,6 +113,20 @@ const activity = (overrides: Record<string, unknown> = {}): Record<string, unkno
   ...overrides,
 });
 
+const jsonBytes = (value: unknown): number =>
+  new TextEncoder().encode(JSON.stringify(value)).length;
+
+/**
+ * JSONが4096バイト（`tail`が"x"のとき）ちょうどになるmeta。値ごとの200文字上限を
+ * 守るため、「あ」を複数キーへ分けて積む。末尾を1文字増やすと4097バイトになる。
+ */
+const sizedMeta = (tail: string): Record<string, string> => {
+  const meta: Record<string, string> = {};
+  for (let index = 0; index < 9; index += 1) meta[`k${String(index)}`] = "あ".repeat(136);
+  meta.k9 = "あ".repeat(114) + tail;
+  return meta;
+};
+
 // progress.test.tsと同じく、このpoolではD1の中身がテスト間で巻き戻らないため、
 // 各テストの冒頭でテーブルごと作り直して白紙から始める。
 describe("活動ログ", () => {
@@ -398,6 +412,40 @@ describe("活動ログ", () => {
       expect(stored[0]?.text).toBe("匿名化した一覧を提出します");
     });
 
+    // 値が複数フィールドへ分かれるとJSON全体の検査では拾えないため、各string値も
+    // 個別に通している。片方だけでは電話番号として成立しない分割は検知されない——
+    // 検出器の語彙を跨ぐ分割（姓と名を別フィールドへ置くなど）は原理的に拾えず、
+    // これはdetectPiiの限界であることを、期待値として明示しておく。
+    it("値が分断されたPIIは検知されず、そのまま保存される（検出器の限界）", async () => {
+      const response = await postJson(
+        "/api/teams/500112/activity",
+        activity({ meta: { a: "090-1234", b: "-5678" } }),
+      );
+      expect(response.status).toBe(200);
+      expect(metaOf((await rows())[0])).toEqual({ a: "090-1234", b: "-5678" });
+    });
+
+    // JSON全体の検査だけでは足りない実例。改行を含む値はJSON化で `\n` の2文字へ
+    // 変換されるため、氏名パターンの `\s*` が一致しなくなる。各string値を素のまま
+    // 個別に通しているので落とせる。
+    it("JSON化で崩れる値のPIIも、string値の個別検査で落とす", async () => {
+      const response = await postJson(
+        "/api/teams/500114/activity",
+        activity({ meta: { note: "渡辺\n三郎さんの件" } }),
+      );
+      expect(response.status).toBe(200);
+      expect(metaOf((await rows())[0])).toEqual({ piiRedacted: true });
+    });
+
+    it("1つのフィールドに収まった電話番号は、meta全体の置換で落とす", async () => {
+      const response = await postJson(
+        "/api/teams/500113/activity",
+        activity({ meta: { phone: "090-1234-5678" } }),
+      );
+      expect(response.status).toBe(200);
+      expect(metaOf((await rows())[0])).toEqual({ piiRedacted: true });
+    });
+
     it.each([
       ["kindが列挙外", activity({ kind: "submit.unknown" })],
       ["commandIdがUUIDでない", activity({ commandId: "not-a-uuid" })],
@@ -405,8 +453,13 @@ describe("活動ログ", () => {
       ["viewに大文字", activity({ view: "S1" })],
       ["viewが33文字", activity({ view: "a".repeat(33) })],
       ["textが上限超過", activity({ text: "あ".repeat(20001) })],
-      ["metaが4KB超", activity({ meta: { blob: "x".repeat(4100) } })],
+      ["metaが4KB超", activity({ meta: sizedMeta("xx") })],
       ["metaが配列", activity({ meta: [1, 2, 3] })],
+      // 平坦なrecordに限る——ネストや配列を許すと、PII検査が全てのstring値を
+      // 漏れなく見て回る保証が持てない。
+      ["metaの値がネストしたobject", activity({ meta: { nested: { a: 1 } } })],
+      ["metaの値が配列", activity({ meta: { arr: [1, 2] } })],
+      ["metaの値が201文字", activity({ meta: { long: "x".repeat(201) } })],
       ["clientAtが欠落", { commandId: activity().commandId, kind: "resume", view: "s1" }],
       // 任意文字列のままだとPIIゲートを通らない列が残る。書式で塞いだことを固定する。
       ["clientAtが電話番号", activity({ clientAt: "090-1234-5678" })],
@@ -421,32 +474,26 @@ describe("活動ログ", () => {
 
     // `String.length`で測るとUTF-16のコード単位になり、日本語のmetaでは上限が
     // 実質3倍に緩む。バイト数で測っていることを境界の両側で固定する。
+    // 値ごとの200文字上限があるので、キーを分けて目標バイト数へ寄せる。
     it("マルチバイトのmetaは4096バイトちょうどまで受け付け、1バイト超で拒否する", async () => {
-      // {"blob":"…"} の固定部分11バイト＋「あ」1361文字（3バイト×1361＝4083）＋
-      // ASCII 2文字＝ちょうど4096バイト。
-      const fit = "あ".repeat(1361) + "xx";
+      expect(jsonBytes(sizedMeta("x"))).toBe(4096);
+      expect(jsonBytes(sizedMeta("xx"))).toBe(4097);
+
       const accepted = await postJson(
         "/api/teams/500109/activity",
-        activity({ meta: { blob: fit } }),
+        activity({ meta: sizedMeta("x") }),
       );
       expect(accepted.status).toBe(200);
       await expect(rows()).resolves.toHaveLength(1);
 
       const rejected = await postJson(
         "/api/teams/500109/activity",
-        activity({ commandId: "00000000-0000-4000-8000-0000000000a2", meta: { blob: fit + "x" } }),
+        activity({
+          commandId: "00000000-0000-4000-8000-0000000000a2",
+          meta: sizedMeta("xx"),
+        }),
       );
       expect(rejected.status).toBe(400);
-      await expect(rows()).resolves.toHaveLength(1);
-    });
-
-    it("metaが4KBちょうどまでは受け付ける", async () => {
-      // {"blob":"x…"} の固定部分11文字を差し引いて、ちょうど4096バイトへ揃える。
-      const response = await postJson(
-        "/api/teams/500106/activity",
-        activity({ meta: { blob: "x".repeat(4096 - 11) } }),
-      );
-      expect(response.status).toBe(200);
       await expect(rows()).resolves.toHaveLength(1);
     });
 
