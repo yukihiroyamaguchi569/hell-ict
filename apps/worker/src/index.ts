@@ -10,7 +10,6 @@ import type {
   AiMessage,
   ChatMessageResult,
   CreateThreadCommand,
-  CreateThreadResult,
   SendMessageCommand,
   TeamCode,
   TeamCommand,
@@ -98,10 +97,12 @@ const handleCreateThread = async (
     return error("commandの形式が不正です。", 400);
   }
   try {
-    const result: CreateThreadResult = await env.TEAM_ROOM.getByName(teamCode).createThread(
-      teamCode,
-      command,
-    );
+    const result = await env.TEAM_ROOM.getByName(teamCode).createThread(teamCode, command);
+    if ("threadLimit" in result)
+      return error(
+        `スレッドは1チーム${String(result.max)}件までです。不要なスレッドの利用をやめてから作成してください。`,
+        409,
+      );
     return json(result);
   } catch {
     return error("スレッドの作成に失敗しました。時間を置いて再試行してください。", 503);

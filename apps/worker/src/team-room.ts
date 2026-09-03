@@ -43,6 +43,9 @@ type StoredPendingMessage = { thread_id: string; claimed_at: string | null };
 type ConflictReply = { conflict: true };
 type UnknownThreadReply = { unknownThread: true };
 
+/** スレッド上限に達した作成要求。DOには何も保存しない。 */
+export type ThreadLimitReply = { threadLimit: true; max: number };
+
 export type BeginChatMessageOutcome =
   | { kind: "already-processed"; result: ChatMessageResult }
   | { kind: "pending"; history: AiMessage[] }
@@ -69,6 +72,13 @@ const PENDING_MESSAGE_EXPIRY_MS = 6 * 60 * 60 * 1000;
  * 終わった場合だけクレームを回収できるようにする。
  */
 const CLAIM_TIMEOUT_MS = 45 * 1000;
+
+/**
+ * 1チームが持てるスレッド数の上限。ステージごとに自動で開くスレッド（5本）に加えて、
+ * 参加者が手で足す余裕を見た値。これを超える作成要求は、DOのストレージを
+ * 際限なく膨らませる操作か暴走とみなして拒否する。
+ */
+export const MAX_THREADS_PER_TEAM = 30;
 
 /** rate_limitの行。壊れた値でレート制限が黙って無効化されないよう実行時に検証する。 */
 const storedRateLimitSchema = z.object({ count: z.number().int().nonnegative() });
@@ -182,7 +192,10 @@ export class TeamRoom extends DurableObject<Env> {
     return this.loadChatSnapshot(teamCodeSchema.parse(teamCodeInput));
   }
 
-  async createThread(teamCodeInput: unknown, commandInput: unknown): Promise<CreateThreadResult> {
+  async createThread(
+    teamCodeInput: unknown,
+    commandInput: unknown,
+  ): Promise<CreateThreadResult | ThreadLimitReply> {
     const teamCode = teamCodeSchema.parse(teamCodeInput);
     const command: CreateThreadCommand = createThreadCommandSchema.parse(commandInput);
     const saved =
@@ -194,6 +207,11 @@ export class TeamRoom extends DurableObject<Env> {
         .toArray()[0] ?? null;
     if (saved !== null) return createThreadResultSchema.parse(JSON.parse(saved.result) as unknown);
     const snapshot = this.loadChatSnapshot(teamCode);
+    // 冪等再送（processed済み）は上限に関係なく従来の結果を返す。上限を当てるのは
+    // 新しいスレッドを実際に増やすときだけである。
+    if (snapshot.threads.length >= MAX_THREADS_PER_TEAM) {
+      return { threadLimit: true, max: MAX_THREADS_PER_TEAM };
+    }
     const created = domainCreateThread(snapshot, {
       threadId: crypto.randomUUID(),
       title: command.title,

@@ -22,6 +22,7 @@ import {
   rateLimitRetryAfterSeconds,
 } from "../src/guard.js";
 import { handleChatMessage } from "../src/index.js";
+import { MAX_THREADS_PER_TEAM } from "../src/team-room.js";
 import { get, postJson, session, TEST_ORIGIN, upgrade } from "./support.js";
 
 const OTHER_ORIGIN = "https://evil.test";
@@ -460,6 +461,60 @@ describe("ヘルスチェックのguards", () => {
       expect(JSON.stringify(body)).not.toContain("100001");
       expect(JSON.stringify(body)).not.toContain(OTHER_ORIGIN);
     });
+  });
+});
+
+describe("スレッド数の上限", () => {
+  it("上限まで作れ、超えた分は409でDOに保存しない", async () => {
+    await session("500040");
+    // 入室時点でメインスレッドが1本ある。残り枠ぶんちょうど作れることを確かめる。
+    const created = await get("/api/teams/500040/chat");
+    const initial = chatSnapshotSchema.parse(await created.json()).threads.length;
+
+    for (let index = initial; index < MAX_THREADS_PER_TEAM; index += 1) {
+      const response = await postJson("/api/teams/500040/chat/threads", {
+        type: "create-thread",
+        commandId: messageCommandId(2000 + index),
+        title: `副${String(index)}`,
+      });
+      expect(response.status, `#${String(index)}`).toBe(200);
+    }
+
+    const blocked = await postJson("/api/teams/500040/chat/threads", {
+      type: "create-thread",
+      commandId: messageCommandId(2100),
+      title: "あふれる",
+    });
+    expect(blocked.status).toBe(409);
+    await expect(blocked.json()).resolves.toMatchObject({
+      message: expect.stringContaining(String(MAX_THREADS_PER_TEAM)),
+    });
+
+    // 上限を超えるスレッドはDOに残っていない。
+    const after = await get("/api/teams/500040/chat");
+    expect(chatSnapshotSchema.parse(await after.json()).threads).toHaveLength(MAX_THREADS_PER_TEAM);
+  });
+
+  it("上限に達していても、処理済みcommandIdの再送は同じ結果を返す", async () => {
+    await session("500041");
+    const commandId = messageCommandId(2200);
+    const create = (id: string, title: string): Promise<Response> =>
+      postJson("/api/teams/500041/chat/threads", { type: "create-thread", commandId: id, title });
+
+    const firstResponse = await create(commandId, "副1");
+    expect(firstResponse.status).toBe(200);
+    const firstBody = await firstResponse.json();
+
+    const snapshot = chatSnapshotSchema.parse(await (await get("/api/teams/500041/chat")).json());
+    for (let index = snapshot.threads.length; index < MAX_THREADS_PER_TEAM; index += 1) {
+      await create(messageCommandId(2300 + index), `副${String(index)}`);
+    }
+    expect((await create(messageCommandId(2400), "あふれる")).status).toBe(409);
+
+    // 上限に達した後でも、既に処理したcommandIdの再送は409にせず同じ結果を返す。
+    const resent = await create(commandId, "副1");
+    expect(resent.status).toBe(200);
+    await expect(resent.json()).resolves.toEqual(firstBody);
   });
 });
 
