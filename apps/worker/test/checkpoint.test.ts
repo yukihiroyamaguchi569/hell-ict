@@ -358,6 +358,21 @@ describe("チェックポイントAPI", () => {
     expect(state.checkpoint?.body.data).toEqual(data);
   });
 
+  it("深すぎるdataは例外にならず400で拒否し、保存されない", async () => {
+    // 再帰schemaへ渡すとRangeErrorになる深さ。500エラーではなく400になることを固定する。
+    let deep: unknown = [];
+    for (let level = 0; level < 5000; level += 1) deep = [deep];
+    const response = await save("500024", {
+      commandId: id("129"),
+      expectedRevision: 0,
+      body: { data: { deep } },
+    });
+
+    expect(response.status).toBe(400);
+    expect(httpErrorSchema.parse(await response.json()).message).not.toContain("大きすぎます");
+    await expect(load("500024")).resolves.toMatchObject({ checkpoint: null });
+  });
+
   it("JSONとして壊れた本文は400で拒否する", async () => {
     const response = await handleSaveCheckpoint(
       new Request("https://example.test/api/teams/500010/checkpoint", {

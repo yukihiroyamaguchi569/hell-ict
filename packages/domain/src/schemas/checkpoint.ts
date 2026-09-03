@@ -12,8 +12,34 @@ export const CHECKPOINT_DATA_MAX_BYTES = 64 * 1024;
 /** 上限超過をWorkerが400（他のschema違反と区別した文言）へ写すための識別子。 */
 export const CHECKPOINT_DATA_TOO_LARGE_MESSAGE = "チェックポイントのdataが大きすぎます。";
 
+/**
+ * `data`の入れ子の深さ上限。ステージ固有の状態は平坦〜数段のオブジェクトで足りる。
+ * 深い値を再帰schemaへそのまま渡すとRangeErrorになり、検証が例外で落ちて400へすら
+ * 写せないため、再帰parseの前に反復で深さを数えて弾く。
+ */
+export const CHECKPOINT_DATA_MAX_DEPTH = 8;
+
 const jsonByteLength = (value: unknown): number =>
   new TextEncoder().encode(JSON.stringify(value)).length;
+
+/** 入れ子をたどる対象（配列・オブジェクト）の中身。それ以外は葉として扱う。 */
+const childrenOf = (node: unknown): unknown[] => {
+  if (Array.isArray(node)) return node;
+  if (typeof node === "object" && node !== null) return Object.values(node);
+  return [];
+};
+
+/**
+ * `root`直下を深さ1として、`limit`段を超える値があるかを再帰せず1段ずつ広げて判定する。
+ * 走査はlimit+1段で打ち切るので、深さ数千の入力でもスタックを消費しない。
+ */
+const exceedsDepth = (root: Record<string, unknown>, limit: number): boolean => {
+  let level = childrenOf(root);
+  for (let depth = 1; depth < limit && level.length > 0; depth += 1) {
+    level = level.flatMap(childrenOf);
+  }
+  return level.flatMap(childrenOf).length > 0;
+};
 
 /** JSONとして往復できる値。zodの再帰schemaは型注釈を要求するため、ここだけは手で書く。 */
 type JsonValue = string | number | boolean | null | JsonValue[] | { [key: string]: JsonValue };
@@ -69,7 +95,10 @@ export const checkpointBodySchema = z
     // TS2589（型の展開が深すぎる）になるため。値の解釈はステージ実装側の責務。
     data: z
       .record(z.string(), z.unknown())
-      .refine((value) => jsonRecordSchema.safeParse(value).success)
+      // 深さ検査を先に、abortで打ち切ってから再帰parseへ進む。順序を入れ替えると、
+      // 深すぎる値が再帰schemaへ届いてRangeErrorになる。
+      .refine((value) => !exceedsDepth(value, CHECKPOINT_DATA_MAX_DEPTH), { abort: true })
+      .refine((value) => jsonRecordSchema.safeParse(value).success, { abort: true })
       .refine((value) => jsonByteLength(value) <= CHECKPOINT_DATA_MAX_BYTES, {
         error: CHECKPOINT_DATA_TOO_LARGE_MESSAGE,
       }),
