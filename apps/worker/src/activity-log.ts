@@ -96,6 +96,8 @@ const orEmpty = (value: string | undefined): string => value ?? "";
  * 分かれていると、JSON上ではキー名や区切り記号を挟んで分断され、一致しなくなる。
  * 各string値も個別に通し、両側から挟む。
  *
+ * キーはmetaKeySchemaで英数字へ制限済みなので、ここでは値だけを見れば足りる。
+ *
  * ただし検出器の語彙を跨ぐ分割（姓と名を別フィールドへ置くなど）は原理的に拾えない。
  * これはdetectPiiの限界であり、ここで塞げるものではない。
  */
@@ -184,6 +186,14 @@ const encoder = new TextEncoder();
 const jsonByteLength = (value: unknown): number => encoder.encode(JSON.stringify(value)).length;
 
 /**
+ * metaのキーは識別子であって自由文ではない。英数字と`_.-`の64文字までへ制限する。
+ * 自由文を許すと、値ではなくキー側にPIIを書けてしまう——boolean値のキーは
+ * 値の個別検査に掛からず、JSON全体の検査も改行のエスケープですり抜けるため、
+ * `{ "渡辺\n三郎さん": true }` が素通りする。入口で書式を固定して塞ぐ。
+ */
+const metaKeySchema = z.string().regex(/^[A-Za-z0-9_.-]{1,64}$/);
+
+/**
  * metaは平坦なrecordに限り、値はstring・number・boolean・nullだけを許す。
  * ネストや配列を許すと、PII検査が全てのstring値を漏れなく見て回る保証が持てない
  * （深さの分だけ見落としの口が増える）。分析の補助情報にその自由度は要らない。
@@ -201,7 +211,7 @@ const clientActivitySchema = z.object({
     .regex(/^[a-z0-9-]+$/),
   text: z.string().max(20000).optional(),
   meta: z
-    .record(z.string(), metaValueSchema)
+    .record(metaKeySchema, metaValueSchema)
     .refine((meta) => jsonByteLength(meta) <= META_LIMIT_BYTES)
     .optional(),
   // 任意文字列にすると、textとmetaのPIIゲートを通らない自由記述の列が1つ残る

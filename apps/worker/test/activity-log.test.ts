@@ -437,6 +437,19 @@ describe("活動ログ", () => {
       expect(metaOf((await rows())[0])).toEqual({ piiRedacted: true });
     });
 
+    it("識別子として妥当なキー（英数字と_.-）は受け付ける", async () => {
+      const response = await postJson(
+        "/api/teams/500115/activity",
+        activity({ meta: { "stage_2.ok": true, "k-1": 1, [`${"k".repeat(64)}`]: null } }),
+      );
+      expect(response.status).toBe(200);
+      expect(metaOf((await rows())[0])).toEqual({
+        "stage_2.ok": true,
+        "k-1": 1,
+        [`${"k".repeat(64)}`]: null,
+      });
+    });
+
     it("1つのフィールドに収まった電話番号は、meta全体の置換で落とす", async () => {
       const response = await postJson(
         "/api/teams/500113/activity",
@@ -460,6 +473,12 @@ describe("活動ログ", () => {
       ["metaの値がネストしたobject", activity({ meta: { nested: { a: 1 } } })],
       ["metaの値が配列", activity({ meta: { arr: [1, 2] } })],
       ["metaの値が201文字", activity({ meta: { long: "x".repeat(201) } })],
+      // キーは識別子に限る。自由文を許すと、値ではなくキー側にPIIを書けてしまう——
+      // boolean値のキーは値の個別検査に掛からず、JSON全体の検査も改行のエスケープで
+      // すり抜けるため、入口の書式制限が唯一の防波堤になる。
+      ["metaのキーが日本語（PII）", activity({ meta: { "渡辺\n三郎さん": true } })],
+      ["metaのキーに空白", activity({ meta: { "a b": 1 } })],
+      ["metaのキーが65文字", activity({ meta: { ["k".repeat(65)]: 1 } })],
       ["clientAtが欠落", { commandId: activity().commandId, kind: "resume", view: "s1" }],
       // 任意文字列のままだとPIIゲートを通らない列が残る。書式で塞いだことを固定する。
       ["clientAtが電話番号", activity({ clientAt: "090-1234-5678" })],
