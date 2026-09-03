@@ -211,7 +211,32 @@ describe("活動ログ", () => {
       const chatRows = (await rows()).filter((row) => row.kind.startsWith("chat."));
       expect(chatRows.map((row) => row.kind)).toEqual(["chat.pii_blocked"]);
       expect(chatRows[0]?.text).toBe("");
-      expect(metaOf(chatRows[0])).toEqual({ length: 21 });
+      expect(metaOf(chatRows[0])).toEqual({ promptProfile: "default", length: 21 });
+    });
+
+    // 送信前ゲートはユーザー本文しか見ない。AI応答にPIIが混ざる経路は現に想定して
+    // おり（blockHistoryPii）、その本文をD1へ残さないことをここで固定する。
+    it("PIIを含むAI応答は、chat.assistantのtextを捨ててpiiRedactedを立てる", async () => {
+      const threadId = await mainThreadId("500008", "00000000-0000-4000-8000-000000000801");
+      const gateway = new FakeAiGateway([
+        { kind: "success", response: "渡辺 三郎さんの件、承知しました" },
+      ]);
+      const response = await chat(
+        "500008",
+        { commandId: "00000000-0000-4000-8000-000000000802", threadId, text: "本文" },
+        gateway,
+      );
+      expect(response.status).toBe(200);
+
+      const chatRows = (await rows()).filter((row) => row.kind.startsWith("chat."));
+      expect(chatRows.map((row) => row.kind)).toEqual(["chat.user", "chat.assistant"]);
+      // ユーザー本文はPIIを含まないのでそのまま残る。
+      expect(chatRows[0]?.text).toBe("本文");
+      expect(metaOf(chatRows[0])).toEqual({ promptProfile: "default" });
+      expect(chatRows[1]?.text).toBe("");
+      expect(metaOf(chatRows[1])).toEqual({ promptProfile: "default", piiRedacted: true });
+      // 本文を捨てても、どのメッセージだったかは追えるようにする。
+      expect(chatRows[1]?.messageId).not.toBe("");
     });
 
     it("履歴に混入したPIIのブロックはchat.history_piiとして残る", async () => {

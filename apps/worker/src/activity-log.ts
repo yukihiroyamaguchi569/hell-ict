@@ -9,7 +9,8 @@ import type { RequestScope } from "./http.js";
  * 「発言単位で1行ずつ」D1へ積み、開催後にSQLで分析する
  * （手順は docs/testplay/ログ分析手順.md）。
  *
- * 前作「地獄のAI」Event 91の分析（docs/前作分析/2026-08-28_Event91ログ分析.md）で、
+ * 前作「地獄のAI」Event 91の分析（前作リポジトリ Hell-AI-v2 の
+ * docs/イベント分析/2026-08-28_Event91ログ分析.md）で、
  * messages.created_atが保存時に一括で書かれており発言単位の時刻が取れなかった。
  * その反省から、ここでは発言が起きた瞬間に1行ずつINSERTし、created_atは
  * ミリ秒精度で残す（会話の間合いやステージ滞留時間を後から復元できるようにする）。
@@ -149,17 +150,25 @@ type ClientActivity = z.infer<typeof clientActivitySchema>;
 
 /**
  * PIIを含む本文はD1にも残さない（企画書§7の「外部へ出す前に止める」と同じ理由で、
- * 保存先が自前のD1でも残さない）。ただし422で弾くとクライアントがリトライを抱え、
- * 「何が起きたか」の時系列そのものが欠ける。本文だけ捨ててイベントは残す。
+ * 保存先が自前のD1でも残さない）。ただし記録ごと捨てると「何が起きたか」の時系列が
+ * 欠ける。本文だけ空にして、metaへ`piiRedacted`を立ててイベントは残す。
+ *
+ * クライアントの提出物と、サーバが書くチャット行（ユーザー本文だけでなくAI応答も）の
+ * 両方がここを通る。AI応答にPIIが混ざる経路は現に想定しており（blockHistoryPii）、
+ * 外部送信を止めるのと同じくD1にも残さない。
  */
-const redactPii = (activity: ClientActivity): Omit<ActivityEvent, "teamCode"> => {
-  const redacted = activity.text !== undefined && detectPii(activity.text) !== null;
-  return {
-    ...activity,
-    text: redacted ? "" : activity.text,
-    meta: redacted ? { ...activity.meta, piiRedacted: true } : activity.meta,
-  };
-};
+export const redactPiiText = (
+  text: string | undefined,
+  meta: Record<string, unknown>,
+): Pick<ActivityEvent, "text" | "meta"> =>
+  text !== undefined && detectPii(text) !== null
+    ? { text: "", meta: { ...meta, piiRedacted: true } }
+    : { text, meta };
+
+const redactPii = (activity: ClientActivity): Omit<ActivityEvent, "teamCode"> => ({
+  ...activity,
+  ...redactPiiText(activity.text, { ...activity.meta }),
+});
 
 export const handleActivityPost = async (
   request: Request,

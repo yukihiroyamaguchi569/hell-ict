@@ -16,7 +16,7 @@ import type {
   TeamCommand,
 } from "@hell-ict/domain";
 
-import { handleActivityPost, logActivity } from "./activity-log.js";
+import { handleActivityPost, logActivity, redactPiiText } from "./activity-log.js";
 import type { ActivityEvent } from "./activity-log.js";
 import { error, isWebSocketRequest, json, parseJson, teamCodeFromPath } from "./http.js";
 import type { RequestScope } from "./http.js";
@@ -174,15 +174,17 @@ const chatLogger = (
   teamCode: TeamCode,
   command: SendMessageCommand,
 ): ChatLogger => {
-  const meta = { promptProfile: command.promptProfile ?? "default" };
+  const promptProfile = command.promptProfile ?? "default";
+  // この書き手を通る本文は種別を問わずPIIゲートへ掛ける。送信前ゲートを抜けた
+  // ユーザー本文だけでなくAI応答も対象にし、kindを足したときに素通りする口を作らない。
   return (kind, extra) => {
     logActivity(scope, {
       teamCode,
       kind,
       threadId: command.threadId,
       commandId: command.commandId,
-      meta,
       ...extra,
+      ...redactPiiText(extra?.text, { promptProfile, ...extra?.meta }),
     });
   };
 };
