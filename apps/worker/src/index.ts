@@ -15,7 +15,6 @@ import type {
   ChatMessageResult,
   CheckpointRejectionReason,
   CreateThreadCommand,
-  CreateThreadResult,
   SaveCheckpointCommand,
   SendMessageCommand,
   TeamCode,
@@ -25,11 +24,22 @@ import type {
 import { handleActivityPost, logActivity } from "./activity-log.js";
 import type { ActivityEvent } from "./activity-log.js";
 import {
+  corsHeadersFor,
+  isApiRequestAllowed,
+  isTeamCodeAllowed,
+  parseAllowedOrigins,
+  parseChatRateLimit,
+  parseTeamCodes,
+} from "./guard.js";
+import type { CorsHeaders } from "./guard.js";
+import {
   error,
+  errorWithHeaders,
   isWebSocketRequest,
   json,
   parseJson,
   PayloadTooLargeError,
+  teamCodeFromApiPath,
   teamCodeFromPath,
 } from "./http.js";
 import type { RequestScope } from "./http.js";
@@ -54,6 +64,11 @@ const handleSession = async (request: Request, env: Env): Promise<Response> => {
     );
   } catch {
     return error("teamCodeはASCII数字6桁で指定してください。", 400);
+  }
+  // 入室コードは本文にあるため入口ガードでは見られない。DOへ触れる直前でここだけ当てる
+  // （未登録コードのチーム状態を作らせない）。応答は存在を明かさない404に揃える。
+  if (!isTeamCodeAllowed(teamCode, parseTeamCodes(env.TEAM_CODES))) {
+    return new Response("Not found", { status: 404 });
   }
   try {
     const snapshot = await env.TEAM_ROOM.getByName(teamCode).join(teamCode);
@@ -96,10 +111,13 @@ export const handleCreateThread = async (
     return error("commandの形式が不正です。", 400);
   }
   try {
-    const result: CreateThreadResult = await scope.env.TEAM_ROOM.getByName(teamCode).createThread(
-      teamCode,
-      command,
-    );
+    const result = await scope.env.TEAM_ROOM.getByName(teamCode).createThread(teamCode, command);
+    // 上限超過は何も作られていないので、活動ログにも作成として残さない。
+    if ("threadLimit" in result)
+      return error(
+        `スレッドは1チーム${String(result.max)}件までです。不要なスレッドの利用をやめてから作成してください。`,
+        409,
+      );
     // 作成されたスレッドは末尾へ足される（domainのcreateThread）。分析で
     // 「いつ文脈を分けたか」を追えるよう、そのthreadIdごと記録する。
     logActivity(scope, {
@@ -222,12 +240,52 @@ const logChatOutcome = (
   log("chat.failure");
 };
 
+/** beginChatMessageへ渡す、レート制限の固定窓の基準値。 */
+type ChatGate = { readonly nowMs: number; readonly limit: number };
+
+/**
+ * beginChatMessageを呼び、そのまま応答して終わる結果（DO失敗・スレッド不明・
+ * レート制限超過・処理済み・処理中）をResponseへ畳む。AI呼び出しへ進む場合だけ
+ * 履歴を返す。handleChatMessageの複雑度を下げるための切り出し。
+ */
+const beginOrRespond = async (
+  room: DurableObjectStub<TeamRoom>,
+  teamCode: TeamCode,
+  command: SendMessageCommand,
+  gate: ChatGate,
+): Promise<{ readonly history: readonly AiMessage[] } | Response> => {
+  const begin = await room
+    .beginChatMessage(teamCode, command, gate.nowMs, gate.limit)
+    .catch(() => null);
+  if (begin === null)
+    return error("メッセージの処理に失敗しました。時間を置いて再試行してください。", 503);
+  if ("unknownThread" in begin) return error("指定されたスレッドが見つかりません。", 404);
+  if (begin.kind === "rate-limited")
+    return errorWithHeaders("送信が多すぎます。少し待ってから再試行してください。", 429, {
+      "Retry-After": String(begin.retryAfterSeconds),
+    });
+  if (begin.kind === "already-processed") return json(begin.result);
+  if (begin.kind === "in-progress")
+    return error("同じ内容が既に送信処理中です。少し待って再試行してください。", 409);
+  return { history: begin.history };
+};
+
+/**
+ * `handleChatMessage`の交換可能な境界。AI接続に加えて基準時刻も外から渡すことで、
+ * レート制限の固定窓をテストから固定できる（max-paramsを超えないよう1つへまとめる）。
+ */
+export type ChatMessageDeps = {
+  readonly aiGateway: AiGateway;
+  readonly nowMs: number;
+};
+
 export const handleChatMessage = async (
   request: Request,
   scope: RequestScope,
   teamCode: TeamCode,
-  aiGateway: AiGateway,
+  deps: ChatMessageDeps,
 ): Promise<Response> => {
+  const { aiGateway, nowMs } = deps;
   let command: SendMessageCommand;
   try {
     command = sendMessageCommandSchema.parse(await parseJson(request));
@@ -247,19 +305,18 @@ export const handleChatMessage = async (
   }
 
   const room = scope.env.TEAM_ROOM.getByName(teamCode);
-  const begin = await room.beginChatMessage(teamCode, command).catch(() => null);
-  if (begin === null)
-    return error("メッセージの処理に失敗しました。時間を置いて再試行してください。", 503);
-  if ("unknownThread" in begin) return error("指定されたスレッドが見つかりません。", 404);
-  if (begin.kind === "already-processed") return json(begin.result);
-  if (begin.kind === "in-progress")
-    return error("同じ内容が既に送信処理中です。少し待って再試行してください。", 409);
+  const begun = await beginOrRespond(room, teamCode, command, {
+    nowMs,
+    limit: parseChatRateLimit(scope.env.CHAT_RATE_LIMIT_PER_MINUTE),
+  });
+  if (begun instanceof Response) return begun;
 
-  // ここまで来た送信だけを1行として記録する（already-processedの再送は
-  // 新しい発言ではないので記録しない。同じcommandIdの再試行はINSERT OR IGNOREで潰れる）。
+  // ここまで来た送信だけを1行として記録する（already-processedの再送とレート制限超過は
+  // 新しい発言ではないので、beginOrRespondがResponseを返した時点で記録せずに戻る。
+  // 同じcommandIdの再試行はINSERT OR IGNOREで潰れる）。
   log("chat.user", { role: "user", text: command.text });
 
-  const historyBlock = await blockHistoryPii(room, command.commandId, begin.history);
+  const historyBlock = await blockHistoryPii(room, command.commandId, begun.history);
   if (historyBlock !== null) {
     log("chat.history_pii");
     return historyBlock;
@@ -269,7 +326,7 @@ export const handleChatMessage = async (
   // （保存対象はユーザー/アシスタントのやり取りのみ。企画書§5のStage別罠設計）。
   const historyWithSystemPrompt: readonly AiMessage[] = [
     { role: "system", text: systemPromptFor(command.promptProfile) },
-    ...begin.history,
+    ...begun.history,
   ];
   const { outcome, refusal } = await runAiCompletion(aiGateway, historyWithSystemPrompt);
   const result = await room.completeChatMessage(command.commandId, outcome).catch(() => null);
@@ -393,7 +450,10 @@ const handlePost = (request: Request, scope: RequestScope, url: URL): Promise<Re
   if (threadsTeamCode !== null) return handleCreateThread(request, scope, threadsTeamCode);
   const messagesTeamCode = teamCodeFromPath(url.pathname, "/api/teams/", "/chat/messages");
   if (messagesTeamCode !== null)
-    return handleChatMessage(request, scope, messagesTeamCode, createAiGateway(env));
+    return handleChatMessage(request, scope, messagesTeamCode, {
+      aiGateway: createAiGateway(env),
+      nowMs: Date.now(),
+    });
   const checkpointTeamCode = teamCodeFromPath(url.pathname, "/api/teams/", "/checkpoint");
   if (checkpointTeamCode !== null) return handleSaveCheckpoint(request, env, checkpointTeamCode);
   const commandTeamCode = teamCodeFromPath(url.pathname, "/api/teams/", "/commands");
@@ -424,15 +484,113 @@ const handleGet = (request: Request, env: Env, url: URL): Promise<Response> => {
     : Promise.resolve(new Response("Not found", { status: 404 }));
 };
 
+/**
+ * 公開APIの入口ガード。`/api/*`（`/api/health`を除く）すべてに、メソッドや
+ * WebSocket upgradeの別なく一律で当てる。前作Hell-AI-v2では書き込み系だけを
+ * 検証したため管理系APIに検証漏れが残った。拒否したときはDOにもAiGatewayにも触れない。
+ *
+ * Origin検証はブラウザ経由の悪用（CSRF・他サイトからの読み取り）を止める層であって、
+ * 認証ではない。非ブラウザからの直接アクセスはOriginを詐称できるため、そちらは
+ * TEAM_CODESの許可リストとレート制限で抑える（詳細はguard.ts先頭の注記）。
+ *
+ * 通す場合はnullを返す。
+ */
+/**
+ * ヘルスチェックへ載せる運用値の状態。デプロイ後に`GET /api/health`を見るだけで
+ * 設定漏れが分かるようにする——TEAM_CODES未設定のfail-openは意図した既定であり、
+ * 本番でそのまま残っていても例外やログには現れないため、目視できる形で出す。
+ * 値そのもの（配布したチームコードや許可オリジン）は伏せ、設定の有無だけを返す。
+ */
+const guardStatus = (env: Env): Record<string, boolean | number> => ({
+  teamCodes: parseTeamCodes(env.TEAM_CODES) !== null,
+  allowedOrigins: parseAllowedOrigins(env.ALLOWED_ORIGINS).length > 0,
+  chatRateLimitPerMinute: parseChatRateLimit(env.CHAT_RATE_LIMIT_PER_MINUTE),
+});
+
+/**
+ * 許可リストを当てる対象のチームコードを取り出す。`/api/teams/:code/*`はパスから、
+ * `/api/leaderboard/sync`はクエリから読む（リーダーボードのDOはグローバル1つで、
+ * チームコードはクエリでしか渡ってこない）。
+ */
+const guardedTeamCode = (url: URL): TeamCode | null =>
+  url.pathname === "/api/leaderboard/sync"
+    ? (teamCodeSchema.safeParse(url.searchParams.get("teamCode")).data ?? null)
+    : teamCodeFromApiPath(url.pathname);
+
+const guardApiRequest = (request: Request, env: Env, url: URL): Response | null => {
+  if (!url.pathname.startsWith("/api/")) return null;
+  // ヘルスチェックは配信元の生死確認用で、モックが起動時に無条件で叩く。Origin不問にする。
+  if (url.pathname === "/api/health") return null;
+  if (!isApiRequestAllowed(request, url, parseAllowedOrigins(env.ALLOWED_ORIGINS))) {
+    return error("許可されていない送信元からのリクエストです。", 403);
+  }
+  const teamCode = guardedTeamCode(url);
+  if (teamCode !== null && !isTeamCodeAllowed(teamCode, parseTeamCodes(env.TEAM_CODES))) {
+    // 未登録コードの存在を明かさないよう、経路自体が無いときと同じ404に揃える。
+    return new Response("Not found", { status: 404 });
+  }
+  return null;
+};
+
+/**
+ * ブラウザのpreflightへの応答。本APIが受けるのはGETとPOSTだけで、独自ヘッダーも
+ * 使わないため、許可するmethodとheaderはこの2つに絞る。Max-Ageで再問い合わせを
+ * 1日に1回へ抑える（研修は120分なので実質1回で済む）。
+ */
+const preflightResponse = (cors: CorsHeaders): Response =>
+  new Response(null, {
+    status: 204,
+    headers: {
+      ...cors,
+      "Access-Control-Allow-Methods": "GET, POST",
+      "Access-Control-Allow-Headers": "Content-Type",
+      "Access-Control-Max-Age": "86400",
+    },
+  });
+
+/**
+ * 応答へCORSヘッダーを足す。`cors`が空（同一オリジン、または許可外）なら素通しする。
+ * WebSocketの101応答は本体を作り直せないので触らない。
+ */
+const withCors = (response: Response, cors: CorsHeaders): Response => {
+  if (response.webSocket !== null || Object.keys(cors).length === 0) return response;
+  const headers = new Headers(response.headers);
+  for (const [name, value] of Object.entries(cors)) headers.set(name, value);
+  return new Response(response.body, {
+    status: response.status,
+    statusText: response.statusText,
+    headers,
+  });
+};
+
+/** 入口ガードを通したうえで、メソッド別のハンドラーへ振り分ける。 */
+const routeRequest = (
+  request: Request,
+  scope: RequestScope,
+  url: URL,
+  cors: CorsHeaders,
+): Promise<Response> => {
+  const { env } = scope;
+  const blocked = guardApiRequest(request, env, url);
+  if (blocked !== null) return Promise.resolve(blocked);
+  if (request.method === "OPTIONS" && url.pathname.startsWith("/api/"))
+    return Promise.resolve(preflightResponse(cors));
+  if (request.method === "GET" && url.pathname === "/api/health")
+    return Promise.resolve(json({ status: "ok", guards: guardStatus(env) }));
+  if (request.method === "POST") return handlePost(request, scope, url);
+  if (request.method === "GET") return handleGet(request, env, url);
+  return Promise.resolve(new Response("Not found", { status: 404 }));
+};
+
 const worker = {
   async fetch(request: Request, env: Env, ctx: ExecutionContext): Promise<Response> {
     const url = new URL(request.url);
-    if (request.method === "GET" && url.pathname === "/api/health") {
-      return json({ status: "ok" });
-    }
-    if (request.method === "POST") return handlePost(request, { env, ctx }, url);
-    if (request.method === "GET") return handleGet(request, env, url);
-    return new Response("Not found", { status: 404 });
+    // 許可判定はcorsHeadersFor自身がもう一度行う。ガードで403にならなかった
+    // リクエストでも、同一オリジンや許可外にはヘッダーが付かない。
+    const cors = url.pathname.startsWith("/api/")
+      ? corsHeadersFor(request.headers.get("Origin"), url, parseAllowedOrigins(env.ALLOWED_ORIGINS))
+      : {};
+    return withCors(await routeRequest(request, { env, ctx }, url, cors), cors);
   },
 } satisfies ExportedHandler<Env>;
 

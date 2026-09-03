@@ -1,5 +1,6 @@
 import { z } from "zod";
 
+import { isTeamCodeAllowed, parseTeamCodes } from "./guard.js";
 import { error, json, parseJson } from "./http.js";
 
 /**
@@ -129,6 +130,12 @@ export const handleProgressPost = async (request: Request, env: Env): Promise<Re
   if (parsed === null || !parsed.success) return error("進捗イベントの形式が不正です。", 400);
 
   const event = parsed.data;
+  // チームコードは本文にあるため入口ガードでは見られない。D1へ書く前にここで当てる
+  // （未登録チームの行をダッシュボードへ混ぜない）。応答は存在を明かさない404に揃える。
+  if (!isTeamCodeAllowed(event.teamCode, parseTeamCodes(env.TEAM_CODES))) {
+    return new Response("Not found", { status: 404 });
+  }
+
   try {
     await ensureSchema(env.PROGRESS_DB);
     await env.PROGRESS_DB.prepare(

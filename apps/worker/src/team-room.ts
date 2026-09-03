@@ -35,7 +35,9 @@ import type {
   TeamSyncMessage,
 } from "@hell-ict/domain";
 import { DurableObject } from "cloudflare:workers";
+import { z } from "zod";
 
+import { RATE_LIMIT_WINDOW_MS, rateLimitBucket, rateLimitRetryAfterSeconds } from "./guard.js";
 import { error, isWebSocketRequest } from "./http.js";
 
 type StoredCommand = { result: string };
@@ -58,10 +60,14 @@ export type CheckpointRejection = { rejected: CheckpointRejectionReason };
  */
 class CheckpointConflictError extends Error {}
 
+/** スレッド上限に達した作成要求。DOには何も保存しない。 */
+export type ThreadLimitReply = { threadLimit: true; max: number };
+
 export type BeginChatMessageOutcome =
   | { kind: "already-processed"; result: ChatMessageResult }
   | { kind: "pending"; history: AiMessage[] }
-  | { kind: "in-progress" };
+  | { kind: "in-progress" }
+  | { kind: "rate-limited"; retryAfterSeconds: number };
 
 export type CompleteChatMessageOutcome = { kind: "success"; text: string } | { kind: "failure" };
 
@@ -83,6 +89,16 @@ const PENDING_MESSAGE_EXPIRY_MS = 6 * 60 * 60 * 1000;
  * 終わった場合だけクレームを回収できるようにする。
  */
 const CLAIM_TIMEOUT_MS = 45 * 1000;
+
+/**
+ * 1チームが持てるスレッド数の上限。ステージごとに自動で開くスレッド（5本）に加えて、
+ * 参加者が手で足す余裕を見た値。これを超える作成要求は、DOのストレージを
+ * 際限なく膨らませる操作か暴走とみなして拒否する。
+ */
+export const MAX_THREADS_PER_TEAM = 30;
+
+/** rate_limitの行。壊れた値でレート制限が黙って無効化されないよう実行時に検証する。 */
+const storedRateLimitSchema = z.object({ count: z.number().int().nonnegative() });
 
 export class TeamRoom extends DurableObject<Env> {
   constructor(ctx: DurableObjectState, env: Env) {
@@ -110,6 +126,9 @@ export class TeamRoom extends DurableObject<Env> {
     );
     this.ctx.storage.sql.exec(
       "CREATE TABLE IF NOT EXISTS processed_checkpoint_commands (command_id TEXT PRIMARY KEY, revision INTEGER NOT NULL, created_at TEXT NOT NULL)",
+    );
+    this.ctx.storage.sql.exec(
+      "CREATE TABLE IF NOT EXISTS rate_limit (bucket TEXT PRIMARY KEY, count INTEGER NOT NULL)",
     );
   }
 
@@ -196,7 +215,10 @@ export class TeamRoom extends DurableObject<Env> {
     return this.loadChatSnapshot(teamCodeSchema.parse(teamCodeInput));
   }
 
-  async createThread(teamCodeInput: unknown, commandInput: unknown): Promise<CreateThreadResult> {
+  async createThread(
+    teamCodeInput: unknown,
+    commandInput: unknown,
+  ): Promise<CreateThreadResult | ThreadLimitReply> {
     const teamCode = teamCodeSchema.parse(teamCodeInput);
     const command: CreateThreadCommand = createThreadCommandSchema.parse(commandInput);
     const saved =
@@ -208,6 +230,11 @@ export class TeamRoom extends DurableObject<Env> {
         .toArray()[0] ?? null;
     if (saved !== null) return createThreadResultSchema.parse(JSON.parse(saved.result) as unknown);
     const snapshot = this.loadChatSnapshot(teamCode);
+    // 冪等再送（processed済み）は上限に関係なく従来の結果を返す。上限を当てるのは
+    // 新しいスレッドを実際に増やすときだけである。
+    if (snapshot.threads.length >= MAX_THREADS_PER_TEAM) {
+      return { threadLimit: true, max: MAX_THREADS_PER_TEAM };
+    }
     const created = domainCreateThread(snapshot, {
       threadId: crypto.randomUUID(),
       title: command.title,
@@ -224,9 +251,69 @@ export class TeamRoom extends DurableObject<Env> {
     return result;
   }
 
+  /**
+   * 固定窓の枠を1つ消費する。消費できたらnull、超過していたら待つべき秒数を返す。
+   *
+   * beginChatMessageの中からだけ呼ぶ。以前は別RPCとしてWorkerから先に呼んでいたが、
+   * それだと「枠の予約」と「pending行の作成」が別々のDO操作になり、同じcommandIdの
+   * 並行再送が二重に枠を減らした。1操作にまとめると、DOの直列実行がそのまま
+   * 「数えるのは新しいpending行を作るときだけ」を保証する。
+   *
+   * `nowMs`はWorkerから渡す。DO内でDate.now()を直書きすると窓をテストから固定できない。
+   */
+  private consumeRateLimit(nowMs: number, limit: number): number | null {
+    const bucket = rateLimitBucket(nowMs, RATE_LIMIT_WINDOW_MS);
+    const count = this.rateLimitCount(bucket);
+    if (count >= limit) return rateLimitRetryAfterSeconds(nowMs, RATE_LIMIT_WINDOW_MS);
+    // 固定窓なので過去の窓の行は不要。消費するときに掃除して1行だけ残す
+    // （超過で戻るときは1行も書かないよう、判定より後に置く）。
+    this.ctx.storage.sql.exec("DELETE FROM rate_limit WHERE bucket <> ?", bucket);
+    // `count + 1`ではなく読み取った値からの上書きにする。壊れた行へ加算し続けると
+    // 上限へ永久に届かず、制限が黙って無効化される。
+    this.ctx.storage.sql.exec(
+      "INSERT OR REPLACE INTO rate_limit (bucket, count) VALUES (?, ?)",
+      bucket,
+      count + 1,
+    );
+    return null;
+  }
+
+  /**
+   * 現在の窓のカウンタを読む。行が無い、または値が壊れている（型が違う、負数）ときは0を返す。
+   *
+   * 自前で書いている行だが、SQLiteは列の型を強制しないので、手作業のSQLや将来の
+   * スキーマ変更で数値以外が入りうる。素通しするとNaNとの比較が常にfalseになり、
+   * レート制限が例外もログも出さずに効かなくなる。壊れた行は0として扱い、
+   * consumeRateLimitの上書きで正しい値へ戻す。
+   */
+  private rateLimitCount(bucket: string): number {
+    const row =
+      this.ctx.storage.sql
+        .exec("SELECT count FROM rate_limit WHERE bucket = ?", bucket)
+        .toArray()[0] ?? null;
+    if (row === null) return 0;
+    return storedRateLimitSchema.safeParse(row).data?.count ?? 0;
+  }
+
+  /**
+   * 送信を受け付け、AIへ渡す履歴を返す。レート制限の消費もここで行う——判定と
+   * pending行の作成を1つのDO操作にまとめることで、次の3つを同時に保証する。
+   *
+   * - 冪等再送（processed済み・pending残り）は枠を消費しない。通信が不安定で再送を
+   *   繰り返しているチームが、1通も新しく送っていないのに429で詰むのを避ける。
+   * - 存在しないthreadIdへの送信は枠を消費しない。不正なリクエストで正規の枠を
+   *   削れてしまうのを避ける。
+   * - 枠を消費するのは、新しいpending行を実際に作る直前だけ。DOは操作を直列に
+   *   実行するので、同じcommandIdの並行再送が二重に数えられることはない。
+   *
+   * 超過したときはユーザーメッセージを保存せず（saveChatSnapshotより手前で返す）、
+   * 呼び出し側もAiGatewayに触れない。
+   */
   async beginChatMessage(
     teamCodeInput: unknown,
     commandInput: unknown,
+    nowMs: number,
+    limit: number,
   ): Promise<BeginChatMessageOutcome | UnknownThreadReply> {
     const teamCode = teamCodeSchema.parse(teamCodeInput);
     const command: SendMessageCommand = sendMessageCommandSchema.parse(commandInput);
@@ -251,18 +338,7 @@ export class TeamRoom extends DurableObject<Env> {
           command.commandId,
         )
         .toArray()[0] ?? null;
-    if (pending !== null) {
-      if (!this.isClaimStale(pending.claimed_at)) return { kind: "in-progress" };
-      // 未クレーム、またはクレームが古い（AI呼び出しが完了しないまま終わった）ので、
-      // ここで改めてクレームを取り直してから再試行させる。
-      this.ctx.storage.sql.exec(
-        "UPDATE pending_message_commands SET claimed_at = ? WHERE command_id = ?",
-        new Date().toISOString(),
-        command.commandId,
-      );
-      const snapshot = this.loadChatSnapshot(teamCode);
-      return { kind: "pending", history: this.historyFor(snapshot, pending.thread_id) };
-    }
+    if (pending !== null) return this.resumePending(teamCode, command.commandId, pending);
 
     const snapshot = this.loadChatSnapshot(teamCode);
     if (!snapshot.threads.some((thread) => thread.threadId === command.threadId)) {
@@ -276,17 +352,49 @@ export class TeamRoom extends DurableObject<Env> {
     };
     const appended = appendMessage(snapshot, { threadId: command.threadId, message: userMessage });
     if (!appended.ok) return { unknownThread: true };
-    this.saveChatSnapshot(appended.snapshot);
-    const now = new Date().toISOString();
-    this.ctx.storage.sql.exec(
-      "INSERT INTO pending_message_commands (command_id, thread_id, created_at, claimed_at) VALUES (?, ?, ?, ?)",
-      command.commandId,
-      command.threadId,
-      now,
-      now,
-    );
+    // ここまでは何も永続化していない。「枠の加算・snapshotの保存・pending行の作成」は
+    // 全部そろって初めて意味を持つので、1つのトランザクションにまとめる。途中で
+    // ストレージが失敗しても、枠だけ減ってメッセージが残らない中途半端な状態にしない。
+    // 超過のときはconsumeRateLimitが1行も書かずに戻るため、この中では何も起きない。
+    const retryAfterSeconds = this.ctx.storage.transactionSync(() => {
+      const retry = this.consumeRateLimit(nowMs, limit);
+      if (retry !== null) return retry;
+      this.saveChatSnapshot(appended.snapshot);
+      const now = new Date().toISOString();
+      this.ctx.storage.sql.exec(
+        "INSERT INTO pending_message_commands (command_id, thread_id, created_at, claimed_at) VALUES (?, ?, ?, ?)",
+        command.commandId,
+        command.threadId,
+        now,
+        now,
+      );
+      return null;
+    });
+    if (retryAfterSeconds !== null) return { kind: "rate-limited", retryAfterSeconds };
     this.broadcastChat(appended.snapshot);
     return { kind: "pending", history: this.historyFor(appended.snapshot, command.threadId) };
+  }
+
+  /**
+   * 既にpending行が残っているcommandIdの再送を捌く。クレームが生きていれば処理中、
+   * 古ければ取り直して履歴を返す。どちらも新しい送信ではないので枠は消費しない。
+   * beginChatMessageの複雑度を下げるための切り出し。
+   */
+  private resumePending(
+    teamCode: TeamCode,
+    commandId: string,
+    pending: StoredPendingMessage,
+  ): BeginChatMessageOutcome {
+    if (!this.isClaimStale(pending.claimed_at)) return { kind: "in-progress" };
+    // 未クレーム、またはクレームが古い（AI呼び出しが完了しないまま終わった）ので、
+    // ここで改めてクレームを取り直してから再試行させる。
+    this.ctx.storage.sql.exec(
+      "UPDATE pending_message_commands SET claimed_at = ? WHERE command_id = ?",
+      new Date().toISOString(),
+      commandId,
+    );
+    const snapshot = this.loadChatSnapshot(teamCode);
+    return { kind: "pending", history: this.historyFor(snapshot, pending.thread_id) };
   }
 
   async completeChatMessage(

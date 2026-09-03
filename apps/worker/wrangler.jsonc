@@ -4,6 +4,23 @@
   "main": "./src/index.ts",
   "compatibility_date": "2026-08-20",
   "compatibility_flags": ["nodejs_compat"],
+  // ALLOWED_ORIGINS / TEAM_CODES / CHAT_RATE_LIMIT_PER_MINUTE は入口ガード
+  // （src/guard.ts）の運用値。会ごとに変わるのでここへ値を書かず、本番デプロイ前に
+  // Cloudflareダッシュボードの Variables か `wrangler deploy --var NAME:VALUE` で与える
+  // （秘匿情報ではないのでsecretにはしない）。いずれも未設定のままでも既定動作で動く。
+  //
+  // - ALLOWED_ORIGINS: 許可するOriginをカンマ区切りで列挙（末尾スラッシュと空白は無視）。
+  //   未設定ならリクエストURLと同じoriginだけを許可する。配信版はモックHTMLを
+  //   Assetsから同一オリジンで配るので、本番は未設定でよい。別オリジンのページから
+  //   叩く場合（開発時に localStorage.hellApiBase で別ポートのwrangler devへ向ける等）
+  //   だけ設定する。例: "http://127.0.0.1:8788,http://localhost:8788"
+  // - TEAM_CODES: 事前配布した6桁チームコードをカンマ区切りで列挙。設定すると
+  //   一覧に無いコードは404で拒否する（未設定なら6桁なら何でも入室できる）。空文字や
+  //   ","だけを設定した場合は設定し損ねとみなして全コードを拒否する（fail-closed）。
+  //   設定できているかは GET /api/health の guards.teamCodes で確認する。
+  //   例: 2026-08-23のテストプレイはチームA〜Gに "100001,100002,100003,100004,100005,100006,100007" を配布した。
+  // - CHAT_RATE_LIMIT_PER_MINUTE: 1チームが1分あたりに送れるチャット数。未設定なら20。
+  //   受け付けるのは1〜600の整数のみで、範囲外・非数値は既定の20へ倒す。
   "vars": {
     "OPENAI_BASE_URL": "https://api.openai.com/v1",
     "OPENAI_MODEL": "gpt-4o",

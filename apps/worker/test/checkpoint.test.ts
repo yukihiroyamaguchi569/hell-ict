@@ -69,7 +69,10 @@ describe("チェックポイントAPI", () => {
 
   it("serverNowはISO 8601で返る（時刻を注入しない既定経路）", async () => {
     const response = await exports.default.fetch(
-      new Request("https://example.test/api/teams/500001/checkpoint"),
+      // 入口ガードは同一オリジンGETをSec-Fetch-Siteで通す（ブラウザはGETにOriginを付けない）。
+      new Request("https://example.test/api/teams/500001/checkpoint", {
+        headers: { "Sec-Fetch-Site": "same-origin" },
+      }),
     );
     expect(response.status).toBe(200);
     const state = checkpointStateSchema.parse(await response.json());
@@ -461,6 +464,13 @@ describe("チェックポイントAPI", () => {
   it("適用済みのcommandIdは、最新revisionで再送しても再適用されない", async () => {
     const teamCode = "500016";
     const commandIds = Array.from({ length: 21 }, (_, index) => id(String(200 + index)));
+    // noUncheckedIndexedAccess下では要素がstring | undefinedになる。長さは自明だが、
+    // non-null assertionを使わずに取り出す。
+    const commandIdAt = (index: number): string => {
+      const value = commandIds[index];
+      if (value === undefined) throw new Error("unexpected");
+      return value;
+    };
     for (const [index, commandId] of commandIds.entries()) {
       const response = await save(teamCode, {
         commandId,
@@ -480,7 +490,7 @@ describe("チェックポイントAPI", () => {
 
     // 最古のcommandIdを最新revisionで再送しても、古いbodyは再適用されない。
     const stale = await save(teamCode, {
-      commandId: commandIds[0],
+      commandId: commandIdAt(0),
       expectedRevision: 21,
       body: { pos: 0 },
     });
@@ -491,7 +501,7 @@ describe("チェックポイントAPI", () => {
     });
 
     // 直前の保存の再送は、状態を進めず現在のsnapshotを返す。
-    const kept = await save(teamCode, { commandId: commandIds[20], expectedRevision: 20 });
+    const kept = await save(teamCode, { commandId: commandIdAt(20), expectedRevision: 20 });
     expect(kept.status).toBe(200);
     const { snapshot } = saveCheckpointResultSchema.parse(await kept.json());
     expect(snapshot).toMatchObject({ revision: 21, body: { pos: 7 } });

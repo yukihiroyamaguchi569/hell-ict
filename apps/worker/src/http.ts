@@ -11,6 +11,16 @@ export type RequestScope = { readonly env: Env; readonly ctx: ExecutionContext }
 export const json = (value: unknown, status = 200): Response => Response.json(value, { status });
 export const error = (message: string, status: number, code?: HttpErrorCode): Response =>
   json(code === undefined ? { message } : { message, code }, status);
+/** Retry-Afterのように追加ヘッダーを伴うエラー応答（429）用。本文の形はerrorと同じ。 */
+export const errorWithHeaders = (
+  message: string,
+  status: number,
+  headers: Record<string, string>,
+): Response =>
+  new Response(JSON.stringify({ message }), {
+    status,
+    headers: { "content-type": "application/json", ...headers },
+  });
 /** 本文が上限を超えたときにparseJsonが投げる。413へ変換するため他の失敗と区別する。 */
 export class PayloadTooLargeError extends Error {}
 
@@ -45,4 +55,15 @@ export const teamCodeFromPath = (
 ): TeamCode | null => {
   if (!pathname.startsWith(prefix) || !pathname.endsWith(suffix)) return null;
   return teamCodeSchema.safeParse(pathname.slice(prefix.length, -suffix.length)).data ?? null;
+};
+
+/**
+ * `/api/teams/:code/...`のcodeを、末尾のパスを問わず取り出す。入口ガードは
+ * 個別エンドポイントを知らずに許可リストを当てたいので、teamCodeFromPathとは別に置く。
+ */
+export const teamCodeFromApiPath = (pathname: string): TeamCode | null => {
+  const prefix = "/api/teams/";
+  if (!pathname.startsWith(prefix)) return null;
+  const [code] = pathname.slice(prefix.length).split("/");
+  return teamCodeSchema.safeParse(code).data ?? null;
 };

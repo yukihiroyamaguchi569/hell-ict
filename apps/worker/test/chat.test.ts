@@ -11,6 +11,7 @@ import { FakeAiGateway } from "@hell-ict/domain/fakes";
 import type { AiGateway, ChatSnapshot, PromptProfile } from "@hell-ict/domain";
 import { describe, expect, it } from "vitest";
 
+import { DEFAULT_CHAT_RATE_LIMIT } from "../src/guard.js";
 import { handleChatMessage } from "../src/index.js";
 import { OpenAiRefusalError } from "../src/openai-gateway.js";
 import { collectMessages, postJson, session, upgrade } from "./support.js";
@@ -27,6 +28,7 @@ const sendMessage = async (
     promptProfile?: PromptProfile;
   },
   aiGateway: FakeAiGateway,
+  nowMs = Date.now(),
 ): Promise<Response> => {
   // 活動ログは`waitUntil`へ逃がすため、自前のExecutionContextを渡して
   // 書き込みの完了まで待てるようにする。
@@ -38,11 +40,27 @@ const sendMessage = async (
     }),
     { env, ctx },
     teamCode,
-    aiGateway,
+    { aiGateway, nowMs },
   );
   await waitOnExecutionContext(ctx);
   return response;
 };
+
+/**
+ * DOのbeginChatMessageを直接呼ぶ。レート制限の固定窓を握るnowMs/limitも渡す
+ * （省略すると実行時にNaN・undefinedが渡り、制限が効かない状態でテストが通ってしまう）。
+ */
+const beginDirect = (
+  teamCode: string,
+  command: { commandId: string; threadId: string; text: string },
+  nowMs = Date.now(),
+): Promise<unknown> =>
+  env.TEAM_ROOM.getByName(teamCode).beginChatMessage(
+    teamCode,
+    { type: "send-message", ...command },
+    nowMs,
+    DEFAULT_CHAT_RATE_LIMIT,
+  );
 
 type PromptProfileCase = {
   readonly label: string;
@@ -224,14 +242,12 @@ describe("P1C チャット骨格", () => {
     if (threadId === undefined) throw new Error("unexpected");
 
     const command = {
-      type: "send-message",
       commandId: "00000000-0000-4000-8000-000000000602",
       threadId,
       text: "本文",
     };
-    const room = env.TEAM_ROOM.getByName("400006");
-    const first = await room.beginChatMessage("400006", command);
-    const second = await room.beginChatMessage("400006", command);
+    const first = await beginDirect("400006", command);
+    const second = await beginDirect("400006", command);
     expect(first).toMatchObject({ kind: "pending" });
     expect(second).toEqual({ kind: "in-progress" });
   });
@@ -250,10 +266,7 @@ describe("P1C チャット骨格", () => {
     };
     // 先にDOを直接呼び、pending行をクレームさせておく
     // （別リクエストが処理中の状態を再現する）。
-    await env.TEAM_ROOM.getByName("400007").beginChatMessage("400007", {
-      type: "send-message",
-      ...command,
-    });
+    await beginDirect("400007", command);
 
     const gateway = new FakeAiGateway([{ kind: "success", response: "応答" }]);
     const response = await sendMessage("400007", command, gateway);
@@ -284,7 +297,7 @@ describe("P1C チャット骨格", () => {
       }),
       { env, ctx },
       "400008",
-      refusalGateway,
+      { aiGateway: refusalGateway, nowMs: Date.now() },
     );
     await waitOnExecutionContext(ctx);
     expect(response.status).toBe(422);
@@ -411,12 +424,7 @@ describe("P1C チャット骨格", () => {
     if (threadId === undefined) throw new Error("unexpected");
 
     const commandId = "00000000-0000-4000-8000-000000001202";
-    await env.TEAM_ROOM.getByName("400012").beginChatMessage("400012", {
-      type: "send-message",
-      commandId,
-      threadId,
-      text: "本文",
-    });
+    await beginDirect("400012", { commandId, threadId, text: "本文" });
 
     const gateway = new FakeAiGateway([]);
     const response = await sendMessage(

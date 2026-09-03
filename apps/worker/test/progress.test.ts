@@ -3,7 +3,7 @@ import { beforeEach, describe, expect, it } from "vitest";
 import { z } from "zod";
 
 import { progressSchemaSql } from "../src/progress.js";
-import { postJson } from "./support.js";
+import { get, postJson, TEST_ORIGIN } from "./support.js";
 
 const summarySchema = z.object({
   teams: z.array(
@@ -39,16 +39,20 @@ const event = (overrides: Record<string, unknown> = {}): Record<string, unknown>
 });
 
 const summary = async (): Promise<Summary> => {
-  const response = await exports.default.fetch(
-    new Request("https://example.test/api/progress/summary"),
-  );
+  const response = await get("/api/progress/summary");
   expect(response.status).toBe(200);
   return summarySchema.parse(await response.json());
 };
 
 /** JSONとして壊れた本文や本文なしを送るため、support.tsのpostJsonを経由しない。 */
 const postRaw = async (body: BodyInit | null): Promise<Response> =>
-  exports.default.fetch(new Request("https://example.test/api/progress", { method: "POST", body }));
+  exports.default.fetch(
+    new Request(`${TEST_ORIGIN}/api/progress`, {
+      method: "POST",
+      body,
+      headers: { Origin: TEST_ORIGIN },
+    }),
+  );
 
 const rowCount = async (): Promise<number> => {
   const row = await env.PROGRESS_DB.prepare("SELECT COUNT(*) AS n FROM progress_events").first("n");
@@ -180,6 +184,28 @@ describe("進捗記録", () => {
     const response = await postJson("/api/progress", body);
     expect(response.status).toBe(400);
     await expect(rowCount()).resolves.toBe(0);
+  });
+
+  it("TEAM_CODES設定時、未登録チームの進捗は404で拒否しD1へ書かない", async () => {
+    const saved = env.TEAM_CODES;
+    env.TEAM_CODES = "100001,100002";
+    try {
+      const rejected = await postJson("/api/progress", event({ teamCode: "100009" }));
+      expect(rejected.status).toBe(404);
+      await expect(rowCount()).resolves.toBe(0);
+
+      const accepted = await postJson("/api/progress", event({ teamCode: "100001" }));
+      expect(accepted.status).toBe(200);
+      await expect(rowCount()).resolves.toBe(1);
+    } finally {
+      env.TEAM_CODES = saved;
+    }
+  });
+
+  it("TEAM_CODES未設定なら任意の6桁の進捗を受け付ける", async () => {
+    const response = await postJson("/api/progress", event({ teamCode: "987654" }));
+    expect(response.status).toBe(200);
+    await expect(rowCount()).resolves.toBe(1);
   });
 
   it("JSONとして壊れた本文と空bodyは400で拒否し、行を増やさない", async () => {

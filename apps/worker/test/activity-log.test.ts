@@ -69,7 +69,7 @@ const chat = async (
     }),
     { env, ctx },
     teamCode,
-    aiGateway,
+    { aiGateway, nowMs: Date.now() },
   );
   await waitOnExecutionContext(ctx);
   return response;
@@ -528,7 +528,8 @@ describe("活動ログ", () => {
         new Request("https://example.test/api/teams/500116/activity", {
           method: "POST",
           body: huge,
-          headers,
+          // 入口ガードを通すため、ブラウザと同じくOriginを付ける。
+          headers: { Origin: "https://example.test", ...headers },
         }),
       );
       expect(response.status).toBe(413);
