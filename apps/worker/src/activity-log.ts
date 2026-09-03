@@ -22,16 +22,18 @@ import type { RequestScope } from "./http.js";
 /**
  * schema/activity.sqlと同じ内容。D1の`exec`は改行で文を区切るため、1文＝1行で書く。
  *
- * (command_id, kind)のUNIQUEは、同じcommandIdの再送で行が二重に積まれるのを
- * INSERT OR IGNOREで吸収するためのもの。1つのcommandIdからuser行とassistant行の
- * 2行が出るのでkindとの複合にする。command_idを持たないイベントを将来足したときに
+ * UNIQUEは、同じcommandIdの再送で行が二重に積まれるのをINSERT OR IGNOREで
+ * 吸収するためのもの。1つのcommandIdからuser行とassistant行の2行が出るので
+ * kindと複合にし、さらにevent_idとteam_codeまで含める——commandIdはクライアントが
+ * 採番するため、別チームや別開催回で衝突しうる。狭いキーだと後から来た本物の
+ * イベントが黙って捨てられる。command_idを持たないイベントを将来足したときに
  * 空文字どうしが衝突して静かに捨てられないよう、部分インデックスにしておく。
  */
 export const activitySchemaSql = [
   "CREATE TABLE IF NOT EXISTS activity_events (id INTEGER PRIMARY KEY AUTOINCREMENT, event_id TEXT NOT NULL DEFAULT '', team_code TEXT NOT NULL, kind TEXT NOT NULL, view TEXT NOT NULL DEFAULT '', thread_id TEXT NOT NULL DEFAULT '', message_id TEXT NOT NULL DEFAULT '', command_id TEXT NOT NULL DEFAULT '', role TEXT NOT NULL DEFAULT '', text TEXT NOT NULL DEFAULT '', meta TEXT NOT NULL DEFAULT '{}', client_at TEXT NOT NULL DEFAULT '', created_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ','now')));",
   "CREATE INDEX IF NOT EXISTS idx_activity_team ON activity_events(team_code, id);",
   "CREATE INDEX IF NOT EXISTS idx_activity_kind ON activity_events(kind);",
-  "CREATE UNIQUE INDEX IF NOT EXISTS idx_activity_command ON activity_events(command_id, kind) WHERE command_id <> '';",
+  "CREATE UNIQUE INDEX IF NOT EXISTS idx_activity_command ON activity_events(event_id, team_code, command_id, kind) WHERE command_id <> '';",
 ].join("\n");
 
 /** ensureActivitySchemaが必要とするのはexecだけ。テストからFakeを渡せるよう最小限へ絞る。 */
