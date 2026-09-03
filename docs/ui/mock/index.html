@@ -3338,6 +3338,96 @@
     });
   }
 
+  /* ------------------------------------------------------------------ */
+  /* チェックポイント（LIVE時のみ）                                       */
+  /*                                                                    */
+  /* リロード・タブ落ちからの復帰を、ファシリテーターの手動ジャンプ        */
+  /* （docs/testplay/2026-08-23_進行台本.md §5-1）ではなく「再入室するだけ」 */
+  /* で済ませるための保存。reportProgress と同じ fire-and-forget の流儀で、 */
+  /* 失敗しても握りつぶして進行は止めない——保存できないことより、保存の    */
+  /* 失敗でゲームが止まることのほうが本番では痛い。                       */
+  /* ------------------------------------------------------------------ */
+  const CHECKPOINT_DEBOUNCE_MS = 500;
+  let checkpointTimer = null;
+
+  /* 現在の状態をそのまま body へ写す。ステージ固有の状態（グリッドの中身・
+     生成済みポスター等）はまだ持たない——復元は「そのステージの先頭から」で、
+     data は空のまま送る（サーバは中身を解釈せず大きさだけを見る）。 */
+  function checkpointBody() {
+    return {
+      view: view,
+      pos: TEAMS[2].pos,
+      elapsedMs: elapsed * 1000,
+      trap: { s3Used: s3TrapUsed, s4Used: s4TrapUsed },
+      data: {},
+    };
+  }
+
+  /* 409 は2種類ある。どちらもサーバのmessageでしか区別できないので、罠の
+     文言（handleSaveCheckpoint の「発動済みの罠を…」）だけを見分ける。 */
+  function isTrapRegression(res) {
+    return !!(res.body && typeof res.body.message === "string" && res.body.message.indexOf("罠") >= 0);
+  }
+
+  async function postCheckpoint(body, retried) {
+    if (!liveState) return;
+    const teamCode = liveState.teamCode;
+    const res = await liveFetch("/api/teams/" + teamCode + "/checkpoint", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        type: "save-checkpoint",
+        commandId: crypto.randomUUID(),
+        expectedRevision: liveState.checkpointRevision,
+        body: body,
+      }),
+    }, LIVE_RESTORE_TIMEOUT_MS);
+    if (!liveState || liveState.teamCode !== teamCode) return;   // 待っている間に入り直していたら捨てる
+    if (res.ok && res.body && res.body.snapshot) {
+      liveState.checkpointRevision = res.body.snapshot.revision;
+      return;
+    }
+    // 409 以外（通信断・503・404）はそのまま諦める。次の保存でまた送られる。
+    if (res.status !== 409 || retried) return;
+
+    // 同じPCで複数タブが開かれると revision がずれる。最新を取り直して、
+    // 同じ body を「もう一度だけ」送る（無限再送はしない）。
+    const latest = await liveFetch("/api/teams/" + teamCode + "/checkpoint", { method: "GET" }, LIVE_RESTORE_TIMEOUT_MS);
+    if (!liveState || liveState.teamCode !== teamCode) return;
+    if (!latest.ok || !latest.body) return;
+    liveState.checkpointRevision = latest.body.checkpoint ? latest.body.checkpoint.revision : 0;
+    if (isTrapRegression(res)) {
+      // 罠の後退は「こちらのフラグが遅れている」状態。企画書§6の「連続罰は
+      // 1回まで」はサーバ側が正なので、サーバの発動済みフラグを取り込んで
+      // 再送はしない——ここで諦めるだけだと、以後の保存も同じ理由で永久に
+      // 弾かれ続けるため、ゲーム側のフラグにも反映して追いつかせる。
+      const trap = latest.body.checkpoint ? latest.body.checkpoint.body.trap : null;
+      if (trap) {
+        liveState.checkpointTrap = trap;
+        if (trap.s3Used) s3TrapUsed = true;
+        if (trap.s4Used) s4TrapUsed = true;
+      }
+      return;
+    }
+    postCheckpoint(body, true);
+  }
+
+  /* 保存の入口。連続で呼ばれても最後の状態だけを送る（ステージ遷移では
+     go() の末尾と pos 更新がほぼ同時に走るため）。reason は呼び出し元の
+     識別で、デバッグ時に liveState を覗けば最後の理由が分かる。 */
+  function saveCheckpoint(reason) {
+    if (!LIVE || !liveState || !liveState.teamCode) return;
+    if (view === "entry") return;   // 入室前の状態は復帰の役に立たない
+    liveState.lastCheckpointReason = reason;
+    if (checkpointTimer !== null) clearTimeout(checkpointTimer);
+    // later() は使わない——go() の clearLater() に回収されると、ステージ遷移の
+    // たびに保存そのものが消える。
+    checkpointTimer = setTimeout(() => {
+      checkpointTimer = null;
+      postCheckpoint(checkpointBody(), false);
+    }, CHECKPOINT_DEBOUNCE_MS);
+  }
+
   /* AIペインのタブを liveState.threads から描画する。scripted時
      （liveState===null）は静的マークアップ（「メイン」＋「＋」）のまま
      何もしない。 */
@@ -3478,6 +3568,7 @@
     if (view === "s4") {
       if (!s4TrapUsed) {
         s4TrapUsed = true;
+        saveCheckpoint("trap-s4");
         triggerLeak();
       } else {
         aiBubble("システム", "個人情報を検知したため、送信をブロックしました。");
@@ -3735,6 +3826,7 @@
           if (view !== "s4") return;   // 判断C
           if (!s4TrapUsed) {
             s4TrapUsed = true;
+            saveCheckpoint("trap-s4");
             triggerLeak();
           } else {
             // 上限は1回（企画書§6）。2回目以降は罰を出さず、ブロックだけ告げる。
@@ -4738,7 +4830,7 @@
   function s1Result(kind) {
     s1.cleared = true; s1.result = kind;
     s1.items.forEach((x) => { if (x.state === "live") x.state = "done"; });
-    TEAMS[2].pos = 2; drawMarks(); reportProgress(2, "clear");
+    TEAMS[2].pos = 2; drawMarks(); reportProgress(2, "clear"); saveCheckpoint("stage-clear");
     s1Center(); s1List();
     // Stage 2 へは直接飛ばさない。片付いたと思った一拍のあとに急変が来る。
     // 事務長の窓はOKボタンで閉じ、閉じた0.7秒後に赤帯（okBtnハンドラ側）。
@@ -5452,7 +5544,7 @@
     hasUnlockMail = true; renderMails("u");
     sfx("decision1");   // 師長の承認メールが着弾する
     // 自チームのマーカーが S3 へ滑る
-    TEAMS[2].pos = 3; drawMarks(); reportProgress(3, "clear");
+    TEAMS[2].pos = 3; drawMarks(); reportProgress(3, "clear"); saveCheckpoint("stage-clear");
     await wait(700);
     if (view !== "s2") return;   // 判断C
     // 解錠の喜びの陰で、誰も見ていない数字が増える。演出はつけない。
@@ -5589,6 +5681,7 @@
     if (result.trap) {
       if (!s3TrapUsed) {
         s3TrapUsed = true;
+        saveCheckpoint("trap-s3");
         s3Verdicting = false;
         triggerTrap();
         return;
@@ -5648,7 +5741,7 @@
     // （先に 14 にすると急変の一報が死ぬ）。
     // 停留所は 2026-08-22 の表示番号振り直しで S4 が独立したので、ここで進める
     // （以前は S3 の停留所を共有していたため進めなかった）。
-    TEAMS[2].pos = 4; drawMarks(); reportProgress(4, "clear");
+    TEAMS[2].pos = 4; drawMarks(); reportProgress(4, "clear"); saveCheckpoint("stage-clear");
     go("s35");
   }
 
@@ -6014,7 +6107,7 @@
     if (view !== "s35") return;   // 判断C
     $("ov-unlock").classList.add("hide");
     // 表示番号振り直し後、このクリアで進むのは S5（旧 Stage 4）の停留所。
-    TEAMS[2].pos = 5; drawMarks(); reportProgress(5, "clear");
+    TEAMS[2].pos = 5; drawMarks(); reportProgress(5, "clear"); saveCheckpoint("stage-clear");
     // このステージだけ、クリア後に次のシーンへ実際に遷移する（devbar・URLハッシュ
     // 単体起動でも詰まないようにするため。docs/ui/mock/README.md の他ステージは
     // 遷移せず状態更新のみで留まるが、S3.5→S4 の配線検証にはここが要る）。
@@ -6226,7 +6319,7 @@
     // devbarで送る必要があった）。
     // 発熱インジケータは動かさない——Stage 4・5 は 14 のまま継続
     // （docs/scenario/00_未知ウイルスの通奏低音.md §3「●●●継続」）。
-    TEAMS[2].pos = 6; drawMarks(); reportProgress(6, "clear");
+    TEAMS[2].pos = 6; drawMarks(); reportProgress(6, "clear"); saveCheckpoint("stage-clear");
     await wait(900);
     if (view !== "s4") return;   // 判断C
     go("s5");
@@ -6604,7 +6697,7 @@
   function stage5GoalSequence() {
     // 発熱インジケータは動かさない——Stage 4・5 は 14 のまま継続
     // （docs/scenario/00_未知ウイルスの通奏低音.md §3「●●●継続」）。
-    TEAMS[2].pos = 7; drawMarks(); reportProgress(7, "clear");   // フッターの停留所表示も同時に進める
+    TEAMS[2].pos = 7; drawMarks(); reportProgress(7, "clear"); saveCheckpoint("stage-clear");   // フッターの停留所表示も同時に進める
     goalSequence();
     $("goal-s").textContent = "レース終了 — このあと振り返りへ進みます";
     // .onclick への代入（addEventListener の積み増しではなく上書き）——
@@ -7108,7 +7201,7 @@
     // 置いていったことが見えるほうが、このステージの主題に合う。
     s2.left = 0;
     s2.items.forEach((x) => { if (x.state === "live") { x.state = "left"; s2.left++; } });
-    TEAMS[2].pos = 3; drawMarks(); reportProgress(3, "clear");
+    TEAMS[2].pos = 3; drawMarks(); reportProgress(3, "clear"); saveCheckpoint("stage-clear");
     // 通奏低音は Stage 2 で 9 名（docs/ui/00 §4）。1回だけ薄く光らせる。
     const f = $("fever");
     f.textContent = "9"; f.classList.add("bumped");
@@ -7471,6 +7564,9 @@
     // 旧S5→新S6）。STEPS.note の解説文と設計ドキュメントのファイル名・内部IDは
     // 旧番号のままなので、読み違えないよう対応表を先頭に添える。
     $("note").innerHTML = STEP_RENUMBER_NOTE + "<b>" + step.label + "</b>　" + step.note;
+
+    // ステージ遷移のたびに保存する。LIVE・入室後でなければ何もしない。
+    saveCheckpoint("go:" + id);
   }
 
   STEPS.forEach((s) => {
