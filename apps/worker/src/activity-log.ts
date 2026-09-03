@@ -81,7 +81,7 @@ const insertActivity = async (env: Env, event: ActivityEvent): Promise<void> => 
   await ensureActivitySchema(env.PROGRESS_DB);
   await env.PROGRESS_DB.prepare(INSERT_SQL)
     .bind(
-      env.EVENT_ID,
+      orEmpty(env.EVENT_ID),
       event.teamCode,
       event.kind,
       orEmpty(event.view),
