@@ -13,6 +13,7 @@ import type {
   AiGateway,
   AiMessage,
   ChatMessageResult,
+  CheckpointRejectionReason,
   CreateThreadCommand,
   CreateThreadResult,
   SendMessageCommand,
@@ -269,6 +270,13 @@ export const handleChatMessage = async (
   return respondToCompletion(result, refusal);
 };
 
+/** 保存を拒否した理由ごとの409メッセージ。理由が増えたら網羅漏れを型で検出する。 */
+const CHECKPOINT_REJECTION_MESSAGES = {
+  conflict: "チェックポイントが競合しました。最新を取得し直してください。",
+  "trap-regression": "発動済みの罠を取り消すチェックポイントは保存できません。",
+  "elapsed-regression": "経過時間を巻き戻すチェックポイントは保存できません。",
+} as const satisfies Record<CheckpointRejectionReason, string>;
+
 /**
  * ステージ内状態のチェックポイントを保存する。`nowIso`はここで採る——DOはテストから
  * Clockを差し替えられないため、時刻の境界をWorker側のhandlerに置いている。
@@ -299,11 +307,7 @@ export const handleSaveCheckpoint = async (
       parsed.data,
       nowIso,
     );
-    if ("rejected" in result) {
-      return result.rejected === "conflict"
-        ? error("チェックポイントが競合しました。最新を取得し直してください。", 409)
-        : error("発動済みの罠を取り消すチェックポイントは保存できません。", 409);
-    }
+    if ("rejected" in result) return error(CHECKPOINT_REJECTION_MESSAGES[result.rejected], 409);
     return json(saveCheckpointResultSchema.parse({ snapshot: result }));
   } catch {
     return error("チェックポイントの保存に失敗しました。時間を置いて再試行してください。", 503);

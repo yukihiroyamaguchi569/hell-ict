@@ -63,7 +63,7 @@ export type {
   SaveCheckpointResult,
 } from "./schemas/checkpoint.js";
 export { applyCheckpoint } from "./checkpoint.js";
-export type { CheckpointResult } from "./checkpoint.js";
+export type { CheckpointRejectionReason, CheckpointResult } from "./checkpoint.js";
 export {
   openAiChatCompletionSchema,
   parseOpenAiChatCompletion,
