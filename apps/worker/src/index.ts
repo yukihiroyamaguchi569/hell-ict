@@ -302,6 +302,10 @@ const handleGet = (request: Request, env: Env, url: URL): Promise<Response> => {
  * WebSocket upgradeの別なく一律で当てる。前作Hell-AI-v2では書き込み系だけを
  * 検証したため管理系APIに検証漏れが残った。拒否したときはDOにもAiGatewayにも触れない。
  *
+ * Origin検証はブラウザ経由の悪用（CSRF・他サイトからの読み取り）を止める層であって、
+ * 認証ではない。非ブラウザからの直接アクセスはOriginを詐称できるため、そちらは
+ * TEAM_CODESの許可リストとレート制限で抑える（詳細はguard.ts先頭の注記）。
+ *
  * 通す場合はnullを返す。
  */
 const guardApiRequest = (request: Request, env: Env, url: URL): Response | null => {
