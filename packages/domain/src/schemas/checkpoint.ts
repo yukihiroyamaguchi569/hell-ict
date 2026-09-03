@@ -15,6 +15,20 @@ export const CHECKPOINT_DATA_TOO_LARGE_MESSAGE = "チェックポイントのdat
 const jsonByteLength = (value: unknown): number =>
   new TextEncoder().encode(JSON.stringify(value)).length;
 
+/**
+ * 保存を拒否した理由。HTTPエラーの`code`としてそのまま返すため、schemaを情報源にする
+ * （`schemas/http-error.ts`が同じ値を取り込む）——クライアントは文言ではなくこの値で
+ * 分岐する。conflictは取り直して再送、*-regressionは巻き戻した状態を送り直さない。
+ */
+export const CHECKPOINT_REJECTION_REASONS = [
+  "conflict",
+  "trap-regression",
+  "elapsed-regression",
+  "pos-regression",
+] as const;
+
+export const checkpointRejectionReasonSchema = z.enum(CHECKPOINT_REJECTION_REASONS);
+
 /** 罠の発動済みフラグ。Stage 3・Stage 4のどちらも1回だけ発動する（企画書§6）。 */
 export const checkpointTrapSchema = z.object({ s3Used: z.boolean(), s4Used: z.boolean() }).strict();
 
@@ -66,6 +80,7 @@ export const checkpointStateSchema = z
   })
   .strict();
 
+export type CheckpointRejectionReason = z.infer<typeof checkpointRejectionReasonSchema>;
 export type CheckpointTrap = z.infer<typeof checkpointTrapSchema>;
 export type CheckpointBody = z.infer<typeof checkpointBodySchema>;
 export type CheckpointSnapshot = z.infer<typeof checkpointSnapshotSchema>;

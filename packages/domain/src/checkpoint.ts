@@ -1,16 +1,11 @@
 import type {
   CheckpointBody,
+  CheckpointRejectionReason,
   CheckpointSnapshot,
   CheckpointTrap,
   SaveCheckpointCommand,
 } from "./schemas/checkpoint.js";
 import type { TeamCode } from "./schemas/team-state.js";
-
-export type CheckpointRejectionReason =
-  | "conflict"
-  | "trap-regression"
-  | "elapsed-regression"
-  | "pos-regression";
 
 export type CheckpointResult =
   | { ok: true; snapshot: CheckpointSnapshot }
