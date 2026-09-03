@@ -3390,7 +3390,24 @@
     }
   })();
 
-  /* fetchを{ok,status,body}へ正規化する。ネットワーク断・タイムアウトも
+  /* 429 の Retry-After（秒）を数える。RFC はHTTP-dateも許すが、Workerは秒で返すので
+     秒だけを読む——読めなければ null にして、文言から秒数を落とす。 */
+  function retryAfterSeconds(res) {
+    const raw = res.headers.get("Retry-After");
+    if (raw === null) return null;
+    const seconds = Number(raw.trim());
+    return Number.isFinite(seconds) && seconds >= 0 ? Math.ceil(seconds) : null;
+  }
+
+  /* 429（レート制限）の案内文。自動再送はしない——待たせている間に画面が勝手に
+     動くより、参加者が「何秒待てばいいか」を読んで自分で押し直せる方がよい。 */
+  function rateLimitMessage(retryAfter) {
+    return retryAfter === null
+      ? "送信が多すぎます。少し待ってからもう一度送ってください。"
+      : "送信が多すぎます。" + retryAfter + " 秒待ってからもう一度送ってください。";
+  }
+
+  /* fetchを{ok,status,body,retryAfter}へ正規化する。ネットワーク断・タイムアウトも
      例外を投げさせず status:0 として呼び出し側の分岐へ寄せる。 */
   async function liveFetch(path, options, timeoutMs) {
     const ctrl = new AbortController();
@@ -3399,9 +3416,11 @@
       const res = await fetch(LIVE_API_BASE + path, Object.assign({ signal: ctrl.signal }, options));
       let body = null;
       try { body = await res.json(); } catch {}
-      return { ok: res.ok, status: res.status, body };
+      // 429 のときだけ意味を持つ待ち秒数。headers を丸ごと露出させず、必要な1つだけ
+      // 数値へ落として返す（読めなければ null＝「何秒待てとは言えない」）。
+      return { ok: res.ok, status: res.status, body, retryAfter: retryAfterSeconds(res) };
     } catch {
-      return { ok: false, status: 0, body: null };
+      return { ok: false, status: 0, body: null, retryAfter: null };
     } finally {
       clearTimeout(timer);
     }
@@ -3438,6 +3457,14 @@
   /* ------------------------------------------------------------------ */
   const CHECKPOINT_DEBOUNCE_MS = 500;
   let checkpointTimer = null;
+  /* 「最後に要求した状態が、まだサーバで確認できていない」印。デバウンス待ちだけを
+     見ていると、キューへ積んだ直後や送信中（fetchが返る前）のリロードで取りこぼす
+     ——タイマーはもう null なので離脱時のflushが何もしない。要求で立て、200応答で
+     revisionを採用した時点でだけ下ろす。 */
+  let checkpointDirty = false;
+  /* 保存要求の通し番号。送信中に新しい要求が入っていたら、古い応答が返ってきても
+     dirtyを下ろさない（新しい状態が未送信のまま「確認済み」になるのを防ぐ）。 */
+  let checkpointSeq = 0;
 
   /* 現在の状態をそのまま body へ写す。ステージ固有の状態（グリッドの中身・
      生成済みポスター等）はまだ持たない——復元は「そのステージの先頭から」で、
@@ -3493,6 +3520,7 @@
     const sentRevision = liveState.checkpointRevision;
     // 送る直前に組む。キュー待ちの間に進んだ状態があれば、それごと送る。
     const body = checkpointBody();
+    const sentSeq = checkpointSeq;   // これ以降に来た要求は、この応答では確認済みにしない
     const res = await liveFetch("/api/teams/" + teamCode + "/checkpoint", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
@@ -3510,6 +3538,9 @@
       // 採用しない——ずれたままなら次の保存が409 conflictで取り直す。
       if (res.body.snapshot.revision === sentRevision + 1) {
         liveState.checkpointRevision = res.body.snapshot.revision;
+        // ここだけが「サーバで確認できた」と言える地点。送った後に新しい要求が
+        // 入っていた場合（seqが進んでいる）は、その分がまだ未送信なので下ろさない。
+        if (checkpointSeq === sentSeq) checkpointDirty = false;
       }
       return;
     }
@@ -3554,13 +3585,22 @@
     checkpointChain = checkpointChain.then(() => postCheckpoint(false)).catch(() => undefined);
   }
 
-  /* 離脱の直前に、保留中の保存を投げ切る。通常の fetch はページが消えた時点で
-     中断されるので keepalive を付ける（本文は数百バイトで、keepalive の
-     64KB 制限に遠く届かない）。キューは通さない——チェーンの手前に何か
-     詰まっていると、離脱までに送れない。 */
+  /* 離脱の直前に、まだサーバで確認できていない状態を投げ切る。通常の fetch は
+     ページが消えた時点で中断されるので keepalive を付ける（本文は数百バイトで、
+     keepalive の 64KB 制限に遠く届かない）。
+
+     見るのはタイマーの有無ではなく dirty——罠の発動は即時にキューへ積むので
+     タイマーは既に null で、それでもチェーン待ちや送信中（fetchが返る前）で
+     ありうる。そこでリロードされると、サーバには罠を踏む前の状態が残り、
+     復帰したチームが同じ罠をもう一度踏めてしまう。
+
+     キューは通さない——チェーンの手前に何か詰まっていると離脱までに送れない。
+     送信中のPOSTと二重になるが、commandId は新規で構わない：サーバは
+     revision の CAS と罠・経過時間・停留所の後退拒否で守られており、
+     古い方が後から通っても状態を巻き戻せない。 */
   function flushCheckpoint() {
-    if (checkpointTimer === null) return;
-    clearTimeout(checkpointTimer);
+    if (!checkpointDirty) return;
+    if (checkpointTimer !== null) clearTimeout(checkpointTimer);
     checkpointTimer = null;
     if (!LIVE || !liveState || !liveState.teamCode) return;
     try {
@@ -3592,11 +3632,14 @@
 
      immediate=true はデバウンスを挟まず即座にキューへ積む。罠の発動だけは
      これを使う——踏んだ0.5秒以内にリロードされると罠がもう一度発動でき、
-     企画書§6「連続罰は1回まで」の抜け道になる。 */
+     企画書§6「連続罰は1回まで」の抜け道になる。即時にしても送信中の中断は
+     残るので、離脱時の取りこぼしは dirty（flushCheckpoint）が受け持つ。 */
   function saveCheckpoint(reason, immediate) {
     if (!LIVE || !liveState || !liveState.teamCode) return;
     if (view === "entry") return;   // 入室前の状態は復帰の役に立たない
     liveState.lastCheckpointReason = reason;
+    checkpointDirty = true;
+    checkpointSeq++;
     if (checkpointTimer !== null) clearTimeout(checkpointTimer);
     if (immediate) {
       checkpointTimer = null;
@@ -3804,6 +3847,11 @@
     }
     if (res.status === 409) {
       aiBubble("システム", "同じ内容を処理中です。少し待って再送してください。");
+      return;
+    }
+    if (res.status === 429) {
+      // レート制限。自動では送り直さない（待ち時間を告げて参加者に委ねる）。
+      aiBubble("システム", esc(rateLimitMessage(res.retryAfter)));
       return;
     }
     // 503・ネットワーク断・タイムアウト（20秒）はここへ集約する。
@@ -4865,9 +4913,18 @@
     }
 
     // 400（長すぎ）/422（PII等）は適用されずに確定した拒否なのでIDを持ち越さない。
+    // 429（レート制限）も本文はまだ処理されていないが、同じ下書きを送り直すのが
+    // 自然なのでIDは持ち越す（待ってから押し直せば冪等に当たる）。
     // 0（タイムアウト・断）/409（処理中）/503 は結果が未確定——同じIDで再送すれば
     // DO側の冪等性に当たる。
     if (res.status === 400 || res.status === 422) s1DraftCommand.clear();
+
+    if (res.status === 429) {
+      // レート制限だけは「失敗」ではなく「待て」なので、専用の文言をボタンへ出す。
+      // Stage 1 には会話の表示欄が無いので、他の失敗と同じくボタンで知らせる。
+      s1ShowDraftNotice(it, rateLimitMessage(res.retryAfter));
+      return;   // 未確定ではないのでスナップショットの取り直しも要らない
+    }
 
     // 422（PII等）/409（二重送信）/503・タイムアウト、いずれもここへ集約する。
     // Stage1は締切が短いので、専用の警告行は作らずボタンの文言を一時的に
@@ -4885,16 +4942,24 @@
 
   /* 下書きボタンを失敗表示へ戻し、少し置いて元の文言へ戻す。s1DraftLive の
      失敗経路から呼ぶ（await をまたがずに必ず押せる状態にするため分離した）。 */
-  function s1RestoreDraftButton(it) {
+  /* ボタンの文言を一時的に差し替えて知らせ、必ず再クリック可能な状態へ戻す。
+     Stage 1 の中央ペインには会話の表示欄が無いので、失敗もレート制限もここを通す。
+     戻すときは「自分が出した文言のままか」を確かめる——待っている間に別の通知が
+     上書きしていたら、そちらを消さない。 */
+  function s1ShowDraftNotice(it, notice) {
     if (s1.open !== it.key) return;   // 送信中に別のメールへ移っていたら黙る（sendAI判断Cと同じ流儀）
-    const failBtn = $("s1-draft");
-    if (!failBtn) return;
-    failBtn.textContent = "下書きに失敗しました（再試行可）";
-    failBtn.disabled = false;
+    const btn = $("s1-draft");
+    if (!btn) return;
+    btn.textContent = notice;
+    btn.disabled = false;
     later(() => {
       const b = $("s1-draft");
-      if (b && s1.open === it.key && b.textContent === "下書きに失敗しました（再試行可）") b.textContent = "AIに下書きさせる";
+      if (b && s1.open === it.key && b.textContent === notice) b.textContent = "AIに下書きさせる";
     }, 2400);
+  }
+
+  function s1RestoreDraftButton(it) {
+    s1ShowDraftNotice(it, "下書きに失敗しました（再試行可）");
   }
 
   // 引き継ぎメモの[本文をコピー]。Clipboard API を優先し、使えない/失敗する
