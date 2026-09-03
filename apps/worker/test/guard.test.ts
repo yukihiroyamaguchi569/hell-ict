@@ -12,6 +12,8 @@ import {
   isOriginAllowed,
   isOriginlessRequestAllowed,
   isTeamCodeAllowed,
+  MAX_CHAT_RATE_LIMIT,
+  MIN_CHAT_RATE_LIMIT,
   parseAllowedOrigins,
   parseChatRateLimit,
   parseTeamCodes,
@@ -186,14 +188,25 @@ describe("レート制限の窓（Pure Function）", () => {
     expect(rateLimitRetryAfterSeconds(59_999, RATE_LIMIT_WINDOW_MS)).toBe(1);
   });
 
-  it("CHAT_RATE_LIMIT_PER_MINUTEは正の整数だけ採用し、それ以外は既定へ倒す", () => {
+  it("CHAT_RATE_LIMIT_PER_MINUTEは1〜600の安全な整数だけ採用する", () => {
     expect(parseChatRateLimit("5")).toBe(5);
-    expect(parseChatRateLimit(undefined)).toBe(DEFAULT_CHAT_RATE_LIMIT);
-    expect(parseChatRateLimit("")).toBe(DEFAULT_CHAT_RATE_LIMIT);
-    expect(parseChatRateLimit("0")).toBe(DEFAULT_CHAT_RATE_LIMIT);
-    expect(parseChatRateLimit("-3")).toBe(DEFAULT_CHAT_RATE_LIMIT);
-    expect(parseChatRateLimit("2.5")).toBe(DEFAULT_CHAT_RATE_LIMIT);
-    expect(parseChatRateLimit("たくさん")).toBe(DEFAULT_CHAT_RATE_LIMIT);
+    expect(parseChatRateLimit("1")).toBe(MIN_CHAT_RATE_LIMIT);
+    expect(parseChatRateLimit("600")).toBe(MAX_CHAT_RATE_LIMIT);
+  });
+
+  it.each([
+    ["未設定", undefined],
+    ["空文字", ""],
+    ["0", "0"],
+    ["負数", "-3"],
+    ["小数", "2.5"],
+    ["非数値", "abc"],
+    ["範囲超過", "601"],
+    ["指数表記の桁あふれ", "1e100"],
+    ["安全整数を超える", "9007199254740993"],
+    ["Infinity", "Infinity"],
+  ])("CHAT_RATE_LIMIT_PER_MINUTEの%sは既定へ倒す", (_label, raw) => {
+    expect(parseChatRateLimit(raw)).toBe(DEFAULT_CHAT_RATE_LIMIT);
   });
 });
 
@@ -351,6 +364,27 @@ describe("CORS", () => {
       response.webSocket?.accept();
       response.webSocket?.close();
     });
+  });
+});
+
+describe("ヘルスチェックのguards（レート制限の実効値）", () => {
+  it("設定ミスで既定へ倒れたことがhealthから分かる", async () => {
+    const saved = env.CHAT_RATE_LIMIT_PER_MINUTE;
+    try {
+      env.CHAT_RATE_LIMIT_PER_MINUTE = "1e100";
+      const fellBack = await get("/api/health");
+      await expect(fellBack.json()).resolves.toMatchObject({
+        guards: { chatRateLimitPerMinute: DEFAULT_CHAT_RATE_LIMIT },
+      });
+
+      env.CHAT_RATE_LIMIT_PER_MINUTE = "42";
+      const applied = await get("/api/health");
+      await expect(applied.json()).resolves.toMatchObject({
+        guards: { chatRateLimitPerMinute: 42 },
+      });
+    } finally {
+      env.CHAT_RATE_LIMIT_PER_MINUTE = saved;
+    }
   });
 });
 

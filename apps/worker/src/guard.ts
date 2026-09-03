@@ -129,10 +129,24 @@ export const RATE_LIMIT_WINDOW_MS = 60_000;
 /** 既定の上限。研修中の1チームが1分に20通を超えるのは操作ミスか暴走とみなす。 */
 export const DEFAULT_CHAT_RATE_LIMIT = 20;
 
-/** `CHAT_RATE_LIMIT_PER_MINUTE`を上限値へ。未設定・不正値は既定へ倒す（設定ミスでAPIを止めない）。 */
+/**
+ * 受け付ける上限値の範囲。1未満は「1通も送れない」で研修が成立せず、600（毎秒10通）を
+ * 超える値は制限として意味を持たない。`1e100`のような指数表記や桁あふれを既定へ倒し、
+ * 設定ミスがそのまま「実質無制限」にならないようにする。
+ */
+export const MIN_CHAT_RATE_LIMIT = 1;
+export const MAX_CHAT_RATE_LIMIT = 600;
+
+/**
+ * `CHAT_RATE_LIMIT_PER_MINUTE`を上限値へ。未設定・非数値・範囲外はすべて既定へ倒す
+ * （設定ミスでAPIを止めない）。実際に効いている値は`GET /api/health`のguardsに出るので、
+ * 黙って既定へ落ちたことに気付けるようにしてある。
+ */
 export const parseChatRateLimit = (raw: string | undefined): number => {
   const parsed = Number(raw);
-  return Number.isInteger(parsed) && parsed > 0 ? parsed : DEFAULT_CHAT_RATE_LIMIT;
+  const usable =
+    Number.isSafeInteger(parsed) && parsed >= MIN_CHAT_RATE_LIMIT && parsed <= MAX_CHAT_RATE_LIMIT;
+  return usable ? parsed : DEFAULT_CHAT_RATE_LIMIT;
 };
 
 /** 固定窓のキー。同じ窓に入る時刻は同じ文字列になる。 */

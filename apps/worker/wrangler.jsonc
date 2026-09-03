@@ -20,6 +20,7 @@
   //   設定できているかは GET /api/health の guards.teamCodes で確認する。
   //   例: 2026-08-23のテストプレイはチームA〜Gに "100001,100002,100003,100004,100005,100006,100007" を配布した。
   // - CHAT_RATE_LIMIT_PER_MINUTE: 1チームが1分あたりに送れるチャット数。未設定なら20。
+  //   受け付けるのは1〜600の整数のみで、範囲外・非数値は既定の20へ倒す。
   "vars": {
     "OPENAI_BASE_URL": "https://api.openai.com/v1",
     "OPENAI_MODEL": "gpt-4o",
