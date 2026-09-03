@@ -3,6 +3,8 @@ import { describe, expect, it } from "vitest";
 import { applyCheckpoint } from "../src/checkpoint.js";
 import {
   CHECKPOINT_DATA_MAX_BYTES,
+  CHECKPOINT_DATA_MAX_DEPTH,
+  CHECKPOINT_ELAPSED_MAX_MS,
   CHECKPOINT_DATA_TOO_LARGE_MESSAGE,
   checkpointBodySchema,
   checkpointSnapshotSchema,
@@ -38,6 +40,13 @@ const snapshot = (revision: number, bodyOverrides: Partial<CheckpointBody> = {})
     savedAt: "2026-09-03T00:00:00.000Z",
     body: body(bodyOverrides),
   });
+
+/** data直下を深さ1として、深さ`depth`の葉を1つ持つ入れ子を作る。 */
+const nested = (depth: number): Record<string, unknown> => {
+  let node: unknown = "x";
+  for (let level = 1; level < depth; level += 1) node = { a: node };
+  return { a: node };
+};
 
 /** `data`のJSON化バイト数がちょうど`bytes`になるレコードを作る。 */
 const dataOfBytes = (bytes: number): Record<string, unknown> => {
@@ -243,6 +252,22 @@ describe("チェックポイントのschema", () => {
     expect(checkpointBodySchema.safeParse({ ...body(), elapsedMs }).success).toBe(false);
   });
 
+  it("elapsedMsは上限ちょうどまで受け入れる", () => {
+    const parsed = checkpointBodySchema.safeParse({
+      ...body(),
+      elapsedMs: CHECKPOINT_ELAPSED_MAX_MS,
+    });
+    expect(parsed.success).toBe(true);
+  });
+
+  it("elapsedMsが上限を1ms超えたら拒否する", () => {
+    const parsed = checkpointBodySchema.safeParse({
+      ...body(),
+      elapsedMs: CHECKPOINT_ELAPSED_MAX_MS + 1,
+    });
+    expect(parsed.success).toBe(false);
+  });
+
   it("trapに余分なキーがあれば拒否する", () => {
     const trap = { s3Used: false, s4Used: false, s5Used: false };
     expect(checkpointBodySchema.safeParse({ ...body(), trap }).success).toBe(false);
@@ -267,6 +292,30 @@ describe("チェックポイントのschema", () => {
     const parsed = checkpointBodySchema.parse({ ...body(), data });
     expect(parsed.data).toEqual(data);
     expect(JSON.parse(JSON.stringify(parsed.data))).toEqual(data);
+  });
+
+  it("dataの入れ子は上限の深さちょうどまで受け入れる", () => {
+    const parsed = checkpointBodySchema.safeParse({
+      ...body(),
+      data: nested(CHECKPOINT_DATA_MAX_DEPTH),
+    });
+    expect(parsed.success).toBe(true);
+  });
+
+  it("dataの入れ子が上限を1段超えたら拒否する", () => {
+    const parsed = checkpointBodySchema.safeParse({
+      ...body(),
+      data: nested(CHECKPOINT_DATA_MAX_DEPTH + 1),
+    });
+    expect(parsed.success).toBe(false);
+  });
+
+  it("深さ5000の配列でも例外にならず拒否する", () => {
+    // 再帰schemaへ渡すとRangeErrorになる深さ。反復の深さ検査で先に落とす。
+    let deep: unknown = [];
+    for (let level = 0; level < 5000; level += 1) deep = [deep];
+    expect(() => checkpointBodySchema.safeParse({ ...body(), data: { deep } })).not.toThrow();
+    expect(checkpointBodySchema.safeParse({ ...body(), data: { deep } }).success).toBe(false);
   });
 
   it("dataは上限ちょうどまで受け入れる", () => {

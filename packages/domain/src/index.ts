@@ -46,7 +46,9 @@ export { appendMessage, createThread, initialChatSnapshot } from "./chat.js";
 export type { ChatMutationResult } from "./chat.js";
 export {
   CHECKPOINT_DATA_MAX_BYTES,
+  CHECKPOINT_DATA_MAX_DEPTH,
   CHECKPOINT_DATA_TOO_LARGE_MESSAGE,
+  CHECKPOINT_ELAPSED_MAX_MS,
   CHECKPOINT_REJECTION_REASONS,
   checkpointBodySchema,
   checkpointRejectionReasonSchema,
