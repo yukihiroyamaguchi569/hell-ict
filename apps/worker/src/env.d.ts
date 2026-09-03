@@ -14,5 +14,11 @@ export {};
 declare global {
   interface Env {
     OPENAI_API_KEY: string;
+    /**
+     * 活動ログ（activity_events.event_id）へ書く開催回の識別子。wrangler.jsoncの
+     * `vars`にあるが、worker-configuration.d.tsを再生成せずに済ませたいので
+     * ここへ手書きで足す（生成物は`wrangler types`の実行者ごとに差分が出るため）。
+     */
+    EVENT_ID: string;
   }
 }
