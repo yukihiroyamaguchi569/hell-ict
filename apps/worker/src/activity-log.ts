@@ -22,16 +22,18 @@ import type { RequestScope } from "./http.js";
 /**
  * schema/activity.sqlと同じ内容。D1の`exec`は改行で文を区切るため、1文＝1行で書く。
  *
- * (command_id, kind)のUNIQUEは、同じcommandIdの再送で行が二重に積まれるのを
- * INSERT OR IGNOREで吸収するためのもの。1つのcommandIdからuser行とassistant行の
- * 2行が出るのでkindとの複合にする。command_idを持たないイベントを将来足したときに
+ * UNIQUEは、同じcommandIdの再送で行が二重に積まれるのをINSERT OR IGNOREで
+ * 吸収するためのもの。1つのcommandIdからuser行とassistant行の2行が出るので
+ * kindと複合にし、さらにevent_idとteam_codeまで含める——commandIdはクライアントが
+ * 採番するため、別チームや別開催回で衝突しうる。狭いキーだと後から来た本物の
+ * イベントが黙って捨てられる。command_idを持たないイベントを将来足したときに
  * 空文字どうしが衝突して静かに捨てられないよう、部分インデックスにしておく。
  */
 export const activitySchemaSql = [
   "CREATE TABLE IF NOT EXISTS activity_events (id INTEGER PRIMARY KEY AUTOINCREMENT, event_id TEXT NOT NULL DEFAULT '', team_code TEXT NOT NULL, kind TEXT NOT NULL, view TEXT NOT NULL DEFAULT '', thread_id TEXT NOT NULL DEFAULT '', message_id TEXT NOT NULL DEFAULT '', command_id TEXT NOT NULL DEFAULT '', role TEXT NOT NULL DEFAULT '', text TEXT NOT NULL DEFAULT '', meta TEXT NOT NULL DEFAULT '{}', client_at TEXT NOT NULL DEFAULT '', created_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ','now')));",
   "CREATE INDEX IF NOT EXISTS idx_activity_team ON activity_events(team_code, id);",
   "CREATE INDEX IF NOT EXISTS idx_activity_kind ON activity_events(kind);",
-  "CREATE UNIQUE INDEX IF NOT EXISTS idx_activity_command ON activity_events(command_id, kind) WHERE command_id <> '';",
+  "CREATE UNIQUE INDEX IF NOT EXISTS idx_activity_command ON activity_events(event_id, team_code, command_id, kind) WHERE command_id <> '';",
 ].join("\n");
 
 /** ensureActivitySchemaが必要とするのはexecだけ。テストからFakeを渡せるよう最小限へ絞る。 */
@@ -158,6 +160,13 @@ const activityKindSchema = z.enum([
 /** metaは自由なJSONだが、1行が肥大して分析クエリが重くなるのを粗い上限で止める。 */
 const META_LIMIT_BYTES = 4096;
 
+/**
+ * 上限はバイト数で測る。`String.length`はUTF-16のコード単位なので、日本語のmetaだと
+ * 実際の保存サイズ（UTF-8）の1/3程度に見積もられ、上限が事実上効かない。
+ */
+const encoder = new TextEncoder();
+const jsonByteLength = (value: unknown): number => encoder.encode(JSON.stringify(value)).length;
+
 const clientActivitySchema = z.object({
   commandId: z.uuid(),
   kind: activityKindSchema,
@@ -169,9 +178,12 @@ const clientActivitySchema = z.object({
   text: z.string().max(20000).optional(),
   meta: z
     .record(z.string(), z.unknown())
-    .refine((meta) => JSON.stringify(meta).length <= META_LIMIT_BYTES)
+    .refine((meta) => jsonByteLength(meta) <= META_LIMIT_BYTES)
     .optional(),
-  clientAt: z.string().max(64),
+  // 任意文字列にすると、textとmetaのPIIゲートを通らない自由記述の列が1つ残る
+  // （実際に電話番号がそのまま保存できてしまう）。書式を固定して抜け道を塞ぐ。
+  // クライアントは`new Date().toISOString()`を送るので、これで足りる。
+  clientAt: z.iso.datetime(),
 });
 
 export const handleActivityPost = async (

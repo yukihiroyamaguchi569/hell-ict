@@ -345,6 +345,18 @@ describe("活動ログ", () => {
       expect(stored[0]?.text).toBe("判定に出した本文");
     });
 
+    // commandIdはクライアント採番なので、別チームで衝突しうる。冪等性のキーが
+    // 狭いと、後から来た本物のイベントがINSERT OR IGNOREで黙って消える。
+    it("別チームが同じcommandId・kindを送っても、両方が保存される", async () => {
+      const first = await postJson("/api/teams/500110/activity", activity());
+      const second = await postJson("/api/teams/500111/activity", activity());
+      expect([first.status, second.status]).toEqual([200, 200]);
+
+      const stored = await rows();
+      expect(stored.map((row) => row.teamCode)).toEqual(["500110", "500111"]);
+      expect(new Set(stored.map((row) => row.commandId)).size).toBe(1);
+    });
+
     it("同じcommandIdでもkindが違えば別の行として残る", async () => {
       await postJson("/api/teams/500103/activity", activity({ kind: "submit.s1-reply" }));
       await postJson("/api/teams/500103/activity", activity({ kind: "verdict.s1" }));
@@ -396,12 +408,36 @@ describe("活動ログ", () => {
       ["metaが4KB超", activity({ meta: { blob: "x".repeat(4100) } })],
       ["metaが配列", activity({ meta: [1, 2, 3] })],
       ["clientAtが欠落", { commandId: activity().commandId, kind: "resume", view: "s1" }],
+      // 任意文字列のままだとPIIゲートを通らない列が残る。書式で塞いだことを固定する。
+      ["clientAtが電話番号", activity({ clientAt: "090-1234-5678" })],
+      ["clientAtがISO 8601でない", activity({ clientAt: "2026年9月3日 11時" })],
       ["bodyが配列", []],
       ["bodyがnull", null],
     ])("不正な入力(%s)は400で拒否し、行を増やさない", async (_label, body) => {
       const response = await postJson("/api/teams/500105/activity", body);
       expect(response.status).toBe(400);
       await expect(rows()).resolves.toEqual([]);
+    });
+
+    // `String.length`で測るとUTF-16のコード単位になり、日本語のmetaでは上限が
+    // 実質3倍に緩む。バイト数で測っていることを境界の両側で固定する。
+    it("マルチバイトのmetaは4096バイトちょうどまで受け付け、1バイト超で拒否する", async () => {
+      // {"blob":"…"} の固定部分11バイト＋「あ」1361文字（3バイト×1361＝4083）＋
+      // ASCII 2文字＝ちょうど4096バイト。
+      const fit = "あ".repeat(1361) + "xx";
+      const accepted = await postJson(
+        "/api/teams/500109/activity",
+        activity({ meta: { blob: fit } }),
+      );
+      expect(accepted.status).toBe(200);
+      await expect(rows()).resolves.toHaveLength(1);
+
+      const rejected = await postJson(
+        "/api/teams/500109/activity",
+        activity({ commandId: "00000000-0000-4000-8000-0000000000a2", meta: { blob: fit + "x" } }),
+      );
+      expect(rejected.status).toBe(400);
+      await expect(rows()).resolves.toHaveLength(1);
     });
 
     it("metaが4KBちょうどまでは受け付ける", async () => {
