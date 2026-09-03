@@ -168,7 +168,7 @@ const respondToCompletion = (
     return error("応答の保存に失敗しました。時間を置いて再試行してください。", 503);
   if ("retry" in result) {
     return refusal !== null
-      ? error(`AIが回答を拒否しました: ${refusal}`, 422)
+      ? error(`AIが回答を拒否しました: ${refusal}`, 422, "ai_refusal")
       : error("AI応答の取得に失敗しました。再試行してください。", 503);
   }
   return json(result);
@@ -191,7 +191,7 @@ const blockHistoryPii = async (
   const blocked = await room.completeChatMessage(commandId, { kind: "failure" }).catch(() => null);
   return blocked === null
     ? error("メッセージの処理に失敗しました。時間を置いて再試行してください。", 503)
-    : error("会話履歴に個人情報を検知したため、送信をブロックしました。", 422);
+    : error("会話履歴に個人情報を検知したため、送信をブロックしました。", 422, "history_pii");
 };
 
 /** 1回の送信に紐づく活動ログの書き手。kindごとの差分だけを渡せば済むようにする。 */

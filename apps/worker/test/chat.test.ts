@@ -301,8 +301,10 @@ describe("P1C チャット骨格", () => {
     );
     await waitOnExecutionContext(ctx);
     expect(response.status).toBe(422);
-    const body = await response.json();
-    expect(body).toMatchObject({ message: expect.stringContaining("対応できません") });
+    const body = httpErrorSchema.parse(await response.json());
+    expect(body.message).toContain("対応できません");
+    // 422は3種あり、保存済みか否かで再送方針が違う。ユーザー発言は保存済みなのでai_refusal。
+    expect(body.code).toBe("ai_refusal");
   });
 
   it("PIIを含む送信は422でブロックし、AIを呼ばずチャットにも残さない", async () => {
@@ -490,7 +492,8 @@ describe("P1C チャット骨格", () => {
     );
     expect(response.status).toBe(422);
     const body = httpErrorSchema.parse(await response.json());
-    expect(body.code).toBeUndefined();
+    // 送信前ゲート（pii_blocked＝未保存）と違い、ユーザー発言は保存済みなのでhistory_pii。
+    expect(body.code).toBe("history_pii");
     expect(gateway.requests).toHaveLength(1);
   });
 
