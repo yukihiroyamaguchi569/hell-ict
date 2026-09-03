@@ -396,6 +396,9 @@ describe("活動ログ", () => {
       ["metaが4KB超", activity({ meta: { blob: "x".repeat(4100) } })],
       ["metaが配列", activity({ meta: [1, 2, 3] })],
       ["clientAtが欠落", { commandId: activity().commandId, kind: "resume", view: "s1" }],
+      // 任意文字列のままだとPIIゲートを通らない列が残る。書式で塞いだことを固定する。
+      ["clientAtが電話番号", activity({ clientAt: "090-1234-5678" })],
+      ["clientAtがISO 8601でない", activity({ clientAt: "2026年9月3日 11時" })],
       ["bodyが配列", []],
       ["bodyがnull", null],
     ])("不正な入力(%s)は400で拒否し、行を増やさない", async (_label, body) => {

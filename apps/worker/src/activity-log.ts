@@ -171,7 +171,10 @@ const clientActivitySchema = z.object({
     .record(z.string(), z.unknown())
     .refine((meta) => JSON.stringify(meta).length <= META_LIMIT_BYTES)
     .optional(),
-  clientAt: z.string().max(64),
+  // 任意文字列にすると、textとmetaのPIIゲートを通らない自由記述の列が1つ残る
+  // （実際に電話番号がそのまま保存できてしまう）。書式を固定して抜け道を塞ぐ。
+  // クライアントは`new Date().toISOString()`を送るので、これで足りる。
+  clientAt: z.iso.datetime(),
 });
 
 export const handleActivityPost = async (
