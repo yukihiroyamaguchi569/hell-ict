@@ -17,12 +17,14 @@ import type {
 } from "@hell-ict/domain";
 
 import {
+  corsHeadersFor,
   isApiRequestAllowed,
   isTeamCodeAllowed,
   parseAllowedOrigins,
   parseChatRateLimit,
   parseTeamCodes,
 } from "./guard.js";
+import type { CorsHeaders } from "./guard.js";
 import {
   error,
   errorWithHeaders,
@@ -317,17 +319,64 @@ const guardApiRequest = (request: Request, env: Env, url: URL): Response | null 
   return null;
 };
 
+/**
+ * ブラウザのpreflightへの応答。本APIが受けるのはGETとPOSTだけで、独自ヘッダーも
+ * 使わないため、許可するmethodとheaderはこの2つに絞る。Max-Ageで再問い合わせを
+ * 1日に1回へ抑える（研修は120分なので実質1回で済む）。
+ */
+const preflightResponse = (cors: CorsHeaders): Response =>
+  new Response(null, {
+    status: 204,
+    headers: {
+      ...cors,
+      "Access-Control-Allow-Methods": "GET, POST",
+      "Access-Control-Allow-Headers": "Content-Type",
+      "Access-Control-Max-Age": "86400",
+    },
+  });
+
+/**
+ * 応答へCORSヘッダーを足す。`cors`が空（同一オリジン、または許可外）なら素通しする。
+ * WebSocketの101応答は本体を作り直せないので触らない。
+ */
+const withCors = (response: Response, cors: CorsHeaders): Response => {
+  if (response.webSocket !== null || Object.keys(cors).length === 0) return response;
+  const headers = new Headers(response.headers);
+  for (const [name, value] of Object.entries(cors)) headers.set(name, value);
+  return new Response(response.body, {
+    status: response.status,
+    statusText: response.statusText,
+    headers,
+  });
+};
+
+/** 入口ガードを通したうえで、メソッド別のハンドラーへ振り分ける。 */
+const routeRequest = (
+  request: Request,
+  env: Env,
+  url: URL,
+  cors: CorsHeaders,
+): Promise<Response> => {
+  const blocked = guardApiRequest(request, env, url);
+  if (blocked !== null) return Promise.resolve(blocked);
+  if (request.method === "OPTIONS" && url.pathname.startsWith("/api/"))
+    return Promise.resolve(preflightResponse(cors));
+  if (request.method === "GET" && url.pathname === "/api/health")
+    return Promise.resolve(json({ status: "ok" }));
+  if (request.method === "POST") return handlePost(request, env, url);
+  if (request.method === "GET") return handleGet(request, env, url);
+  return Promise.resolve(new Response("Not found", { status: 404 }));
+};
+
 const worker = {
   async fetch(request: Request, env: Env): Promise<Response> {
     const url = new URL(request.url);
-    const blocked = guardApiRequest(request, env, url);
-    if (blocked !== null) return blocked;
-    if (request.method === "GET" && url.pathname === "/api/health") {
-      return json({ status: "ok" });
-    }
-    if (request.method === "POST") return handlePost(request, env, url);
-    if (request.method === "GET") return handleGet(request, env, url);
-    return new Response("Not found", { status: 404 });
+    // 許可判定はcorsHeadersFor自身がもう一度行う。ガードで403にならなかった
+    // リクエストでも、同一オリジンや許可外にはヘッダーが付かない。
+    const cors = url.pathname.startsWith("/api/")
+      ? corsHeadersFor(request.headers.get("Origin"), url, parseAllowedOrigins(env.ALLOWED_ORIGINS))
+      : {};
+    return withCors(await routeRequest(request, env, url, cors), cors);
   },
 } satisfies ExportedHandler<Env>;
 

@@ -61,6 +61,32 @@ export const isApiRequestAllowed = (
     : isOriginAllowed(origin, requestUrl, allowedOrigins);
 };
 
+/** 許可済みリクエストへ付けるCORSヘッダー（同一オリジンなら空）。 */
+export type CorsHeaders = Readonly<Record<string, string>>;
+
+/**
+ * 別オリジンからの許可済みリクエストへ返すCORSヘッダーを組み立てる。
+ *
+ * エコーするのは`allowedOrigins`の判定を通ったOriginだけである。前作Hell-AI-v2では
+ * `origin || "*"`を無条件にエコーして、任意のサイトからAPIを読めるようにしてしまった。
+ * ここで許可判定をもう一度通すことで、呼び出し位置に関係なくその事故を再現できない。
+ *
+ * 同一オリジン（リクエストURLと同じorigin）には何も付けない——CORSが不要だからで、
+ * 付けても無害だが、付いていること自体が「別オリジンを許可している」という誤読を生む。
+ */
+export const corsHeadersFor = (
+  originHeader: string | null,
+  requestUrl: URL,
+  allowedOrigins: readonly string[],
+): CorsHeaders => {
+  if (originHeader === null) return {};
+  const origin = normalizeOrigin(originHeader);
+  if (origin === requestUrl.origin) return {};
+  if (!isOriginAllowed(originHeader, requestUrl, allowedOrigins)) return {};
+  // Varyが無いと、別オリジン向けの応答が同一オリジン用としてキャッシュされうる。
+  return { "Access-Control-Allow-Origin": origin, Vary: "Origin" };
+};
+
 /** カンマ区切りの`TEAM_CODES`を集合へ。未設定・空文字はnull（＝許可リストなし＝何でも通す）。 */
 export const parseTeamCodes = (raw: string | undefined): ReadonlySet<string> | null => {
   const codes = (raw ?? "")

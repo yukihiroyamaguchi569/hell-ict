@@ -6,6 +6,7 @@ import type { FakeAiOutcome } from "@hell-ict/domain/fakes";
 import { describe, expect, it, vi } from "vitest";
 
 import {
+  corsHeadersFor,
   DEFAULT_CHAT_RATE_LIMIT,
   isOriginAllowed,
   isOriginlessRequestAllowed,
@@ -249,6 +250,74 @@ describe("入口ガード（Origin）", () => {
       expect(allowed.status).toBe(200);
       const rejected = await fetchWithHeaders("/api/session", "POST", { Origin: TEST_ORIGIN });
       expect(rejected.status).toBe(403);
+    });
+  });
+});
+
+describe("CORS", () => {
+  it("エコーするのは許可判定を通った別オリジンだけ", () => {
+    const url = new URL("https://worker.test/api/session");
+    const allowed = parseAllowedOrigins("https://a.test");
+    expect(corsHeadersFor("https://a.test", url, allowed)).toEqual({
+      "Access-Control-Allow-Origin": "https://a.test",
+      Vary: "Origin",
+    });
+    // 許可外はエコーしない（前作の `origin || "*"` 事故を再現させない）。
+    expect(corsHeadersFor("https://evil.test", url, allowed)).toEqual({});
+    // 同一オリジンにはCORSが要らない。
+    expect(corsHeadersFor("https://worker.test", url, [])).toEqual({});
+    expect(corsHeadersFor(null, url, allowed)).toEqual({});
+  });
+
+  it("許可オリジンのpreflightは204で許可メソッドとヘッダーを返す", async () => {
+    await withEnv({ ALLOWED_ORIGINS: OTHER_ORIGIN }, async () => {
+      const response = await fetchWithHeaders("/api/session", "OPTIONS", { Origin: OTHER_ORIGIN });
+      expect(response.status).toBe(204);
+      expect(response.headers.get("Access-Control-Allow-Origin")).toBe(OTHER_ORIGIN);
+      expect(response.headers.get("Vary")).toBe("Origin");
+      expect(response.headers.get("Access-Control-Allow-Methods")).toBe("GET, POST");
+      expect(response.headers.get("Access-Control-Allow-Headers")).toBe("Content-Type");
+      expect(response.headers.get("Access-Control-Max-Age")).toBe("86400");
+    });
+  });
+
+  it("不許可オリジンのpreflightは403でCORSヘッダーを返さない", async () => {
+    await withEnv({ ALLOWED_ORIGINS: "https://allowed.test" }, async () => {
+      const response = await fetchWithHeaders("/api/session", "OPTIONS", { Origin: OTHER_ORIGIN });
+      expect(response.status).toBe(403);
+      expect(response.headers.get("Access-Control-Allow-Origin")).toBeNull();
+    });
+  });
+
+  it("許可オリジンの通常リクエストにはACAOとVaryが付く", async () => {
+    await withEnv({ ALLOWED_ORIGINS: OTHER_ORIGIN }, async () => {
+      const response = await fetchWithHeaders("/api/session", "POST", { Origin: OTHER_ORIGIN });
+      expect(response.status).toBe(200);
+      expect(response.headers.get("Access-Control-Allow-Origin")).toBe(OTHER_ORIGIN);
+      expect(response.headers.get("Vary")).toBe("Origin");
+    });
+  });
+
+  it("同一オリジンのリクエストにはCORSヘッダーを付けない", async () => {
+    const response = await session("500020");
+    expect(response.status).toBe(200);
+    expect(response.headers.get("Access-Control-Allow-Origin")).toBeNull();
+    const sameOriginGet = await get("/api/teams/500020/chat");
+    expect(sameOriginGet.headers.get("Access-Control-Allow-Origin")).toBeNull();
+  });
+
+  it("WebSocketの101応答はCORSヘッダーで壊さない", async () => {
+    await withEnv({ ALLOWED_ORIGINS: OTHER_ORIGIN }, async () => {
+      await session("500021");
+      const response = await exports.default.fetch(
+        new Request(`${TEST_ORIGIN}/api/teams/500021/sync`, {
+          headers: { Upgrade: "websocket", Origin: OTHER_ORIGIN },
+        }),
+      );
+      expect(response.status).toBe(101);
+      expect(response.webSocket).not.toBeNull();
+      response.webSocket?.accept();
+      response.webSocket?.close();
     });
   });
 });
