@@ -60,13 +60,17 @@ const displayText = (limit: number): z.ZodType<string> =>
     .max(2000)
     .transform((value) => value.slice(0, limit));
 
-/** 意味を持つ値は切り詰めずに拒否する。posの範囲は8停留所（Prologue..Final）に対応する。 */
+/**
+ * 意味を持つ値は切り詰めずに拒否する。posの範囲は8停留所（Prologue..Final）に対応する。
+ * kindは、entry=停留所に入った、clear=突破した、jump=devbarやURLハッシュでの手動復帰、
+ * resume=チェックポイントからの自動復帰。
+ */
 const progressEventSchema = z.object({
   teamCode: z.string().regex(/^\d{6}$/),
   teamName: displayText(24),
   pos: z.number().int().min(0).max(7),
   view: displayText(32),
-  kind: z.enum(["entry", "clear", "jump"]),
+  kind: z.enum(["entry", "clear", "jump", "resume"]),
   clientAt: displayText(40),
 });
 
@@ -88,10 +92,11 @@ const eventRowSchema = z.object({
 
 /**
  * チームごとの現在位置。
- * - pos: kind='jump'（devbarやURLハッシュでの復帰）は進捗と見なさないので集計から外す。
- *   非jumpイベントが1件も無いチームは0（Prologue）として扱う。
+ * - pos: 復帰イベント（jump=手動復帰、resume=チェックポイントからの自動復帰）は
+ *   自力で進んだわけではないので集計から外す。復帰以外のイベントが1件も無いチームは
+ *   0（Prologue）として扱う。
  * - teamName: 空文字で送られてくることがあるため、最新の「非空」の名前を採る。
- * - updatedAt: 生存確認なのでjumpを含む全イベントの最新時刻を使う。
+ * - updatedAt: 生存確認なので復帰を含む全イベントの最新時刻を使う。
  */
 const TEAMS_SQL = `SELECT
   e.team_code AS teamCode,
@@ -100,7 +105,7 @@ const TEAMS_SQL = `SELECT
     WHERE i.team_code = e.team_code AND i.team_name <> ''
     ORDER BY i.id DESC LIMIT 1
   ), '') AS teamName,
-  COALESCE(MAX(CASE WHEN e.kind <> 'jump' THEN e.pos END), 0) AS pos,
+  COALESCE(MAX(CASE WHEN e.kind NOT IN ('jump', 'resume') THEN e.pos END), 0) AS pos,
   MAX(e.created_at) AS updatedAt
 FROM progress_events e
 GROUP BY e.team_code

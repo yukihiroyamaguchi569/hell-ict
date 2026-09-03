@@ -120,6 +120,22 @@ describe("進捗記録", () => {
     expect((await summary()).teams).toMatchObject([{ teamCode: "100001", pos: 0 }]);
   });
 
+  it("resumeは200で記録するが、jumpと同じくposへ算入しない", async () => {
+    await postJson("/api/progress", event({ pos: 2, kind: "clear", view: "s2" }));
+    const response = await postJson("/api/progress", event({ pos: 5, kind: "resume", view: "s5" }));
+
+    expect(response.status).toBe(200);
+    const result = await summary();
+    expect(result.teams).toMatchObject([{ teamCode: "100001", pos: 2 }]);
+    expect(result.events[0]).toMatchObject({ kind: "resume", pos: 5 });
+    expect(result.events).toHaveLength(2);
+  });
+
+  it("resumeしか無いチームはpos 0として扱う", async () => {
+    await postJson("/api/progress", event({ pos: 6, kind: "resume" }));
+    expect((await summary()).teams).toMatchObject([{ teamCode: "100001", pos: 0 }]);
+  });
+
   it("posは最大値を採る（戻る操作で後退させない）", async () => {
     await postJson("/api/progress", event({ pos: 4, kind: "clear" }));
     await postJson("/api/progress", event({ pos: 1, kind: "entry" }));
