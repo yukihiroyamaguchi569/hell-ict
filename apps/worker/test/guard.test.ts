@@ -384,4 +384,103 @@ describe("チャット送信のレート制限", () => {
     );
     expect(fresh.status).toBe(429);
   });
+  it("存在しないスレッドへの送信は枠を消費しない", async () => {
+    const threadId = await prepareThread("500014", messageCommandId(1));
+    const gateway = new FakeAiGateway(successOutcomes(DEFAULT_CHAT_RATE_LIMIT));
+    // 上限と同じ回数だけ不正なthreadIdへ投げる。枠を消費していれば、このあとの
+    // 正当な送信が429になるはずである。
+    for (let index = 0; index < DEFAULT_CHAT_RATE_LIMIT; index += 1) {
+      const rejected = await sendChat(
+        "500014",
+        {
+          commandId: messageCommandId(700 + index),
+          threadId: "00000000-0000-4000-8000-999999999999",
+          text: "本文",
+        },
+        gateway,
+        windowStartMs,
+      );
+      expect(rejected.status).toBe(404);
+    }
+
+    const accepted = await sendChat(
+      "500014",
+      { commandId: messageCommandId(800), threadId, text: "本文" },
+      gateway,
+      windowStartMs,
+    );
+    expect(accepted.status).toBe(200);
+  });
+
+  it("同じcommandIdの並行再送でも枠は1つしか減らない", async () => {
+    const threadId = await prepareThread("500015", messageCommandId(1));
+    const gateway = new FakeAiGateway(successOutcomes(DEFAULT_CHAT_RATE_LIMIT + 2));
+    // 判定とpending行の作成が1つのDO操作なので、並行2本でも数えられるのは1回だけ。
+    await Promise.all([
+      sendChat(
+        "500015",
+        { commandId: messageCommandId(900), threadId, text: "本文" },
+        gateway,
+        windowStartMs,
+      ),
+      sendChat(
+        "500015",
+        { commandId: messageCommandId(900), threadId, text: "本文" },
+        gateway,
+        windowStartMs,
+      ),
+    ]);
+
+    // 枠が1つだけ減っているなら、残りはlimit-1通。そこまで通り、その次が429になる。
+    for (let index = 0; index < DEFAULT_CHAT_RATE_LIMIT - 1; index += 1) {
+      const response = await sendChat(
+        "500015",
+        { commandId: messageCommandId(1000 + index), threadId, text: "本文" },
+        gateway,
+        windowStartMs,
+      );
+      expect(response.status).toBe(200);
+    }
+    const blocked = await sendChat(
+      "500015",
+      { commandId: messageCommandId(1100), threadId, text: "本文" },
+      gateway,
+      windowStartMs,
+    );
+    expect(blocked.status).toBe(429);
+  });
+
+  it("上限に達した送信はpending行を残さず、窓が明ければ同じcommandIdで再送できる", async () => {
+    const threadId = await prepareThread("500016", messageCommandId(1));
+    const gateway = new FakeAiGateway(successOutcomes(DEFAULT_CHAT_RATE_LIMIT + 1));
+    for (let index = 0; index < DEFAULT_CHAT_RATE_LIMIT; index += 1) {
+      await sendChat(
+        "500016",
+        { commandId: messageCommandId(1200 + index), threadId, text: "本文" },
+        gateway,
+        windowStartMs,
+      );
+    }
+    const stored = await messageCountOf("500016");
+
+    const blockedId = messageCommandId(1300);
+    const blocked = await sendChat(
+      "500016",
+      { commandId: blockedId, threadId, text: "本文" },
+      gateway,
+      windowStartMs,
+    );
+    expect(blocked.status).toBe(429);
+    // pending行が作られていれば、次の窓で同じcommandIdを送っても"in-progress"（409）に
+    // なってしまう。200が返るなら、429の時点で何も書いていない。
+    await expect(messageCountOf("500016")).resolves.toBe(stored);
+
+    const retried = await sendChat(
+      "500016",
+      { commandId: blockedId, threadId, text: "本文" },
+      gateway,
+      windowStartMs + RATE_LIMIT_WINDOW_MS,
+    );
+    expect(retried.status).toBe(200);
+  });
 });

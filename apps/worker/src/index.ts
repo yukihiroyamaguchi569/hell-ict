@@ -165,32 +165,34 @@ const blockHistoryPii = async (
     : error("会話履歴に個人情報を検知したため、送信をブロックしました。", 422);
 };
 
+/** beginChatMessageへ渡す、レート制限の固定窓の基準値。 */
+type ChatGate = { readonly nowMs: number; readonly limit: number };
+
 /**
- * 送信前ゲート。PII検知（企画書§7）とチーム単位のレート制限を、どちらもDOへ
- * ユーザーメッセージを保存させず、AiGatewayにも触れずに止める（`room`は
- * スタブを取るだけでDOを起こさない）。通す場合はnullを返す。
- *
- * PIIは何も保存していないので"pii_blocked"を付け、クライアントが新しいcommandIdで
- * 書き直せることを示す。レート制限はRetry-Afterで待つべき秒数を返す。
- * handleChatMessageの複雑度を下げるための切り出し。
+ * beginChatMessageを呼び、そのまま応答して終わる結果（DO失敗・スレッド不明・
+ * レート制限超過・処理済み・処理中）をResponseへ畳む。AI呼び出しへ進む場合だけ
+ * 履歴を返す。handleChatMessageの複雑度を下げるための切り出し。
  */
-const blockBeforeSend = async (
+const beginOrRespond = async (
   room: DurableObjectStub<TeamRoom>,
+  teamCode: TeamCode,
   command: SendMessageCommand,
-  nowMs: number,
-  limit: number,
-): Promise<Response | null> => {
-  if (detectPii(command.text) !== null) {
-    return error("個人情報を検知したため、送信をブロックしました。", 422, "pii_blocked");
-  }
-  const verdict = await room.checkChatRateLimit(command.commandId, nowMs, limit).catch(() => null);
-  if (verdict === null)
+  gate: ChatGate,
+): Promise<{ readonly history: readonly AiMessage[] } | Response> => {
+  const begin = await room
+    .beginChatMessage(teamCode, command, gate.nowMs, gate.limit)
+    .catch(() => null);
+  if (begin === null)
     return error("メッセージの処理に失敗しました。時間を置いて再試行してください。", 503);
-  return verdict.allowed
-    ? null
-    : errorWithHeaders("送信が多すぎます。少し待ってから再試行してください。", 429, {
-        "Retry-After": String(verdict.retryAfterSeconds),
-      });
+  if ("unknownThread" in begin) return error("指定されたスレッドが見つかりません。", 404);
+  if (begin.kind === "rate-limited")
+    return errorWithHeaders("送信が多すぎます。少し待ってから再試行してください。", 429, {
+      "Retry-After": String(begin.retryAfterSeconds),
+    });
+  if (begin.kind === "already-processed") return json(begin.result);
+  if (begin.kind === "in-progress")
+    return error("同じ内容が既に送信処理中です。少し待って再試行してください。", 409);
+  return { history: begin.history };
 };
 
 /**
@@ -216,33 +218,28 @@ export const handleChatMessage = async (
     return error("commandの形式が不正です。", 400);
   }
 
+  // 送信前PIIゲート（企画書§7）。DO・AiGatewayのどちらにも触れる前に止める——
+  // ユーザーメッセージを保存させず、OpenAIへも一切送らない。何も保存していないので
+  // "pii_blocked"を付け、クライアントが新しいcommandIdで書き直せることを示す。
+  if (detectPii(command.text) !== null) {
+    return error("個人情報を検知したため、送信をブロックしました。", 422, "pii_blocked");
+  }
+
   const room = env.TEAM_ROOM.getByName(teamCode);
-  // 送信前ゲートはbeginChatMessageより前に置く。ここで止まればユーザーメッセージは
-  // 保存されず、OpenAIへも一切送られない（冪等再送が枠を消費しない理由はTeamRoom側）。
-  const blocked = await blockBeforeSend(
-    room,
-    command,
+  const begun = await beginOrRespond(room, teamCode, command, {
     nowMs,
-    parseChatRateLimit(env.CHAT_RATE_LIMIT_PER_MINUTE),
-  );
-  if (blocked !== null) return blocked;
+    limit: parseChatRateLimit(env.CHAT_RATE_LIMIT_PER_MINUTE),
+  });
+  if (begun instanceof Response) return begun;
 
-  const begin = await room.beginChatMessage(teamCode, command).catch(() => null);
-  if (begin === null)
-    return error("メッセージの処理に失敗しました。時間を置いて再試行してください。", 503);
-  if ("unknownThread" in begin) return error("指定されたスレッドが見つかりません。", 404);
-  if (begin.kind === "already-processed") return json(begin.result);
-  if (begin.kind === "in-progress")
-    return error("同じ内容が既に送信処理中です。少し待って再試行してください。", 409);
-
-  const historyBlock = await blockHistoryPii(room, command.commandId, begin.history);
+  const historyBlock = await blockHistoryPii(room, command.commandId, begun.history);
   if (historyBlock !== null) return historyBlock;
 
   // ステージ別システムプロンプトは送信時にだけ前置し、DOへ保存される履歴には含めない
   // （保存対象はユーザー/アシスタントのやり取りのみ。企画書§5のStage別罠設計）。
   const historyWithSystemPrompt: readonly AiMessage[] = [
     { role: "system", text: systemPromptFor(command.promptProfile) },
-    ...begin.history,
+    ...begun.history,
   ];
   const { outcome, refusal } = await runAiCompletion(aiGateway, historyWithSystemPrompt);
   const result = await room.completeChatMessage(command.commandId, outcome).catch(() => null);

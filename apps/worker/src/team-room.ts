@@ -46,13 +46,10 @@ type UnknownThreadReply = { unknownThread: true };
 export type BeginChatMessageOutcome =
   | { kind: "already-processed"; result: ChatMessageResult }
   | { kind: "pending"; history: AiMessage[] }
-  | { kind: "in-progress" };
+  | { kind: "in-progress" }
+  | { kind: "rate-limited"; retryAfterSeconds: number };
 
 export type CompleteChatMessageOutcome = { kind: "success"; text: string } | { kind: "failure" };
-
-export type RateLimitVerdict =
-  | { readonly allowed: true }
-  | { readonly allowed: false; readonly retryAfterSeconds: number };
 
 /**
  * AI呼び出しが失敗し続け、クライアントが二度と同じcommandIdで再送しない場合に
@@ -211,23 +208,16 @@ export class TeamRoom extends DurableObject<Env> {
   }
 
   /**
-   * チーム単位のチャット送信レート制限（固定窓）。beginChatMessageの手前で呼ぶ前提で、
-   * 拒否したときはユーザーメッセージを保存せず、AiGatewayにも触れさせない。
+   * 固定窓の枠を1つ消費する。消費できたらnull、超過していたら待つべき秒数を返す。
    *
-   * 冪等再送——既にprocessed、または送信途中でpendingに残っているcommandId——は
-   * 枠を消費させない。beginChatMessage側のalready-processed/in-progress分岐と同じ
-   * 「これは新しい送信ではない」判定をここでも先に行う。逆順（先に窓を数える）にすると、
-   * 通信が不安定で再送を繰り返しているチームが、1通も新しく送っていないのに429で
-   * 詰んでしまう。窓を消費してよいのは、これから本当にAIを呼ぶ送信だけである。
+   * beginChatMessageの中からだけ呼ぶ。以前は別RPCとしてWorkerから先に呼んでいたが、
+   * それだと「枠の予約」と「pending行の作成」が別々のDO操作になり、同じcommandIdの
+   * 並行再送が二重に枠を減らした。1操作にまとめると、DOの直列実行がそのまま
+   * 「数えるのは新しいpending行を作るときだけ」を保証する。
    *
    * `nowMs`はWorkerから渡す。DO内でDate.now()を直書きすると窓をテストから固定できない。
    */
-  async checkChatRateLimit(
-    commandId: string,
-    nowMs: number,
-    limit: number,
-  ): Promise<RateLimitVerdict> {
-    if (this.isResendOf(commandId)) return { allowed: true };
+  private consumeRateLimit(nowMs: number, limit: number): number | null {
     const bucket = rateLimitBucket(nowMs, RATE_LIMIT_WINDOW_MS);
     // 固定窓なので過去の窓の行は不要。1行だけ残す。
     this.ctx.storage.sql.exec("DELETE FROM rate_limit WHERE bucket <> ?", bucket);
@@ -235,37 +225,35 @@ export class TeamRoom extends DurableObject<Env> {
       this.ctx.storage.sql
         .exec<StoredRateLimit>("SELECT count FROM rate_limit WHERE bucket = ?", bucket)
         .toArray()[0] ?? null;
-    const count = stored?.count ?? 0;
-    if (count >= limit) {
-      return {
-        allowed: false,
-        retryAfterSeconds: rateLimitRetryAfterSeconds(nowMs, RATE_LIMIT_WINDOW_MS),
-      };
+    if ((stored?.count ?? 0) >= limit) {
+      return rateLimitRetryAfterSeconds(nowMs, RATE_LIMIT_WINDOW_MS);
     }
     this.ctx.storage.sql.exec(
       "INSERT INTO rate_limit (bucket, count) VALUES (?, 1) ON CONFLICT(bucket) DO UPDATE SET count = count + 1",
       bucket,
     );
-    return { allowed: true };
+    return null;
   }
 
-  /** 処理済み、または送信途中として記録済みのcommandIdか（＝新規送信ではない再送か）。 */
-  private isResendOf(commandId: string): boolean {
-    const known = this.ctx.storage.sql
-      .exec<{
-        found: number;
-      }>(
-        "SELECT 1 AS found FROM processed_message_commands WHERE command_id = ? UNION ALL SELECT 1 AS found FROM pending_message_commands WHERE command_id = ?",
-        commandId,
-        commandId,
-      )
-      .toArray();
-    return known.length > 0;
-  }
-
+  /**
+   * 送信を受け付け、AIへ渡す履歴を返す。レート制限の消費もここで行う——判定と
+   * pending行の作成を1つのDO操作にまとめることで、次の3つを同時に保証する。
+   *
+   * - 冪等再送（processed済み・pending残り）は枠を消費しない。通信が不安定で再送を
+   *   繰り返しているチームが、1通も新しく送っていないのに429で詰むのを避ける。
+   * - 存在しないthreadIdへの送信は枠を消費しない。不正なリクエストで正規の枠を
+   *   削れてしまうのを避ける。
+   * - 枠を消費するのは、新しいpending行を実際に作る直前だけ。DOは操作を直列に
+   *   実行するので、同じcommandIdの並行再送が二重に数えられることはない。
+   *
+   * 超過したときはユーザーメッセージを保存せず（saveChatSnapshotより手前で返す）、
+   * 呼び出し側もAiGatewayに触れない。
+   */
   async beginChatMessage(
     teamCodeInput: unknown,
     commandInput: unknown,
+    nowMs: number,
+    limit: number,
   ): Promise<BeginChatMessageOutcome | UnknownThreadReply> {
     const teamCode = teamCodeSchema.parse(teamCodeInput);
     const command: SendMessageCommand = sendMessageCommandSchema.parse(commandInput);
@@ -290,18 +278,7 @@ export class TeamRoom extends DurableObject<Env> {
           command.commandId,
         )
         .toArray()[0] ?? null;
-    if (pending !== null) {
-      if (!this.isClaimStale(pending.claimed_at)) return { kind: "in-progress" };
-      // 未クレーム、またはクレームが古い（AI呼び出しが完了しないまま終わった）ので、
-      // ここで改めてクレームを取り直してから再試行させる。
-      this.ctx.storage.sql.exec(
-        "UPDATE pending_message_commands SET claimed_at = ? WHERE command_id = ?",
-        new Date().toISOString(),
-        command.commandId,
-      );
-      const snapshot = this.loadChatSnapshot(teamCode);
-      return { kind: "pending", history: this.historyFor(snapshot, pending.thread_id) };
-    }
+    if (pending !== null) return this.resumePending(teamCode, command.commandId, pending);
 
     const snapshot = this.loadChatSnapshot(teamCode);
     if (!snapshot.threads.some((thread) => thread.threadId === command.threadId)) {
@@ -315,6 +292,10 @@ export class TeamRoom extends DurableObject<Env> {
     };
     const appended = appendMessage(snapshot, { threadId: command.threadId, message: userMessage });
     if (!appended.ok) return { unknownThread: true };
+    // ここまでは何も永続化していない。枠を消費するのはこの直後の保存とpending行作成の
+    // ためだけであり、超過なら何も書かずに戻る。
+    const retryAfterSeconds = this.consumeRateLimit(nowMs, limit);
+    if (retryAfterSeconds !== null) return { kind: "rate-limited", retryAfterSeconds };
     this.saveChatSnapshot(appended.snapshot);
     const now = new Date().toISOString();
     this.ctx.storage.sql.exec(
@@ -326,6 +307,28 @@ export class TeamRoom extends DurableObject<Env> {
     );
     this.broadcastChat(appended.snapshot);
     return { kind: "pending", history: this.historyFor(appended.snapshot, command.threadId) };
+  }
+
+  /**
+   * 既にpending行が残っているcommandIdの再送を捌く。クレームが生きていれば処理中、
+   * 古ければ取り直して履歴を返す。どちらも新しい送信ではないので枠は消費しない。
+   * beginChatMessageの複雑度を下げるための切り出し。
+   */
+  private resumePending(
+    teamCode: TeamCode,
+    commandId: string,
+    pending: StoredPendingMessage,
+  ): BeginChatMessageOutcome {
+    if (!this.isClaimStale(pending.claimed_at)) return { kind: "in-progress" };
+    // 未クレーム、またはクレームが古い（AI呼び出しが完了しないまま終わった）ので、
+    // ここで改めてクレームを取り直してから再試行させる。
+    this.ctx.storage.sql.exec(
+      "UPDATE pending_message_commands SET claimed_at = ? WHERE command_id = ?",
+      new Date().toISOString(),
+      commandId,
+    );
+    const snapshot = this.loadChatSnapshot(teamCode);
+    return { kind: "pending", history: this.historyFor(snapshot, pending.thread_id) };
   }
 
   async completeChatMessage(
