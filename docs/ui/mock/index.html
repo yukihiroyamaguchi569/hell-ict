@@ -3428,6 +3428,32 @@
     }, CHECKPOINT_DEBOUNCE_MS);
   }
 
+  /* ------------------------------------------------------------------ */
+  /* 活動ログ（LIVE時のみ）                                              */
+  /*                                                                    */
+  /* 提出・判定・罠をサーバへ積む。reportProgress と同じ fire-and-forget  */
+  /* ——await せず結果も見ない。振り返り用の記録であって、ゲームの進行に    */
+  /* 一切影響させない。                                                  */
+  /* ------------------------------------------------------------------ */
+  const ACTIVITY_TEXT_MAX = 20000;
+
+  function logActivity(kind, text, meta) {
+    if (!LIVE || !liveState || !liveState.teamCode) return;
+    const payload = {
+      commandId: crypto.randomUUID(),
+      kind: kind,
+      view: view,
+      clientAt: new Date().toISOString(),
+    };
+    if (typeof text === "string") payload.text = text.slice(0, ACTIVITY_TEXT_MAX);
+    if (meta) payload.meta = meta;
+    liveFetch("/api/teams/" + liveState.teamCode + "/activity", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(payload),
+    });
+  }
+
   /* AIペインのタブを liveState.threads から描画する。scripted時
      （liveState===null）は静的マークアップ（「メイン」＋「＋」）のまま
      何もしない。 */
@@ -3568,6 +3594,8 @@
     if (view === "s4") {
       if (!s4TrapUsed) {
         s4TrapUsed = true;
+        // 本文は残さない（PIIの罠なので、送ろうとした個人情報をログへ写さない）。
+        logActivity("trap.s4", undefined, { gate: "server" });
         saveCheckpoint("trap-s4");
         triggerLeak();
       } else {
@@ -3826,6 +3854,8 @@
           if (view !== "s4") return;   // 判断C
           if (!s4TrapUsed) {
             s4TrapUsed = true;
+            // 本文は残さない（PIIの罠なので、送ろうとした個人情報をログへ写さない）。
+            logActivity("trap.s4", undefined, { gate: "client", detected: hit.label });
             saveCheckpoint("trap-s4");
             triggerLeak();
           } else {
@@ -4737,6 +4767,7 @@
     // メールスレッド演出（round1）や簡易表示（それ以外）で返ってくる。
     // その場では何も知らせない——知らせたら不意打ちにならない。
     if (body.length < S1_MIN_LEN || !S1_POLITE.test(body)) s1.curt.push({ def: it.def, reply: body });
+    logActivity("submit.s1-reply", body, { mailId: it.def.id, round: s1.round });
     s1Close(it);
     s1.doneIds.add(it.def.id);
     s1Say("返信した　" + it.def.subj);
@@ -4830,6 +4861,7 @@
   function s1Result(kind) {
     s1.cleared = true; s1.result = kind;
     s1.items.forEach((x) => { if (x.state === "live") x.state = "done"; });
+    logActivity("verdict.s1", undefined, { result: kind, round: s1.round, curt: s1.curt.length });
     TEAMS[2].pos = 2; drawMarks(); reportProgress(2, "clear"); saveCheckpoint("stage-clear");
     s1Center(); s1List();
     // Stage 2 へは直接飛ばさない。片付いたと思った一拍のあとに急変が来る。
@@ -5468,6 +5500,10 @@
     if (!v || verdicting) return;   // 連打で判定が二重に走らないようにする
     verdicting = true;
     closePasteBar();
+    // 提出時点のグリッドをTSVで残す。判定より先に積む——判定が落ちても
+    // 「何を出したか」は振り返りに要る（上限は logActivity 側で切る）。
+    logActivity("submit.s2-grid", [S2_COLS].concat(s2Grid).map((r) => r.join("\t")).join("\n"),
+      { rows: s2Grid.length, addendumTaken: s2AddTaken });
     const bad = checkGrid();
     const CHECKS = [
       "必須列がすべて埋まっている",
@@ -5508,6 +5544,11 @@
 
     await wait(400);
     verdicting = false;
+    logActivity("verdict.s2", undefined, {
+      ok: !bad,
+      ngCells: bad ? (bad.hot || []).length : 0,
+      failedCheck: bad ? CHECKS[bad.at] : "",
+    });
     if (!bad) {
       s2Hot = [];
       s2StopDeadline();
@@ -5676,11 +5717,16 @@
     await wait(500);
     if (view !== "s3") { s3Verdicting = false; return; }   // 判断C：シーンを離れていたら以降は何もしない
 
+    logActivity("submit.s3", JSON.stringify(vals));
     const result = checkStage3(vals);
+    logActivity("verdict.s3", undefined, {
+      trap: result.trap, short: !!result.short, field: result.field || "", trapUsed: s3TrapUsed,
+    });
 
     if (result.trap) {
       if (!s3TrapUsed) {
         s3TrapUsed = true;
+        logActivity("trap.s3", undefined, { field: result.field || "" });
         saveCheckpoint("trap-s3");
         s3Verdicting = false;
         triggerTrap();
@@ -5982,7 +6028,10 @@
     await wait(500);
     if (view !== "s35") { s35Verdicting = false; return; }   // 判断C：シーンを離れていたら以降は何もしない
 
-    if (!checkS35Summary(text)) {
+    logActivity("submit.s35", text, { which: "summary" });
+    const summaryOk = checkS35Summary(text);
+    logActivity("verdict.s35", undefined, { which: "summary", ok: summaryOk });
+    if (!summaryOk) {
       $("s35-box").classList.add("warn");
       sfx("cancel");   // 差し戻し
       const d = document.createElement("div");
@@ -6023,7 +6072,10 @@
     await wait(400);
     if (view !== "s35") { s35ActionVerdicting = false; return; }   // 判断C
 
-    if (!(S35_ACTION_TARGET.test(text) && S35_ACTION_CONTENT.test(text))) {
+    logActivity("submit.s35", text, { which: "action" });
+    const actionOk = S35_ACTION_TARGET.test(text) && S35_ACTION_CONTENT.test(text);
+    logActivity("verdict.s35", undefined, { which: "action", ok: actionOk });
+    if (!actionOk) {
       // 内容語は掴めていて、相手だけが患者へ向いている場合だけ専用の差し戻しにする
       // （定数側のコメント参照）。それ以外は従来どおり汎用の差し戻し。
       const toPatients = S35_ACTION_CONTENT.test(text) && S35_ACTION_PATIENT.test(text);
@@ -6269,7 +6321,11 @@
     await wait(500);
     if (view !== "s4") { s4Verdicting = false; return; }   // 判断C
 
+    // 本文は残さない。ここへ届く提出はIDベースの一覧が正解だが、氏名を残した
+    // まま出すチームもいる——罠の対象そのものをログへ写さない（trap.s4 と同じ扱い）。
     const missing = checkStage4(text);
+    logActivity("submit.s4", undefined, { form: "linelist", chars: text.length });
+    logActivity("verdict.s4", undefined, { form: "linelist", ok: missing.length === 0, missing: missing.length });
     if (missing.length) {
       $("s4-box").classList.add("warn");
       sfx("cancel");   // 差し戻し（IDの不足）
@@ -6398,6 +6454,10 @@
     s4ReportVerdicting = true;
     const missing = S4_REPORT.some((seg, i) => seg.pii === true && !s4Masked.has(i));
     const over = S4_REPORT.some((seg, i) => seg.pii === false && s4Masked.has(i));
+    // 罰ゲーム（黒塗り）の提出。塗った数だけ残す——報告書の本文は個人情報を
+    // 含むのでログへ写さない。
+    logActivity("submit.s4", undefined, { form: "report", masked: s4Masked.size });
+    logActivity("verdict.s4", undefined, { form: "report", ok: !missing && !over, missing: missing, over: over });
     const box = verdictChecking(v);
     await wait(500);
     s4ReportVerdicting = false;
@@ -6515,6 +6575,7 @@
     }
     // 上限で画像が出ない回でも「AIに伝えた」事実は残る——要件判定の累積には入れる。
     s5PromptLog.push(text);
+    logActivity("submit.s5-prompt", text, { genCount: s5GenCount });
     // タグ無し指示（様式継承）× 様式継承の連鎖で全候補が default のまま上限に
     // 達すると、合格しうる候補（pictogram/multilingual）がゼロのまま提出手段が
     // 尽き、進行不能になる（2026-08-22 レビューで実測再現）。合格しうる候補が
@@ -6566,6 +6627,8 @@
 
   function s5PickCandidate(idx) {
     s5Selected = idx;
+    const c = s5Candidates[idx];
+    logActivity("select.s5", undefined, { phase: "pick", index: idx, type: c ? c.type : "" });
     s5DrawCandidate();
   }
 
@@ -6661,6 +6724,15 @@
     if (view !== "s5") { s5Verdicting = false; return; }   // 判断C
 
     const reject = checkStage5(s5Candidates[s5Selected]);
+    // 活動ログの kind に verdict.s5 は無い（Workerのenum）。提出判定の結果は
+    // select.s5 の meta へ phase:"verdict" として入れる。
+    logActivity("select.s5", undefined, {
+      phase: "verdict",
+      index: s5Selected,
+      type: s5Candidates[s5Selected].type,
+      ok: !reject,
+      reject: reject || "",
+    });
     if (reject) {
       // 差し戻し（無罰・無制限）。候補と生成済み画像はそのまま残り、
       // 選び直し・再提出に何度でも戻れる（docs/ui/06_Stage5.md §4 の
@@ -6864,6 +6936,7 @@
       return;
     }
     fLine = text;
+    logActivity("submit.final", text);
     fRenderPieceBody();
     $("f-piece").classList.add("done");
     $("f-board").classList.add("done");
