@@ -7578,6 +7578,23 @@
     { id: "final",   label: "⑪ Final 振り返り",  mode: "crisis", note: "2026-08-22 全面改修（ユーザー決定）。参加者に見える名は「会見」から「振り返り」へ改称した——旧実装は記者会見資料を作って提出する4欄フォームだったが、レースのゴールが Stage 5 クリアへ移ったことで「会見資料を作る」という前提のタスクではなくなったため、「振り返り」の方が画面の中身（対応の全体図＋一言）と一致する。旧4欄判定（checkFinal/F_ORDER/F_WRONG/F_REQUIRED、誤り→不足・Stage 3 と同じ順序）は削除した——判定そのものが無い。発熱インジケータ・crisisモードは Stage 4・5 から継続で14のまま動かさない。事務長・広報課からのメール2通は「資料を4点作れ」ではなく「振り返って一言を残せ」の前振りに書き換えた（聖クロノス熱（仮）の爆誕・記者クラブ事前質問は文言のみ調整して維持）。中央ペインは振り返りボード——この研修で作った成果物のタイル6枚（S1メール対応／S2火の手・発熱の芽／S3疥癬の方針／S3.5眼痛の手がかり／S4保健所報告14名／S5面会制限ポスター）が0.4秒間隔（F_BOARD_LIGHT_MS）で順に点灯し（fLightTiles）、全点灯後に中央下の空白ピース「引き継ぎ」が開く（2026-08-22再設計・親裁定済み：当初の「記者会見」ラベル／「明日の記者会見で最初に伝える一言」だとICTの振り返りという主題からズレたため、Stage 1 の前任ICNの引き継ぎメモと対をなす「引き継ぎメモ」型に変更した）。ピースには「次にこの病院へ来るICTに引き継ぎをしましょう。次のチームに伝えたい一言をチームで相談して入力してください。」の入力欄（placeholder例「AIに渡す前に、名前を消す。」）と［記す］ボタンのみ——判定は空欄拒否（fSubmitLine）だけで内容は一切見ない。記すとボード全体が一拍点灯し（.fboard.done）、締めのメッセージ（F_CLOSE_LINES＝「あなたたちも、引き継ぐ側になった。」で始まる、前任ICNのメモに始まりチーム自身のメモで終わる円環を示す文言）を出す。記した一言は画面に残り続け、再訪時もアニメーションを再生せず完成状態を直接描く（fLine が re-render をまたいで保持される）——ファシリテーターが各チームのPCから読み上げるため。苅部さんは登場しない（2026-08-22 ユーザー決定）——旧実装は入場40秒後にPHSを鳴らして「私も呼ばれてます。で、どこまで公表するんですか。」と言わせていたが、公表を前提にした旧・記者会見設計の台詞であり、判定なしの振り返りとなった現Finalと文脈が噛み合わないため、F_KARUBE_LINE・F_KARUBE_DELAY・phsFPending 一式ごと削除した（旧2段目＝最終セーフティは、それ以前に判定廃止で削除済み）。AIチャットに Final 専用の台本応答はもう無い（2026-08-22 ユーザー決定）——旧実装は F_REQUEST_TRIGGER→F_AI_REPLY で「承知しました。会見用の文案です。」と返していたが、記者会見の資料を作らせる旧設計の応答なので定数と sendAI() の Final 分岐ごと削除し、scripted 時は他ステージのトリガー不一致と同じ既定応答（「（このモックでは応答しません）」）へ合流させた（LIVE時は従来どおり sendAiLive()）。振り返りボード自体はAIチャットに依存しない。ゴール演出は Stage 5 側（stage5GoalSequence）に移った——#ov-goal に追加した「振り返りへ進む」ボタンを押すと go(\"final\") でここへ来る。Final 自身はもう #ov-goal を開かない（goalSequence() は Stage 5 専用の共有関数として残した）。ボード完成の後にエンディングが続く（2026-08-22追加）：①幹部の労いリレー（#ov-f-relay。院長→看護部長→事務長を F_RELAY から1人ずつ、［次へ］ボタンと背景クリックの早送りだけで送る。自動タイマーは無い）→②感謝状（#ov-f-handover。同日ユーザー決定で「引き継ぎ書」から改稿——病院からチームへの謝意と、記した一言を次のICTチームへ必ず申し送るという約束を賞状の体裁で見せる。宛名はチーム名、一言は esc() を通して引用枠へ入る）。感謝状はゲームの最終状態で閉じる導線を持たず、fEnded が立った後は #final 再入場のたびに renderFinal() が直接復元する。devbar・URLハッシュからの単体起動は従来どおり可能。" }
   ];
 
+  /* 停留所（pos）→ そのステージ先頭の view。STEPS の並び順から作るので、
+     ステージを足したときにこの表だけ更新し忘れる、という取りこぼしが起きない。
+     帯に停留所を持たない導入・開発用のステップ（entry/welcome/inbox/unlock）は
+     除く。pos 0（Prologue）はまだステージに入っていないので welcome へ落とす。
+
+     復帰でこれが要る理由：クリア処理は「画面遷移より先に TEAMS[2].pos を進める」
+     （unlockSequence・stage4UnlockSequence 等）。クリアカードや解錠演出を見ている
+     数秒の間にリロードされると { view: 前のステージ, pos: 次の停留所 } という
+     ねじれた状態が保存され、view をそのまま信じるとクリア済みのステージへ
+     戻してしまう——Stage 6 では { view:"s5", pos:7 } になり、ゴール演出の手前で
+     もう一度クリアできてしまう。pos を正とし、view はその裏付けがあるときだけ使う。 */
+  const NON_STAGE_VIEWS = ["entry", "welcome", "inbox", "unlock"];
+  const POS_TO_VIEW = ["welcome"].concat(
+    STEPS.filter((s) => NON_STAGE_VIEWS.indexOf(s.id) < 0).map((s) => s.id)
+  );
+  const viewPos = (id) => POS_TO_VIEW.indexOf(id);
+
   function go(id, keepMode) {
     clearLater();
     verdicting = false;
@@ -7874,8 +7891,11 @@
     // チーム名がサーバへ届く最初の機会。commitTeamName の後（teamName 確定後）に送る。
     reportProgress(TEAMS[2].pos, "entry");
     pollSummary();   // 帯を10秒待たずに一度埋める（以後は setInterval が回す）
-    // entry/welcome までしか進んでいないチームは、初回入室と同じ扱いでよい。
-    if (!snapshot || snapshot.body.view === "entry" || snapshot.body.view === "welcome") {
+    // Prologue圏（entry/welcome/inbox）までしか進んでいないチームは、初回入室と
+    // 同じ扱いでよい——ここを pos で判定しないのは、go() がこの3画面にも
+    // pos=1（S1の停留所）を振るため。ステージにはまだ入っていない。
+    const savedView = snapshot ? snapshot.body.view : null;
+    if (!snapshot || savedView === "entry" || savedView === "welcome" || savedView === "inbox") {
       go("welcome");
       return;
     }
@@ -7896,6 +7916,15 @@
     const body = snapshot.body;
     TEAMS[2].pos = body.pos;
 
+    // 戻す先は pos が正。保存済みの view は、pos が示すステージと同じか後ろに
+    // あるときだけ信じる（同じ停留所の中でどの画面にいたかは view の方が詳しい）。
+    // pos より前を指しているときは、クリア処理が pos を先に進めた直後に
+    // リロードされた——つまり view が1ステージ古い——ので pos 側を開く
+    // （POS_TO_VIEW のコメント参照）。
+    const target = viewPos(body.view) >= body.pos
+      ? body.view
+      : (POS_TO_VIEW[body.pos] || POS_TO_VIEW[POS_TO_VIEW.length - 1]);
+
     const savedAtMs = Date.parse(snapshot.savedAt);
     const serverNowMs = Date.parse(serverNow);
     const awayMs = Number.isFinite(savedAtMs) && Number.isFinite(serverNowMs)
@@ -7905,9 +7934,9 @@
 
     // 時計は go() より先に積み、go() の中で始まる startClock() に引き継がせる
     // （Stage 1 は renderStage1Flood→s1Begin が、それ以外は go() 自身が始める）。
-    const wasS1 = body.view === "s1";
+    const wasS1 = target === "s1";
     if (wasS1) s1SkipBrief = true;
-    go(body.view);
+    go(target);
     if (wasS1) s1SkipBrief = false;
     startClock();   // go() が始めていなければここで（clockOn のガードで二重には動かない）
     paintClock();   // 最初のティックまでの1秒を「--:--」で見せない
@@ -7920,7 +7949,9 @@
     s4TrapUsed = body.trap.s4Used;
 
     reportProgress(TEAMS[2].pos, "resume");
-    logActivity("resume", undefined, { view: body.view, elapsedMs: elapsed * 1000 });
+    logActivity("resume", undefined, {
+      view: target, savedView: body.view, pos: body.pos, elapsedMs: elapsed * 1000,
+    });
   }
   $("btn-brief").addEventListener("click", s1Begin);
   // 段落待ちの早送り。[了解しました] 自身は s1Begin へ抜けるので拾わない。
