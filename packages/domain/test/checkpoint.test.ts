@@ -4,6 +4,7 @@ import { applyCheckpoint } from "../src/checkpoint.js";
 import {
   CHECKPOINT_DATA_MAX_BYTES,
   CHECKPOINT_DATA_MAX_DEPTH,
+  CHECKPOINT_ELAPSED_MAX_MS,
   CHECKPOINT_DATA_TOO_LARGE_MESSAGE,
   checkpointBodySchema,
   checkpointSnapshotSchema,
@@ -249,6 +250,22 @@ describe("チェックポイントのschema", () => {
 
   it.each([-1, 1.5])("elapsedMsの不正値 %s を拒否する", (elapsedMs) => {
     expect(checkpointBodySchema.safeParse({ ...body(), elapsedMs }).success).toBe(false);
+  });
+
+  it("elapsedMsは上限ちょうどまで受け入れる", () => {
+    const parsed = checkpointBodySchema.safeParse({
+      ...body(),
+      elapsedMs: CHECKPOINT_ELAPSED_MAX_MS,
+    });
+    expect(parsed.success).toBe(true);
+  });
+
+  it("elapsedMsが上限を1ms超えたら拒否する", () => {
+    const parsed = checkpointBodySchema.safeParse({
+      ...body(),
+      elapsedMs: CHECKPOINT_ELAPSED_MAX_MS + 1,
+    });
+    expect(parsed.success).toBe(false);
   });
 
   it("trapに余分なキーがあれば拒否する", () => {

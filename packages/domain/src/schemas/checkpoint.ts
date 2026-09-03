@@ -13,6 +13,12 @@ export const CHECKPOINT_DATA_MAX_BYTES = 64 * 1024;
 export const CHECKPOINT_DATA_TOO_LARGE_MESSAGE = "チェックポイントのdataが大きすぎます。";
 
 /**
+ * `elapsedMs`の上限。研修は120分だが、休憩・中断からの再開・延長で伸びる余地を残し、
+ * 桁違いの値（クライアントの時計計算の壊れ、細工）だけを弾く幅にする。
+ */
+export const CHECKPOINT_ELAPSED_MAX_MS = 24 * 60 * 60 * 1000;
+
+/**
  * `data`の入れ子の深さ上限。ステージ固有の状態は平坦〜数段のオブジェクトで足りる。
  * 深い値を再帰schemaへそのまま渡すとRangeErrorになり、検証が例外で落ちて400へすら
  * 写せないため、再帰parseの前に反復で深さを数えて弾く。
@@ -83,7 +89,7 @@ export const checkpointBodySchema = z
       .max(32)
       .regex(/^[a-z0-9-]+$/),
     pos: z.number().int().min(0).max(7),
-    elapsedMs: z.number().int().nonnegative(),
+    elapsedMs: z.number().int().nonnegative().max(CHECKPOINT_ELAPSED_MAX_MS),
     trap: checkpointTrapSchema,
     // ステージ固有の状態は不透明なまま預かる。サーバーは形を解釈せず、
     // 大きさだけを見る——ステージ実装のたびにschemaを追う運用にしないため。

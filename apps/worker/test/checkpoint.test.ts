@@ -1,6 +1,7 @@
 import { env, exports } from "cloudflare:workers";
 import { runInDurableObject } from "cloudflare:test";
 import {
+  CHECKPOINT_ELAPSED_MAX_MS,
   checkpointStateSchema,
   httpErrorSchema,
   saveCheckpointResultSchema,
@@ -371,6 +372,28 @@ describe("チェックポイントAPI", () => {
     expect(response.status).toBe(400);
     expect(httpErrorSchema.parse(await response.json()).message).not.toContain("大きすぎます");
     await expect(load("500024")).resolves.toMatchObject({ checkpoint: null });
+  });
+
+  it("elapsedMsが上限を超える保存は400で拒否し、その後の正常な保存は妨げない", async () => {
+    const tooLong = await save("500025", {
+      commandId: id("130"),
+      expectedRevision: 0,
+      body: { elapsedMs: CHECKPOINT_ELAPSED_MAX_MS + 1 },
+    });
+
+    expect(tooLong.status).toBe(400);
+    await expect(load("500025")).resolves.toMatchObject({ checkpoint: null });
+
+    const ok = await save("500025", {
+      commandId: id("131"),
+      expectedRevision: 0,
+      body: { elapsedMs: CHECKPOINT_ELAPSED_MAX_MS },
+    });
+
+    expect(ok.status).toBe(200);
+    await expect(load("500025")).resolves.toMatchObject({
+      checkpoint: { revision: 1, body: { elapsedMs: CHECKPOINT_ELAPSED_MAX_MS } },
+    });
   });
 
   it("JSONとして壊れた本文は400で拒否する", async () => {
