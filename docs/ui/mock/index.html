@@ -3595,9 +3595,13 @@
      復帰したチームが同じ罠をもう一度踏めてしまう。
 
      キューは通さない——チェーンの手前に何か詰まっていると離脱までに送れない。
-     送信中のPOSTと二重になるが、commandId は新規で構わない：サーバは
-     revision の CAS と罠・経過時間・停留所の後退拒否で守られており、
-     古い方が後から通っても状態を巻き戻せない。 */
+
+     `flush: true` を付ける。送信中の通常POSTとこれは同じ expectedRevision を握って
+     いるので、素のまま投げると片方が 409 conflict になる——離脱側が負けると、
+     まさに残したかった罠フラグが落ちる。flush を立てた保存だけは、サーバが
+     revision の一致を要求せず、trap は OR・pos と elapsedMs は max・view と data は
+     pos が大きい側、で単調にマージして 200 を返す（どちらが先に着いても後退しない）。
+     通常経路には付けない——CAS を外すのは離脱時の1発だけに限る。 */
   function flushCheckpoint() {
     if (!checkpointDirty) return;
     if (checkpointTimer !== null) clearTimeout(checkpointTimer);
@@ -3612,6 +3616,7 @@
           commandId: crypto.randomUUID(),
           expectedRevision: liveState.checkpointRevision,
           body: checkpointBody(),
+          flush: true,
         }),
         keepalive: true,
       }).catch(() => {});

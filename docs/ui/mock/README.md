@@ -127,6 +127,10 @@ JS 構造そのものは資産ではない。単一ファイル・フレーム�
   下ろす）で追い、`pagehide`／`visibilitychange(hidden)` で dirty なら最新状態から組み直して
   `keepalive: true` の fetch で投げ切る——**デバウンス待ちだけでなく、キュー待ち・送信中（fetchが返る前）の
   リロードでも送る**。ここを取りこぼすと、罠を踏んだ直後にリロードしたチームだけ同じ罠をもう一度踏める。
+  この離脱時の1発だけは body に **`flush: true`** を付ける（通常経路には付けない）——送信中の通常POSTと
+  同じ`expectedRevision`を握っているため素のままだと片方が409になり、離脱側が負けると残したかった罠フラグが
+  落ちる。flush の保存はサーバがrevisionの一致を要求せず、trapはOR・posとelapsedMsはmax・viewとdataはposが
+  大きい側、で単調にマージして200を返す。
   POSTは1本のPromiseチェーンで**直列化**し、
   bodyは必ず送る直前の最新状態から組み直す（古いbodyが後から新しいrevisionで通ると状態が巻き戻る）。
   成功応答のrevisionは、送った`expectedRevision`+1と一致するときだけ採用する。409は応答の `code`
