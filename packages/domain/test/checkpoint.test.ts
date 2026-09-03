@@ -252,6 +252,23 @@ describe("チェックポイントのschema", () => {
     expect(checkpointBodySchema.safeParse({ ...body(), extra: 1 }).success).toBe(false);
   });
 
+  it.each([
+    { label: "Infinity", value: JSON.parse('{"a":1e400}') as unknown },
+    { label: "NaN", value: { a: Number.NaN } },
+    { label: "undefined", value: { a: undefined } },
+    { label: "関数", value: { a: () => 1 } },
+    { label: "入れ子のInfinity", value: JSON.parse('{"a":{"b":[1e400]}}') as unknown },
+  ])("JSONにならない値 $label をdataに含む保存を拒否する", ({ value }) => {
+    expect(checkpointBodySchema.safeParse({ ...body(), data: value }).success).toBe(false);
+  });
+
+  it("入れ子のオブジェクトと配列はそのまま往復する", () => {
+    const data = { quiz: { answers: ["A", "B"], done: true }, notes: [1, null, { memo: "x" }] };
+    const parsed = checkpointBodySchema.parse({ ...body(), data });
+    expect(parsed.data).toEqual(data);
+    expect(JSON.parse(JSON.stringify(parsed.data))).toEqual(data);
+  });
+
   it("dataは上限ちょうどまで受け入れる", () => {
     const parsed = checkpointBodySchema.safeParse({
       ...body(),

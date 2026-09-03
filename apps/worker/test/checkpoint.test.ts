@@ -310,6 +310,37 @@ describe("チェックポイントAPI", () => {
     await expect(load(teamCode)).resolves.toMatchObject({ checkpoint: null });
   });
 
+  it("JSONにならない数値（1e400）を含む保存は400で拒否し、保存されない", async () => {
+    // JSON.stringifyでは作れない値なので、本文を生のJSONテキストで組み立てる。
+    const raw = `{"type":"save-checkpoint","commandId":"${id("125")}","expectedRevision":0,"body":{"view":"stage3-manual","pos":2,"elapsedMs":60000,"trap":{"s3Used":false,"s4Used":false},"data":{"score":1e400}}}`;
+    const response = await handleSaveCheckpoint(
+      new Request("https://example.test/api/teams/500021/checkpoint", {
+        method: "POST",
+        body: raw,
+      }),
+      env,
+      "500021",
+      now,
+    );
+
+    expect(response.status).toBe(400);
+    expect(httpErrorSchema.parse(await response.json()).message).not.toContain("大きすぎます");
+    await expect(load("500021")).resolves.toMatchObject({ checkpoint: null });
+  });
+
+  it("入れ子のdataは保存して復元しても同じ形で返る", async () => {
+    const data = { quiz: { answers: ["A", "B"], done: true }, notes: [1, null, { memo: "x" }] };
+    const response = await save("500022", {
+      commandId: id("126"),
+      expectedRevision: 0,
+      body: { data },
+    });
+
+    expect(response.status).toBe(200);
+    const state = await load("500022");
+    expect(state.checkpoint?.body.data).toEqual(data);
+  });
+
   it("JSONとして壊れた本文は400で拒否する", async () => {
     const response = await handleSaveCheckpoint(
       new Request("https://example.test/api/teams/500010/checkpoint", {

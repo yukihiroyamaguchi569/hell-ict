@@ -15,6 +15,23 @@ export const CHECKPOINT_DATA_TOO_LARGE_MESSAGE = "チェックポイントのdat
 const jsonByteLength = (value: unknown): number =>
   new TextEncoder().encode(JSON.stringify(value)).length;
 
+/** JSONとして往復できる値。zodの再帰schemaは型注釈を要求するため、ここだけは手で書く。 */
+type JsonValue = string | number | boolean | null | JsonValue[] | { [key: string]: JsonValue };
+
+const jsonValueSchema: z.ZodType<JsonValue> = z.lazy(() =>
+  z.union([
+    z.string(),
+    // zod 4のz.number()は非有限値を受け付けないので、Infinity・NaNはここで落ちる。
+    z.number(),
+    z.boolean(),
+    z.null(),
+    z.array(jsonValueSchema),
+    z.record(z.string(), jsonValueSchema),
+  ]),
+);
+
+const jsonRecordSchema = z.record(z.string(), jsonValueSchema);
+
 /**
  * 保存を拒否した理由。HTTPエラーの`code`としてそのまま返すため、schemaを情報源にする
  * （`schemas/http-error.ts`が同じ値を取り込む）——クライアントは文言ではなくこの値で
@@ -44,8 +61,15 @@ export const checkpointBodySchema = z
     trap: checkpointTrapSchema,
     // ステージ固有の状態は不透明なまま預かる。サーバーは形を解釈せず、
     // 大きさだけを見る——ステージ実装のたびにschemaを追う運用にしないため。
+    // ただし値はJSONとして往復できるものに限る。素通しにするとInfinity・NaN・
+    // undefined・関数がすり抜け、保存時のJSON.stringifyで黙ってnullや欠落に化けて、
+    // 復元した状態が保存した状態と食い違う。
+    // 検証は再帰schemaで行い、静的な型はRecord<string, unknown>のまま浅く保つ——
+    // 再帰型をそのまま推論させると、DOのRPC型（Rpc.Serializable）を通す時点で
+    // TS2589（型の展開が深すぎる）になるため。値の解釈はステージ実装側の責務。
     data: z
       .record(z.string(), z.unknown())
+      .refine((value) => jsonRecordSchema.safeParse(value).success)
       .refine((value) => jsonByteLength(value) <= CHECKPOINT_DATA_MAX_BYTES, {
         error: CHECKPOINT_DATA_TOO_LARGE_MESSAGE,
       }),
