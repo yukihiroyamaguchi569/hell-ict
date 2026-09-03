@@ -22,7 +22,14 @@ import type {
   TeamCommand,
 } from "@hell-ict/domain";
 
-import { error, isWebSocketRequest, json, parseJson, teamCodeFromPath } from "./http.js";
+import {
+  error,
+  isWebSocketRequest,
+  json,
+  parseJson,
+  PayloadTooLargeError,
+  teamCodeFromPath,
+} from "./http.js";
 import { createAiGateway, OpenAiRefusalError } from "./openai-gateway.js";
 import { handleProgressPost, handleProgressSummary } from "./progress.js";
 import { RaceLeaderboard } from "./race-leaderboard.js";
@@ -202,14 +209,20 @@ const CHECKPOINT_REJECTION_MESSAGES = {
   "pos-regression": "進行位置を巻き戻すチェックポイントは保存できません。",
 } as const satisfies Record<CheckpointRejectionReason, string>;
 
+/**
+ * 受け付けるリクエスト本文の上限。dataの64KBに、封筒（view・pos・JSONの記法）の
+ * 余裕を足した幅にする。上限を超える本文は、オブジェクトへ展開する前に413で返す。
+ */
+const CHECKPOINT_BODY_MAX_BYTES = 96 * 1024;
+
+type CheckpointParseFailure = "invalid" | "data-too-large" | "body-too-large";
+
 type ParsedCheckpointCommand =
   | { ok: true; command: SaveCheckpointCommand }
-  | { ok: false; tooLarge: boolean };
-
-const rejectedCommand: ParsedCheckpointCommand = { ok: false, tooLarge: false };
+  | { ok: false; reason: CheckpointParseFailure };
 
 /**
- * checkpointコマンドの検証を、失敗も例外もまとめて400へ倒せる形へ写す。
+ * checkpointコマンドの検証を、失敗も例外もまとめてHTTP応答へ写せる形にする。
  * safeParseは値によっては例外を投げうる（深い入れ子など、検証自体が失敗する入力）ので、
  * 呼び出し側のtryの外に置かず、ここで捕まえて未処理例外にしない。
  */
@@ -217,16 +230,20 @@ const parseSaveCheckpointCommand = (input: unknown): ParsedCheckpointCommand => 
   try {
     const parsed = saveCheckpointCommandSchema.safeParse(input);
     if (parsed.success) return { ok: true, command: parsed.data };
-    return {
-      ok: false,
-      tooLarge: parsed.error.issues.some(
-        (issue) => issue.message === CHECKPOINT_DATA_TOO_LARGE_MESSAGE,
-      ),
-    };
+    const tooLarge = parsed.error.issues.some(
+      (issue) => issue.message === CHECKPOINT_DATA_TOO_LARGE_MESSAGE,
+    );
+    return { ok: false, reason: tooLarge ? "data-too-large" : "invalid" };
   } catch {
-    return rejectedCommand;
+    return { ok: false, reason: "invalid" };
   }
 };
+
+/** 本文の読み取り自体の失敗を、大きすぎる（413）と壊れている（400）へ振り分ける。 */
+const failedToReadBody = (caught: unknown): ParsedCheckpointCommand => ({
+  ok: false,
+  reason: caught instanceof PayloadTooLargeError ? "body-too-large" : "invalid",
+});
 
 /**
  * ステージ内状態のチェックポイントを保存する。`nowIso`はここで採る——DOはテストから
@@ -238,11 +255,15 @@ export const handleSaveCheckpoint = async (
   teamCode: TeamCode,
   nowIso: string = new Date().toISOString(),
 ): Promise<Response> => {
-  const parsed = await parseJson(request).then(parseSaveCheckpointCommand, () => rejectedCommand);
+  const parsed = await parseJson(request, CHECKPOINT_BODY_MAX_BYTES).then(
+    parseSaveCheckpointCommand,
+    failedToReadBody,
+  );
   if (!parsed.ok) {
     // 上限超過だけは他のschema違反と区別する——クライアントは書式ではなく
     // 保存する状態そのものを削る必要があるため。
-    return parsed.tooLarge
+    if (parsed.reason === "body-too-large") return error("リクエスト本文が大きすぎます。", 413);
+    return parsed.reason === "data-too-large"
       ? error("チェックポイントのデータが大きすぎます。", 400)
       : error("checkpointの形式が不正です。", 400);
   }

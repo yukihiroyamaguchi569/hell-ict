@@ -396,6 +396,53 @@ describe("チェックポイントAPI", () => {
     });
   });
 
+  const postRaw = (teamCode: string, raw: string, headers?: HeadersInit): Promise<Response> =>
+    handleSaveCheckpoint(
+      new Request(`https://example.test/api/teams/${teamCode}/checkpoint`, {
+        method: "POST",
+        body: raw,
+        headers,
+      }),
+      env,
+      teamCode,
+      now,
+    );
+
+  const rawCommand = (commandId: string, dataBytes: number): string =>
+    JSON.stringify({
+      type: "save-checkpoint",
+      commandId,
+      expectedRevision: 0,
+      body: { ...body(), data: { blob: "x".repeat(dataBytes) } },
+    });
+
+  it("Content-Lengthが上限を超えていれば、本文を展開せず413で拒否する", async () => {
+    // 本文自体は小さい。ヘッダーの申告だけで短絡することを固定する。
+    const response = await postRaw("500027", rawCommand(id("133"), 10), {
+      "Content-Length": String(100 * 1024),
+    });
+
+    expect(response.status).toBe(413);
+    expect(httpErrorSchema.parse(await response.json()).message).toContain("大きすぎます");
+    await expect(load("500027")).resolves.toMatchObject({ checkpoint: null });
+  });
+
+  it("Content-Lengthを小さく偽装した巨大な本文も413で拒否する", async () => {
+    const response = await postRaw("500028", rawCommand(id("134"), 100 * 1024), {
+      "Content-Length": "10",
+    });
+
+    expect(response.status).toBe(413);
+    await expect(load("500028")).resolves.toMatchObject({ checkpoint: null });
+  });
+
+  it("Content-Lengthが無い巨大な本文も413で拒否する", async () => {
+    const response = await postRaw("500029", rawCommand(id("135"), 100 * 1024));
+
+    expect(response.status).toBe(413);
+    await expect(load("500029")).resolves.toMatchObject({ checkpoint: null });
+  });
+
   it("JSONとして壊れた本文は400で拒否する", async () => {
     const response = await handleSaveCheckpoint(
       new Request("https://example.test/api/teams/500010/checkpoint", {
