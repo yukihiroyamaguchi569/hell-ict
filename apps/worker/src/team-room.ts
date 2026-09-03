@@ -45,7 +45,7 @@ type StoredThreadCommand = { result: string };
 type StoredMessageCommand = { result: string };
 type StoredPendingMessage = { thread_id: string; claimed_at: string | null };
 type StoredCheckpointState = { snapshot: string };
-type StoredCheckpointCommand = { result: string };
+type StoredCheckpointCommand = { revision: number };
 type ConflictReply = { conflict: true };
 type UnknownThreadReply = { unknownThread: true };
 
@@ -84,16 +84,6 @@ const PENDING_MESSAGE_EXPIRY_MS = 6 * 60 * 60 * 1000;
  */
 const CLAIM_TIMEOUT_MS = 45 * 1000;
 
-/**
- * チェックポイントの冪等台帳に残す最新件数。台帳の行はsnapshot全体（dataは最大64KB）
- * を持つので、オートセーブのたびに新しいcommandIdが増えるこの用途では、
- * pending_message_commandsの時間ベースの掃除（PENDING_MESSAGE_EXPIRY_MS）と同じ考えで
- * 上限を設ける——ただしチェックポイントは件数で切る。台帳が要るのは再送を吸収する
- * 数秒〜数分の窓だけで、クライアントは500msデバウンスで保存し、失敗時も同じcommandIdを
- * 1回再試行するだけなので、直近20件あれば正当な再送が古い行に当たらない。
- */
-const CHECKPOINT_LEDGER_KEEP = 20;
-
 export class TeamRoom extends DurableObject<Env> {
   constructor(ctx: DurableObjectState, env: Env) {
     super(ctx, env);
@@ -119,7 +109,7 @@ export class TeamRoom extends DurableObject<Env> {
       "CREATE TABLE IF NOT EXISTS checkpoint_state (id INTEGER PRIMARY KEY CHECK (id = 1), snapshot TEXT NOT NULL)",
     );
     this.ctx.storage.sql.exec(
-      "CREATE TABLE IF NOT EXISTS processed_checkpoint_commands (command_id TEXT PRIMARY KEY, result TEXT NOT NULL, created_at TEXT NOT NULL)",
+      "CREATE TABLE IF NOT EXISTS processed_checkpoint_commands (command_id TEXT PRIMARY KEY, revision INTEGER NOT NULL, created_at TEXT NOT NULL)",
     );
   }
 
@@ -399,6 +389,24 @@ export class TeamRoom extends DurableObject<Env> {
   }
 
   /**
+   * 台帳にあるcommandIdへの再送を、本文を見ずに処理する。適用済みのコマンドは二度と
+   * 適用しない——台帳が指すrevisionが今のrevisionなら「直前の保存の再送」なので現在の
+   * snapshotをそのまま返し、ずれていれば既に上書きされた古い保存なのでconflictにする
+   * （クライアントはGETして最新を採用すればよい）。この判定により、台帳はsnapshotを
+   * 持たず`(command_id, revision)`だけで足り、剪定して有限に保つ必要も無くなる——
+   * 剪定すると、溢れた古いcommandIdの再送が「未処理」に見え、古いdataが最新revision
+   * の新規保存として通ってしまう。
+   */
+  private replayCheckpoint(
+    current: CheckpointSnapshot | null,
+    appliedRevision: number,
+  ): CheckpointSnapshot | CheckpointRejection {
+    return current !== null && current.revision === appliedRevision
+      ? current
+      : { rejected: "conflict" };
+  }
+
+  /**
    * チェックポイントを保存する。`nowIso`はWorker側で採る——DOはテストからClockを
    * 差し替えられないため、時刻の境界をWorkerのhandlerへ寄せている。
    */
@@ -413,20 +421,19 @@ export class TeamRoom extends DurableObject<Env> {
     const saved =
       this.ctx.storage.sql
         .exec<StoredCheckpointCommand>(
-          "SELECT result FROM processed_checkpoint_commands WHERE command_id = ?",
+          "SELECT revision FROM processed_checkpoint_commands WHERE command_id = ?",
           command.commandId,
         )
         .toArray()[0] ?? null;
-    // 保存済みのcommandIdは、再送されても状態を進めず同じsnapshotを返す。
-    if (saved !== null) return checkpointSnapshotSchema.parse(JSON.parse(saved.result) as unknown);
-
     const current = this.readCheckpoint();
+    if (saved !== null) return this.replayCheckpoint(current, saved.revision);
+
     const applied = applyCheckpoint(current, command, { teamCode, now });
     if (!applied.ok) return { rejected: applied.reason };
     const serialized = JSON.stringify(applied.snapshot);
     // 状態更新と冪等台帳は必ず同時に成立させる。片方だけ書けると、revisionだけ
-    // 進んで台帳が無い状態になり、同じcommandIdの再送が保存済み結果ではなく
-    // conflictとして返ってしまう（AGENTS.mdの「保存失敗・重複イベント」）。
+    // 進んで台帳に記録が無い状態になり、同じcommandIdの再送が現在のsnapshotではなく
+    // 新規の保存として再適用されてしまう（AGENTS.mdの「保存失敗・重複イベント」）。
     // CASが0行だった場合は、returnではロールバックできないので例外で抜けて
     // トランザクションごと巻き戻し、ここで受けてconflictへ写す。
     try {
@@ -445,16 +452,10 @@ export class TeamRoom extends DurableObject<Env> {
               ).rowsWritten;
         if (written === 0) throw new CheckpointConflictError();
         this.ctx.storage.sql.exec(
-          "INSERT INTO processed_checkpoint_commands (command_id, result, created_at) VALUES (?, ?, ?)",
+          "INSERT INTO processed_checkpoint_commands (command_id, revision, created_at) VALUES (?, ?, ?)",
           command.commandId,
-          serialized,
+          applied.snapshot.revision,
           now,
-        );
-        // 同じトランザクションで古い台帳行を落とす。created_atが同値になる連続保存でも
-        // 挿入順で切れるよう、rowidを第2キーにする。
-        this.ctx.storage.sql.exec(
-          "DELETE FROM processed_checkpoint_commands WHERE command_id NOT IN (SELECT command_id FROM processed_checkpoint_commands ORDER BY created_at DESC, rowid DESC LIMIT ?)",
-          CHECKPOINT_LEDGER_KEEP,
         );
       });
     } catch (caught) {
