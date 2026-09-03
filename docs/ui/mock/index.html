@@ -7740,12 +7740,69 @@
       showEntryError((chatRes.body && chatRes.body.message) || "チャット状態の取得に失敗しました。時間を置いて再試行してください。");
       return;
     }
-    liveState = { teamCode: code, threads: chatRes.body.threads, activeThreadId: chatRes.body.threads[0].threadId };
+    liveState = {
+      teamCode: code,
+      threads: chatRes.body.threads,
+      activeThreadId: chatRes.body.threads[0].threadId,
+      checkpointRevision: 0,
+    };
     commitTeamName(code, name);
+    // 保存済みのチェックポイントがあれば、そのステージへ戻す（進行台本 §5-1 の
+    // 手動ジャンプを不要にするための自動復帰）。取得できなくても入室は通す
+    // ——復帰できないことより、入室そのものが止まることのほうが痛い。
+    const cpRes = await liveFetch("/api/teams/" + code + "/checkpoint", { method: "GET" }, LIVE_RESTORE_TIMEOUT_MS);
+    const snapshot = cpRes.ok && cpRes.body && cpRes.body.checkpoint ? cpRes.body.checkpoint : null;
+    if (snapshot) liveState.checkpointRevision = snapshot.revision;
     // チーム名がサーバへ届く最初の機会。commitTeamName の後（teamName 確定後）に送る。
     reportProgress(TEAMS[2].pos, "entry");
-    go("welcome");
+    // entry/welcome までしか進んでいないチームは、初回入室と同じ扱いでよい。
+    if (!snapshot || snapshot.body.view === "entry" || snapshot.body.view === "welcome") {
+      go("welcome");
+      return;
+    }
+    resumeFromCheckpoint(snapshot, cpRes.body.serverNow);
   });
+
+  /* チェックポイントからの復帰。ステージ固有の状態（グリッドの中身・生成済み
+     ポスター等）は預けていないので、戻す先は「そのステージの先頭」——赤帯や
+     ブリーフィングが再生されるのは許容する（Stage 1 の長いブリーフィングだけは
+     s1SkipBrief で飛ばす。復帰のたびに読み直させると、その分だけレースで損をする）。
+
+     📌 経過時計はリロード中も止めない。レースなので、リロードした側が時間を
+     取り戻せると「詰まったらリロード」が最適戦略になってしまう。savedAt から
+     serverNow までの実時間を加算し、席を外していた分もそのまま払わせる
+     （2026-08-23 テストプレイではファシリテーターの裁量だった扱いを、ここで
+     機械的に決める）。 */
+  function resumeFromCheckpoint(snapshot, serverNow) {
+    const body = snapshot.body;
+    TEAMS[2].pos = body.pos;
+    s3TrapUsed = body.trap.s3Used;
+    s4TrapUsed = body.trap.s4Used;
+
+    const savedAtMs = Date.parse(snapshot.savedAt);
+    const serverNowMs = Date.parse(serverNow);
+    const awayMs = Number.isFinite(savedAtMs) && Number.isFinite(serverNowMs)
+      ? Math.max(0, serverNowMs - savedAtMs)
+      : 0;
+    elapsed = Math.round((body.elapsedMs + awayMs) / 1000);
+
+    // 時計は go() より先に積み、go() の中で始まる startClock() に引き継がせる
+    // （Stage 1 は renderStage1Flood→s1Begin が、それ以外は go() 自身が始める）。
+    const wasS1 = body.view === "s1";
+    if (wasS1) s1SkipBrief = true;
+    go(body.view);
+    if (wasS1) s1SkipBrief = false;
+    startClock();   // go() が始めていなければここで（clockOn のガードで二重には動かない）
+    // 最初のティックまでの1秒を「--:--」で見せない。
+    $("clock").textContent =
+      String(Math.floor(elapsed / 60)).padStart(2, "0") + ":" + String(elapsed % 60).padStart(2, "0");
+
+    // ⚠️ apps/worker/src/progress.ts の kind enum は entry/clear/jump しか受けず、
+    // "resume" は現状400で弾かれる（fire-and-forgetなので進行には影響しない）。
+    // 直前に "entry" を送っているので生存確認は落ちない。enum への追加はWorker側の宿題。
+    reportProgress(TEAMS[2].pos, "resume");
+    logActivity("resume", undefined, { view: body.view, elapsedMs: elapsed * 1000 });
+  }
   $("btn-brief").addEventListener("click", s1Begin);
   // 段落待ちの早送り。[了解しました] 自身は s1Begin へ抜けるので拾わない。
   $("ov-brief").addEventListener("click", (e) => {
