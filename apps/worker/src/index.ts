@@ -16,7 +16,20 @@ import type {
   TeamCommand,
 } from "@hell-ict/domain";
 
-import { error, isWebSocketRequest, json, parseJson, teamCodeFromPath } from "./http.js";
+import {
+  isApiRequestAllowed,
+  isTeamCodeAllowed,
+  parseAllowedOrigins,
+  parseTeamCodes,
+} from "./guard.js";
+import {
+  error,
+  isWebSocketRequest,
+  json,
+  parseJson,
+  teamCodeFromApiPath,
+  teamCodeFromPath,
+} from "./http.js";
 import { createAiGateway, OpenAiRefusalError } from "./openai-gateway.js";
 import { handleProgressPost, handleProgressSummary } from "./progress.js";
 import { RaceLeaderboard } from "./race-leaderboard.js";
@@ -38,6 +51,11 @@ const handleSession = async (request: Request, env: Env): Promise<Response> => {
     );
   } catch {
     return error("teamCodeはASCII数字6桁で指定してください。", 400);
+  }
+  // 入室コードは本文にあるため入口ガードでは見られない。DOへ触れる直前でここだけ当てる
+  // （未登録コードのチーム状態を作らせない）。応答は存在を明かさない404に揃える。
+  if (!isTeamCodeAllowed(teamCode, parseTeamCodes(env.TEAM_CODES))) {
+    return new Response("Not found", { status: 404 });
   }
   try {
     const snapshot = await env.TEAM_ROOM.getByName(teamCode).join(teamCode);
@@ -234,9 +252,33 @@ const handleGet = (request: Request, env: Env, url: URL): Promise<Response> => {
     : Promise.resolve(new Response("Not found", { status: 404 }));
 };
 
+/**
+ * 公開APIの入口ガード。`/api/*`（`/api/health`を除く）すべてに、メソッドや
+ * WebSocket upgradeの別なく一律で当てる。前作Hell-AI-v2では書き込み系だけを
+ * 検証したため管理系APIに検証漏れが残った。拒否したときはDOにもAiGatewayにも触れない。
+ *
+ * 通す場合はnullを返す。
+ */
+const guardApiRequest = (request: Request, env: Env, url: URL): Response | null => {
+  if (!url.pathname.startsWith("/api/")) return null;
+  // ヘルスチェックは配信元の生死確認用で、モックが起動時に無条件で叩く。Origin不問にする。
+  if (url.pathname === "/api/health") return null;
+  if (!isApiRequestAllowed(request, url, parseAllowedOrigins(env.ALLOWED_ORIGINS))) {
+    return error("許可されていない送信元からのリクエストです。", 403);
+  }
+  const teamCode = teamCodeFromApiPath(url.pathname);
+  if (teamCode !== null && !isTeamCodeAllowed(teamCode, parseTeamCodes(env.TEAM_CODES))) {
+    // 未登録コードの存在を明かさないよう、経路自体が無いときと同じ404に揃える。
+    return new Response("Not found", { status: 404 });
+  }
+  return null;
+};
+
 const worker = {
   async fetch(request: Request, env: Env): Promise<Response> {
     const url = new URL(request.url);
+    const blocked = guardApiRequest(request, env, url);
+    if (blocked !== null) return blocked;
     if (request.method === "GET" && url.pathname === "/api/health") {
       return json({ status: "ok" });
     }

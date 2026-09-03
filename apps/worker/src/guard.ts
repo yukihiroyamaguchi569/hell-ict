@@ -1,0 +1,75 @@
+/**
+ * 公開Worker APIの入口ガード（Origin検証・チームコード許可リスト）。判定はすべて
+ * 副作用のないPure Functionとして置き、index.tsのfetch入口からは
+ * 「決めた結果」だけを使う。
+ *
+ * 前提: 本番（2026年9月の集合研修）はモックHTMLをWorkerのAssetsから配信するため、
+ * ブラウザとAPIは同一オリジンになる。ALLOWED_ORIGINSを設定しなくても動くのが
+ * 既定の状態で、別オリジン配信や開発時の別ポートだけが明示設定を要する。
+ */
+
+/** 比較用の正規化。前後の空白と末尾スラッシュを落とす（`https://x/`と`https://x`を同一視する）。 */
+const normalizeOrigin = (value: string): string => value.trim().replace(/\/+$/, "");
+
+/** カンマ区切りの`ALLOWED_ORIGINS`を配列へ。未設定・空文字は空配列（＝同一オリジンのみ許可）。 */
+export const parseAllowedOrigins = (raw: string | undefined): readonly string[] =>
+  (raw ?? "")
+    .split(",")
+    .map(normalizeOrigin)
+    .filter((origin) => origin.length > 0);
+
+/**
+ * Originヘッダーが許可集合に含まれるか。`allowedOrigins`が空なら
+ * 「リクエストURLと同じorigin」だけを許可する（同一オリジン配信の既定）。
+ */
+export const isOriginAllowed = (
+  originHeader: string | null,
+  requestUrl: URL,
+  allowedOrigins: readonly string[],
+): boolean => {
+  if (originHeader === null) return false;
+  const allowed = allowedOrigins.length === 0 ? [requestUrl.origin] : allowedOrigins;
+  const origin = normalizeOrigin(originHeader);
+  return allowed.some((candidate) => normalizeOrigin(candidate) === origin);
+};
+
+/**
+ * Originヘッダーが無いリクエストを通してよいか。
+ *
+ * ブラウザは同一オリジンのGETにOriginを付けない。会場前面の進捗ボードが叩く
+ * `GET /api/progress/summary`がまさにこれで、Origin必須にすると同一オリジンでも
+ * 落ちる。一方でPOSTは同一オリジンでもブラウザが必ずOriginを付けるので必須にできる。
+ *
+ * そこで、Originが無いGET（WebSocket upgradeもGET）は`Sec-Fetch-Site`が
+ * `same-origin`/`none`のときだけ通す。curlのような非ブラウザからのリクエストは
+ * このヘッダーを付けないため拒否される——「curlからPOSTできない」と
+ * 「同一オリジンのブラウザから全APIが動く」を両立させるのがここの狙いである
+ * （Sec-Fetch-*はブラウザが付ける禁止ヘッダーで、ページ側のJSからは偽装できない）。
+ */
+export const isOriginlessRequestAllowed = (method: string, secFetchSite: string | null): boolean =>
+  method === "GET" && (secFetchSite === "same-origin" || secFetchSite === "none");
+
+/** Origin検証の総合判定。Originがあれば許可集合と突合し、無ければGET限定の緩和へ回す。 */
+export const isApiRequestAllowed = (
+  request: Pick<Request, "method" | "headers">,
+  requestUrl: URL,
+  allowedOrigins: readonly string[],
+): boolean => {
+  const origin = request.headers.get("Origin");
+  return origin === null
+    ? isOriginlessRequestAllowed(request.method, request.headers.get("Sec-Fetch-Site"))
+    : isOriginAllowed(origin, requestUrl, allowedOrigins);
+};
+
+/** カンマ区切りの`TEAM_CODES`を集合へ。未設定・空文字はnull（＝許可リストなし＝何でも通す）。 */
+export const parseTeamCodes = (raw: string | undefined): ReadonlySet<string> | null => {
+  const codes = (raw ?? "")
+    .split(",")
+    .map((code) => code.trim())
+    .filter((code) => code.length > 0);
+  return codes.length === 0 ? null : new Set(codes);
+};
+
+/** 許可リストが無ければ何でも通す（ローカル開発とE2Eの互換）。 */
+export const isTeamCodeAllowed = (code: string, allowlist: ReadonlySet<string> | null): boolean =>
+  allowlist === null || allowlist.has(code);

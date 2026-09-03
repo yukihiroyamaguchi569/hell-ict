@@ -3,7 +3,7 @@ import { beforeEach, describe, expect, it } from "vitest";
 import { z } from "zod";
 
 import { progressSchemaSql } from "../src/progress.js";
-import { postJson } from "./support.js";
+import { get, postJson, TEST_ORIGIN } from "./support.js";
 
 const summarySchema = z.object({
   teams: z.array(
@@ -39,16 +39,20 @@ const event = (overrides: Record<string, unknown> = {}): Record<string, unknown>
 });
 
 const summary = async (): Promise<Summary> => {
-  const response = await exports.default.fetch(
-    new Request("https://example.test/api/progress/summary"),
-  );
+  const response = await get("/api/progress/summary");
   expect(response.status).toBe(200);
   return summarySchema.parse(await response.json());
 };
 
 /** JSONとして壊れた本文や本文なしを送るため、support.tsのpostJsonを経由しない。 */
 const postRaw = async (body: BodyInit | null): Promise<Response> =>
-  exports.default.fetch(new Request("https://example.test/api/progress", { method: "POST", body }));
+  exports.default.fetch(
+    new Request(`${TEST_ORIGIN}/api/progress`, {
+      method: "POST",
+      body,
+      headers: { Origin: TEST_ORIGIN },
+    }),
+  );
 
 const rowCount = async (): Promise<number> => {
   const row = await env.PROGRESS_DB.prepare("SELECT COUNT(*) AS n FROM progress_events").first("n");

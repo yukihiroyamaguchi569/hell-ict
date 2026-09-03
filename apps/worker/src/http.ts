@@ -16,3 +16,14 @@ export const teamCodeFromPath = (
   if (!pathname.startsWith(prefix) || !pathname.endsWith(suffix)) return null;
   return teamCodeSchema.safeParse(pathname.slice(prefix.length, -suffix.length)).data ?? null;
 };
+
+/**
+ * `/api/teams/:code/...`のcodeを、末尾のパスを問わず取り出す。入口ガードは
+ * 個別エンドポイントを知らずに許可リストを当てたいので、teamCodeFromPathとは別に置く。
+ */
+export const teamCodeFromApiPath = (pathname: string): TeamCode | null => {
+  const prefix = "/api/teams/";
+  if (!pathname.startsWith(prefix)) return null;
+  const [code] = pathname.slice(prefix.length).split("/");
+  return teamCodeSchema.safeParse(code).data ?? null;
+};
