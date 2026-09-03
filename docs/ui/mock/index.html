@@ -502,8 +502,12 @@
 .mark-t.lead { color: var(--fg); }
 /* 他チーム（LIVE時のみ・GET /api/progress/summary 由来）。自チームより一段
    小さく淡くして、どれが自分かを一目で分かるようにする。同じ停留所に並ぶと
-   drawMarks() が bottom を段積みするので、帯の外へはみ出さない高さに抑える。 */
-.mark-t.other { color: var(--fg-muted); font-size: 11px; opacity: .85; }
+   drawMarks() が bottom を段積みし、上段は停留所ラベルの高さまで来るので、
+   帯と同じ地色を敷いてラベルと文字が絡まないようにする。 */
+.mark-t.other {
+  color: var(--fg-muted); font-size: 11px; opacity: .85;
+  background: var(--surface); padding: 0 3px; border-radius: 3px;
+}
 .mark-t.other .nm { font-size: 11px; }
 .mark-t .nm { font-family: var(--font-ui); font-size: 12px; }
 
@@ -3132,11 +3136,29 @@
      チーム自身（他チームの場合は他人）の入力なので必ず esc() を通す。
 
      同じ停留所に複数チームが並ぶと横位置が完全に重なるので、縦に積む。
-     自チームを必ず最下段（いちばん読みやすい位置）に置く。 */
+     自チームを必ず最下段（いちばん読みやすい位置）に置く。積める段数は帯の
+     高さ（48px、うち上段は停留所ラベル）で決まるので3段まで——研修開始直後は
+     全チームが同じ停留所にいるため、名前を全部並べようとすると帯の外へ溢れて
+     本編の画面を覆う。溢れた分は最上段の「＋N」にまとめ、何チームそこにいるかは
+     必ず読めるようにする（チーム名の一覧は会場前面のダッシュボードが持つ）。 */
   const MARK_STACK_STEP_PX = 13;
+  const MARK_MAX_ROWS = 3;
   // サーバの集計を一度でも受け取るまでは他チームを描かない。TEAMS の初期値に
   // 残っているダミー（A班・D班…）を実データのふりで見せないため。
   let summarySeen = false;
+
+  /* 両端の停留所だけ寄せ方を変える。既定の中心合わせ（.mark-t の
+     translateX(-50%)）のままだと、ラベルの半分が帯の外へ出る——Final に
+     着いたチームの名前が画面の右端で切れていた。ここはファシリテーターが
+     チーム名を読む場所なので、端では内側へ寄せる。 */
+  function placeMark(d, pos, level) {
+    const last = STOP_COUNT - 1;
+    d.style.left = (pos * (100 / last)) + "%";
+    if (level > 0) d.style.bottom = (level * MARK_STACK_STEP_PX) + "px";
+    d.style.transform = pos === 0 ? "translateX(0)"
+      : pos === last ? "translateX(-100%)"
+      : "translateX(-50%)";
+  }
 
   function drawMarks(targetId) {
     const el = $(targetId || "marks"); el.innerHTML = "";
@@ -3144,24 +3166,26 @@
     if (!me) return;
     // 実データが届いているときだけ他チームを混ぜる。自チームが先頭＝最下段。
     const shown = summarySeen ? [me].concat(TEAMS.filter((t) => t !== me && t.kind === "other")) : [me];
-    const last = STOP_COUNT - 1;
-    const stacked = {};   // pos ごとの積み上げ段数
-    shown.forEach((t) => {
-      const d = document.createElement("div");
-      d.className = "mark-t " + (t === me ? "me" : "other");
-      d.style.left = (t.pos * (100 / last)) + "%";
-      const level = stacked[t.pos] || 0;
-      stacked[t.pos] = level + 1;
-      if (level > 0) d.style.bottom = (level * MARK_STACK_STEP_PX) + "px";
-      // 両端の停留所だけ寄せ方を変える。既定の中心合わせ（.mark-t の
-      // translateX(-50%)）のままだと、ラベルの半分が帯の外へ出る——Final に
-      // 着いたチームの名前が画面の右端で切れていた。ここはファシリテーターが
-      // チーム名を読む場所なので、端では内側へ寄せる。
-      d.style.transform = t.pos === 0 ? "translateX(0)"
-        : t.pos === last ? "translateX(-100%)"
-        : "translateX(-50%)";
-      d.innerHTML = (t === me ? "◆" : "◇") + '<span class="nm">' + esc((t === me ? teamName : "") || t.nm || "") + "</span>";
-      el.appendChild(d);
+    const byPos = {};
+    shown.forEach((t) => { (byPos[t.pos] = byPos[t.pos] || []).push(t); });
+    Object.keys(byPos).forEach((key) => {
+      const list = byPos[key];
+      const pos = list[0].pos;
+      const overflow = list.length > MARK_MAX_ROWS ? list.length - (MARK_MAX_ROWS - 1) : 0;
+      (overflow ? list.slice(0, MARK_MAX_ROWS - 1) : list).forEach((t, level) => {
+        const d = document.createElement("div");
+        d.className = "mark-t " + (t === me ? "me" : "other");
+        placeMark(d, pos, level);
+        d.innerHTML = (t === me ? "◆" : "◇") +
+          '<span class="nm">' + esc((t === me ? teamName : "") || t.nm || "") + "</span>";
+        el.appendChild(d);
+      });
+      if (!overflow) return;
+      const more = document.createElement("div");
+      more.className = "mark-t other";
+      placeMark(more, pos, MARK_MAX_ROWS - 1);
+      more.innerHTML = '◇<span class="nm">ほか' + overflow + "チーム</span>";
+      el.appendChild(more);
     });
   }
   drawMarks();
@@ -3425,15 +3449,38 @@
     };
   }
 
-  /* 409 は2種類ある。どちらもサーバのmessageでしか区別できないので、罠の
-     文言（handleSaveCheckpoint の「発動済みの罠を…」）だけを見分ける。 */
-  function isTrapRegression(res) {
-    return !!(res.body && typeof res.body.message === "string" && res.body.message.indexOf("罠") >= 0);
+  /* 経過時計の表示だけを書き直す（setInterval の次のティックを待たない）。 */
+  function paintClock() {
+    $("clock").textContent =
+      String(Math.floor(elapsed / 60)).padStart(2, "0") + ":" + String(elapsed % 60).padStart(2, "0");
+  }
+
+  /* 保存を拒否された（409）ときに、サーバの方が進んでいる値をこちらへ取り込む。
+     罠の発動・経過時間・停留所はどれも後退させてはいけない値なので、大きい方を
+     採る。view（今どの画面か）は取り込まない——復帰ではなく進行中の拒否なので、
+     参加者が見ている画面を勝手に動かさない。
+
+     経過時間をサーバ側優先にするのは、devbar のジャンプや別タブで時計を0から
+     始め直してもレースの経過時間は巻き戻らない、という扱いにするため
+     （罰＝時間で払う設計で、時計のリセットが抜け道になるのを塞ぐ）。 */
+  function adoptServerState(server) {
+    if (!server) return;
+    if (server.trap && server.trap.s3Used) s3TrapUsed = true;
+    if (server.trap && server.trap.s4Used) s4TrapUsed = true;
+    if (typeof server.elapsedMs === "number" && server.elapsedMs > elapsed * 1000) {
+      elapsed = Math.round(server.elapsedMs / 1000);
+      paintClock();
+    }
+    if (typeof server.pos === "number" && server.pos > TEAMS[2].pos) {
+      TEAMS[2].pos = server.pos;
+      drawMarks();
+    }
   }
 
   async function postCheckpoint(body, retried) {
     if (!liveState) return;
     const teamCode = liveState.teamCode;
+    const sentRevision = liveState.checkpointRevision;
     const res = await liveFetch("/api/teams/" + teamCode + "/checkpoint", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
@@ -3452,26 +3499,28 @@
     // 409 以外（通信断・503・404）はそのまま諦める。次の保存でまた送られる。
     if (res.status !== 409 || retried) return;
 
-    // 同じPCで複数タブが開かれると revision がずれる。最新を取り直して、
-    // 同じ body を「もう一度だけ」送る（無限再送はしない）。
+    // 409 の理由は4種類（conflict／trap-regression／elapsed-regression／
+    // pos-regression）だが、サーバはどれも日本語のmessageでしか区別を返さない。
+    // 文言を読む代わりに revision で見分ける——最新を取り直したとき、送った
+    // expectedRevision とサーバの revision がずれていれば conflict（同じPCで
+    // 複数タブが開かれた等）、一致していれば「revisionは合っていたのに中身が
+    // 後退していた」＝3つの regression のいずれか、と構造で決まる。
     const latest = await liveFetch("/api/teams/" + teamCode + "/checkpoint", { method: "GET" }, LIVE_RESTORE_TIMEOUT_MS);
     if (!liveState || liveState.teamCode !== teamCode) return;
     if (!latest.ok || !latest.body) return;
-    liveState.checkpointRevision = latest.body.checkpoint ? latest.body.checkpoint.revision : 0;
-    if (isTrapRegression(res)) {
-      // 罠の後退は「こちらのフラグが遅れている」状態。企画書§6の「連続罰は
-      // 1回まで」はサーバ側が正なので、サーバの発動済みフラグを取り込んで
-      // 再送はしない——ここで諦めるだけだと、以後の保存も同じ理由で永久に
-      // 弾かれ続けるため、ゲーム側のフラグにも反映して追いつかせる。
-      const trap = latest.body.checkpoint ? latest.body.checkpoint.body.trap : null;
-      if (trap) {
-        liveState.checkpointTrap = trap;
-        if (trap.s3Used) s3TrapUsed = true;
-        if (trap.s4Used) s4TrapUsed = true;
-      }
+    const snapshot = latest.body.checkpoint;
+    const serverRevision = snapshot ? snapshot.revision : 0;
+    liveState.checkpointRevision = serverRevision;
+    liveState.checkpointTrap = snapshot ? snapshot.body.trap : null;
+    if (serverRevision !== sentRevision) {
+      // conflict。revision を合わせて、同じ body を「もう一度だけ」送る
+      // （無限再送はしない。commandId は毎回新規なので冪等台帳とも噛み合う）。
+      postCheckpoint(body, true);
       return;
     }
-    postCheckpoint(body, true);
+    // regression。サーバ値を採用して再送はしない——次の保存（ステージ遷移・
+    // 停留所の前進）が、取り込んだ値を含む新しい body で自然に送られる。
+    adoptServerState(snapshot ? snapshot.body : null);
   }
 
   /* 保存の入口。連続で呼ばれても最後の状態だけを送る（ステージ遷移では
@@ -7839,8 +7888,6 @@
   function resumeFromCheckpoint(snapshot, serverNow) {
     const body = snapshot.body;
     TEAMS[2].pos = body.pos;
-    s3TrapUsed = body.trap.s3Used;
-    s4TrapUsed = body.trap.s4Used;
 
     const savedAtMs = Date.parse(snapshot.savedAt);
     const serverNowMs = Date.parse(serverNow);
@@ -7856,9 +7903,14 @@
     go(body.view);
     if (wasS1) s1SkipBrief = false;
     startClock();   // go() が始めていなければここで（clockOn のガードで二重には動かない）
-    // 最初のティックまでの1秒を「--:--」で見せない。
-    $("clock").textContent =
-      String(Math.floor(elapsed / 60)).padStart(2, "0") + ":" + String(elapsed % 60).padStart(2, "0");
+    paintClock();   // 最初のティックまでの1秒を「--:--」で見せない
+
+    // 罠のフラグは go() の後で戻す。renderStage3()/renderStage4() が入場のたびに
+    // s3TrapUsed/s4TrapUsed を false へ戻すので、go() より前に立てても消える
+    // ——消えたままだと、復帰したチームだけ同じ罠をもう一度踏めてしまう
+    // （企画書§6「連続罰は1回まで」の抜け道になる）。
+    s3TrapUsed = body.trap.s3Used;
+    s4TrapUsed = body.trap.s4Used;
 
     // ⚠️ apps/worker/src/progress.ts の kind enum は entry/clear/jump しか受けず、
     // "resume" は現状400で弾かれる（fire-and-forgetなので進行には影響しない）。

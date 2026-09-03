@@ -110,6 +110,29 @@ JS 構造そのものは資産ではない。単一ファイル・フレーム�
   `F_REQUEST_TRIGGER`→`F_AI_REPLY` は削除済み）——トリガー不一致時と同じ既定応答
   「（このモックでは応答しません）」へ合流する。
 
+### LIVE時だけ動く3つの配線（2026-09-03追加）
+
+どれも `LIVE=true` かつ入室済み（`liveState` あり）のときだけ動き、失敗は握りつぶして進行を
+止めない。scripted時は1本も動かないので、`file://` 直開きの外部通信ゼロは変わらない。
+
+- **チェックポイント**（`saveCheckpoint()`／`postCheckpoint()`）。ステージ遷移（`go()` の末尾）・
+  罠の発動・停留所の前進のたびに、`view`・`pos`・経過時間・罠のフラグを
+  `POST /api/teams/:code/checkpoint` へ500msデバウンスで保存する。409はサーバの `revision` と
+  突き合わせて理由を判別し、競合なら同じbodyを1回だけ再送、後退（罠・経過時間・停留所）なら
+  サーバ値を採用して再送しない（`adoptServerState()`）。
+- **入室時の自動復帰**（`resumeFromCheckpoint()`）。`btn-enter` のLIVE経路で
+  `GET /api/teams/:code/checkpoint` を取り、保存済みのステージがあればそこへ戻す
+  ——進行台本 §5-1 の「ファシリテーターがdevbarで手動ジャンプして復帰させる」手順が要らなくなる。
+  戻る先はステージの先頭で、ステージ固有の状態（グリッドの中身・生成済みポスター）は復元しない。
+  経過時計はリロード中も止めず、`savedAt`→`serverNow` の実時間を加算する（レースなので、
+  リロードで時間を取り戻せる抜け道を作らない）。罠のフラグは `go()` の後に戻す
+  ——`renderStage3()`/`renderStage4()` が入場のたびにリセットするため。
+- **活動ログ**（`logActivity()`）と**全チームの帯**。提出・判定・罠・復帰を
+  `POST /api/teams/:code/activity` へ fire-and-forget で積み（Stage 4のPII罠と保健所提出だけは
+  本文を送らない）、`GET /api/progress/summary` を10秒ごとにポーリングして他チームの位置を
+  `TEAMS` へ流し込む（`syncTeamsFromSummary()`）。帯は自チームを最下段に、同じ停留所のチームを
+  3段まで縦に積み、溢れた分は「ほかNチーム」へまとめる（`drawMarks()`）。
+
 ## ステージごとのエントリ
 
 | ステージ | エントリ関数 | 状態 |
