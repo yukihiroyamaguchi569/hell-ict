@@ -1,4 +1,5 @@
 import { env } from "cloudflare:workers";
+import { createExecutionContext, waitOnExecutionContext } from "cloudflare:test";
 import {
   chatMessageResultSchema,
   chatSnapshotSchema,
@@ -17,7 +18,7 @@ import { collectMessages, postJson, session, upgrade } from "./support.js";
 const createThread = (teamCode: string, commandId: string, title: string): Promise<Response> =>
   postJson(`/api/teams/${teamCode}/chat/threads`, { type: "create-thread", commandId, title });
 
-const sendMessage = (
+const sendMessage = async (
   teamCode: string,
   command: {
     commandId: string;
@@ -26,16 +27,22 @@ const sendMessage = (
     promptProfile?: PromptProfile;
   },
   aiGateway: FakeAiGateway,
-): Promise<Response> =>
-  handleChatMessage(
+): Promise<Response> => {
+  // 活動ログは`waitUntil`へ逃がすため、自前のExecutionContextを渡して
+  // 書き込みの完了まで待てるようにする。
+  const ctx = createExecutionContext();
+  const response = await handleChatMessage(
     new Request(`https://example.test/api/teams/${teamCode}/chat/messages`, {
       method: "POST",
       body: JSON.stringify({ type: "send-message", ...command }),
     }),
-    env,
+    { env, ctx },
     teamCode,
     aiGateway,
   );
+  await waitOnExecutionContext(ctx);
+  return response;
+};
 
 type PromptProfileCase = {
   readonly label: string;
@@ -264,6 +271,7 @@ describe("P1C チャット骨格", () => {
     const refusalGateway: AiGateway = {
       complete: () => Promise.reject(new OpenAiRefusalError("対応できません")),
     };
+    const ctx = createExecutionContext();
     const response = await handleChatMessage(
       new Request("https://example.test/api/teams/400008/chat/messages", {
         method: "POST",
@@ -274,10 +282,11 @@ describe("P1C チャット骨格", () => {
           text: "本文",
         }),
       }),
-      env,
+      { env, ctx },
       "400008",
       refusalGateway,
     );
+    await waitOnExecutionContext(ctx);
     expect(response.status).toBe(422);
     const body = await response.json();
     expect(body).toMatchObject({ message: expect.stringContaining("対応できません") });
