@@ -117,9 +117,12 @@ JS 構造そのものは資産ではない。単一ファイル・フレーム�
 
 - **チェックポイント**（`saveCheckpoint()`／`postCheckpoint()`）。ステージ遷移（`go()` の末尾）・
   罠の発動・停留所の前進のたびに、`view`・`pos`・経過時間・罠のフラグを
-  `POST /api/teams/:code/checkpoint` へ500msデバウンスで保存する。**罠の発動だけはデバウンスせず
-  即時**（踏んだ0.5秒以内のリロードで罠が復活するのを防ぐ）。`pagehide`／`visibilitychange(hidden)`
-  で保留中の保存を `keepalive: true` の fetch で投げ切る。POSTは1本のPromiseチェーンで**直列化**し、
+  `POST /api/teams/:code/checkpoint` へ500msデバウンスで保存する。**罠の発動だけはデバウンスせず即時**。
+  離脱の取りこぼしは `checkpointDirty`（保存要求で立て、200応答で`expectedRevision`+1を採用した時点でだけ
+  下ろす）で追い、`pagehide`／`visibilitychange(hidden)` で dirty なら最新状態から組み直して
+  `keepalive: true` の fetch で投げ切る——**デバウンス待ちだけでなく、キュー待ち・送信中（fetchが返る前）の
+  リロードでも送る**。ここを取りこぼすと、罠を踏んだ直後にリロードしたチームだけ同じ罠をもう一度踏める。
+  POSTは1本のPromiseチェーンで**直列化**し、
   bodyは必ず送る直前の最新状態から組み直す（古いbodyが後から新しいrevisionで通ると状態が巻き戻る）。
   成功応答のrevisionは、送った`expectedRevision`+1と一致するときだけ採用する。409は応答の `code`
   （`conflict` / `trap-regression` / `elapsed-regression` / `pos-regression`）で分岐し、
