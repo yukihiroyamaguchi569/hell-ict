@@ -3869,16 +3869,23 @@
      同じ commandId を再利用しなければならない——送信のたびに crypto.randomUUID()
      で振り直していたため、20秒タイムアウト後の再送が別コマンドとして通り、
      ユーザーメッセージの二重保存とOpenAIの二重呼び出しを起こしていた
-     （2026-08-22 修正）。キーは送信テキスト——同じ文面を送り直したときだけIDを
-     再利用し、別の文面を送ったら新しい試行として扱う。
+     （2026-08-22 修正）。
+
+     キーは threadId・promptProfile・本文の3つを繋いだもの。本文だけを見ていた頃は、
+     別スレッド（Stage 2 のタブと Stage 3 のタブ）や別ステージ（promptProfile が
+     "default" と "s3"）へ同じ文面を送ると同じ commandId が再利用され、2通目が
+     「処理済みの再送」と見なされて片方が消えていた。同じ宛先へ同じ文面を送り直した
+     ときだけIDを再利用する、が正しい単位。
+
      送信経路ごとに1枠ずつ持つ（AIチャットの sendAiLive と Stage 1 の s1DraftLive）
      ——どちらも同じメインスレッドへ書き込むが、進行中の試行は経路ごとに独立で、
      片方の成功でもう片方のIDを捨ててはいけない。 */
   function makePendingCommand() {
     let pending = null;
     return {
-      idFor(text) {
-        if (pending === null || pending.text !== text) pending = { text, commandId: crypto.randomUUID() };
+      idFor(threadId, promptProfile, text) {
+        const key = threadId + " " + promptProfile + " " + text;
+        if (pending === null || pending.key !== key) pending = { key, commandId: crypto.randomUUID() };
         return pending.commandId;
       },
       clear() { pending = null; }
@@ -3923,16 +3930,18 @@
   async function sendAiLive(text) {
     aiSending = true;
     $("ai-send").disabled = true;
+    // 再送用IDのキーにも入るので、送信本文と同じ一箇所から決める。
+    const chatProfile = view === "s3" ? "s3" : "default";
     const placeholder = aiPlaceholderBubble();
     const res = await liveFetch("/api/teams/" + liveState.teamCode + "/chat/messages", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
         type: "send-message",
-        commandId: chatSendCommand.idFor(text),
+        commandId: chatSendCommand.idFor(liveState.activeThreadId, chatProfile, text),
         threadId: liveState.activeThreadId,
         text,
-        promptProfile: view === "s3" ? "s3" : "default",
+        promptProfile: chatProfile,
       }),
     });
     aiSending = false;
@@ -4918,7 +4927,7 @@
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
         type: "send-message",
-        commandId: s1DraftCommand.idFor(text),
+        commandId: s1DraftCommand.idFor(liveState.activeThreadId, "s1", text),
         threadId: liveState.activeThreadId,
         text,
         promptProfile: "s1",
