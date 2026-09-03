@@ -77,7 +77,35 @@ const INSERT_SQL = `INSERT OR IGNORE INTO activity_events
 /** 省略された列は空文字で埋める。列ごとに`??`を並べると複雑度上限に触れるため関数へ寄せる。 */
 const orEmpty = (value: string | undefined): string => value ?? "";
 
-const insertActivity = async (env: Env, event: ActivityEvent): Promise<void> => {
+/**
+ * 保存直前のPIIゲート。textだけでなくmetaも検査する——metaはクライアントが任意の
+ * JSONを送れるうえ、サーバが作るmetaにも利用者入力（スレッドのtitle）が混ざるため、
+ * textだけ見ていてはD1へPIIを残さない保証が破れる。
+ *
+ * metaは一致したキーだけ削るのではなく、丸ごと`{ piiRedacted: true }`へ置き換える。
+ * PIIがどのキーに入るか事前に決められない以上、全部捨てる方が単純で漏れがない。
+ * metaは分析の補助情報であり、失っても「いつ何が起きたか」の時系列は残る。
+ *
+ * textとmetaは独立に判定する。metaにPIIが混ざったことを理由にtextまで捨てると、
+ * 較正の主材料である本文を不必要に失うため。
+ */
+const redactPii = (event: ActivityEvent): ActivityEvent => {
+  const textHit = detectPii(orEmpty(event.text)) !== null;
+  const metaHit = detectPii(JSON.stringify(event.meta ?? {})) !== null;
+  if (!textHit && !metaHit) return event;
+  return {
+    ...event,
+    text: textHit ? "" : event.text,
+    meta: metaHit ? { piiRedacted: true } : { ...event.meta, piiRedacted: true },
+  };
+};
+
+/**
+ * 全ての書き込みがここを通る。redactPiiをこの一点へ置くことで、呼び出し側が
+ * ゲートを掛け忘れてもPIIがD1へ残らない。
+ */
+const insertActivity = async (env: Env, input: ActivityEvent): Promise<void> => {
+  const event = redactPii(input);
   await ensureActivitySchema(env.PROGRESS_DB);
   await env.PROGRESS_DB.prepare(INSERT_SQL)
     .bind(
@@ -146,30 +174,6 @@ const clientActivitySchema = z.object({
   clientAt: z.string().max(64),
 });
 
-type ClientActivity = z.infer<typeof clientActivitySchema>;
-
-/**
- * PIIを含む本文はD1にも残さない（企画書§7の「外部へ出す前に止める」と同じ理由で、
- * 保存先が自前のD1でも残さない）。ただし記録ごと捨てると「何が起きたか」の時系列が
- * 欠ける。本文だけ空にして、metaへ`piiRedacted`を立ててイベントは残す。
- *
- * クライアントの提出物と、サーバが書くチャット行（ユーザー本文だけでなくAI応答も）の
- * 両方がここを通る。AI応答にPIIが混ざる経路は現に想定しており（blockHistoryPii）、
- * 外部送信を止めるのと同じくD1にも残さない。
- */
-export const redactPiiText = (
-  text: string | undefined,
-  meta: Record<string, unknown>,
-): Pick<ActivityEvent, "text" | "meta"> =>
-  text !== undefined && detectPii(text) !== null
-    ? { text: "", meta: { ...meta, piiRedacted: true } }
-    : { text, meta };
-
-const redactPii = (activity: ClientActivity): Omit<ActivityEvent, "teamCode"> => ({
-  ...activity,
-  ...redactPiiText(activity.text, { ...activity.meta }),
-});
-
 export const handleActivityPost = async (
   request: Request,
   env: Env,
@@ -181,7 +185,7 @@ export const handleActivityPost = async (
   if (parsed === null || !parsed.success) return error("活動ログの形式が不正です。", 400);
 
   try {
-    await insertActivity(env, { ...redactPii(parsed.data), teamCode });
+    await insertActivity(env, { ...parsed.data, teamCode });
     return json({ ok: true });
   } catch {
     return error("活動ログの記録に失敗しました。", 503);
