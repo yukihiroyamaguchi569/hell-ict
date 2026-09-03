@@ -45,7 +45,7 @@ type StoredThreadCommand = { result: string };
 type StoredMessageCommand = { result: string };
 type StoredPendingMessage = { thread_id: string; claimed_at: string | null };
 type StoredCheckpointState = { snapshot: string };
-type StoredCheckpointCommand = { revision: number };
+type StoredCheckpointCommand = { revision: SqlStorageValue };
 type ConflictReply = { conflict: true };
 type UnknownThreadReply = { unknownThread: true };
 
@@ -426,7 +426,14 @@ export class TeamRoom extends DurableObject<Env> {
         )
         .toArray()[0] ?? null;
     const current = this.readCheckpoint();
-    if (saved !== null) return this.replayCheckpoint(current, saved.revision);
+    // 台帳の行も検証してから使う。壊れた行を「台帳に無い」と読み替えると、適用済みの
+    // commandIdが未処理に見えて古いbodyを再適用してしまう。不整合は黙って通さず、
+    // 例外にしてWorkerの503（時間を置いて再試行）へ倒す。
+    if (saved !== null)
+      return this.replayCheckpoint(
+        current,
+        checkpointSnapshotSchema.shape.revision.parse(saved.revision),
+      );
 
     const applied = applyCheckpoint(current, command, { teamCode, now });
     if (!applied.ok) return { rejected: applied.reason };

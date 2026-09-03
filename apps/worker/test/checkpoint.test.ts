@@ -451,6 +451,27 @@ describe("チェックポイントAPI", () => {
     await expect(load(teamCode)).resolves.toMatchObject({ checkpoint: snapshot });
   });
 
+  it("台帳の行が壊れていたら503で止め、再適用も状態変更もしない", async () => {
+    const teamCode = "500026";
+    const commandId = id("132");
+    await save(teamCode, { commandId, expectedRevision: 0, body: { pos: 3 } });
+
+    await runInDurableObject(env.TEAM_ROOM.getByName(teamCode), (_instance, state) => {
+      state.storage.sql.exec(
+        "UPDATE processed_checkpoint_commands SET revision = ? WHERE command_id = ?",
+        "broken",
+        commandId,
+      );
+    });
+
+    const response = await save(teamCode, { commandId, expectedRevision: 0, body: { pos: 3 } });
+
+    expect(response.status).toBe(503);
+    await expect(load(teamCode)).resolves.toMatchObject({
+      checkpoint: { revision: 1, body: { pos: 3 } },
+    });
+  });
+
   it("チームごとにチェックポイントが分離される", async () => {
     await save("500011", { commandId: id("112"), expectedRevision: 0, body: { pos: 1 } });
     await save("500012", { commandId: id("113"), expectedRevision: 0, body: { pos: 6 } });
