@@ -278,6 +278,21 @@ describe("活動ログ", () => {
       expect(metaOf(threadRows[0])).toEqual({ title: "Stage 3" });
     });
 
+    // metaにはサーバ生成のものでも利用者入力が混ざる（スレッドのtitleがそれ）。
+    // textだけ見ていては塞げない口なので、meta側でも落ちることを固定する。
+    it("PIIを含むスレッドtitleは、thread.createのmetaごと捨てられる", async () => {
+      const teamCode = "500009";
+      await session(teamCode);
+      await createThread(teamCode, "00000000-0000-4000-8000-000000000901", "渡辺 三郎さんの件");
+
+      const threadRows = (await rows()).filter((row) => row.kind === "thread.create");
+      expect(threadRows).toHaveLength(1);
+      expect(metaOf(threadRows[0])).toEqual({ piiRedacted: true });
+      // titleを捨てても、いつスレッドが増えたかは追える。
+      expect(threadRows[0]?.threadId).not.toBe("");
+      expect(threadRows[0]?.text).toBe("");
+    });
+
     // 記録はゲーム進行より優先度が低い。テーブルが消えていても応答は成功のままであること
     // （ログのためにチャットを落とさない）を、実際にDROPして確かめる。
     it("D1への書き込みが失敗しても、チャットの応答は成功のまま", async () => {
@@ -347,6 +362,28 @@ describe("活動ログ", () => {
       expect(stored).toHaveLength(1);
       expect(stored[0]?.text).toBe("");
       expect(metaOf(stored[0])).toEqual({ verdict: "pass", score: 82, piiRedacted: true });
+    });
+
+    // クライアントは任意のmetaを送れる。textが綺麗でもmetaへPIIを詰められるので、
+    // metaだけが反応したケースを独立に固定する。
+    it("metaにPIIが混ざると、metaは丸ごと捨てられるがtextは残る", async () => {
+      const response = await postJson(
+        "/api/teams/500108/activity",
+        activity({
+          kind: "submit.s4",
+          view: "s4",
+          text: "匿名化した一覧を提出します",
+          meta: { verdict: "fail", contact: "090-1234-5678" },
+        }),
+      );
+      expect(response.status).toBe(200);
+
+      const stored = await rows();
+      expect(stored).toHaveLength(1);
+      // 一致したキーだけでなくmeta全体を置き換える（どのキーに入るか決められないため）。
+      expect(metaOf(stored[0])).toEqual({ piiRedacted: true });
+      // metaが理由でtextまで捨てない。
+      expect(stored[0]?.text).toBe("匿名化した一覧を提出します");
     });
 
     it.each([

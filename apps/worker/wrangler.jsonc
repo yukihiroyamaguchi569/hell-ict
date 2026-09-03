@@ -7,11 +7,13 @@
   "vars": {
     "OPENAI_BASE_URL": "https://api.openai.com/v1",
     "OPENAI_MODEL": "gpt-4o",
-    // 活動ログ（activity_events.event_id）へ書く開催回の識別子。
-    // 本番はデプロイ前にこの値を開催回へ書き換え、`wrangler types` を流し直す
-    // （生成される型はこの文字列リテラルなので、書き換えるとCIのtypecheckが落ちる）。
-    "EVENT_ID": "dev",
   },
+  // 活動ログ（activity_events.event_id）へ書く開催回の識別子EVENT_IDは、秘匿情報では
+  // ないがここ（`vars`）には置かず、`wrangler secret put EVENT_ID` で与える。
+  // `vars`に書くと`wrangler types`が生成する型が値そのものの文字列リテラルになり、
+  // 開催回ごとに値を変えるたびに worker-configuration.d.ts の再生成とcommitを
+  // 忘れるとCIのtypecheckが落ちる。型生成から切り離すのが目的である。
+  // ローカル開発とテストは apps/worker/.dev.vars へ `EVENT_ID=dev` と書けば入る。
   // テストプレイ用の静的配信。/api/* は必ずWorkerへ届かせ、それ以外の
   // パスだけAssetsから返す（scripts/build-testplay.shが生成するpublic/を配信対象とする）。
   "assets": {
