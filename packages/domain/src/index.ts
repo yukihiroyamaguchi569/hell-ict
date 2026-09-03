@@ -47,7 +47,9 @@ export type { ChatMutationResult } from "./chat.js";
 export {
   CHECKPOINT_DATA_MAX_BYTES,
   CHECKPOINT_DATA_TOO_LARGE_MESSAGE,
+  CHECKPOINT_REJECTION_REASONS,
   checkpointBodySchema,
+  checkpointRejectionReasonSchema,
   checkpointSnapshotSchema,
   checkpointStateSchema,
   checkpointTrapSchema,
@@ -56,6 +58,7 @@ export {
 } from "./schemas/checkpoint.js";
 export type {
   CheckpointBody,
+  CheckpointRejectionReason,
   CheckpointSnapshot,
   CheckpointState,
   CheckpointTrap,
@@ -63,7 +66,7 @@ export type {
   SaveCheckpointResult,
 } from "./schemas/checkpoint.js";
 export { applyCheckpoint } from "./checkpoint.js";
-export type { CheckpointRejectionReason, CheckpointResult } from "./checkpoint.js";
+export type { CheckpointResult } from "./checkpoint.js";
 export {
   openAiChatCompletionSchema,
   parseOpenAiChatCompletion,

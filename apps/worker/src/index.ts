@@ -231,7 +231,9 @@ export const handleSaveCheckpoint = async (
       parsed.data,
       nowIso,
     );
-    if ("rejected" in result) return error(CHECKPOINT_REJECTION_MESSAGES[result.rejected], 409);
+    // 拒否理由はcodeにも載せる。クライアントは日本語文言ではなくこの値で分岐する。
+    if ("rejected" in result)
+      return error(CHECKPOINT_REJECTION_MESSAGES[result.rejected], 409, result.rejected);
     return json(saveCheckpointResultSchema.parse({ snapshot: result }));
   } catch {
     return error("チェックポイントの保存に失敗しました。時間を置いて再試行してください。", 503);

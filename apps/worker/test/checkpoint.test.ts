@@ -126,6 +126,7 @@ describe("チェックポイントAPI", () => {
     });
 
     expect(conflict.status).toBe(409);
+    expect(httpErrorSchema.parse(await conflict.json()).code).toBe("conflict");
     const state = await load("500005");
     expect(state.checkpoint?.revision).toBe(1);
     expect(state.checkpoint?.body.pos).toBe(2);
@@ -169,8 +170,9 @@ describe("チェックポイントAPI", () => {
     });
 
     expect(regression.status).toBe(409);
-    const message = httpErrorSchema.parse(await regression.json()).message;
-    expect(message).toContain("罠");
+    const rejected = httpErrorSchema.parse(await regression.json());
+    expect(rejected.message).toContain("罠");
+    expect(rejected.code).toBe("trap-regression");
     const state = await load("500006");
     expect(state.checkpoint?.revision).toBe(1);
     expect(state.checkpoint?.body.trap).toEqual({ s3Used: true, s4Used: false });
@@ -191,7 +193,9 @@ describe("チェックポイントAPI", () => {
     });
 
     expect(regression.status).toBe(409);
-    expect(httpErrorSchema.parse(await regression.json()).message).toContain("経過時間");
+    const rejected = httpErrorSchema.parse(await regression.json());
+    expect(rejected.message).toContain("経過時間");
+    expect(rejected.code).toBe("elapsed-regression");
     const state = await load("500017");
     expect(state.checkpoint).toMatchObject({ revision: 1, body: { elapsedMs: 60_000, pos: 2 } });
   });
@@ -206,7 +210,9 @@ describe("チェックポイントAPI", () => {
     });
 
     expect(regression.status).toBe(409);
-    expect(httpErrorSchema.parse(await regression.json()).message).toContain("進行位置");
+    const rejected = httpErrorSchema.parse(await regression.json());
+    expect(rejected.message).toContain("進行位置");
+    expect(rejected.code).toBe("pos-regression");
     const state = await load("500019");
     expect(state.checkpoint).toMatchObject({ revision: 1, body: { pos: 4, elapsedMs: 60_000 } });
   });
@@ -343,6 +349,7 @@ describe("チェックポイントAPI", () => {
     // 溢れた最古のcommandIdは台帳に無いので、通常の競合として扱われる。
     const evicted = await save(teamCode, { commandId: commandIds[0], expectedRevision: 0 });
     expect(evicted.status).toBe(409);
+    expect(httpErrorSchema.parse(await evicted.json()).code).toBe("conflict");
 
     // 直近のcommandIdは台帳に残っており、再送しても状態を進めず同じsnapshotを返す。
     const kept = await save(teamCode, { commandId: commandIds[20], expectedRevision: 20 });
