@@ -24,27 +24,77 @@ export const errorWithHeaders = (
 /** 本文が上限を超えたときにparseJsonが投げる。413へ変換するため他の失敗と区別する。 */
 export class PayloadTooLargeError extends Error {}
 
-const bodyEncoder = new TextEncoder();
+/**
+ * 上限を明示しないPOSTルート（session・commands・chat/threads・chat/messages・
+ * progress）へ一律で掛かる既定値。チャット本文はschemaで4,000文字までなので、
+ * UTF-8最大4バイト換算でも16KBに収まる。32KBはその倍で、正当な本文を巻き込まずに
+ * 「本文で殴る」経路だけを止められる大きさとして採る。
+ */
+export const DEFAULT_BODY_MAX_BYTES = 32 * 1024;
+
+const bodyDecoder = new TextDecoder();
 
 /**
- * `maxBytes`を渡すと、本文をJSONへ展開する前にバイト数で弾く——巨大なJSONを
- * request.json()へ通すと、上限を検証する前に展開だけでメモリを食う。
+ * 本文を上限までチャンク読みし、超えた時点で読むのをやめる。
  *
- * Content-Lengthがあればそれを見て、読む前に打ち切る。ヘッダは偽装できる（chunked
- * 転送では付かない）ので、テキストとして読んだ実バイト数でも必ず測り直す。
+ * `request.text()`は全量をメモリへ展開してから長さを返すので、読み切った後に
+ * バイト数を測っても手遅れである（Content-Lengthを申告しないchunked転送では、
+ * 上限がメモリ消費を何も制限していなかった）。ここでは超過を検知した瞬間に
+ * `reader.cancel()`して送信元へ打ち切りを伝え、保持するのは上限＋最後の1チャンク
+ * までに抑える。
+ */
+const readBodyText = async (request: Request, maxBytes: number): Promise<string> => {
+  const body = request.body;
+  if (body === null) return "";
+  const reader = body.getReader();
+  const chunks: Uint8Array[] = [];
+  let total = 0;
+  try {
+    for (;;) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      total += value.byteLength;
+      if (total > maxBytes) throw new PayloadTooLargeError();
+      chunks.push(value);
+    }
+  } finally {
+    // 打ち切りでも読み切りでも必ず解放する。読み切り後のcancelは無害。
+    await reader.cancel().catch(() => undefined);
+  }
+  const merged = new Uint8Array(total);
+  let offset = 0;
+  for (const chunk of chunks) {
+    merged.set(chunk, offset);
+    offset += chunk.byteLength;
+  }
+  return bodyDecoder.decode(merged);
+};
+
+/**
+ * 本文をJSONへ展開する前にバイト数で弾く。`maxBytes`を省略した呼び出しにも
+ * DEFAULT_BODY_MAX_BYTESが掛かる——上限の指定漏れが「無制限」を意味しないようにする。
+ *
+ * Content-Lengthがあればそれを見て、1バイトも読まずに打ち切る。ヘッダは偽装できる
+ * （chunked転送では付かない）ので、実際に読んだバイト数でも必ず測り直す。
  * どちらの経路でも、上限を超えた文字列がJSON.parseへ渡ることはない。
  *
- * 上限を渡さない既存の呼び出しは、これまでどおりrequest.json()へ素通しする。
- * 現在の呼び出し側はチェックポイント保存（96KB）と活動ログ（64KB）。
+ * 上限を明示している呼び出しは活動ログ（64KB）とチェックポイント保存（96KB）。
  */
-export const parseJson = async (request: Request, maxBytes?: number): Promise<unknown> => {
-  if (maxBytes === undefined) return request.json();
+export const parseJson = async (
+  request: Request,
+  maxBytes: number = DEFAULT_BODY_MAX_BYTES,
+): Promise<unknown> => {
   const declared = Number(request.headers.get("Content-Length"));
   if (Number.isFinite(declared) && declared > maxBytes) throw new PayloadTooLargeError();
-  const body = await request.text();
-  if (bodyEncoder.encode(body).length > maxBytes) throw new PayloadTooLargeError();
-  return JSON.parse(body) as unknown;
+  return JSON.parse(await readBodyText(request, maxBytes)) as unknown;
 };
+
+/** parseJsonの失敗を、大きすぎる（413）と壊れている（400）へ振り分ける。 */
+export const bodyErrorResponse = (caught: unknown, invalidMessage: string): Response =>
+  caught instanceof PayloadTooLargeError
+    ? error("リクエスト本文が大きすぎます。", 413)
+    : error(invalidMessage, 400);
+
 export const isWebSocketRequest = (request: Request): boolean =>
   request.headers.get("Upgrade")?.toLowerCase() === "websocket";
 

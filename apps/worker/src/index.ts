@@ -34,6 +34,7 @@ import {
 } from "./guard.js";
 import type { CorsHeaders } from "./guard.js";
 import {
+  bodyErrorResponse,
   error,
   errorWithHeaders,
   isWebSocketRequest,
@@ -63,8 +64,8 @@ const handleSession = async (request: Request, env: Env): Promise<Response> => {
         ? input.teamCode
         : undefined,
     );
-  } catch {
-    return error("teamCodeはASCII数字6桁で指定してください。", 400);
+  } catch (caught) {
+    return bodyErrorResponse(caught, "teamCodeはASCII数字6桁で指定してください。");
   }
   // 入室コードは本文にあるため入口ガードでは見られない。DOへ触れる直前でここだけ当てる
   // （未登録コードのチーム状態を作らせない）。応答は存在を明かさない404に揃える。
@@ -84,8 +85,8 @@ const handleCommand = async (request: Request, env: Env, teamCode: TeamCode): Pr
   let command: TeamCommand;
   try {
     command = teamCommandSchema.parse(await parseJson(request));
-  } catch {
-    return error("commandの形式が不正です。", 400);
+  } catch (caught) {
+    return bodyErrorResponse(caught, "commandの形式が不正です。");
   }
   try {
     const result = await env.TEAM_ROOM.getByName(teamCode).command(teamCode, command);
@@ -108,8 +109,8 @@ export const handleCreateThread = async (
   let command: CreateThreadCommand;
   try {
     command = createThreadCommandSchema.parse(await parseJson(request));
-  } catch {
-    return error("commandの形式が不正です。", 400);
+  } catch (caught) {
+    return bodyErrorResponse(caught, "commandの形式が不正です。");
   }
   try {
     const result = await scope.env.TEAM_ROOM.getByName(teamCode).createThread(teamCode, command);
@@ -290,8 +291,8 @@ export const handleChatMessage = async (
   let command: SendMessageCommand;
   try {
     command = sendMessageCommandSchema.parse(await parseJson(request));
-  } catch {
-    return error("commandの形式が不正です。", 400);
+  } catch (caught) {
+    return bodyErrorResponse(caught, "commandの形式が不正です。");
   }
 
   // 送信前PIIゲート（企画書§7）。DO・AiGatewayのどちらにも触れる前に止める——

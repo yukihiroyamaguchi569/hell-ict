@@ -1,7 +1,7 @@
 import { z } from "zod";
 
 import { isTeamCodeAllowed, parseTeamCodes } from "./guard.js";
-import { error, json, parseJson } from "./http.js";
+import { bodyErrorResponse, error, json, parseJson } from "./http.js";
 
 /**
  * テストプレイ当日の進捗記録。参加者のブラウザから位置イベントをD1へ積み、
@@ -124,10 +124,14 @@ ORDER BY id DESC
 LIMIT 20`;
 
 export const handleProgressPost = async (request: Request, env: Env): Promise<Response> => {
-  const parsed = await parseJson(request)
-    .then((body) => progressEventSchema.safeParse(body))
-    .catch(() => null);
-  if (parsed === null || !parsed.success) return error("進捗イベントの形式が不正です。", 400);
+  // 本文の読み取り失敗（大きすぎる／壊れている）と、schema違反を区別して返す。
+  const read = await parseJson(request).then(
+    (body) => ({ ok: true as const, body }),
+    (caught: unknown) => ({ ok: false as const, caught }),
+  );
+  if (!read.ok) return bodyErrorResponse(read.caught, "進捗イベントの形式が不正です。");
+  const parsed = progressEventSchema.safeParse(read.body);
+  if (!parsed.success) return error("進捗イベントの形式が不正です。", 400);
 
   const event = parsed.data;
   // チームコードは本文にあるため入口ガードでは見られない。D1へ書く前にここで当てる
