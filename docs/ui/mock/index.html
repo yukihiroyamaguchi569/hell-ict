@@ -500,6 +500,11 @@
 }
 .mark-t.me { color: var(--accent); font-weight: 700; font-size: 14px; }
 .mark-t.lead { color: var(--fg); }
+/* 他チーム（LIVE時のみ・GET /api/progress/summary 由来）。自チームより一段
+   小さく淡くして、どれが自分かを一目で分かるようにする。同じ停留所に並ぶと
+   drawMarks() が bottom を段積みするので、帯の外へはみ出さない高さに抑える。 */
+.mark-t.other { color: var(--fg-muted); font-size: 11px; opacity: .85; }
+.mark-t.other .nm { font-size: 11px; }
 .mark-t .nm { font-family: var(--font-ui); font-size: 12px; }
 
 /* --- 院内連絡先：浮く別ウィンドウ（AIと同じ吹き出しを共用しない） ------
@@ -3094,11 +3099,13 @@
   $("code").addEventListener("input", prefillTeamName);
   prefillTeamName();
 
-  /* リーダーボードの位置。📌 表示は自チームのみ（2026-08-22 ユーザー決定。
-     理由は drawMarks() のコメント）——kind:"other"/"lead" の行はもう画面に
-     出ない。TEAMS[2]（kind:"me"）の pos だけが各ステージから更新され、帯に
-     反映される。配列の形を変えないのは、TEAMS[2].pos を進める既存の散在箇所を
-     そのまま動かし続けるため。nm:"B班" は未入室・devbar 直行時のプレースホルダ。 */
+  /* リーダーボードの位置。TEAMS[2]（kind:"me"）が自チームで、pos は各ステージ
+     から更新される。配列の先頭付近の形を変えないのは、TEAMS[2].pos を進める
+     既存の散在箇所をそのまま動かし続けるため。nm:"B班" は未入室・devbar
+     直行時のプレースホルダ。
+     kind:"other" の行は LIVE 時に GET /api/progress/summary の結果で丸ごと
+     入れ替わる（syncTeamsFromSummary）。scripted 時は初期値のまま残るが、
+     drawMarks() が自チームだけを描くので画面には出ない。 */
   /* 停留所の数（Prologue/S1/S2/S3/S4/S5/S6/Final）。2026-08-22 の表示番号
      振り直しで旧 Stage 3.5 が Stage 4 として独立し、7→8 へ増えた。マーカーの左位置は
      pos ÷ (STOP_COUNT - 1) で決まる——帯のラベル（.board .stops）は
@@ -3110,40 +3117,95 @@
     { pos: 2, kind: "other" }, { pos: 3, kind: "lead", nm: "D班" },
     { pos: 1, kind: "other" }
   ];
-  /* 帯に描くのは自チームのマーカー1つだけ（2026-08-22 ユーザー決定）。
-     ダミーの他班（A班・D班…）を並べていた頃は、入室時にチーム自身が入力した
-     名前がヘッダーのチップと感謝状には出るのに、帯だけが作り話の並びを見せて
-     いた——同じ画面で名前が食い違うくらいなら、正直に自分の位置だけを出す。
-     他チームのライブ表示は本実装の宿題（全体用 Durable Object から配信・
-     企画書§7）で、モックでは持たない。
+  /* 帯に描くマーカー。
 
-     TEAMS 自体は残してある——各ステージが TEAMS[2].pos を進める既存の散在箇所
-     （設計負債・10箇所超）をそのまま活かすための位置の記録係で、kind:"other"/
-     "lead" の行はもう描画に使われない。
+     2026-08-22 は「自チームの1つだけ」に絞っていた——ダミーの他班（A班・D班…）
+     を並べていた頃は、チーム自身が入力した名前がヘッダーのチップと感謝状には
+     出るのに、帯だけが作り話の並びを見せていたためで、作り話をやめるための
+     決定だった。LIVE 時は他チームの位置が GET /api/progress/summary から実データ
+     として取れるようになったので（syncTeamsFromSummary）、作り話ではなくなった
+     この条件では全チームを描く。scripted 時（file:// 直開き・外部通信ゼロ）は
+     実データが無いので、従来どおり自チームだけを描く。
 
      ラベルは入室時のチーム名。未入室・devbar 直行時は TEAMS[2].nm（既定の
      プレースホルダ）へ落とす——感謝状（fShowHandover）と同じ流儀。名前は
-     チーム自身の入力なので必ず esc() を通す。 */
+     チーム自身（他チームの場合は他人）の入力なので必ず esc() を通す。
+
+     同じ停留所に複数チームが並ぶと横位置が完全に重なるので、縦に積む。
+     自チームを必ず最下段（いちばん読みやすい位置）に置く。 */
+  const MARK_STACK_STEP_PX = 13;
+  // サーバの集計を一度でも受け取るまでは他チームを描かない。TEAMS の初期値に
+  // 残っているダミー（A班・D班…）を実データのふりで見せないため。
+  let summarySeen = false;
+
   function drawMarks(targetId) {
     const el = $(targetId || "marks"); el.innerHTML = "";
     const me = TEAMS.find((t) => t.kind === "me");
     if (!me) return;
-    const d = document.createElement("div");
-    d.className = "mark-t me";
-    // 横に散らす計算はもう要らない（1つしか置かないので重なりようがない）。
+    // 実データが届いているときだけ他チームを混ぜる。自チームが先頭＝最下段。
+    const shown = summarySeen ? [me].concat(TEAMS.filter((t) => t !== me && t.kind === "other")) : [me];
     const last = STOP_COUNT - 1;
-    d.style.left = (me.pos * (100 / last)) + "%";
-    // 両端の停留所だけ寄せ方を変える。既定の中心合わせ（.mark-t の
-    // translateX(-50%)）のままだと、ラベルの半分が帯の外へ出る——Final に
-    // 着いたチームの名前が画面の右端で切れていた。ここはファシリテーターが
-    // チーム名を読む場所なので、端では内側へ寄せる。
-    d.style.transform = me.pos === 0 ? "translateX(0)"
-      : me.pos === last ? "translateX(-100%)"
-      : "translateX(-50%)";
-    d.innerHTML = "◆" + '<span class="nm">' + esc(teamName || me.nm) + "</span>";
-    el.appendChild(d);
+    const stacked = {};   // pos ごとの積み上げ段数
+    shown.forEach((t) => {
+      const d = document.createElement("div");
+      d.className = "mark-t " + (t === me ? "me" : "other");
+      d.style.left = (t.pos * (100 / last)) + "%";
+      const level = stacked[t.pos] || 0;
+      stacked[t.pos] = level + 1;
+      if (level > 0) d.style.bottom = (level * MARK_STACK_STEP_PX) + "px";
+      // 両端の停留所だけ寄せ方を変える。既定の中心合わせ（.mark-t の
+      // translateX(-50%)）のままだと、ラベルの半分が帯の外へ出る——Final に
+      // 着いたチームの名前が画面の右端で切れていた。ここはファシリテーターが
+      // チーム名を読む場所なので、端では内側へ寄せる。
+      d.style.transform = t.pos === 0 ? "translateX(0)"
+        : t.pos === last ? "translateX(-100%)"
+        : "translateX(-50%)";
+      d.innerHTML = (t === me ? "◆" : "◇") + '<span class="nm">' + esc((t === me ? teamName : "") || t.nm || "") + "</span>";
+      el.appendChild(d);
+    });
   }
   drawMarks();
+
+  /* ------------------------------------------------------------------ */
+  /* 全チームの帯（LIVE時のみ）                                          */
+  /*                                                                    */
+  /* 会場前面のダッシュボード（apps/worker/dashboard/index.html）と同じ    */
+  /* GET /api/progress/summary をポーリングし、自チーム以外を TEAMS へ    */
+  /* 流し込む。失敗は握りつぶす——帯が更新されないだけで進行は止めない。   */
+  /* ------------------------------------------------------------------ */
+  const SUMMARY_POLL_MS = 10000;
+
+  /* teams[] は apps/worker/src/progress.ts の teamRowSchema（teamCode /
+     teamName / pos / updatedAt）。自チームの行は捨てる——自前の TEAMS[2] が
+     正で、サーバの集計はこちらの pos より1拍遅れることがある。
+
+     📌 自チームは TEAMS[2] に固定したまま入れ替える。各ステージが
+     TEAMS[2].pos を直接書く既存の散在箇所（設計負債・10箇所超）が index に
+     依存しているため、席をずらすとそこが全部壊れる。空席は kind:"empty" で
+     埋める（drawMarks は kind:"other" しか描かない）。 */
+  function syncTeamsFromSummary(rows) {
+    const myCode = liveState ? liveState.teamCode : null;
+    const others = rows
+      .filter((r) => r && typeof r.pos === "number" && r.teamCode !== myCode)
+      .map((r) => ({ pos: r.pos, kind: "other", nm: String(r.teamName || "").slice(0, 24) || "（無名）" }));
+    const next = [
+      others[0] || { pos: 0, kind: "empty" },
+      others[1] || { pos: 0, kind: "empty" },
+      TEAMS[2],
+    ].concat(others.slice(2));
+    TEAMS.length = 0;
+    next.forEach((t) => TEAMS.push(t));
+    summarySeen = true;
+    drawMarks();
+  }
+
+  async function pollSummary() {
+    if (!LIVE) return;
+    const res = await liveFetch("/api/progress/summary", { method: "GET" }, LIVE_RESTORE_TIMEOUT_MS);
+    if (res.ok && res.body && Array.isArray(res.body.teams)) syncTeamsFromSummary(res.body.teams);
+  }
+  // later() は使わない（go() の clearLater() に回収されるとポーリングが止まる）。
+  setInterval(pollSummary, SUMMARY_POLL_MS);
 
   /* 経過時間 */
   let clockOn = false, elapsed = 0, clockTimer = null;
@@ -7755,6 +7817,7 @@
     if (snapshot) liveState.checkpointRevision = snapshot.revision;
     // チーム名がサーバへ届く最初の機会。commitTeamName の後（teamName 確定後）に送る。
     reportProgress(TEAMS[2].pos, "entry");
+    pollSummary();   // 帯を10秒待たずに一度埋める（以後は setInterval が回す）
     // entry/welcome までしか進んでいないチームは、初回入室と同じ扱いでよい。
     if (!snapshot || snapshot.body.view === "entry" || snapshot.body.view === "welcome") {
       go("welcome");
