@@ -1,6 +1,10 @@
 import {
+  CHECKPOINT_DATA_TOO_LARGE_MESSAGE,
+  checkpointStateSchema,
   createThreadCommandSchema,
   detectPii,
+  saveCheckpointCommandSchema,
+  saveCheckpointResultSchema,
   sendMessageCommandSchema,
   teamCodeSchema,
   teamCommandSchema,
@@ -188,6 +192,60 @@ export const handleChatMessage = async (
   return respondToCompletion(result, refusal);
 };
 
+/**
+ * ステージ内状態のチェックポイントを保存する。`nowIso`はここで採る——DOはテストから
+ * Clockを差し替えられないため、時刻の境界をWorker側のhandlerに置いている。
+ */
+export const handleSaveCheckpoint = async (
+  request: Request,
+  env: Env,
+  teamCode: TeamCode,
+  nowIso: string = new Date().toISOString(),
+): Promise<Response> => {
+  let input: unknown;
+  try {
+    input = await parseJson(request);
+  } catch {
+    return error("checkpointの形式が不正です。", 400);
+  }
+  const parsed = saveCheckpointCommandSchema.safeParse(input);
+  if (!parsed.success) {
+    // 上限超過だけは他のschema違反と区別する——クライアントは書式ではなく
+    // 保存する状態そのものを削る必要があるため。
+    return parsed.error.issues.some((issue) => issue.message === CHECKPOINT_DATA_TOO_LARGE_MESSAGE)
+      ? error("チェックポイントのデータが大きすぎます。", 400)
+      : error("checkpointの形式が不正です。", 400);
+  }
+  try {
+    const result = await env.TEAM_ROOM.getByName(teamCode).saveCheckpoint(
+      teamCode,
+      parsed.data,
+      nowIso,
+    );
+    if ("rejected" in result) {
+      return result.rejected === "conflict"
+        ? error("チェックポイントが競合しました。最新を取得し直してください。", 409)
+        : error("発動済みの罠を取り消すチェックポイントは保存できません。", 409);
+    }
+    return json(saveCheckpointResultSchema.parse({ snapshot: result }));
+  } catch {
+    return error("チェックポイントの保存に失敗しました。時間を置いて再試行してください。", 503);
+  }
+};
+
+export const handleCheckpointState = async (
+  env: Env,
+  teamCode: TeamCode,
+  nowIso: string = new Date().toISOString(),
+): Promise<Response> => {
+  try {
+    const checkpoint = await env.TEAM_ROOM.getByName(teamCode).loadCheckpoint(teamCode);
+    return json(checkpointStateSchema.parse({ checkpoint, serverNow: nowIso }));
+  } catch {
+    return error("チェックポイントの取得に失敗しました。時間を置いて再試行してください。", 503);
+  }
+};
+
 const handleTeamSync = (request: Request, env: Env, teamCode: TeamCode): Promise<Response> => {
   if (!isWebSocketRequest(request)) return Promise.resolve(error("WebSocket接続が必要です。", 426));
   const target = new URL(request.url);
@@ -208,6 +266,8 @@ const handlePost = (request: Request, env: Env, url: URL): Promise<Response> => 
   const messagesTeamCode = teamCodeFromPath(url.pathname, "/api/teams/", "/chat/messages");
   if (messagesTeamCode !== null)
     return handleChatMessage(request, env, messagesTeamCode, createAiGateway(env));
+  const checkpointTeamCode = teamCodeFromPath(url.pathname, "/api/teams/", "/checkpoint");
+  if (checkpointTeamCode !== null) return handleSaveCheckpoint(request, env, checkpointTeamCode);
   const commandTeamCode = teamCodeFromPath(url.pathname, "/api/teams/", "/commands");
   return commandTeamCode === null
     ? Promise.resolve(new Response("Not found", { status: 404 }))
@@ -229,6 +289,8 @@ const handleGet = (request: Request, env: Env, url: URL): Promise<Response> => {
   if (teamCode !== null) return handleTeamSync(request, env, teamCode);
   const chatTeamCode = teamCodeFromPath(url.pathname, "/api/teams/", "/chat");
   if (chatTeamCode !== null) return handleChatSnapshot(env, chatTeamCode);
+  const checkpointTeamCode = teamCodeFromPath(url.pathname, "/api/teams/", "/checkpoint");
+  if (checkpointTeamCode !== null) return handleCheckpointState(env, checkpointTeamCode);
   return url.pathname === "/api/leaderboard/sync"
     ? handleLeaderboardSync(request, env)
     : Promise.resolve(new Response("Not found", { status: 404 }));

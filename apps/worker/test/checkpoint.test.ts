@@ -1,0 +1,245 @@
+import { env, exports } from "cloudflare:workers";
+import {
+  checkpointStateSchema,
+  httpErrorSchema,
+  saveCheckpointResultSchema,
+} from "@hell-ict/domain";
+import type { CheckpointBody, CheckpointState } from "@hell-ict/domain";
+import { describe, expect, it } from "vitest";
+
+import { handleCheckpointState, handleSaveCheckpoint } from "../src/index.js";
+import { postJson } from "./support.js";
+
+const now = "2026-09-03T10:00:00.000Z";
+const later = "2026-09-03T10:05:00.000Z";
+
+const body = (overrides: Partial<CheckpointBody> = {}): CheckpointBody => ({
+  view: "stage3-manual",
+  pos: 2,
+  elapsedMs: 60_000,
+  trap: { s3Used: false, s4Used: false },
+  data: { answer: "A" },
+  ...overrides,
+});
+
+const saveRequest = (teamCode: string, command: unknown): Request =>
+  new Request(`https://example.test/api/teams/${teamCode}/checkpoint`, {
+    method: "POST",
+    body: JSON.stringify(command),
+  });
+
+const save = (
+  teamCode: string,
+  command: {
+    commandId: string;
+    expectedRevision: number;
+    body?: Partial<CheckpointBody>;
+    rawBody?: unknown;
+  },
+  nowIso: string = now,
+): Promise<Response> =>
+  handleSaveCheckpoint(
+    saveRequest(teamCode, {
+      type: "save-checkpoint",
+      commandId: command.commandId,
+      expectedRevision: command.expectedRevision,
+      body: command.rawBody ?? body(command.body),
+    }),
+    env,
+    teamCode,
+    nowIso,
+  );
+
+const load = async (teamCode: string, nowIso: string = now): Promise<CheckpointState> => {
+  const response = await handleCheckpointState(env, teamCode, nowIso);
+  expect(response.status).toBe(200);
+  return checkpointStateSchema.parse(await response.json());
+};
+
+const id = (suffix: string): string => `00000000-0000-4000-8000-000000000${suffix}`;
+
+describe("チェックポイントAPI", () => {
+  it("未保存のチームにはnullとserverNowを返す", async () => {
+    const state = await load("500000");
+    expect(state.checkpoint).toBeNull();
+    expect(state.serverNow).toBe(now);
+  });
+
+  it("serverNowはISO 8601で返る（時刻を注入しない既定経路）", async () => {
+    const response = await exports.default.fetch(
+      new Request("https://example.test/api/teams/500001/checkpoint"),
+    );
+    expect(response.status).toBe(200);
+    const state = checkpointStateSchema.parse(await response.json());
+    expect(state.checkpoint).toBeNull();
+    expect(Number.isNaN(Date.parse(state.serverNow))).toBe(false);
+  });
+
+  it("初回保存はexpectedRevision 0を受け付け、revision 1のsnapshotを返す", async () => {
+    const response = await save("500002", { commandId: id("101"), expectedRevision: 0 });
+
+    expect(response.status).toBe(200);
+    const { snapshot } = saveCheckpointResultSchema.parse(await response.json());
+    expect(snapshot).toEqual({ teamCode: "500002", revision: 1, savedAt: now, body: body() });
+    await expect(load("500002")).resolves.toMatchObject({ checkpoint: snapshot });
+  });
+
+  it("POSTルートが配線されている", async () => {
+    const response = await postJson("/api/teams/500003/checkpoint", {
+      type: "save-checkpoint",
+      commandId: id("102"),
+      expectedRevision: 0,
+      body: body(),
+    });
+
+    expect(response.status).toBe(200);
+    const { snapshot } = saveCheckpointResultSchema.parse(await response.json());
+    expect(snapshot.revision).toBe(1);
+  });
+
+  it("同じcommandIdの再送は状態を進めず同じsnapshotを返す", async () => {
+    const first = await save("500004", { commandId: id("103"), expectedRevision: 0 });
+    const firstResult = saveCheckpointResultSchema.parse(await first.json());
+
+    // 再送は本文が変わっていても保存済み結果を返す（冪等）。
+    const again = await save(
+      "500004",
+      { commandId: id("103"), expectedRevision: 0, body: { pos: 7 } },
+      later,
+    );
+
+    expect(again.status).toBe(200);
+    await expect(again.json()).resolves.toEqual(firstResult);
+    const state = await load("500004");
+    expect(state.checkpoint?.revision).toBe(1);
+    expect(state.checkpoint?.body.pos).toBe(2);
+  });
+
+  it("revisionが一致しない保存は409で拒否し、状態を変えない", async () => {
+    await save("500005", { commandId: id("104"), expectedRevision: 0 });
+
+    const conflict = await save("500005", {
+      commandId: id("105"),
+      expectedRevision: 0,
+      body: { pos: 5 },
+    });
+
+    expect(conflict.status).toBe(409);
+    const state = await load("500005");
+    expect(state.checkpoint?.revision).toBe(1);
+    expect(state.checkpoint?.body.pos).toBe(2);
+  });
+
+  it("発動済みの罠をfalseへ戻す保存は409で拒否し、保存されない", async () => {
+    await save("500006", {
+      commandId: id("106"),
+      expectedRevision: 0,
+      body: { trap: { s3Used: true, s4Used: false } },
+    });
+
+    const regression = await save("500006", {
+      commandId: id("107"),
+      expectedRevision: 1,
+      body: { pos: 6, trap: { s3Used: false, s4Used: false } },
+    });
+
+    expect(regression.status).toBe(409);
+    const message = httpErrorSchema.parse(await regression.json()).message;
+    expect(message).toContain("罠");
+    const state = await load("500006");
+    expect(state.checkpoint?.revision).toBe(1);
+    expect(state.checkpoint?.body.trap).toEqual({ s3Used: true, s4Used: false });
+    expect(state.checkpoint?.body.pos).toBe(2);
+  });
+
+  it("罠の状態を保ったまま次のチェックポイントは保存できる", async () => {
+    await save("500007", {
+      commandId: id("108"),
+      expectedRevision: 0,
+      body: { trap: { s3Used: true, s4Used: false } },
+    });
+
+    const next = await save(
+      "500007",
+      {
+        commandId: id("109"),
+        expectedRevision: 1,
+        body: { pos: 3, trap: { s3Used: true, s4Used: true } },
+      },
+      later,
+    );
+
+    expect(next.status).toBe(200);
+    const state = await load("500007");
+    expect(state.checkpoint).toMatchObject({ revision: 2, savedAt: later, body: { pos: 3 } });
+  });
+
+  it("dataが上限を超える保存は400で拒否し、保存されない", async () => {
+    const response = await save("500008", {
+      commandId: id("110"),
+      expectedRevision: 0,
+      body: { data: { blob: "x".repeat(64 * 1024) } },
+    });
+
+    expect(response.status).toBe(400);
+    expect(httpErrorSchema.parse(await response.json()).message).toContain("大きすぎます");
+    await expect(load("500008")).resolves.toMatchObject({ checkpoint: null });
+  });
+
+  it.each([
+    { label: "viewの不正文字", body: { view: "Stage_3" } },
+    { label: "posの範囲外", body: { pos: 8 } },
+    { label: "elapsedMsの負値", body: { elapsedMs: -1 } },
+  ])("$labelは400で拒否し、保存されない", async ({ body: overrides }) => {
+    const teamCode = "500009";
+    const response = await save(teamCode, {
+      commandId: id("111"),
+      expectedRevision: 0,
+      rawBody: { ...body(), ...overrides },
+    });
+
+    expect(response.status).toBe(400);
+    expect(httpErrorSchema.parse(await response.json()).message).not.toContain("大きすぎます");
+    await expect(load(teamCode)).resolves.toMatchObject({ checkpoint: null });
+  });
+
+  it("JSONとして壊れた本文は400で拒否する", async () => {
+    const response = await handleSaveCheckpoint(
+      new Request("https://example.test/api/teams/500010/checkpoint", {
+        method: "POST",
+        body: "{",
+      }),
+      env,
+      "500010",
+      now,
+    );
+
+    expect(response.status).toBe(400);
+    await expect(load("500010")).resolves.toMatchObject({ checkpoint: null });
+  });
+
+  it("チームごとにチェックポイントが分離される", async () => {
+    await save("500011", { commandId: id("112"), expectedRevision: 0, body: { pos: 1 } });
+    await save("500012", { commandId: id("113"), expectedRevision: 0, body: { pos: 6 } });
+
+    const first = await load("500011");
+    const second = await load("500012");
+    expect(first.checkpoint).toMatchObject({ teamCode: "500011", body: { pos: 1 } });
+    expect(second.checkpoint).toMatchObject({ teamCode: "500012", body: { pos: 6 } });
+  });
+
+  it("同じcommandIdでも別チームなら独立して保存できる", async () => {
+    const shared = id("114");
+    await save("500013", { commandId: shared, expectedRevision: 0, body: { pos: 1 } });
+    const other = await save("500014", {
+      commandId: shared,
+      expectedRevision: 0,
+      body: { pos: 4 },
+    });
+
+    expect(other.status).toBe(200);
+    await expect(load("500014")).resolves.toMatchObject({
+      checkpoint: { teamCode: "500014", body: { pos: 4 } },
+    });
+  });
+});

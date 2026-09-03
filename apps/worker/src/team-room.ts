@@ -1,13 +1,16 @@
 import {
   appendMessage,
+  applyCheckpoint,
   chatMessageResultSchema,
   chatSnapshotSchema,
+  checkpointSnapshotSchema,
   commandResultSchema,
   createThread as domainCreateThread,
   createThreadCommandSchema,
   createThreadResultSchema,
   initialChatSnapshot,
   initialTeamSnapshot,
+  saveCheckpointCommandSchema,
   sendMessageCommandSchema,
   teamCodeSchema,
   teamCommandSchema,
@@ -20,9 +23,11 @@ import type {
   ChatMessage,
   ChatMessageResult,
   ChatSnapshot,
+  CheckpointSnapshot,
   CommandResult,
   CreateThreadCommand,
   CreateThreadResult,
+  SaveCheckpointCommand,
   SendMessageCommand,
   TeamCode,
   TeamSnapshot,
@@ -38,8 +43,13 @@ type StoredChatState = { snapshot: string };
 type StoredThreadCommand = { result: string };
 type StoredMessageCommand = { result: string };
 type StoredPendingMessage = { thread_id: string; claimed_at: string | null };
+type StoredCheckpointState = { snapshot: string };
+type StoredCheckpointCommand = { result: string };
 type ConflictReply = { conflict: true };
 type UnknownThreadReply = { unknownThread: true };
+
+/** チェックポイント保存の拒否理由。conflictとtrap-regressionはWorkerで文言を分ける。 */
+export type CheckpointRejection = { rejected: "conflict" | "trap-regression" };
 
 export type BeginChatMessageOutcome =
   | { kind: "already-processed"; result: ChatMessageResult }
@@ -87,6 +97,12 @@ export class TeamRoom extends DurableObject<Env> {
     );
     this.ctx.storage.sql.exec(
       "CREATE TABLE IF NOT EXISTS pending_message_commands (command_id TEXT PRIMARY KEY, thread_id TEXT NOT NULL, created_at TEXT NOT NULL, claimed_at TEXT)",
+    );
+    this.ctx.storage.sql.exec(
+      "CREATE TABLE IF NOT EXISTS checkpoint_state (id INTEGER PRIMARY KEY CHECK (id = 1), snapshot TEXT NOT NULL)",
+    );
+    this.ctx.storage.sql.exec(
+      "CREATE TABLE IF NOT EXISTS processed_checkpoint_commands (command_id TEXT PRIMARY KEY, result TEXT NOT NULL)",
     );
   }
 
@@ -346,6 +362,70 @@ export class TeamRoom extends DurableObject<Env> {
   private historyFor(snapshot: ChatSnapshot, threadId: string): AiMessage[] {
     const thread = snapshot.threads.find((candidate) => candidate.threadId === threadId);
     return (thread?.messages ?? []).map((message) => ({ role: message.role, text: message.text }));
+  }
+
+  // ---- チェックポイント ----
+
+  private readCheckpoint(): CheckpointSnapshot | null {
+    const stored =
+      this.ctx.storage.sql
+        .exec<StoredCheckpointState>("SELECT snapshot FROM checkpoint_state WHERE id = 1")
+        .toArray()[0] ?? null;
+    return stored === null
+      ? null
+      : checkpointSnapshotSchema.parse(JSON.parse(stored.snapshot) as unknown);
+  }
+
+  async loadCheckpoint(teamCodeInput: unknown): Promise<CheckpointSnapshot | null> {
+    teamCodeSchema.parse(teamCodeInput);
+    return this.readCheckpoint();
+  }
+
+  /**
+   * チェックポイントを保存する。`nowIso`はWorker側で採る——DOはテストからClockを
+   * 差し替えられないため、時刻の境界をWorkerのhandlerへ寄せている。
+   */
+  async saveCheckpoint(
+    teamCodeInput: unknown,
+    commandInput: unknown,
+    nowIsoInput: unknown,
+  ): Promise<CheckpointSnapshot | CheckpointRejection> {
+    const teamCode = teamCodeSchema.parse(teamCodeInput);
+    const command: SaveCheckpointCommand = saveCheckpointCommandSchema.parse(commandInput);
+    const now = checkpointSnapshotSchema.shape.savedAt.parse(nowIsoInput);
+    const saved =
+      this.ctx.storage.sql
+        .exec<StoredCheckpointCommand>(
+          "SELECT result FROM processed_checkpoint_commands WHERE command_id = ?",
+          command.commandId,
+        )
+        .toArray()[0] ?? null;
+    // 保存済みのcommandIdは、再送されても状態を進めず同じsnapshotを返す。
+    if (saved !== null) return checkpointSnapshotSchema.parse(JSON.parse(saved.result) as unknown);
+
+    const current = this.readCheckpoint();
+    const applied = applyCheckpoint(current, command, { teamCode, now });
+    if (!applied.ok) return { rejected: applied.reason };
+    const serialized = JSON.stringify(applied.snapshot);
+    // 既存commandと同じくrevisionのCASで書く。想定外の並行更新があれば0行になる。
+    const written =
+      current === null
+        ? this.ctx.storage.sql.exec(
+            "INSERT OR IGNORE INTO checkpoint_state (id, snapshot) VALUES (1, ?)",
+            serialized,
+          ).rowsWritten
+        : this.ctx.storage.sql.exec(
+            "UPDATE checkpoint_state SET snapshot = ? WHERE id = 1 AND json_extract(snapshot, '$.revision') = ?",
+            serialized,
+            command.expectedRevision,
+          ).rowsWritten;
+    if (written === 0) return { rejected: "conflict" };
+    this.ctx.storage.sql.exec(
+      "INSERT INTO processed_checkpoint_commands (command_id, result) VALUES (?, ?)",
+      command.commandId,
+      serialized,
+    );
+    return applied.snapshot;
   }
 
   // ---- WebSocket ----
