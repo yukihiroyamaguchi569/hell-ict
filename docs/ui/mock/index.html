@@ -3477,23 +3477,37 @@
     }
   }
 
-  async function postCheckpoint(body, retried) {
-    if (!liveState) return;
+  /* サーバへ1本ずつ送る。POSTを並行させると、先に投げた古いbodyが後から
+     新しいrevisionで通ってしまい、進んだ状態を巻き戻すことがある
+     （expectedRevisionのCASは「revisionが合っているか」しか見ないので、
+     中身の新しさは守ってくれない）。保存はこのチェーンで直列化し、
+     body は必ず「送る直前の最新状態」から組み直す。 */
+  let checkpointChain = Promise.resolve();
+
+  async function postCheckpoint(retried) {
+    if (!LIVE || !liveState || !liveState.teamCode) return;
     const teamCode = liveState.teamCode;
     const sentRevision = liveState.checkpointRevision;
+    // 送る直前に組む。キュー待ちの間に進んだ状態があれば、それごと送る。
+    const body = checkpointBody();
     const res = await liveFetch("/api/teams/" + teamCode + "/checkpoint", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
         type: "save-checkpoint",
         commandId: crypto.randomUUID(),
-        expectedRevision: liveState.checkpointRevision,
+        expectedRevision: sentRevision,
         body: body,
       }),
     }, LIVE_RESTORE_TIMEOUT_MS);
     if (!liveState || liveState.teamCode !== teamCode) return;   // 待っている間に入り直していたら捨てる
     if (res.ok && res.body && res.body.snapshot) {
-      liveState.checkpointRevision = res.body.snapshot.revision;
+      // 自分の保存が通った証拠は「送ったrevision+1が返ること」。それ以外
+      // （冪等台帳による過去commandの再生など）は自分の一手ではないので
+      // 採用しない——ずれたままなら次の保存が409 conflictで取り直す。
+      if (res.body.snapshot.revision === sentRevision + 1) {
+        liveState.checkpointRevision = res.body.snapshot.revision;
+      }
       return;
     }
     // 409 以外（通信断・503・404）はそのまま諦める。次の保存でまた送られる。
@@ -3516,10 +3530,11 @@
     // 構造だけで見分けられる。
     const conflicted = code === null ? serverRevision !== sentRevision : code === "conflict";
     if (conflicted) {
-      // 同じPCで複数タブが開かれた等でrevisionがずれただけ。revisionを合わせて、
-      // 同じ body を「もう一度だけ」送る（無限再送はしない。commandId は毎回
-      // 新規なので冪等台帳とも噛み合う）。
-      if (!retried) postCheckpoint(body, true);
+      // 同じPCで複数タブが開かれた等でrevisionがずれただけ。revisionを合わせて
+      // 「もう一度だけ」送る（無限再送はしない）。送り直すのは同じbodyではなく、
+      // その時点の最新状態から組み直したbody——古いbodyの再送は、まさに
+      // 巻き戻しを起こす経路そのもの。
+      if (!retried) await postCheckpoint(true);
       return;
     }
     // trap-regression／elapsed-regression／pos-regression。サーバ値を採用して
@@ -3530,19 +3545,66 @@
     adoptServerState(snapshot ? snapshot.body : null);
   }
 
+  /* キューへ積む。失敗はここで握りつぶし、チェーンが切れないようにする
+     ——1回の失敗で以後の保存が全部止まるのがいちばん怖い。 */
+  function enqueueCheckpoint() {
+    checkpointChain = checkpointChain.then(() => postCheckpoint(false)).catch(() => undefined);
+  }
+
+  /* 離脱の直前に、保留中の保存を投げ切る。通常の fetch はページが消えた時点で
+     中断されるので keepalive を付ける（本文は数百バイトで、keepalive の
+     64KB 制限に遠く届かない）。キューは通さない——チェーンの手前に何か
+     詰まっていると、離脱までに送れない。 */
+  function flushCheckpoint() {
+    if (checkpointTimer === null) return;
+    clearTimeout(checkpointTimer);
+    checkpointTimer = null;
+    if (!LIVE || !liveState || !liveState.teamCode) return;
+    try {
+      fetch(LIVE_API_BASE + "/api/teams/" + liveState.teamCode + "/checkpoint", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          type: "save-checkpoint",
+          commandId: crypto.randomUUID(),
+          expectedRevision: liveState.checkpointRevision,
+          body: checkpointBody(),
+        }),
+        keepalive: true,
+      }).catch(() => {});
+    } catch {}
+  }
+
+  // リロード・タブ閉じ・バックグラウンド化。pagehide だけでは、モバイル等で
+  // タブが凍結されるときに来ないことがあるので visibilitychange も見る
+  // （どちらも「保留があれば投げる」だけなので、二重に来ても害はない）。
+  window.addEventListener("pagehide", flushCheckpoint);
+  document.addEventListener("visibilitychange", () => {
+    if (document.visibilityState === "hidden") flushCheckpoint();
+  });
+
   /* 保存の入口。連続で呼ばれても最後の状態だけを送る（ステージ遷移では
      go() の末尾と pos 更新がほぼ同時に走るため）。reason は呼び出し元の
-     識別で、デバッグ時に liveState を覗けば最後の理由が分かる。 */
-  function saveCheckpoint(reason) {
+     識別で、デバッグ時に liveState を覗けば最後の理由が分かる。
+
+     immediate=true はデバウンスを挟まず即座にキューへ積む。罠の発動だけは
+     これを使う——踏んだ0.5秒以内にリロードされると罠がもう一度発動でき、
+     企画書§6「連続罰は1回まで」の抜け道になる。 */
+  function saveCheckpoint(reason, immediate) {
     if (!LIVE || !liveState || !liveState.teamCode) return;
     if (view === "entry") return;   // 入室前の状態は復帰の役に立たない
     liveState.lastCheckpointReason = reason;
     if (checkpointTimer !== null) clearTimeout(checkpointTimer);
+    if (immediate) {
+      checkpointTimer = null;
+      enqueueCheckpoint();
+      return;
+    }
     // later() は使わない——go() の clearLater() に回収されると、ステージ遷移の
     // たびに保存そのものが消える。
     checkpointTimer = setTimeout(() => {
       checkpointTimer = null;
-      postCheckpoint(checkpointBody(), false);
+      enqueueCheckpoint();
     }, CHECKPOINT_DEBOUNCE_MS);
   }
 
@@ -3714,7 +3776,7 @@
         s4TrapUsed = true;
         // 本文は残さない（PIIの罠なので、送ろうとした個人情報をログへ写さない）。
         logActivity("trap.s4", undefined, { gate: "server" });
-        saveCheckpoint("trap-s4");
+        saveCheckpoint("trap-s4", true);   // デバウンスしない（踏んだ直後のリロードで罠が復活しないように）
         triggerLeak();
       } else {
         aiBubble("システム", "個人情報を検知したため、送信をブロックしました。");
@@ -3974,7 +4036,7 @@
             s4TrapUsed = true;
             // 本文は残さない（PIIの罠なので、送ろうとした個人情報をログへ写さない）。
             logActivity("trap.s4", undefined, { gate: "client", detected: hit.label });
-            saveCheckpoint("trap-s4");
+            saveCheckpoint("trap-s4", true);   // デバウンスしない（踏んだ直後のリロードで罠が復活しないように）
             triggerLeak();
           } else {
             // 上限は1回（企画書§6）。2回目以降は罰を出さず、ブロックだけ告げる。
@@ -5845,7 +5907,7 @@
       if (!s3TrapUsed) {
         s3TrapUsed = true;
         logActivity("trap.s3", undefined, { field: result.field || "" });
-        saveCheckpoint("trap-s3");
+        saveCheckpoint("trap-s3", true);   // デバウンスしない（踏んだ直後のリロードで罠が復活しないように）
         s3Verdicting = false;
         triggerTrap();
         return;
