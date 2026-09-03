@@ -170,6 +170,28 @@ describe("進捗記録", () => {
     await expect(rowCount()).resolves.toBe(0);
   });
 
+  it("TEAM_CODES設定時、未登録チームの進捗は404で拒否しD1へ書かない", async () => {
+    const saved = env.TEAM_CODES;
+    env.TEAM_CODES = "100001,100002";
+    try {
+      const rejected = await postJson("/api/progress", event({ teamCode: "100009" }));
+      expect(rejected.status).toBe(404);
+      await expect(rowCount()).resolves.toBe(0);
+
+      const accepted = await postJson("/api/progress", event({ teamCode: "100001" }));
+      expect(accepted.status).toBe(200);
+      await expect(rowCount()).resolves.toBe(1);
+    } finally {
+      env.TEAM_CODES = saved;
+    }
+  });
+
+  it("TEAM_CODES未設定なら任意の6桁の進捗を受け付ける", async () => {
+    const response = await postJson("/api/progress", event({ teamCode: "987654" }));
+    expect(response.status).toBe(200);
+    await expect(rowCount()).resolves.toBe(1);
+  });
+
   it("JSONとして壊れた本文と空bodyは400で拒否し、行を増やさない", async () => {
     expect((await postRaw("{not json")).status).toBe(400);
     expect((await postRaw("")).status).toBe(400);
