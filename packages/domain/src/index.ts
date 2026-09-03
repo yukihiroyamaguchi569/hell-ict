@@ -45,6 +45,26 @@ export type {
 export { appendMessage, createThread, initialChatSnapshot } from "./chat.js";
 export type { ChatMutationResult } from "./chat.js";
 export {
+  CHECKPOINT_DATA_MAX_BYTES,
+  CHECKPOINT_DATA_TOO_LARGE_MESSAGE,
+  checkpointBodySchema,
+  checkpointSnapshotSchema,
+  checkpointStateSchema,
+  checkpointTrapSchema,
+  saveCheckpointCommandSchema,
+  saveCheckpointResultSchema,
+} from "./schemas/checkpoint.js";
+export type {
+  CheckpointBody,
+  CheckpointSnapshot,
+  CheckpointState,
+  CheckpointTrap,
+  SaveCheckpointCommand,
+  SaveCheckpointResult,
+} from "./schemas/checkpoint.js";
+export { applyCheckpoint } from "./checkpoint.js";
+export type { CheckpointResult } from "./checkpoint.js";
+export {
   openAiChatCompletionSchema,
   parseOpenAiChatCompletion,
 } from "./schemas/openai-response.js";
