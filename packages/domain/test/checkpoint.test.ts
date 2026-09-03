@@ -120,6 +120,53 @@ describe("チェックポイントの純粋関数", () => {
     expect(result.ok).toBe(true);
   });
 
+  it("elapsedMsを巻き戻す保存を拒否する", () => {
+    const result = applyCheckpoint(
+      snapshot(1, { elapsedMs: 60_000 }),
+      command(1, { elapsedMs: 59_999 }),
+      { teamCode: "000000", now },
+    );
+    expect(result).toEqual({ ok: false, reason: "elapsed-regression" });
+  });
+
+  it.each([
+    { label: "同値", elapsedMs: 60_000 },
+    { label: "前進", elapsedMs: 60_001 },
+  ])("elapsedMsが$labelなら許可する", ({ elapsedMs }) => {
+    const result = applyCheckpoint(snapshot(1, { elapsedMs: 60_000 }), command(1, { elapsedMs }), {
+      teamCode: "000000",
+      now,
+    });
+    if (!result.ok) throw new Error("unexpected");
+    expect(result.snapshot.body.elapsedMs).toBe(elapsedMs);
+  });
+
+  it("未保存への初回保存はelapsedMsを比較しない", () => {
+    const result = applyCheckpoint(null, command(0, { elapsedMs: 0 }), {
+      teamCode: "000000",
+      now,
+    });
+    expect(result.ok).toBe(true);
+  });
+
+  it("競合とelapsedMs後退が同時に成立する場合は競合を優先する", () => {
+    const result = applyCheckpoint(
+      snapshot(1, { elapsedMs: 60_000 }),
+      command(0, { elapsedMs: 0 }),
+      { teamCode: "000000", now },
+    );
+    expect(result).toEqual({ ok: false, reason: "conflict" });
+  });
+
+  it("罠後退とelapsedMs後退が同時に成立する場合は罠を優先する", () => {
+    const result = applyCheckpoint(
+      snapshot(1, { trap: { s3Used: true, s4Used: false }, elapsedMs: 60_000 }),
+      command(1, { trap: { s3Used: false, s4Used: false }, elapsedMs: 0 }),
+      { teamCode: "000000", now },
+    );
+    expect(result).toEqual({ ok: false, reason: "trap-regression" });
+  });
+
   it("競合と罠後退が同時に成立する場合は競合を優先する", () => {
     const result = applyCheckpoint(
       snapshot(1, { trap: { s3Used: true, s4Used: false } }),

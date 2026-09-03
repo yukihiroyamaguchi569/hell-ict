@@ -177,6 +177,44 @@ describe("チェックポイントAPI", () => {
     expect(state.checkpoint?.body.pos).toBe(2);
   });
 
+  it("経過時間を巻き戻す保存は409で拒否し、保存されない", async () => {
+    await save("500017", {
+      commandId: id("117"),
+      expectedRevision: 0,
+      body: { elapsedMs: 60_000 },
+    });
+
+    const regression = await save("500017", {
+      commandId: id("118"),
+      expectedRevision: 1,
+      body: { pos: 6, elapsedMs: 30_000 },
+    });
+
+    expect(regression.status).toBe(409);
+    expect(httpErrorSchema.parse(await regression.json()).message).toContain("経過時間");
+    const state = await load("500017");
+    expect(state.checkpoint).toMatchObject({ revision: 1, body: { elapsedMs: 60_000, pos: 2 } });
+  });
+
+  it("経過時間が同値なら保存できる", async () => {
+    await save("500018", {
+      commandId: id("119"),
+      expectedRevision: 0,
+      body: { elapsedMs: 60_000 },
+    });
+
+    const next = await save(
+      "500018",
+      { commandId: id("120"), expectedRevision: 1, body: { pos: 4, elapsedMs: 60_000 } },
+      later,
+    );
+
+    expect(next.status).toBe(200);
+    await expect(load("500018")).resolves.toMatchObject({
+      checkpoint: { revision: 2, body: { pos: 4, elapsedMs: 60_000 } },
+    });
+  });
+
   it("罠の状態を保ったまま次のチェックポイントは保存できる", async () => {
     await save("500007", {
       commandId: id("108"),

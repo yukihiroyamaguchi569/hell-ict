@@ -23,6 +23,7 @@ import type {
   ChatMessage,
   ChatMessageResult,
   ChatSnapshot,
+  CheckpointRejectionReason,
   CheckpointSnapshot,
   CommandResult,
   CreateThreadCommand,
@@ -48,8 +49,8 @@ type StoredCheckpointCommand = { result: string };
 type ConflictReply = { conflict: true };
 type UnknownThreadReply = { unknownThread: true };
 
-/** チェックポイント保存の拒否理由。conflictとtrap-regressionはWorkerで文言を分ける。 */
-export type CheckpointRejection = { rejected: "conflict" | "trap-regression" };
+/** チェックポイント保存の拒否理由。Workerが理由ごとに409の文言を分ける。 */
+export type CheckpointRejection = { rejected: CheckpointRejectionReason };
 
 /**
  * transactionSyncを巻き戻すためだけの内部シグナル。CASが0行だったことを
