@@ -1,4 +1,4 @@
-import { detectPii } from "@hell-ict/domain";
+import { containsPii, detectPii } from "@hell-ict/domain";
 import { z } from "zod";
 
 import { error, json, parseJson, PayloadTooLargeError } from "./http.js";
@@ -92,22 +92,11 @@ const orEmpty = (value: string | undefined): string => value ?? "";
  * 較正の主材料である本文を不必要に失うため。
  */
 /**
- * metaのPII検査。JSON全体を1回見るだけでは足りない——値が別々のフィールドへ
- * 分かれていると、JSON上ではキー名や区切り記号を挟んで分断され、一致しなくなる。
- * 各string値も個別に通し、両側から挟む。
- *
- * キーはmetaKeySchemaで英数字へ制限済みなので、ここでは値だけを見れば足りる。
- *
- * ただし検出器の語彙を跨ぐ分割（姓と名を別フィールドへ置くなど）は原理的に拾えない。
- * これはdetectPiiの限界であり、ここで塞げるものではない。
+ * metaのPII検査。全体走査と個別走査を両側から掛ける判定はチェックポイントの
+ * dataと同じ性質なので、domainのcontainsPiiへ寄せてある（キーはmetaKeySchemaで
+ * 英数字へ制限済みなので、キー側の検査は空振りするだけで害はない）。
  */
-const metaHasPii = (meta: Record<string, unknown> | undefined): boolean => {
-  const fields = meta ?? {};
-  if (detectPii(JSON.stringify(fields)) !== null) return true;
-  return Object.values(fields).some(
-    (value) => typeof value === "string" && detectPii(value) !== null,
-  );
-};
+const metaHasPii = (meta: Record<string, unknown> | undefined): boolean => containsPii(meta ?? {});
 
 const redactPii = (event: ActivityEvent): ActivityEvent => {
   const textHit = detectPii(orEmpty(event.text)) !== null;

@@ -112,3 +112,52 @@ export type PiiLabel = (typeof piiPatterns)[number]["label"];
 /** テキストがStage 4の個人情報を含むか検査し、最初に一致したラベルを返す。 */
 export const detectPii = (text: string): PiiLabel | null =>
   piiPatterns.find((pattern) => pattern.re.test(text))?.label ?? null;
+
+/**
+ * JSON値の全体を1本の文字列として検査する。値が1つのフィールドに収まっている
+ * ケースはこれで拾える。JSONへ落とせない値（循環参照など）は諦めて、下の再帰走査
+ * だけに委ねる——ここで例外を投げると、検査そのものが呼び出し側を壊してしまう。
+ */
+const stringifiedHasPii = (value: unknown): boolean => {
+  try {
+    // JSON.stringifyは型定義上stringを返すが、undefinedや関数に対しては実際には
+    // undefinedを返す。その場合は全体走査を諦め、walkHasPiiだけに委ねる。
+    const json: unknown = JSON.stringify(value);
+    return typeof json === "string" && detectPii(json) !== null;
+  } catch {
+    return false;
+  }
+};
+
+/** 各string値と各キーを個別に検査する。 */
+const walkHasPii = (value: unknown): boolean => {
+  if (typeof value === "string") return detectPii(value) !== null;
+  if (Array.isArray(value)) return value.some(walkHasPii);
+  if (typeof value === "object" && value !== null) {
+    return Object.entries(value).some(
+      ([key, child]) => detectPii(key) !== null || walkHasPii(child),
+    );
+  }
+  return false;
+};
+
+/**
+ * JSON値にPIIが混ざっているかを再帰的に調べる。
+ *
+ * 全体走査と個別走査を両側から掛ける。JSON全体を1回見るだけでは足りない——値が
+ * 別々のフィールドへ分かれていると、JSON上ではキー名や区切り記号を挟んで分断され、
+ * パターンに一致しなくなる。逆に個別の値だけを見るのも足りない——JSON.stringifyが
+ * 繋げた並びで初めて一致する形を取りこぼす。
+ *
+ * オブジェクトのキーも検査する。キーを自由文字列にできる入力（チェックポイントの
+ * data）では、値ではなくキー側へPIIを置く経路が残るため。
+ *
+ * 深さの保証は呼び出し側の責務とする（チェックポイントはschemaの
+ * CHECKPOINT_DATA_MAX_DEPTH、活動ログのmetaは平坦なrecord）。ここではJSON.parse
+ * 由来の、循環参照を持たない値を前提に素直に辿る。
+ *
+ * ただし検出器の語彙を跨ぐ分割（姓と名を別フィールドへ置くなど）は原理的に拾えない。
+ * これはdetectPiiの限界であり、ここで塞げるものではない。
+ */
+export const containsPii = (value: unknown): boolean =>
+  stringifiedHasPii(value) || walkHasPii(value);

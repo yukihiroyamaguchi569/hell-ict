@@ -5,6 +5,7 @@ import {
   checkpointStateSchema,
   httpErrorSchema,
   saveCheckpointResultSchema,
+  stage4Patient,
 } from "@hell-ict/domain";
 import type { CheckpointBody, CheckpointState } from "@hell-ict/domain";
 import { describe, expect, it } from "vitest";
@@ -57,6 +58,15 @@ const load = async (teamCode: string, nowIso: string = now): Promise<CheckpointS
   expect(response.status).toBe(200);
   return checkpointStateSchema.parse(await response.json());
 };
+
+/** 冪等台帳の行数。PIIで弾いたときに1行も増えていないことを見るために使う。 */
+const ledgerRows = (teamCode: string): Promise<number> =>
+  runInDurableObject(env.TEAM_ROOM.getByName(teamCode), (_instance, state) => {
+    const rows = state.storage.sql
+      .exec("SELECT command_id FROM processed_checkpoint_commands")
+      .toArray();
+    return rows.length;
+  });
 
 const id = (suffix: string): string => `00000000-0000-4000-8000-000000000${suffix}`;
 
@@ -551,6 +561,55 @@ describe("チェックポイントAPI", () => {
     expect(other.status).toBe(200);
     await expect(load("500014")).resolves.toMatchObject({
       checkpoint: { teamCode: "500014", body: { pos: 4 } },
+    });
+  });
+  describe("dataのPIIゲート", () => {
+    // チェックポイントのdataは復帰時にそのまま画面へ戻す正典データなので、活動ログの
+    // ようなredactionではなく拒否に倒す。DOへ触れる前に止まることまで確認する。
+    it("入れ子の値に混ざったPIIは422でブロックし、何も保存しない", async () => {
+      const teamCode = "500130";
+      const before = await load(teamCode);
+      expect(before.checkpoint).toBeNull();
+
+      const response = await save(teamCode, {
+        commandId: id("130"),
+        expectedRevision: 0,
+        body: { data: { memo: { deep: `${stage4Patient.name}さんの件` } } },
+      });
+
+      expect(response.status).toBe(422);
+      expect(httpErrorSchema.parse(await response.json()).code).toBe("pii_blocked");
+      // チェックポイントも台帳（processed_checkpoint_commands）も動いていない。
+      await expect(load(teamCode)).resolves.toMatchObject({ checkpoint: null });
+      await expect(ledgerRows(teamCode)).resolves.toBe(0);
+    });
+
+    it("キーに置かれたPIIも422でブロックする", async () => {
+      const teamCode = "500131";
+      const response = await save(teamCode, {
+        commandId: id("131"),
+        expectedRevision: 0,
+        body: { data: { [`${stage4Patient.name}さん`]: "A" } },
+      });
+
+      expect(response.status).toBe(422);
+      expect(httpErrorSchema.parse(await response.json()).code).toBe("pii_blocked");
+      await expect(load(teamCode)).resolves.toMatchObject({ checkpoint: null });
+      await expect(ledgerRows(teamCode)).resolves.toBe(0);
+    });
+
+    it("PIIを含まないdataは従来どおり保存できる", async () => {
+      const teamCode = "500132";
+      const response = await save(teamCode, {
+        commandId: id("132"),
+        expectedRevision: 0,
+        body: { data: { memo: { deep: "ただのメモ" }, list: [1, 2, 3] } },
+      });
+
+      expect(response.status).toBe(200);
+      await expect(load(teamCode)).resolves.toMatchObject({
+        checkpoint: { revision: 1, body: { data: { memo: { deep: "ただのメモ" } } } },
+      });
     });
   });
 });

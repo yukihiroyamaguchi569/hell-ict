@@ -1,6 +1,7 @@
 import {
   CHECKPOINT_DATA_TOO_LARGE_MESSAGE,
   checkpointStateSchema,
+  containsPii,
   createThreadCommandSchema,
   detectPii,
   saveCheckpointCommandSchema,
@@ -399,6 +400,18 @@ export const handleSaveCheckpoint = async (
     return parsed.reason === "data-too-large"
       ? error("チェックポイントのデータが大きすぎます。", 400)
       : error("checkpointの形式が不正です。", 400);
+  }
+  // 送信前PIIゲート（企画書§7）。深さと大きさの検査（schema）を通した後、DOへ触れる
+  // 前に置く。チェックポイントのdataは復帰時にそのまま画面へ戻す正典データなので、
+  // 活動ログのようにredactionで潰すと復帰そのものが壊れる。ここは拒否へ倒し、
+  // クライアントに書き直させる（チャットの送信前ゲートと同じ"pii_blocked"）。
+  // 何も保存しないので、DOにもチェックポイントにも台帳にも1行も書かない。
+  if (containsPii(parsed.command.body.data)) {
+    return error(
+      "個人情報を検知したため、チェックポイントの保存をブロックしました。",
+      422,
+      "pii_blocked",
+    );
   }
   try {
     const result = await env.TEAM_ROOM.getByName(teamCode).saveCheckpoint(
