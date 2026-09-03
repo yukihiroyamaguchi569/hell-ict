@@ -1,4 +1,4 @@
-import { env } from "cloudflare:workers";
+import { env, exports } from "cloudflare:workers";
 import { createExecutionContext, waitOnExecutionContext } from "cloudflare:test";
 import { createThreadResultSchema } from "@hell-ict/domain";
 import { FakeAiGateway } from "@hell-ict/domain/fakes";
@@ -513,6 +513,32 @@ describe("活動ログ", () => {
         }),
       );
       expect(rejected.status).toBe(400);
+      await expect(rows()).resolves.toHaveLength(1);
+    });
+
+    // schemaの検証は本文をJSONへ展開した後にしか効かない。展開前にバイト数で
+    // 打ち切ることを、Content-Lengthを見る経路と実バイト数を測る経路の両方で固定する。
+    it.each([
+      ["Content-Lengthどおりの巨大な本文", {}],
+      // ヘッダは偽装できるので、小さく申告された巨大な本文も実バイト数で弾く。
+      ["Content-Lengthを小さく偽装した本文", { "Content-Length": "42" }],
+    ])("64KBを超える本文(%s)は413で拒否し、行を増やさない", async (_label, headers) => {
+      const huge = JSON.stringify({ ...activity(), pad: "x".repeat(65 * 1024) });
+      const response = await exports.default.fetch(
+        new Request("https://example.test/api/teams/500116/activity", {
+          method: "POST",
+          body: huge,
+          headers,
+        }),
+      );
+      expect(response.status).toBe(413);
+      await expect(rows()).resolves.toEqual([]);
+    });
+
+    it("上限以内の本文はこれまでどおり処理される", async () => {
+      // 上限判定がバイト数で行われ、通常の本文を巻き込まないことの確認。
+      const response = await postJson("/api/teams/500117/activity", activity());
+      expect(response.status).toBe(200);
       await expect(rows()).resolves.toHaveLength(1);
     });
 

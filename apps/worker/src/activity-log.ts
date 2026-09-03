@@ -1,7 +1,7 @@
 import { detectPii } from "@hell-ict/domain";
 import { z } from "zod";
 
-import { error, json, parseJson } from "./http.js";
+import { error, json, parseJson, PayloadTooLargeError } from "./http.js";
 import type { RequestScope } from "./http.js";
 
 /**
@@ -220,15 +220,27 @@ const clientActivitySchema = z.object({
   clientAt: z.iso.datetime(),
 });
 
+/**
+ * 本文の上限。metaの4KB制限より十分大きく取りつつ、巨大な本文をJSONへ展開する前に
+ * 打ち切るための粗い関門（schemaの検証は展開後にしか効かない）。
+ */
+const ACTIVITY_BODY_MAX_BYTES = 64 * 1024;
+
 export const handleActivityPost = async (
   request: Request,
   env: Env,
   teamCode: string,
 ): Promise<Response> => {
-  const parsed = await parseJson(request)
-    .then((body) => clientActivitySchema.safeParse(body))
-    .catch(() => null);
-  if (parsed === null || !parsed.success) return error("活動ログの形式が不正です。", 400);
+  let body: unknown;
+  try {
+    body = await parseJson(request, ACTIVITY_BODY_MAX_BYTES);
+  } catch (caught) {
+    return caught instanceof PayloadTooLargeError
+      ? error("活動ログの本文が大きすぎます。", 413)
+      : error("活動ログの形式が不正です。", 400);
+  }
+  const parsed = clientActivitySchema.safeParse(body);
+  if (!parsed.success) return error("活動ログの形式が不正です。", 400);
 
   try {
     await insertActivity(env, { ...parsed.data, teamCode });
