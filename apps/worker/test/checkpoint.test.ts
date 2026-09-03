@@ -116,6 +116,23 @@ describe("チェックポイントAPI", () => {
     expect(state.checkpoint?.body.pos).toBe(2);
   });
 
+  it("上書き済みのcommandIdの再送は409で拒否し、古いbodyを復活させない", async () => {
+    await save("500023", { commandId: id("127"), expectedRevision: 0, body: { pos: 1 } });
+    await save("500023", { commandId: id("128"), expectedRevision: 1, body: { pos: 5 } }, later);
+
+    const stale = await save("500023", {
+      commandId: id("127"),
+      expectedRevision: 0,
+      body: { pos: 1 },
+    });
+
+    expect(stale.status).toBe(409);
+    expect(httpErrorSchema.parse(await stale.json()).code).toBe("conflict");
+    await expect(load("500023")).resolves.toMatchObject({
+      checkpoint: { revision: 2, body: { pos: 5 } },
+    });
+  });
+
   it("revisionが一致しない保存は409で拒否し、状態を変えない", async () => {
     await save("500005", { commandId: id("104"), expectedRevision: 0 });
 
@@ -356,10 +373,8 @@ describe("チェックポイントAPI", () => {
     await expect(load("500010")).resolves.toMatchObject({ checkpoint: null });
   });
 
-  it("台帳は直近20件だけを残し、溢れた古いcommandIdの再送は競合になる", async () => {
+  it("適用済みのcommandIdは、最新revisionで再送しても再適用されない", async () => {
     const teamCode = "500016";
-    // 上限を1件だけ超えるまで保存する。savedAtは全て同じなので、created_atが
-    // 同値のときにrowidで挿入順に切れることもここで固定される。
     const commandIds = Array.from({ length: 21 }, (_, index) => id(String(200 + index)));
     for (const [index, commandId] of commandIds.entries()) {
       const response = await save(teamCode, {
@@ -370,19 +385,27 @@ describe("チェックポイントAPI", () => {
       expect(response.status).toBe(200);
     }
 
+    // 台帳は剪定しない。1行あたり数十バイトなので、120分の研修では膨らまない。
     const rows = await runInDurableObject(env.TEAM_ROOM.getByName(teamCode), (_instance, state) =>
       state.storage.sql
         .exec("SELECT count(*) AS count FROM processed_checkpoint_commands")
         .toArray(),
     );
-    expect(rows[0]?.count).toBe(20);
+    expect(rows[0]?.count).toBe(21);
 
-    // 溢れた最古のcommandIdは台帳に無いので、通常の競合として扱われる。
-    const evicted = await save(teamCode, { commandId: commandIds[0], expectedRevision: 0 });
-    expect(evicted.status).toBe(409);
-    expect(httpErrorSchema.parse(await evicted.json()).code).toBe("conflict");
+    // 最古のcommandIdを最新revisionで再送しても、古いbodyは再適用されない。
+    const stale = await save(teamCode, {
+      commandId: commandIds[0],
+      expectedRevision: 21,
+      body: { pos: 0 },
+    });
+    expect(stale.status).toBe(409);
+    expect(httpErrorSchema.parse(await stale.json()).code).toBe("conflict");
+    await expect(load(teamCode)).resolves.toMatchObject({
+      checkpoint: { revision: 21, body: { pos: 7 } },
+    });
 
-    // 直近のcommandIdは台帳に残っており、再送しても状態を進めず同じsnapshotを返す。
+    // 直前の保存の再送は、状態を進めず現在のsnapshotを返す。
     const kept = await save(teamCode, { commandId: commandIds[20], expectedRevision: 20 });
     expect(kept.status).toBe(200);
     const { snapshot } = saveCheckpointResultSchema.parse(await kept.json());
