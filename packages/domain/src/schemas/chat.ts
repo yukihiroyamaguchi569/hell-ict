@@ -6,11 +6,14 @@ export const chatThreadIdSchema = z.uuid();
 export const chatMessageIdSchema = z.uuid();
 export const chatRoleSchema = z.enum(["user", "assistant"]);
 
+/** 1メッセージの本文長の上限。OpenAI応答の切り詰めもこの値へ揃える。 */
+export const CHAT_MESSAGE_MAX_CHARS = 4000;
+
 export const chatMessageSchema = z
   .object({
     messageId: chatMessageIdSchema,
     role: chatRoleSchema,
-    text: z.string().trim().min(1).max(4000),
+    text: z.string().trim().min(1).max(CHAT_MESSAGE_MAX_CHARS),
     createdAt: z.iso.datetime(),
   })
   .strict();

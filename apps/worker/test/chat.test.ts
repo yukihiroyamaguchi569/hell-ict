@@ -1,6 +1,7 @@
 import { env } from "cloudflare:workers";
 import { createExecutionContext, waitOnExecutionContext } from "cloudflare:test";
 import {
+  CHAT_MESSAGE_MAX_CHARS,
   chatCommandFingerprint,
   chatMessageResultSchema,
   chatSnapshotSchema,
@@ -15,7 +16,7 @@ import { describe, expect, it } from "vitest";
 import { DEFAULT_CHAT_RATE_LIMIT, RATE_LIMIT_WINDOW_MS } from "../src/guard.js";
 import { handleChatMessage } from "../src/index.js";
 import { OpenAiRefusalError } from "../src/openai-gateway.js";
-import { collectMessages, postJson, session, upgrade } from "./support.js";
+import { collectMessages, get, postJson, session, upgrade } from "./support.js";
 
 const createThread = (teamCode: string, commandId: string, title: string): Promise<Response> =>
   postJson(`/api/teams/${teamCode}/chat/threads`, { type: "create-thread", commandId, title });
@@ -818,5 +819,96 @@ describe("P1C チャット骨格", () => {
     );
     expect(revived.status).toBe(503);
     expect(gateway.requests).toHaveLength(DEFAULT_CHAT_RATE_LIMIT + 1);
+  });
+  it("空白だけのAI応答は保存せず、snapshotを汚さない", async () => {
+    await session("400026");
+    const created = await createThread("400026", "00000000-0000-4000-8000-000000002601", "副");
+    const { snapshot } = createThreadResultSchema.parse(await created.json());
+    const threadId = snapshot.threads[0]?.threadId;
+    if (threadId === undefined) throw new Error("unexpected");
+
+    const before = await chatSnapshotOf("400026");
+    const gateway = new FakeAiGateway([{ kind: "success", response: "   " }]);
+    const response = await sendMessage(
+      "400026",
+      { commandId: "00000000-0000-4000-8000-000000002602", threadId, text: "本文" },
+      gateway,
+    );
+
+    // 空の本文をsnapshotへ積むと、以後の読み出しがparse失敗で丸ごと壊れる。
+    expect(response.status).toBe(503);
+    const after = await chatSnapshotOf("400026");
+    const messages = after.threads.flatMap((thread) => thread.messages);
+    expect(messages.filter((message) => message.role === "assistant")).toHaveLength(0);
+    // ユーザー発言までは保存済み（再送で二重に積まれない）。
+    expect(messages.filter((message) => message.role === "user")).toHaveLength(1);
+    expect(before.threads).toHaveLength(after.threads.length);
+  });
+
+  it("上限を超えるAI応答は切り詰めて保存し、その後の読み出しも通る", async () => {
+    await session("400027");
+    const created = await createThread("400027", "00000000-0000-4000-8000-000000002701", "副");
+    const { snapshot } = createThreadResultSchema.parse(await created.json());
+    const threadId = snapshot.threads[0]?.threadId;
+    if (threadId === undefined) throw new Error("unexpected");
+
+    const gateway = new FakeAiGateway([
+      { kind: "success", response: "あ".repeat(CHAT_MESSAGE_MAX_CHARS + 1) },
+    ]);
+    const response = await sendMessage(
+      "400027",
+      { commandId: "00000000-0000-4000-8000-000000002702", threadId, text: "本文" },
+      gateway,
+    );
+
+    expect(response.status).toBe(200);
+    const body = chatMessageResultSchema.parse(await response.json());
+    expect(body.assistant.text).toHaveLength(CHAT_MESSAGE_MAX_CHARS);
+
+    // 保存後のGETがschemaで落ちないこと（切り詰めずに積むとここで壊れる）。
+    const snapshotResponse = await get("/api/teams/400027/chat");
+    expect(snapshotResponse.status).toBe(200);
+    const stored = chatSnapshotSchema.parse(await snapshotResponse.json());
+    const assistant = stored.threads.flatMap((thread) => thread.messages).at(-1);
+    expect(assistant?.text).toHaveLength(CHAT_MESSAGE_MAX_CHARS);
+  });
+
+  it("古いclaim generationのcompleteは無視され、新しいclaimの処理が確定する", async () => {
+    await session("400028");
+    const created = await createThread("400028", "00000000-0000-4000-8000-000000002801", "副");
+    const { snapshot } = createThreadResultSchema.parse(await created.json());
+    const threadId = snapshot.threads[0]?.threadId;
+    if (threadId === undefined) throw new Error("unexpected");
+
+    const commandId = "00000000-0000-4000-8000-000000002802";
+    const room = env.TEAM_ROOM.getByName("400028");
+    // generation 1 でクレームを取る。
+    const first = await beginDirect("400028", { commandId, threadId, text: "本文" });
+    expect(first).toMatchObject({ kind: "pending", claimGeneration: 1 });
+
+    // AIが失敗してクレームが解放され、再送が generation 2 で取り直す。
+    await room.completeChatMessage(commandId, { kind: "failure" }, 1);
+    const second = await beginDirect("400028", { commandId, threadId, text: "本文" });
+    expect(second).toMatchObject({ kind: "pending", claimGeneration: 2 });
+
+    // 遅れて戻ってきた generation 1 の応答は捨てる。
+    const stale = await room.completeChatMessage(
+      commandId,
+      { kind: "success", text: "古い応答" },
+      1,
+    );
+    expect(stale).toEqual({ stale: true });
+    const afterStale = await chatSnapshotOf("400028");
+    expect(afterStale.threads.flatMap((t) => t.messages).map((m) => m.text)).not.toContain(
+      "古い応答",
+    );
+
+    // generation 2 の応答は確定する。
+    const applied = await room.completeChatMessage(
+      commandId,
+      { kind: "success", text: "新しい応答" },
+      2,
+    );
+    expect(applied).toMatchObject({ assistant: { text: "新しい応答" } });
   });
 });

@@ -18,6 +18,7 @@ export type {
 } from "./schemas/team-state.js";
 export { initialTeamSnapshot, initialTeamState, transitionTeam } from "./team-state.js";
 export {
+  CHAT_MESSAGE_MAX_CHARS,
   chatCommandSchema,
   chatMessageResultSchema,
   chatMessageSchema,
@@ -50,6 +51,7 @@ export {
   countThreadsOfKind,
   createThread,
   initialChatSnapshot,
+  normalizeAssistantText,
 } from "./chat.js";
 export type { ChatMutationResult } from "./chat.js";
 export {

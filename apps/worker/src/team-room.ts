@@ -2,6 +2,7 @@ import {
   appendMessage,
   applyCheckpoint,
   chatMessageResultSchema,
+  chatMessageSchema,
   chatSnapshotSchema,
   checkpointSnapshotSchema,
   commandResultSchema,
@@ -11,6 +12,7 @@ import {
   createThreadResultSchema,
   initialChatSnapshot,
   initialTeamSnapshot,
+  normalizeAssistantText,
   saveCheckpointCommandSchema,
   sendMessageCommandSchema,
   teamCodeSchema,
@@ -52,6 +54,7 @@ type StoredPendingMessage = {
   claimed_at: string | null;
   prompt_profile: string | null;
   fingerprint: string | null;
+  claim_generation: number | null;
 };
 type StoredCheckpointState = { snapshot: string };
 type StoredCheckpointCommand = { revision: SqlStorageValue };
@@ -72,7 +75,7 @@ export type ThreadLimitReply = { threadLimit: true; max: number; kind: ChatThrea
 
 export type BeginChatMessageOutcome =
   | { kind: "already-processed"; result: ChatMessageResult }
-  | { kind: "pending"; history: AiMessage[] }
+  | { kind: "pending"; history: AiMessage[]; claimGeneration: number }
   | { kind: "in-progress" }
   | { kind: "rate-limited"; retryAfterSeconds: number }
   // 同じcommandIdが別のスレッド／別のpromptProfileで使い回された。冪等再送ではなく
@@ -175,6 +178,14 @@ const replayProcessed = (
   };
 };
 
+/**
+ * 応答をsnapshotへ載せられる形へ整える。失敗と、載せられない応答（空白だけ）は
+ * どちらもnullへ畳む——空の本文をsnapshotへ積むと、以後そのスレッドの読み出しが
+ * parse失敗で丸ごと壊れる。上限超過はnormalizeAssistantTextが切り詰める。
+ */
+const assistantTextOf = (outcome: CompleteChatMessageOutcome): string | null =>
+  outcome.kind === "success" ? normalizeAssistantText(outcome.text) : null;
+
 export class TeamRoom extends DurableObject<Env> {
   constructor(ctx: DurableObjectState, env: Env) {
     super(ctx, env);
@@ -194,7 +205,7 @@ export class TeamRoom extends DurableObject<Env> {
       "CREATE TABLE IF NOT EXISTS processed_message_commands (command_id TEXT PRIMARY KEY, result TEXT NOT NULL, fingerprint TEXT)",
     );
     this.ctx.storage.sql.exec(
-      "CREATE TABLE IF NOT EXISTS pending_message_commands (command_id TEXT PRIMARY KEY, thread_id TEXT NOT NULL, created_at TEXT NOT NULL, claimed_at TEXT, prompt_profile TEXT, fingerprint TEXT)",
+      "CREATE TABLE IF NOT EXISTS pending_message_commands (command_id TEXT PRIMARY KEY, thread_id TEXT NOT NULL, created_at TEXT NOT NULL, claimed_at TEXT, prompt_profile TEXT, fingerprint TEXT, claim_generation INTEGER NOT NULL DEFAULT 0)",
     );
     // 既にテーブルを持つDOにはCREATE TABLE IF NOT EXISTSが効かないので、列を後から足す。
     // 2度目以降は「列が既にある」で失敗するだけなので握りつぶす。既存行のprompt_profileは
@@ -203,6 +214,7 @@ export class TeamRoom extends DurableObject<Env> {
       "ALTER TABLE pending_message_commands ADD COLUMN prompt_profile TEXT",
       "ALTER TABLE pending_message_commands ADD COLUMN fingerprint TEXT",
       "ALTER TABLE processed_message_commands ADD COLUMN fingerprint TEXT",
+      "ALTER TABLE pending_message_commands ADD COLUMN claim_generation INTEGER NOT NULL DEFAULT 0",
     ]) {
       try {
         this.ctx.storage.sql.exec(statement);
@@ -434,7 +446,7 @@ export class TeamRoom extends DurableObject<Env> {
     const pending =
       this.ctx.storage.sql
         .exec<StoredPendingMessage>(
-          "SELECT thread_id, claimed_at, prompt_profile, fingerprint FROM pending_message_commands WHERE command_id = ?",
+          "SELECT thread_id, claimed_at, prompt_profile, fingerprint, claim_generation FROM pending_message_commands WHERE command_id = ?",
           command.commandId,
         )
         .toArray()[0] ?? null;
@@ -462,7 +474,7 @@ export class TeamRoom extends DurableObject<Env> {
       this.saveChatSnapshot(appended.snapshot);
       const now = new Date().toISOString();
       this.ctx.storage.sql.exec(
-        "INSERT INTO pending_message_commands (command_id, thread_id, created_at, claimed_at, prompt_profile, fingerprint) VALUES (?, ?, ?, ?, ?, ?)",
+        "INSERT INTO pending_message_commands (command_id, thread_id, created_at, claimed_at, prompt_profile, fingerprint, claim_generation) VALUES (?, ?, ?, ?, ?, ?, 1)",
         command.commandId,
         command.threadId,
         now,
@@ -474,7 +486,11 @@ export class TeamRoom extends DurableObject<Env> {
     });
     if (retryAfterSeconds !== null) return { kind: "rate-limited", retryAfterSeconds };
     this.broadcastChat(appended.snapshot);
-    return { kind: "pending", history: this.historyFor(appended.snapshot, command.threadId) };
+    return {
+      kind: "pending",
+      history: this.historyFor(appended.snapshot, command.threadId),
+      claimGeneration: 1,
+    };
   }
 
   /**
@@ -503,20 +519,37 @@ export class TeamRoom extends DurableObject<Env> {
     // 同じcommandIdの再送が新規送信として二重に積まれる（冪等性を失う）。
     if (retryAfterSeconds !== null) return { kind: "rate-limited", retryAfterSeconds };
     // 未クレーム、またはクレームが古い（AI呼び出しが完了しないまま終わった）ので、
-    // ここで改めてクレームを取り直してから再試行させる。
+    // ここで改めてクレームを取り直してから再試行させる。世代番号を1つ進めることで、
+    // 前のクレームで走っていたAI呼び出しが後から戻ってきても弾ける（fencing token）。
+    const claimGeneration = (pending.claim_generation ?? 0) + 1;
     this.ctx.storage.sql.exec(
-      "UPDATE pending_message_commands SET claimed_at = ? WHERE command_id = ?",
+      "UPDATE pending_message_commands SET claimed_at = ?, claim_generation = ? WHERE command_id = ?",
       new Date().toISOString(),
+      claimGeneration,
       command.commandId,
     );
     const snapshot = this.loadChatSnapshot(teamCode);
-    return { kind: "pending", history: this.historyFor(snapshot, pending.thread_id) };
+    return {
+      kind: "pending",
+      history: this.historyFor(snapshot, pending.thread_id),
+      claimGeneration,
+    };
   }
 
+  /**
+   * AI呼び出しの顛末を確定させる。`claimGeneration`はbeginChatMessageが返した
+   * クレームの世代番号（fencing token）で、現在の世代と一致するときだけ適用する。
+   *
+   * クレームが古くなって別のリクエストが取り直した後に、前のAI呼び出しが遅れて
+   * 戻ってくることがある。世代を見ないと、その古い応答が新しいクレームの結果を
+   * 上書きしたり、解放したばかりのクレームをもう一度解放したりする。一致しない
+   * ときは何も書かず`{ stale: true }`を返し、呼び出し側もsnapshotへ触れない。
+   */
   async completeChatMessage(
     commandId: string,
     outcome: CompleteChatMessageOutcome,
-  ): Promise<ChatMessageResult | { retry: true }> {
+    claimGeneration: number,
+  ): Promise<ChatMessageResult | { retry: true } | { stale: true }> {
     const processed =
       this.ctx.storage.sql
         .exec<StoredMessageCommand>(
@@ -530,12 +563,15 @@ export class TeamRoom extends DurableObject<Env> {
     const pending =
       this.ctx.storage.sql
         .exec<StoredPendingMessage>(
-          "SELECT thread_id, claimed_at, prompt_profile, fingerprint FROM pending_message_commands WHERE command_id = ?",
+          "SELECT thread_id, claimed_at, prompt_profile, fingerprint, claim_generation FROM pending_message_commands WHERE command_id = ?",
           commandId,
         )
         .toArray()[0] ?? null;
     if (pending === null) throw new Error("該当する送信途中のメッセージがありません。");
-    if (outcome.kind === "failure") {
+    if ((pending.claim_generation ?? 0) !== claimGeneration) return { stale: true };
+
+    const text = assistantTextOf(outcome);
+    if (text === null) {
       // クレームを解放する。解放しないと、正当な再送（同じcommandIdでの再送信）が
       // 誤って「進行中」と判定され、二度とAIを呼べなくなる。
       this.ctx.storage.sql.exec(
@@ -544,40 +580,54 @@ export class TeamRoom extends DurableObject<Env> {
       );
       return { retry: true };
     }
+    return this.appendAssistantMessage(commandId, pending, text);
+  }
 
+  /**
+   * 検証済みの応答をsnapshotへ積み、冪等台帳へ移す。completeChatMessageの複雑度を
+   * 下げるための切り出し。
+   */
+  private appendAssistantMessage(
+    commandId: string,
+    pending: StoredPendingMessage,
+    text: string,
+  ): ChatMessageResult {
     const stored = this.ctx.storage.sql
       .exec<StoredChatState>("SELECT snapshot FROM chat_state WHERE id = 1")
       .toArray()[0];
     if (stored === undefined) throw new Error("チャット状態が見つかりません。");
     const snapshot = chatSnapshotSchema.parse(JSON.parse(stored.snapshot) as unknown);
-    const assistantMessage: ChatMessage = {
+    // schemaを通してからappendする。ここで弾かれる値がsnapshotへ入ることはない。
+    const assistantMessage: ChatMessage = chatMessageSchema.parse({
       messageId: crypto.randomUUID(),
       role: "assistant",
-      text: outcome.text,
+      text,
       createdAt: new Date().toISOString(),
-    };
+    });
     const appended = appendMessage(snapshot, {
       threadId: pending.thread_id,
       message: assistantMessage,
     });
     if (!appended.ok) throw new Error("応答の保存先スレッドが見つかりません。");
-    this.saveChatSnapshot(appended.snapshot);
     const result = chatMessageResultSchema.parse({
       snapshot: appended.snapshot,
       assistant: assistantMessage,
     });
-    this.ctx.storage.sql.exec(
-      // pending行の指紋をそのまま引き継ぐ。processed側にも残しておかないと、
-      // 完了後の再送で内容の取り違えを検出できない。
-      "INSERT INTO processed_message_commands (command_id, result, fingerprint) VALUES (?, ?, ?)",
-      commandId,
-      JSON.stringify(result),
-      pending.fingerprint,
-    );
-    this.ctx.storage.sql.exec(
-      "DELETE FROM pending_message_commands WHERE command_id = ?",
-      commandId,
-    );
+    this.ctx.storage.transactionSync(() => {
+      this.saveChatSnapshot(appended.snapshot);
+      this.ctx.storage.sql.exec(
+        // pending行の指紋をそのまま引き継ぐ。processed側にも残しておかないと、
+        // 完了後の再送で内容の取り違えを検出できない。
+        "INSERT INTO processed_message_commands (command_id, result, fingerprint) VALUES (?, ?, ?)",
+        commandId,
+        JSON.stringify(result),
+        pending.fingerprint,
+      );
+      this.ctx.storage.sql.exec(
+        "DELETE FROM pending_message_commands WHERE command_id = ?",
+        commandId,
+      );
+    });
     this.broadcastChat(appended.snapshot);
     return result;
   }

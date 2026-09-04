@@ -165,12 +165,15 @@ const runAiCompletion = async (
 };
 
 /** AI応答保存の結果をHTTP応答へ変換する。handleChatMessageの複雑度を下げるための切り出し。 */
-const respondToCompletion = (
-  result: ChatMessageResult | { retry: true } | null,
-  refusal: string | null,
-): Response => {
+type CompleteChatOutcome = ChatMessageResult | { retry: true } | { stale: true } | null;
+
+const respondToCompletion = (result: CompleteChatOutcome, refusal: string | null): Response => {
   if (result === null)
     return error("応答の保存に失敗しました。時間を置いて再試行してください。", 503);
+  // クレームを別のリクエストが取り直した後に戻ってきた応答。何も書いていないので、
+  // 進行中の側に任せて再試行を促す。
+  if ("stale" in result)
+    return error("同じ内容が既に送信処理中です。少し待って再試行してください。", 409);
   if ("retry" in result) {
     return refusal !== null
       ? error(`AIが回答を拒否しました: ${refusal}`, 422, "ai_refusal")
@@ -191,9 +194,12 @@ const blockHistoryPii = async (
   room: DurableObjectStub<TeamRoom>,
   commandId: string,
   history: readonly AiMessage[],
+  claimGeneration: number,
 ): Promise<Response | null> => {
   if (!history.some((message) => detectPii(message.text) !== null)) return null;
-  const blocked = await room.completeChatMessage(commandId, { kind: "failure" }).catch(() => null);
+  const blocked = await room
+    .completeChatMessage(commandId, { kind: "failure" }, claimGeneration)
+    .catch(() => null);
   return blocked === null
     ? error("メッセージの処理に失敗しました。時間を置いて再試行してください。", 503)
     : error("会話履歴に個人情報を検知したため、送信をブロックしました。", 422, "history_pii");
@@ -229,10 +235,10 @@ const chatLogger = (
 /** AI応答の顛末を1行書く。handleChatMessageへ分岐を増やさないための切り出し。 */
 const logChatOutcome = (
   log: ChatLogger,
-  result: ChatMessageResult | { retry: true } | null,
+  result: CompleteChatOutcome,
   refusal: string | null,
 ): void => {
-  if (result !== null && !("retry" in result)) {
+  if (result !== null && !("retry" in result) && !("stale" in result)) {
     log("chat.assistant", {
       role: "assistant",
       text: result.assistant.text,
@@ -260,7 +266,9 @@ const beginOrRespond = async (
   teamCode: TeamCode,
   command: SendMessageCommand,
   gate: ChatGate,
-): Promise<{ readonly history: readonly AiMessage[] } | Response> => {
+): Promise<
+  { readonly history: readonly AiMessage[]; readonly claimGeneration: number } | Response
+> => {
   const begin = await room.beginChatMessage(teamCode, command, gate).catch(() => null);
   if (begin === null)
     return error("メッセージの処理に失敗しました。時間を置いて再試行してください。", 503);
@@ -274,7 +282,7 @@ const beginOrRespond = async (
     return error("同じ内容が既に送信処理中です。少し待って再試行してください。", 409);
   if (begin.kind === "conflict")
     return error("同じ送信IDが別の内容で使われています。", 409, "conflict");
-  return { history: begin.history };
+  return { history: begin.history, claimGeneration: begin.claimGeneration };
 };
 
 /**
@@ -347,7 +355,12 @@ export const handleChatMessage = async (
   // 同じcommandIdの再試行はINSERT OR IGNOREで潰れる）。
   log("chat.user", { role: "user", text: command.text });
 
-  const historyBlock = await blockHistoryPii(room, command.commandId, begun.history);
+  const historyBlock = await blockHistoryPii(
+    room,
+    command.commandId,
+    begun.history,
+    begun.claimGeneration,
+  );
   if (historyBlock !== null) {
     log("chat.history_pii");
     return historyBlock;
@@ -360,7 +373,9 @@ export const handleChatMessage = async (
     ...begun.history,
   ];
   const { outcome, refusal } = await runAiCompletion(aiGateway, historyWithSystemPrompt);
-  const result = await room.completeChatMessage(command.commandId, outcome).catch(() => null);
+  const result = await room
+    .completeChatMessage(command.commandId, outcome, begun.claimGeneration)
+    .catch(() => null);
   logChatOutcome(log, result, refusal);
   return respondToCompletion(result, refusal);
 };

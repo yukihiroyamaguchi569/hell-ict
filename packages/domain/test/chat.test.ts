@@ -6,8 +6,9 @@ import {
   countThreadsOfKind,
   createThread,
   initialChatSnapshot,
+  normalizeAssistantText,
 } from "../src/chat.js";
-import { chatMessageSchema } from "../src/schemas/chat.js";
+import { CHAT_MESSAGE_MAX_CHARS, chatMessageSchema } from "../src/schemas/chat.js";
 
 const mainThreadId = "00000000-0000-4000-8000-000000000001";
 const otherThreadId = "00000000-0000-4000-8000-000000000002";
@@ -155,5 +156,24 @@ describe("chatCommandFingerprint", () => {
     const left = await chatCommandFingerprint({ threadId: "ab", text: "c" });
     const right = await chatCommandFingerprint({ threadId: "a", text: "bc" });
     expect(left).not.toBe(right);
+  });
+});
+
+describe("normalizeAssistantText", () => {
+  it("空白だけの応答はnull（保存しない）", () => {
+    expect(normalizeAssistantText("")).toBeNull();
+    expect(normalizeAssistantText("   ")).toBeNull();
+    expect(normalizeAssistantText(" \u3000 ")).toBeNull();
+  });
+
+  it("前後の空白を落とす", () => {
+    expect(normalizeAssistantText("  応答  ")).toBe("応答");
+  });
+
+  it("上限を超える応答は切り詰める（失敗にしない）", () => {
+    const long = "あ".repeat(CHAT_MESSAGE_MAX_CHARS + 1);
+    expect(normalizeAssistantText(long)).toHaveLength(CHAT_MESSAGE_MAX_CHARS);
+    const exact = "い".repeat(CHAT_MESSAGE_MAX_CHARS);
+    expect(normalizeAssistantText(exact)).toBe(exact);
   });
 });

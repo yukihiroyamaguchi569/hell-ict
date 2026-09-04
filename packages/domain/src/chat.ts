@@ -1,3 +1,4 @@
+import { CHAT_MESSAGE_MAX_CHARS } from "./schemas/chat.js";
 import type {
   ChatMessage,
   ChatSnapshot,
@@ -76,4 +77,22 @@ export const chatCommandFingerprint = async (command: {
   const source = `${command.threadId}\n${command.promptProfile ?? "default"}\n${command.text}`;
   const digest = await crypto.subtle.digest("SHA-256", new TextEncoder().encode(source));
   return [...new Uint8Array(digest)].map((byte) => byte.toString(16).padStart(2, "0")).join("");
+};
+
+/**
+ * OpenAIの応答をchatMessageSchemaのtextに載る形へ整える。載せられないならnullを返し、
+ * 呼び出し側は失敗として扱う（snapshotを汚さない）。
+ *
+ * - 空白だけの応答はnull。schemaのmin(1)に落ちる値をsnapshotへ積むと、以後その
+ *   スレッドの読み出しがparse失敗で丸ごと壊れる。
+ * - 上限超過は切り詰めて保存する。失敗にするとクライアントが再送し、OpenAIをもう一度
+ *   呼んで同じ長さの応答が返るだけで、課金と待ち時間が増えて詰む。会話としては
+ *   末尾が欠けるだけで成立するので、切り捨てを許容する。
+ */
+export const normalizeAssistantText = (text: string): string | null => {
+  const trimmed = text.trim();
+  if (trimmed.length === 0) return null;
+  return trimmed.length > CHAT_MESSAGE_MAX_CHARS
+    ? trimmed.slice(0, CHAT_MESSAGE_MAX_CHARS)
+    : trimmed;
 };
