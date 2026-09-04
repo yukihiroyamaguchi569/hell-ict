@@ -3534,26 +3534,45 @@
   /* 読む前に形を確かめ、違っていれば通信失敗と同じ経路（busy解除・         */
   /* エラー表示・再試行）へ倒す。                                        */
   /* ------------------------------------------------------------------ */
+  const isTeamCode = (v) => typeof v === "string" && /^\d{6}$/.test(v);
+  const isChatMessage = (m) =>
+    !!m && typeof m.messageId === "string" && (m.role === "user" || m.role === "assistant") &&
+    typeof m.text === "string" && typeof m.createdAt === "string";
+  /* kind は後から足した列なので、持たないスレッドも通す（持つなら stage/manual だけ）。 */
   const isChatThread = (t) =>
-    !!t && typeof t.threadId === "string" && typeof t.title === "string" && Array.isArray(t.messages);
+    !!t && typeof t.threadId === "string" && typeof t.title === "string" &&
+    (t.kind === undefined || t.kind === "stage" || t.kind === "manual") &&
+    Array.isArray(t.messages) && t.messages.every(isChatMessage);
   /* スレッドは必ず1本以上ある（サーバが「メイン」を必ず作る）。空配列を通すと
-     activeThreadId が undefined のまま送信へ進む。 */
+     activeThreadId が undefined のまま送信へ進む。revision は「古いsnapshotで
+     巻き戻さない」判断の土台なので、欠けていたら不正として扱う。 */
   const isChatSnapshot = (v) =>
-    !!v && Array.isArray(v.threads) && v.threads.length > 0 && v.threads.every(isChatThread);
+    !!v && isTeamCode(v.teamCode) && Number.isInteger(v.revision) && v.revision >= 0 &&
+    Array.isArray(v.threads) && v.threads.length > 0 && v.threads.every(isChatThread);
   /* サーバは秒未満まで持つISO日時を返す。Date.parse だけだと "3" のような
      文字列も通るので、書式と解釈の両方を見る。 */
   const isIsoDateTime = (v) =>
     typeof v === "string" &&
     /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(\.\d+)?(Z|[+-]\d{2}:\d{2})$/.test(v) &&
     Number.isFinite(Date.parse(v));
+  const PENALTY_STATES = ["none", "in-progress", "done"];
+  /* 罰の進行は3値。知らない値を採ると、復帰時に罰を出すか出さないかの判断が狂う。 */
+  const isPenaltyState = (v) => v === undefined || PENALTY_STATES.indexOf(v) >= 0;
+  const isCheckpointData = (d) =>
+    !!d && typeof d === "object" && isPenaltyState(d.s3Penalty) && isPenaltyState(d.s4Penalty);
   const isCheckpointBody = (b) =>
-    !!b && typeof b.view === "string" && Number.isInteger(b.pos) &&
-    Number.isInteger(b.elapsedMs) && !!b.trap &&
+    !!b &&
+    // view は go() が扱える画面idだけ。知らない画面を渡すと go() が STEPS[0] へ
+    // 落ちて、復帰したはずのチームが入室画面に戻る。
+    STEPS.some((step) => step.id === b.view) &&
+    Number.isInteger(b.pos) && b.pos >= 0 && b.pos <= STOP_COUNT - 1 &&
+    Number.isInteger(b.elapsedMs) && b.elapsedMs >= 0 && !!b.trap &&
     typeof b.trap.s3Used === "boolean" && typeof b.trap.s4Used === "boolean" &&
-    !!b.data && typeof b.data === "object" &&
+    isCheckpointData(b.data) &&
     Number.isInteger(b.dataRevision) && b.dataRevision >= 0;
   const isCheckpointSnapshot = (v) =>
-    !!v && Number.isInteger(v.revision) && isIsoDateTime(v.savedAt) && isCheckpointBody(v.body);
+    !!v && isTeamCode(v.teamCode) && Number.isInteger(v.revision) &&
+    isIsoDateTime(v.savedAt) && isCheckpointBody(v.body);
   /* GET応答。checkpoint キーが「有って null」か「有って揃っている」かだけを通す
      ——キーごと無い応答（200 の {} など）を「初回入室」と読むと、進行が残って
      いるチームを welcome へ戻してしまう。serverNow は経過時間の基準なので必須。 */

@@ -189,7 +189,11 @@ JS 構造そのものは資産ではない。単一ファイル・フレーム�
   「進行状況を取得できません。」と［再試行］（プローブ失敗と同じ器。［オフラインで進める（台本モード）］も並ぶ）を
   出し、welcome へは進めない。判定は形まで見る——`checkpoint` キーが**存在して** `null` か完全な snapshot
   （`revision` / `savedAt` / `body` 一式、`body.dataRevision` を含む）であること、`serverNow` が ISO 日時である
-  ことを必須にする（200 の `{}` を「初回入室」と誤認しない）。保存応答（POST 200）も同じ形で検証し、
+  ことを必須にする（200 の `{}` を「初回入室」と誤認しない）。中身も見る——`view` は `STEPS` の id、
+  `pos` は 0〜7、`elapsedMs` は非負整数、`teamCode` は6桁、`data` の `s3Penalty`/`s4Penalty` は
+  `none|in-progress|done`（あれば）。チャットの snapshot も同様に `teamCode`・`revision`（整数・**必須**）・
+  各スレッドの `threadId`/`title`/`kind`（あれば `stage|manual`）/`messages`（各要素の `messageId`・
+  `role`(user|assistant)・`text`・`createdAt`）まで確かめる。保存応答（POST 200）も同じ形で検証し、
   不正なら「確認済み」にせず `checkpointDirty` を維持する。
   戻る先は**`pos`（停留所）が正**——クリア処理は画面遷移より先に `TEAMS[2].pos` を進めるので、
   クリアカードや解錠演出の最中にリロードされると `{ view: 前ステージ, pos: 次 }` というねじれた状態が
