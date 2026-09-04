@@ -1,6 +1,6 @@
 import { z } from "zod";
 
-import { publicTeamId, teamCodeSchema } from "@hell-ict/domain";
+import { publicTeamId, redactPii, teamCodeSchema } from "@hell-ict/domain";
 
 import { isTeamCodeAllowed, parseTeamCodes } from "./guard.js";
 import type { TeamCodeAllowlist } from "./guard.js";
@@ -75,7 +75,9 @@ const progressEventSchema = z.object({
   pos: z.number().int().min(0).max(7),
   view: displayText(32),
   kind: z.enum(["entry", "clear", "jump", "resume"]),
-  clientAt: displayText(40),
+  // 活動ログと同じくISO 8601で厳密に検証する。自由文字列のままだと、表示用の列に
+  // 何でも入れられる経路が1つ残る（モックはtoISOString()を送るので互換性は保たれる）。
+  clientAt: z.iso.datetime(),
 });
 
 const teamRowSchema = z.object({
@@ -171,7 +173,18 @@ export const handleProgressPost = async (request: Request, env: Env): Promise<Re
       `INSERT INTO progress_events (team_code, team_name, pos, view, kind, client_at)
        VALUES (?, ?, ?, ?, ?, ?)`,
     )
-      .bind(event.teamCode, event.teamName, event.pos, event.view, event.kind, event.clientAt)
+      .bind(
+        event.teamCode,
+        // teamNameとviewは参加者が自由に入れられる表示用の値で、D1にも公開サマリーにも
+        // そのまま出る。PIIは伏せ字化してから保存する——拒否にしないのは、進捗記録が
+        // 落ちるとダッシュボードからそのチームが消えて当日の進行が見えなくなるため。
+        // 記録は残し、PIIだけを落とす。
+        redactPii(event.teamName),
+        event.pos,
+        redactPii(event.view),
+        event.kind,
+        event.clientAt,
+      )
       .run();
     return json({ ok: true });
   } catch {

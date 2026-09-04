@@ -1,6 +1,6 @@
 import { env, exports } from "cloudflare:workers";
 import { beforeEach, describe, expect, it } from "vitest";
-import { publicTeamId } from "@hell-ict/domain";
+import { PII_REDACTION, publicTeamId, stage4Patient } from "@hell-ict/domain";
 import { z } from "zod";
 
 import { progressSchemaSql } from "../src/progress.js";
@@ -165,17 +165,46 @@ describe("進捗記録", () => {
   it("表示用の文字列は拒否せず規定長へ切り詰める", async () => {
     const response = await postJson(
       "/api/progress",
-      event({ teamName: "あ".repeat(50), view: "v".repeat(60), clientAt: "c".repeat(80) }),
+      event({ teamName: "あ".repeat(50), view: "v".repeat(60) }),
     );
     expect(response.status).toBe(200);
 
     const result = await summary();
     expect(result.teams[0]?.teamName).toHaveLength(24);
     expect(result.events[0]?.view).toHaveLength(32);
-    const clientAt = await env.PROGRESS_DB.prepare(
-      "SELECT client_at FROM progress_events LIMIT 1",
-    ).first("client_at");
-    expect(z.string().parse(clientAt)).toHaveLength(40);
+  });
+
+  it.each([
+    ["自由文字列", "c".repeat(80)],
+    ["空文字", ""],
+    ["日付だけ", "2026-08-23"],
+    ["タイムゾーン無し", "2026-08-23T02:00:00"],
+  ])("clientAtがISO 8601でない(%s)ときは400で拒否する", async (_label, clientAt) => {
+    // 表示用の列に何でも入れられる経路を残さない（活動ログと同じ厳密さに揃える）。
+    const response = await postJson("/api/progress", event({ clientAt }));
+    expect(response.status).toBe(400);
+    await expect(rowCount()).resolves.toBe(0);
+  });
+
+  it("teamNameとviewのPIIは伏せ字で保存され、summaryにも伏せ字で出る", async () => {
+    // 進捗記録は落とさない（拒否にするとダッシュボードからそのチームが消える）。
+    // 記録は残し、PIIだけを落とす。
+    const response = await postJson(
+      "/api/progress",
+      event({ teamName: `${stage4Patient.name}班`, view: stage4Patient.phone }),
+    );
+    expect(response.status).toBe(200);
+
+    const result = await summary();
+    expect(result.teams[0]?.teamName).not.toContain(stage4Patient.name);
+    expect(result.teams[0]?.teamName).toContain(PII_REDACTION);
+    expect(result.events[0]?.view).not.toContain(stage4Patient.phone);
+    // D1にも平文は残っていない。
+    const stored = await env.PROGRESS_DB.prepare(
+      "SELECT team_name, view FROM progress_events LIMIT 1",
+    ).first();
+    expect(JSON.stringify(stored)).not.toContain(stage4Patient.name);
+    expect(JSON.stringify(stored)).not.toContain(stage4Patient.phone);
   });
 
   it.each([
