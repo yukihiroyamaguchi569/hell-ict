@@ -4061,18 +4061,35 @@
      「処理済みの再送」と見なされて片方が消えていた。同じ宛先へ同じ文面を送り直した
      ときだけIDを再利用する、が正しい単位。
 
-     送信経路ごとに1枠ずつ持つ（AIチャットの sendAiLive と Stage 1 の s1DraftLive）
+     送信経路ごとに1つずつ持つ（AIチャットの sendAiLive と Stage 1 の s1DraftLive）
      ——どちらも同じメインスレッドへ書き込むが、進行中の試行は経路ごとに独立で、
-     片方の成功でもう片方のIDを捨ててはいけない。 */
+     片方の成功でもう片方のIDを捨ててはいけない。
+
+     未確定の試行は1件ではなくMapで持つ。1枠だけだと、スレッドAで失敗したあと
+     スレッドBへ送った時点でAのIDが上書きされ、Aの原文を送り直しても別コマンドに
+     なって発言が二重に積まれる。参加者は詰まったスレッドを放って別の話題を
+     始めるので、これは普通に起きる。上限を超えたら古い順に捨てる——20件あれば
+     1ステージ分の試行錯誤には足り、際限なく抱えても意味が無い。 */
+  const PENDING_COMMAND_LIMIT = 20;
+
   function makePendingCommand() {
-    let pending = null;
+    const pending = new Map();   // 指紋 → commandId（Mapは挿入順を保つ＝先頭が最も古い）
+    const keyOf = (threadId, promptProfile, text) => threadId + " " + promptProfile + " " + text;
     return {
       idFor(threadId, promptProfile, text) {
-        const key = threadId + " " + promptProfile + " " + text;
-        if (pending === null || pending.key !== key) pending = { key, commandId: crypto.randomUUID() };
-        return pending.commandId;
+        const key = keyOf(threadId, promptProfile, text);
+        const known = pending.get(key);
+        if (known !== undefined) return known;
+        const commandId = crypto.randomUUID();
+        pending.set(key, commandId);
+        while (pending.size > PENDING_COMMAND_LIMIT) pending.delete(pending.keys().next().value);
+        return commandId;
       },
-      clear() { pending = null; }
+      /* 解決した試行を捨てる。引数なしは全消し（入り直しなど）。 */
+      clear(threadId, promptProfile, text) {
+        if (threadId === undefined) { pending.clear(); return; }
+        pending.delete(keyOf(threadId, promptProfile, text));
+      }
     };
   }
 
@@ -4116,14 +4133,17 @@
     updateAiInputLock();
     // 再送用IDのキーにも入るので、送信本文と同じ一箇所から決める。
     const chatProfile = view === "s3" ? "s3" : "default";
+    // 応答が返る頃にはタブが切り替わっているかもしれないので、宛先は送信時点で
+    // 固定する（このキーで解決済みのIDを消す）。
+    const sentThreadId = liveState.activeThreadId;
     const placeholder = aiPlaceholderBubble();
     const res = await liveFetch("/api/teams/" + liveState.teamCode + "/chat/messages", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
         type: "send-message",
-        commandId: chatSendCommand.idFor(liveState.activeThreadId, chatProfile, text),
-        threadId: liveState.activeThreadId,
+        commandId: chatSendCommand.idFor(sentThreadId, chatProfile, text),
+        threadId: sentThreadId,
         text,
         promptProfile: chatProfile,
       }),
@@ -4132,7 +4152,7 @@
     updateAiInputLock();
 
     if (res.ok && res.body) {
-      chatSendCommand.clear();   // 確定したのでIDを破棄する（次の送信は新しい試行）
+      chatSendCommand.clear(sentThreadId, chatProfile, text);   // 確定したので破棄
       applyChatSnapshot(res.body.snapshot);
       placeholder.querySelector(".body").innerHTML = esc(res.body.assistant.text).replace(/\n/g, "<br>");
       renderAiTabs();
@@ -4147,7 +4167,7 @@
     // にならない。画面はサーバの状態と食い違っているので取り直して描き直す
     // （history_pii/ai_refusal では、保存済みのユーザー発言がここで現れる）。
     if (isUnsavedRejection(res)) {
-      chatSendCommand.clear();
+      chatSendCommand.clear(sentThreadId, chatProfile, text);
     } else {
       await restoreChatFromServer();
     }
@@ -5113,13 +5133,15 @@
     if (btn) { btn.textContent = "下書き中…"; btn.disabled = true; }
 
     const text = s1BuildDraftText(it, hasCtx);
+    // 宛先は送信時点で固定する（sendAiLive と同じ理由）。
+    const sentThreadId = liveState.activeThreadId;
     const res = await liveFetch("/api/teams/" + liveState.teamCode + "/chat/messages", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
         type: "send-message",
-        commandId: s1DraftCommand.idFor(liveState.activeThreadId, "s1", text),
-        threadId: liveState.activeThreadId,
+        commandId: s1DraftCommand.idFor(sentThreadId, "s1", text),
+        threadId: sentThreadId,
         text,
         promptProfile: "s1",
       }),
@@ -5127,7 +5149,7 @@
     s1DraftBusy = false;
 
     if (res.ok && res.body && res.body.assistant) {
-      s1DraftCommand.clear();   // 確定したのでIDを破棄する（次の依頼は新しい試行）
+      s1DraftCommand.clear(sentThreadId, "s1", text);   // 確定したので破棄
       applyChatSnapshot(res.body.snapshot);
       if (view !== "s1") return;   // 下書き要求中に Stage 1 を離れていたら他ステージの中央ペインへ着弾させない
       it.bodyDraft = res.body.assistant.text;
@@ -5143,7 +5165,7 @@
     // 0（タイムアウト・断）/409（処理中）/503 は結果が未確定——同じIDで再送すれば
     // DO側の冪等性に当たる。
     const unsaved = isUnsavedRejection(res);
-    if (unsaved) s1DraftCommand.clear();
+    if (unsaved) s1DraftCommand.clear(sentThreadId, "s1", text);
 
     if (res.status === 429) {
       // レート制限だけは「失敗」ではなく「待て」なので、専用の文言をボタンへ出す。
