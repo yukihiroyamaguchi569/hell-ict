@@ -3479,31 +3479,48 @@
      （企画書§6）なので、払わずに済む抜け道は塞ぐ。
      data は平坦なオブジェクトで、個人情報は一切入れない（サーバはdata内のPIIを
      422で拒否する）。 */
+  function checkpointData() {
+    return { s3Penalty: s3PenaltyState, s4Penalty: s4PenaltyState };
+  }
+
   function checkpointBody() {
+    const data = checkpointData();
     return {
       view: view,
       pos: TEAMS[2].pos,
       elapsedMs: elapsed * 1000,
       trap: { s3Used: s3TrapUsed, s4Used: s4TrapUsed },
-      data: { s3Penalty: s3PenaltyState, s4Penalty: s4PenaltyState },
-      dataRevision: nextDataRevision(),
+      data: data,
+      dataRevision: dataRevisionFor(data),
     };
   }
 
   /* data（罰の進行）の世代番号。pos と elapsedMs は数値そのものが単調なので
      後退を弾けるが、data は中身を見ても新旧が決まらない——同じ停留所にいる
      古いタブの flush が「まだ罰は始まっていない」を書き戻せてしまう。
-     そこで送るたびに増える番号を添え、サーバは pos → dataRevision の順で
-     新しい側を採る（flushの単調マージ）。
+     そこで世代番号を添え、サーバは pos → dataRevision の順で新しい側を採る。
 
-     次の値は「サーバから最後に受け取った値」と「自分が最後に送った値」の
-     大きい方＋1。GET・POST どちらの応答でも受け取った値を取り込むので、
-     別タブが先に進めていれば、こちらはその先から番号を振り直す。 */
-  function nextDataRevision() {
+     📌 番号を上げるのは「ローカルの data が変わった保存」だけ。ステージ遷移や
+     停留所の前進のように data が同じままの保存でも番号を上げてしまうと、
+     古いタブが「サーバの世代＋1」を名乗って自分の古い data を新しいものとして
+     押し通せる——世代番号が意味を持つのは「その data を作ったのは誰か」であって、
+     「誰が最後に喋ったか」ではない。data が変わっていない保存は、観測済みの
+     番号をそのまま送る（サーバは同値を許す）。 */
+  function dataRevisionFor(data) {
     if (!liveState) return 1;
-    const next = Math.max(liveState.serverDataRevision || 0, liveState.sentDataRevision || 0) + 1;
-    liveState.sentDataRevision = next;
-    return next;
+    const observed = Math.max(liveState.serverDataRevision || 0, liveState.sentDataRevision || 0);
+    const json = JSON.stringify(data);
+    if (json === liveState.sentDataJson) return observed;
+    liveState.sentDataRevision = observed + 1;
+    liveState.sentDataJson = json;
+    return liveState.sentDataRevision;
+  }
+
+  /* サーバの data を取り込んだ直後に呼ぶ。いま持っている data は「サーバが
+     持っていたもの」そのものなので、次の保存で新しい世代を名乗らせない。 */
+  function syncSentData() {
+    if (!liveState) return;
+    liveState.sentDataJson = JSON.stringify(checkpointData());
   }
 
   /* サーバのsnapshotから dataRevision を取り込む。後退させない。 */
@@ -3605,6 +3622,14 @@
     // expectedRevision とサーバの revision がずれていれば conflict、一致して
     // いれば「revisionは合っていたのに中身が後退していた」＝ regression、と
     // 構造だけで見分けられる。
+    // 拒否の理由に関わらず、取り直したサーバの状態をまず自分へ取り込む。
+    // conflict でも同じ——別タブが進めた罰の状態などを持たないまま body を
+    // 組み直すと、「サーバの世代を観測しただけの古い data」を新しい世代として
+    // 押し戻すことになる。取り込んだあとに syncSentData() で「この data は
+    // サーバ由来」と記録し、次の保存が余計な世代を名乗らないようにする。
+    adoptServerState(snapshot ? snapshot.body : null);
+    syncSentData();
+
     const conflicted = code === null ? serverRevision !== sentRevision : code === "conflict";
     if (conflicted) {
       // 同じPCで複数タブが開かれた等でrevisionがずれただけ。revisionを合わせて
@@ -3615,12 +3640,8 @@
       return;
     }
     // trap-regression／elapsed-regression／pos-regression／data-regression。
-    // いずれもサーバ値を採用して
-    // 再送はしない——次の保存（ステージ遷移・停留所の前進）が、取り込んだ値を
-    // 含む新しい body で自然に送られる。取り込みは再送後（retried）でも行う
-    // ——競合を直して送り直した先が後退だった、という順で来ることがあり、
-    // ここで諦めると追いつきが次の保存まで一巡遅れる。
-    adoptServerState(snapshot ? snapshot.body : null);
+    // いずれもサーバ値を採用済みで、再送はしない——次の保存（ステージ遷移・
+    // 停留所の前進）が、取り込んだ値を含む新しい body で自然に送られる。
   }
 
   /* キューへ積む。失敗はここで握りつぶし、チェーンが切れないようにする
@@ -8262,6 +8283,7 @@
     const data = body.data || {};
     s3PenaltyState = data.s3Penalty || "none";
     s4PenaltyState = data.s4Penalty || "none";
+    syncSentData();   // いま持っている data はサーバ由来。次の保存で新世代を名乗らせない
     resumePenalty(target);
 
     reportProgress(TEAMS[2].pos, "resume");
