@@ -3769,6 +3769,28 @@
   // 作成中のタイトル。同じステージへ連続で入場しても二重に作らせない。
   const stageThreadCreating = new Set();
 
+  let aiSending = false;
+  /* スレッド作成の飛行中カウント。ステージ入場の自動スレッド（activateStageThread）と
+     ＋ボタン（createLiveThread）が同時に走りうるので、真偽値ではなく数で持つ
+     ——片方の完了でもう片方の分までロックを外さないため。 */
+  let aiThreadPending = 0;
+
+  /* 入力欄と送信ボタンのロックを1箇所で決める。送信中（aiSending）に加えて
+     スレッド作成中も塞ぐ——作成が返る前に送ると、activeThreadId がまだ前ステージの
+     ままなので、新ステージの発言が前ステージのスレッドへ保存されてしまう
+     （Stage 2 のタスク別文脈分離＝AGENTS.md「壊してはいけない設計判断」が崩れる）。 */
+  function updateAiInputLock() {
+    const send = $("ai-send");
+    const input = $("ai-input");
+    const locked = aiSending || aiThreadPending > 0;
+    if (send) send.disabled = locked;
+    if (input) {
+      input.disabled = locked;
+      // 送信中は従来どおり文言を足さない（吹き出しで「入力中…」が出ている）。
+      input.placeholder = !aiSending && aiThreadPending > 0 ? "スレッドを準備しています…" : "";
+    }
+  }
+
   async function activateStageThread(id) {
     const title = STAGE_THREAD_TITLES[id];
     if (!title || !liveState) return;      // scripted時はgo()のAI_GREETING_HTMLリセットだけで足りる
@@ -3781,6 +3803,10 @@
     }
     if (stageThreadCreating.has(title)) return;
     stageThreadCreating.add(title);
+    // 作成が返るまで送信を塞ぐ。ここを開けたままにすると、新ステージで打った
+    // 発言が前ステージのスレッドへ入る（updateAiInputLock のコメント参照）。
+    aiThreadPending++;
+    updateAiInputLock();
     const teamCode = liveState.teamCode;
     const res = await liveFetch("/api/teams/" + teamCode + "/chat/threads", {
       method: "POST",
@@ -3791,6 +3817,8 @@
       body: JSON.stringify({ type: "create-thread", commandId: crypto.randomUUID(), title, kind: "stage" }),
     });
     stageThreadCreating.delete(title);
+    aiThreadPending--;
+    updateAiInputLock();   // 成功・失敗のどちらでも必ず解除する
     // 失敗しても進行は止めない。現行スレッドのまま従来どおり会話できる
     // ——409（上限）も含めてここへ落ちる（stage枠は独立なので実運用では起きない）。
     if (!res.ok || !res.body) return;
@@ -3807,6 +3835,9 @@
   async function createLiveThread() {
     if (!liveState) return;
     const title = "スレッド" + (liveState.threads.length + 1);
+    // ＋ボタンにも同じ穴がある——作成前に送ると、切り替わる前のスレッドへ入る。
+    aiThreadPending++;
+    updateAiInputLock();
     const res = await liveFetch("/api/teams/" + liveState.teamCode + "/chat/threads", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
@@ -3814,6 +3845,8 @@
       // stage側と対で読めるよう明示する。
       body: JSON.stringify({ type: "create-thread", commandId: crypto.randomUUID(), title, kind: "manual" }),
     });
+    aiThreadPending--;
+    updateAiInputLock();   // 成功・失敗のどちらでも必ず解除する
     if (res.status === 409) {
       // 上限に当たった。黙って何も起きないと「＋が壊れている」ように見えるので、
       // 理由だけは告げる（進行は止めない——今のスレッドでそのまま会話できる）。
@@ -3827,7 +3860,6 @@
     renderAiLogFromThread(liveState.activeThreadId);
   }
 
-  let aiSending = false;
   function aiPlaceholderBubble() {
     const log = $("ai-log");
     const empty = log.querySelector(".empty");
@@ -3951,7 +3983,7 @@
 
   async function sendAiLive(text) {
     aiSending = true;
-    $("ai-send").disabled = true;
+    updateAiInputLock();
     // 再送用IDのキーにも入るので、送信本文と同じ一箇所から決める。
     const chatProfile = view === "s3" ? "s3" : "default";
     const placeholder = aiPlaceholderBubble();
@@ -3967,7 +3999,7 @@
       }),
     });
     aiSending = false;
-    $("ai-send").disabled = false;
+    updateAiInputLock();
 
     if (res.ok && res.body) {
       chatSendCommand.clear();   // 確定したのでIDを破棄する（次の送信は新しい試行）
@@ -4124,7 +4156,9 @@
     const liveTurn = LIVE && liveState !== null &&
       (view === "s3" || view === "s35" || view === "s4");
     if (!liveTurn && view !== "s2" && view !== "s3" && view !== "s4" && view !== "s5" && view !== "s35") return;
-    if (liveTurn && aiSending) return;   // 二重送信ガード（LIVE時のみ。送信中はai-sendもdisabledにする）
+    // 二重送信ガードと、スレッド作成の完了待ち（LIVE時のみ。どちらの間も
+    // ai-send/ai-input を disabled にしてあるので、通常は押せない）。
+    if (liveTurn && (aiSending || aiThreadPending > 0)) return;
     const ta = $("ai-input");
     const text = ta.value.trim();
     if (!text) return;
