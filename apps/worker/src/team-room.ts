@@ -438,7 +438,7 @@ export class TeamRoom extends DurableObject<Env> {
           command.commandId,
         )
         .toArray()[0] ?? null;
-    if (pending !== null) return this.resumePending(teamCode, command, { pending, fingerprint });
+    if (pending !== null) return this.resumePending(teamCode, command, pending, gate);
 
     const snapshot = this.loadChatSnapshot(teamCode);
     if (!snapshot.threads.some((thread) => thread.threadId === command.threadId)) {
@@ -485,14 +485,23 @@ export class TeamRoom extends DurableObject<Env> {
   private resumePending(
     teamCode: TeamCode,
     command: SendMessageCommand,
-    found: { pending: StoredPendingMessage; fingerprint: string },
+    pending: StoredPendingMessage,
+    gate: BeginChatMessageGate,
   ): BeginChatMessageOutcome {
-    const { pending } = found;
     // 同じcommandIdを別の内容（別スレッド／別profile／別本文）で使い回した送信は、
     // 冪等再送ではなくクライアント側の取り違えである。pendingの履歴を流用すると、
     // 別スレッドの文脈をそのままAIへ渡してしまうので、流用せずに突き返す。
-    if (mismatchesPending(pending, command, found.fingerprint)) return { kind: "conflict" };
+    if (mismatchesPending(pending, command, gate.fingerprint)) return { kind: "conflict" };
     if (!this.isClaimStale(pending.claimed_at)) return { kind: "in-progress" };
+    // ここから先はこれから改めてOpenAIを呼ぶ経路なので、新規送信と同じく枠を1つ消費する。
+    // completeChatMessageはAI失敗・refusalでクレームを解放するため、消費しないと
+    // 「失敗する本文を同じcommandIdで投げ続ける」だけでレート制限に一切当たらず
+    // OpenAIを何度でも呼べてしまう。AIを呼ばない再送——processed（結果を返すだけ）と
+    // クレームが生きている最中（in-progress）——は従来どおり消費しない。
+    const retryAfterSeconds = this.consumeRateLimit(gate.nowMs, gate.limit);
+    // 超過してもpending行は消さない。ユーザー発言は既に保存済みで、行を消すと
+    // 同じcommandIdの再送が新規送信として二重に積まれる（冪等性を失う）。
+    if (retryAfterSeconds !== null) return { kind: "rate-limited", retryAfterSeconds };
     // 未クレーム、またはクレームが古い（AI呼び出しが完了しないまま終わった）ので、
     // ここで改めてクレームを取り直してから再試行させる。
     this.ctx.storage.sql.exec(

@@ -12,7 +12,7 @@ import { FakeAiGateway } from "@hell-ict/domain/fakes";
 import type { AiGateway, ChatSnapshot, PromptProfile } from "@hell-ict/domain";
 import { describe, expect, it } from "vitest";
 
-import { DEFAULT_CHAT_RATE_LIMIT } from "../src/guard.js";
+import { DEFAULT_CHAT_RATE_LIMIT, RATE_LIMIT_WINDOW_MS } from "../src/guard.js";
 import { handleChatMessage } from "../src/index.js";
 import { OpenAiRefusalError } from "../src/openai-gateway.js";
 import { collectMessages, postJson, session, upgrade } from "./support.js";
@@ -768,5 +768,55 @@ describe("P1C チャット骨格", () => {
     expect(resent.status).toBe(200);
     await expect(resent.json()).resolves.toEqual(firstBody);
     expect(gateway.requests).toHaveLength(1);
+  });
+  it("AI失敗後の再送も枠を消費し、同じcommandIdでOpenAIを呼び続けられない", async () => {
+    await session("400025");
+    const created = await createThread("400025", "00000000-0000-4000-8000-000000002501", "副");
+    const { snapshot } = createThreadResultSchema.parse(await created.json());
+    const threadId = snapshot.threads[0]?.threadId;
+    if (threadId === undefined) throw new Error("unexpected");
+
+    // completeChatMessageはAI失敗でクレームを解放するので、同じcommandIdの再送は
+    // 何度でもAIを呼べてしまっていた。再試行も枠を消費することを固定する。
+    const windowStartMs = 1_756_200_000_000;
+    const commandId = "00000000-0000-4000-8000-000000002502";
+    const gateway = new FakeAiGateway(
+      Array.from({ length: DEFAULT_CHAT_RATE_LIMIT + 1 }, () => ({
+        kind: "failure" as const,
+        error: new Error("一時障害"),
+      })),
+    );
+
+    for (let attempt = 0; attempt < DEFAULT_CHAT_RATE_LIMIT; attempt += 1) {
+      const response = await sendMessage(
+        "400025",
+        { commandId, threadId, text: "本文" },
+        gateway,
+        windowStartMs,
+      );
+      expect(response.status, `#${String(attempt)}`).toBe(503);
+    }
+    expect(gateway.requests).toHaveLength(DEFAULT_CHAT_RATE_LIMIT);
+
+    const blocked = await sendMessage(
+      "400025",
+      { commandId, threadId, text: "本文" },
+      gateway,
+      windowStartMs,
+    );
+    expect(blocked.status).toBe(429);
+    expect(blocked.headers.get("Retry-After")).not.toBeNull();
+    // 429の分はAIを呼んでいない。
+    expect(gateway.requests).toHaveLength(DEFAULT_CHAT_RATE_LIMIT);
+
+    // 窓が明ければ同じcommandIdで再開できる（pending行は消していない）。
+    const revived = await sendMessage(
+      "400025",
+      { commandId, threadId, text: "本文" },
+      gateway,
+      windowStartMs + RATE_LIMIT_WINDOW_MS,
+    );
+    expect(revived.status).toBe(503);
+    expect(gateway.requests).toHaveLength(DEFAULT_CHAT_RATE_LIMIT + 1);
   });
 });
