@@ -3491,6 +3491,11 @@
   $("btn-probe-offline").addEventListener("click", () => {
     LIVE = false;
     liveProbeState = "scripted";
+    // 入室手続きの途中（進行状況の取得失敗）から選ばれた場合、liveState は
+    // もう埋まっている。落とさないと「LIVE=false なのにセッションはある」という
+    // 中途半端な状態が残り、liveState だけを見ているスレッド作成が動いて
+    // 台本モードのはずの画面から通信が出る。
+    liveState = null;
     // プローブ失敗だけでなく、入室手続きの途中（進行状況の取得失敗）から
     // 選ばれることもある。そちらの理由も必ず消す——消し忘れると失敗表示と
     // disabled が残り、台本モードを選んだのに入室できない。
@@ -4012,7 +4017,9 @@
 
   async function activateStageThread(id) {
     const title = STAGE_THREAD_TITLES[id];
-    if (!title || !liveState) return;      // scripted時はgo()のAI_GREETING_HTMLリセットだけで足りる
+    // scripted時はgo()のAI_GREETING_HTMLリセットだけで足りる。LIVE も見る——
+    // 台本モードを選んだ直後は liveState を落とすが、片方だけの判定を残さない。
+    if (!title || !LIVE || !liveState) return;
     const existing = liveState.threads.find((t) => t.title === title);
     if (existing) {
       liveState.activeThreadId = existing.threadId;
