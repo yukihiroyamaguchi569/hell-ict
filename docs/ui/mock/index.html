@@ -3234,14 +3234,23 @@
      TEAMS[2].pos を直接書く既存の散在箇所（設計負債・10箇所超）が index に
      依存しているため、席をずらすとそこが全部壊れる。空席は kind:"empty" で
      埋める（drawMarks は kind:"other" しか描かない）。 */
+  /* 帯に描ける行かどうか。1行でも形が違うと drawMarks() が NaN の left や
+     undefined の名前を吐いて帯が崩れるので、不正な行は描く前に落とす
+     ——帯は表示だけの機能で、1チーム欠けても進行は止まらない。 */
+  const isSummaryTeam = (r) =>
+    !!r && typeof r.publicId === "string" && /^[0-9a-f]{8}$/i.test(r.publicId) &&
+    typeof r.teamName === "string" &&
+    Number.isInteger(r.pos) && r.pos >= 0 && r.pos <= STOP_COUNT - 1 &&
+    (r.isSelf === undefined || typeof r.isSelf === "boolean");
+
   function syncTeamsFromSummary(rows) {
     const others = rows
-      .filter((r) => r && typeof r.pos === "number" && r.isSelf !== true)
+      .filter((r) => isSummaryTeam(r) && r.isSelf !== true)
       .map((r) => ({
         pos: r.pos,
         kind: "other",
-        publicId: typeof r.publicId === "string" ? r.publicId : "",
-        nm: String(r.teamName || "").slice(0, 24) || "（無名）",
+        publicId: r.publicId,
+        nm: r.teamName.slice(0, 24) || "（無名）",
       }));
     const next = [
       others[0] || { pos: 0, kind: "empty" },
