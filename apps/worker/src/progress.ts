@@ -1,6 +1,12 @@
 import { z } from "zod";
 
-import { publicTeamId, redactPii, teamCodeSchema, viewIdSchema } from "@hell-ict/domain";
+import {
+  PII_REDACTION,
+  publicTeamId,
+  redactPii,
+  teamCodeSchema,
+  viewIdSchema,
+} from "@hell-ict/domain";
 
 import { isTeamCodeAllowed, parseTeamCodes } from "./guard.js";
 import type { TeamCodeAllowlist } from "./guard.js";
@@ -177,11 +183,11 @@ export const handleProgressPost = async (request: Request, env: Env): Promise<Re
       .bind(
         event.teamCode,
         // teamNameは参加者が自由に入れられる表示用の値で、D1にも公開サマリーにも
-        // そのまま出る。PIIは伏せ字化してから保存する——拒否にしないのは、進捗記録が
-        // 落ちるとダッシュボードからそのチームが消えて当日の進行が見えなくなるため。
-        // 記録は残し、PIIだけを落とす。
+        // そのまま出る。PIIと配布コードを伏せ字化してから保存する——拒否にしないのは、
+        // 進捗記録が落ちるとダッシュボードからそのチームが消えて当日の進行が
+        // 見えなくなるため。記録は残し、危ないものだけを落とす。
         // viewはschemaで既知の画面idに固定済みなので、そのまま入れてよい。
-        redactPii(event.teamName),
+        redactDisplayText(event.teamName, parseTeamCodes(env.TEAM_CODES)),
         event.pos,
         event.view,
         event.kind,
@@ -199,20 +205,55 @@ export const handleProgressPost = async (request: Request, env: Env): Promise<Re
  * 設定が途中で入った場合や、設定前に積まれた行が残っている場合に、知らないチームが
  * 並ぶのを防ぐため、読み出し側でも絞る。
  */
+/** 6桁の連続数字。配布コードが分からないときは、これを配布コードとみなして伏せる。 */
+const SIX_DIGITS = /(?<!\d)\d{6}(?!\d)/g;
+
 /**
- * 行のteamCodeを公開用IDへ差し替える。生のチームコードは返さない——サマリーは
- * 参加者の端末からも読めるので、他チームのコードが見えるとそのまま入室に使えてしまう
- * （コードが唯一の入室資格）。自分の行だけ`isSelf`で見分けられるようにする。
+ * 表示用テキストの伏せ字化。PIIに加えて配布チームコードも落とす——teamNameへ自分の
+ * コードを入れられると、公開サマリー経由で他チームの端末へそのまま渡り、publicIdで
+ * 隠した意味が無くなる（コードが唯一の入室資格）。
+ *
+ * 許可リストがあるときは、そこに載っているコードだけを伏せる（無関係な6桁の数字を
+ * むやみに潰さない）。未設定・不正・空のときは配布コードが分からないので、6桁の連続
+ * 数字を一律で伏せる。
+ *
+ * 保存時と読み出し時の両方で通す。読み出し側にも掛けるのは、この伏せ字化を入れる前に
+ * 積まれた行が既にD1へ残っているため——保存時だけでは過去の行が公開され続ける。
  */
-const toPublicRow = async <Row extends { teamCode: string }>(
+const redactDisplayText = (text: string, allowlist: TeamCodeAllowlist): string => {
+  const withoutPii = redactPii(text);
+  const known = allowlist.kind === "list" && allowlist.codes.size > 0 ? allowlist.codes : null;
+  return known === null
+    ? withoutPii.replace(SIX_DIGITS, PII_REDACTION)
+    : withoutPii.replace(SIX_DIGITS, (code) => (known.has(code) ? PII_REDACTION : code));
+};
+
+type PublicRowContext = { selfCode: string | null; allowlist: TeamCodeAllowlist };
+
+/**
+ * 行のteamCodeを公開用IDへ差し替え、表示用テキストを伏せ字化する。生のチームコードは
+ * 返さない——サマリーは参加者の端末からも読めるので、他チームのコードが見えると
+ * そのまま入室に使えてしまう。自分の行だけ`isSelf`で見分けられるようにする。
+ */
+const toPublicRow = async <Row extends { teamCode: string; teamName: string }>(
   row: Row,
-  selfCode: string | null,
+  context: PublicRowContext,
 ): Promise<Omit<Row, "teamCode"> & { publicId: string; isSelf?: true }> => {
   const { teamCode, ...rest } = row;
   const publicId = await publicTeamId(teamCode);
-  return selfCode !== null && teamCode === selfCode
-    ? { ...rest, publicId, isSelf: true }
-    : { ...rest, publicId };
+  const base = { ...rest, teamName: redactDisplayText(row.teamName, context.allowlist) };
+  return context.selfCode !== null && teamCode === context.selfCode
+    ? { ...base, publicId, isSelf: true }
+    : { ...base, publicId };
+};
+
+/** eventsはviewも表示用テキストなので同じ伏せ字化を通す（enum化より前の行のため）。 */
+const toPublicEventRow = async (
+  row: z.infer<typeof eventRowSchema>,
+  context: PublicRowContext,
+): Promise<Omit<z.infer<typeof eventRowSchema>, "teamCode"> & { publicId: string }> => {
+  const publicRow = await toPublicRow(row, context);
+  return { ...publicRow, view: redactDisplayText(row.view, context.allowlist) };
 };
 
 /**
@@ -240,18 +281,19 @@ export const handleProgressSummary = async (env: Env, url: URL): Promise<Respons
         .bind(...eventsFilter.params)
         .all(),
     ]);
+    const context: PublicRowContext = { selfCode, allowlist };
     return json({
       teams: await Promise.all(
         z
           .array(teamRowSchema)
           .parse(teams.results)
-          .map((row) => toPublicRow(row, selfCode)),
+          .map((row) => toPublicRow(row, context)),
       ),
       events: await Promise.all(
         z
           .array(eventRowSchema)
           .parse(events.results)
-          .map((row) => toPublicRow(row, selfCode)),
+          .map((row) => toPublicEventRow(row, context)),
       ),
     });
   } catch {

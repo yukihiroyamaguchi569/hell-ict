@@ -379,6 +379,57 @@ describe("進捗記録", () => {
     expect(result.teams.some((team) => team.isSelf === true)).toBe(false);
   });
 
+  it("teamNameに入れた配布コードはsummaryで伏せ字になる", async () => {
+    // publicIdで隠した意味が無くならないよう、teamName経由でコードが漏れる経路も塞ぐ。
+    const saved = env.TEAM_CODES;
+    try {
+      env.TEAM_CODES = "100001,100002";
+      await postJson("/api/progress", event({ teamCode: "100001", teamName: "100001" }));
+
+      const result = await summary();
+      expect(result.teams[0]?.teamName).toBe(PII_REDACTION);
+      const body = await (await get("/api/progress/summary")).text();
+      expect(body).not.toContain("100001");
+    } finally {
+      env.TEAM_CODES = saved;
+    }
+  });
+
+  it("許可リストが無いときは6桁連続数字を一律で伏せる", async () => {
+    // 配布コードが分からないので、6桁の並びはすべて配布コードとみなす。
+    await postJson("/api/progress", event({ teamName: "班 100001" }));
+    const result = await summary();
+    expect(result.teams[0]?.teamName).toBe(`班 ${PII_REDACTION}`);
+  });
+
+  it("許可リストにあるコードだけを伏せ、無関係な6桁は残す", async () => {
+    const saved = env.TEAM_CODES;
+    try {
+      env.TEAM_CODES = "100001";
+      await postJson("/api/progress", event({ teamCode: "100001", teamName: "病床 400000" }));
+      const result = await summary();
+      expect(result.teams[0]?.teamName).toBe("病床 400000");
+    } finally {
+      env.TEAM_CODES = saved;
+    }
+  });
+
+  it("伏せ字化を入れる前に積まれた行も、summaryでは伏せ字で出る", async () => {
+    // 保存時だけでは過去の行が公開され続ける。読み出し側にも同じ伏せ字化を掛ける。
+    await env.PROGRESS_DB.prepare(
+      `INSERT INTO progress_events (team_code, team_name, pos, view, kind, client_at)
+       VALUES (?, ?, 1, ?, 'clear', '')`,
+    )
+      .bind("100001", `${stage4Patient.name}班`, `連絡先 ${stage4Patient.phone}`)
+      .run();
+
+    const result = await summary();
+    expect(result.teams[0]?.teamName).not.toContain(stage4Patient.name);
+    expect(result.teams[0]?.teamName).toContain(PII_REDACTION);
+    expect(result.events[0]?.view).not.toContain(stage4Patient.phone);
+    expect(result.events[0]?.view).toContain(PII_REDACTION);
+  });
+
   it("teamsはpos降順、同順位は最終更新が古い順に並ぶ", async () => {
     const insert = env.PROGRESS_DB.prepare(
       `INSERT INTO progress_events (team_code, team_name, pos, view, kind, client_at, created_at)
