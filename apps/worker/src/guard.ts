@@ -133,10 +133,12 @@ const TEAM_CODE_SEPARATORS = /[,，、]/;
  */
 export const parseTeamCodes = (raw: string | undefined): TeamCodeAllowlist => {
   if (raw === undefined) return { kind: "unset" };
-  const entries = raw
-    .split(TEAM_CODE_SEPARATORS)
-    .map((code) => code.trim())
-    .filter((code) => code.length > 0);
+  // 空要素（`100001,,100002`や末尾カンマ）も不正として扱う。落として済ませると、
+  // 区切りの打ち間違いに気づけないまま件数だけが合わなくなる——teamCodesCountを
+  // 配布数と突き合わせる運用が、いちばん効いてほしい場面で効かなくなる。
+  // 全体が空白だけ（""や",")のときは、従来どおり「設定し損ねた空リスト」として扱う。
+  const entries = raw.split(TEAM_CODE_SEPARATORS).map((code) => code.trim());
+  if (entries.every((code) => code.length === 0)) return { kind: "list", codes: new Set() };
   if (entries.some((code) => !teamCodeSchema.safeParse(code).success)) return { kind: "invalid" };
   return { kind: "list", codes: new Set(entries) };
 };

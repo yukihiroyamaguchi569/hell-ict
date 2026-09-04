@@ -193,6 +193,19 @@ describe("チームコード許可リスト（Pure Function）", () => {
     expect(teamCodesStatus(allowlist)).toEqual({ teamCodes: true, teamCodesCount: 2 });
   });
 
+  it("空要素が混ざればinvalid（区切りの打ち間違いを見逃さない）", () => {
+    // 落として済ませると、teamCodesCountを配布数と突き合わせる運用が
+    // いちばん効いてほしい場面で効かなくなる。
+    for (const raw of ["100001,,100002", "100001,", ",100001", "100001, ,100002"]) {
+      const allowlist = parseTeamCodes(raw);
+      expect(allowlist, raw).toEqual({ kind: "invalid" });
+      expect(teamCodesStatus(allowlist), raw).toEqual({
+        teamCodes: "invalid",
+        teamCodesCount: 0,
+      });
+    }
+  });
+
   it("6桁数字でない要素が1つでも混ざればinvalidで全拒否", () => {
     // 検証しないと、healthが「設定済み」を返して本番前確認を通過した後、当日
     // 入室できないという順序で気づくことになる。一部だけ通すのは、いちばん
