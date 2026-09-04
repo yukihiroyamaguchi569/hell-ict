@@ -1,6 +1,10 @@
 import { env, exports } from "cloudflare:workers";
-import { createExecutionContext, waitOnExecutionContext } from "cloudflare:test";
-import { createThreadResultSchema } from "@hell-ict/domain";
+import {
+  createExecutionContext,
+  runInDurableObject,
+  waitOnExecutionContext,
+} from "cloudflare:test";
+import { createThreadResultSchema, PII_REDACTION } from "@hell-ict/domain";
 import { FakeAiGateway } from "@hell-ict/domain/fakes";
 import type { PromptProfile } from "@hell-ict/domain";
 import { beforeEach, describe, expect, it } from "vitest";
@@ -240,7 +244,7 @@ describe("活動ログ", () => {
 
     // 送信前ゲートはユーザー本文しか見ない。AI応答にPIIが混ざる経路は現に想定して
     // おり（blockHistoryPii）、その本文をD1へ残さないことをここで固定する。
-    it("PIIを含むAI応答は、chat.assistantのtextを捨ててpiiRedactedを立てる", async () => {
+    it("PIIを含むAI応答は伏せ字で保存され、活動ログにも平文が残らない", async () => {
       const threadId = await mainThreadId("500008", "00000000-0000-4000-8000-000000000801");
       const gateway = new FakeAiGateway([
         { kind: "success", response: "渡辺 三郎さんの件、承知しました" },
@@ -257,22 +261,60 @@ describe("活動ログ", () => {
       // ユーザー本文はPIIを含まないのでそのまま残る。
       expect(chatRows[0]?.text).toBe("本文");
       expect(metaOf(chatRows[0])).toEqual({ promptProfile: "default" });
-      expect(chatRows[1]?.text).toBe("");
-      expect(metaOf(chatRows[1])).toEqual({ promptProfile: "default", piiRedacted: true });
-      // 本文を捨てても、どのメッセージだったかは追えるようにする。
+      // AI応答はDOへ保存される時点で伏せ字化済み。活動ログにも平文は届かないので、
+      // 活動ログ側のtext空化（piiRedacted）は発動しない。
+      expect(chatRows[1]?.text).not.toContain("渡辺 三郎");
+      expect(chatRows[1]?.text).toContain(PII_REDACTION);
+      expect(metaOf(chatRows[1])).toEqual({ promptProfile: "default" });
       expect(chatRows[1]?.messageId).not.toBe("");
+    });
+
+    it("活動ログへ平文のPIIが渡った場合は、textを捨ててpiiRedactedを立てる", async () => {
+      // AI応答は保存前に伏せ字化されるので通常はここへ来ないが、活動ログ側の防御は
+      // 全ての書き込みに掛かる最後の砦として残す。ユーザー本文の経路で確かめる。
+      const threadId = await mainThreadId("500019", "00000000-0000-4000-8000-000000001901");
+      const gateway = new FakeAiGateway([]);
+      const blocked = await chat(
+        "500019",
+        {
+          commandId: "00000000-0000-4000-8000-000000001902",
+          threadId,
+          text: "渡辺 三郎さんの件で返信文を書いてください",
+        },
+        gateway,
+      );
+      expect(blocked.status).toBe(422);
+
+      const piiRows = (await rows()).filter((row) => row.kind === "chat.pii_blocked");
+      expect(piiRows).toHaveLength(1);
+      expect(piiRows[0]?.text).toBe("");
     });
 
     it("履歴に混入したPIIのブロックはchat.history_piiとして残る", async () => {
       const threadId = await mainThreadId("500005", "00000000-0000-4000-8000-000000000501");
-      const gateway = new FakeAiGateway([
-        { kind: "success", response: "渡辺 三郎さんの件、承知しました" },
-      ]);
+      const gateway = new FakeAiGateway([{ kind: "success", response: "応答" }]);
       await chat(
         "500005",
         { commandId: "00000000-0000-4000-8000-000000000502", threadId, text: "本文" },
         gateway,
       );
+      // AI応答は保存時に伏せ字化されるので、履歴ゲートを踏ませるには平文を差し込む。
+      await runInDurableObject(env.TEAM_ROOM.getByName("500005"), (_instance, state) => {
+        const row = state.storage.sql
+          .exec("SELECT snapshot FROM chat_state WHERE id = 1")
+          .toArray()[0];
+        const parsed = JSON.parse(String(row?.snapshot)) as { threads: { messages: unknown[] }[] };
+        parsed.threads[0]?.messages.push({
+          messageId: "00000000-0000-4000-8000-000000000504",
+          role: "assistant",
+          text: "渡辺 三郎さんの件、承知しました",
+          createdAt: "2026-09-04T00:00:00.000Z",
+        });
+        state.storage.sql.exec(
+          "UPDATE chat_state SET snapshot = ? WHERE id = 1",
+          JSON.stringify(parsed),
+        );
+      });
       const blocked = await chat(
         "500005",
         { commandId: "00000000-0000-4000-8000-000000000503", threadId, text: "別の本文" },

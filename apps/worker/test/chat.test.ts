@@ -1,7 +1,9 @@
 import { env } from "cloudflare:workers";
+import { runInDurableObject } from "cloudflare:test";
 import { createExecutionContext, waitOnExecutionContext } from "cloudflare:test";
 import {
   CHAT_MESSAGE_MAX_CHARS,
+  PII_REDACTION,
   chatCommandFingerprint,
   chatMessageResultSchema,
   chatSnapshotSchema,
@@ -67,6 +69,27 @@ const beginDirect = async (
       fingerprint: await chatCommandFingerprint(command),
     },
   );
+
+/**
+ * 保存経路の伏せ字化を迂回して、履歴へ平文のPIIを差し込む。伏せ字化を入れる前に
+ * 保存された行など、想定外の経路で平文が残った状態を作り、外部送信の直前に効く
+ * 履歴側の防御が残っていることを確かめるために使う。
+ */
+const injectAssistantPii = (teamCode: string, messageId: string): Promise<void> =>
+  runInDurableObject(env.TEAM_ROOM.getByName(teamCode), (_instance, state) => {
+    const row = state.storage.sql.exec("SELECT snapshot FROM chat_state WHERE id = 1").toArray()[0];
+    const parsed = JSON.parse(String(row?.snapshot)) as { threads: { messages: unknown[] }[] };
+    parsed.threads[0]?.messages.push({
+      messageId,
+      role: "assistant",
+      text: "渡辺 三郎さんの件、承知しました",
+      createdAt: "2026-09-04T00:00:00.000Z",
+    });
+    state.storage.sql.exec(
+      "UPDATE chat_state SET snapshot = ? WHERE id = 1",
+      JSON.stringify(parsed),
+    );
+  });
 
 type PromptProfileCase = {
   readonly label: string;
@@ -472,17 +495,18 @@ describe("P1C チャット骨格", () => {
     ]);
   });
 
-  it("履歴に混入したPII（想定外経路のアシスタント応答）を検知し、追加のAI呼び出しをせず422を返す", async () => {
+  it("PIIを含むAI応答は伏せ字で保存され、次の送信も履歴ゲートに掛からない", async () => {
     await session("400014");
     const created = await createThread("400014", "00000000-0000-4000-8000-000000001401", "副");
     const { snapshot } = createThreadResultSchema.parse(await created.json());
     const threadId = snapshot.threads[0]?.threadId;
     if (threadId === undefined) throw new Error("unexpected");
 
-    // 送信前ゲートは今回の本文しか検査しない。ここではAI応答自体がPIIを含んで
-    // 保存された状態を再現し、外部送信の直前で履歴側の防御が効くことを検証する。
+    // 送信前ゲートは今回の本文しか検査しない。AI応答自体がPIIを含んで返ってきた場合は、
+    // 保存前に伏せ字へ置き換える（拒否にすると再送で同じ応答が返り課金だけ増える）。
     const gateway = new FakeAiGateway([
       { kind: "success", response: "渡辺 三郎さんの件、承知しました" },
+      { kind: "success", response: "了解しました" },
     ]);
     const first = await sendMessage(
       "400014",
@@ -490,17 +514,45 @@ describe("P1C チャット骨格", () => {
       gateway,
     );
     expect(first.status).toBe(200);
+    const firstBody = chatMessageResultSchema.parse(await first.json());
+    expect(firstBody.assistant.text).not.toContain("渡辺 三郎");
+    expect(firstBody.assistant.text).toContain(PII_REDACTION);
 
-    const response = await sendMessage(
+    // GETでも伏せ字（DOのchat_stateに平文が残っていない）。
+    const stored = chatSnapshotSchema.parse(await (await get("/api/teams/400014/chat")).json());
+    const texts = stored.threads.flatMap((thread) => thread.messages).map((m) => m.text);
+    expect(texts.some((text) => text.includes("渡辺 三郎"))).toBe(false);
+    expect(texts.some((text) => text.includes(PII_REDACTION))).toBe(true);
+
+    // 履歴に平文が残っていないので、次の送信は履歴PIIゲートに掛からない。
+    const next = await sendMessage(
       "400014",
       { commandId: "00000000-0000-4000-8000-000000001403", threadId, text: "別の本文" },
       gateway,
     );
+    expect(next.status).toBe(200);
+    expect(gateway.requests).toHaveLength(2);
+  });
+
+  it("履歴に平文のPIIが残っていた場合は、AIを呼ばず422 history_piiで止める", async () => {
+    await session("400030");
+    const created = await createThread("400030", "00000000-0000-4000-8000-000000003001", "副");
+    const { snapshot } = createThreadResultSchema.parse(await created.json());
+    const threadId = snapshot.threads[0]?.threadId;
+    if (threadId === undefined) throw new Error("unexpected");
+
+    await injectAssistantPii("400030", "00000000-0000-4000-8000-000000003002");
+
+    const gateway = new FakeAiGateway([{ kind: "success", response: "応答" }]);
+    const response = await sendMessage(
+      "400030",
+      { commandId: "00000000-0000-4000-8000-000000003003", threadId, text: "本文" },
+      gateway,
+    );
+
     expect(response.status).toBe(422);
-    const body = httpErrorSchema.parse(await response.json());
-    // 送信前ゲート（pii_blocked＝未保存）と違い、ユーザー発言は保存済みなのでhistory_pii。
-    expect(body.code).toBe("history_pii");
-    expect(gateway.requests).toHaveLength(1);
+    expect(httpErrorSchema.parse(await response.json()).code).toBe("history_pii");
+    expect(gateway.requests).toHaveLength(0);
   });
 
   it("履歴ブロック後、同じcommandIdで再送すると同じブロックが再現され、ユーザーメッセージは重複しない", async () => {
@@ -510,14 +562,14 @@ describe("P1C チャット骨格", () => {
     const threadId = snapshot.threads[0]?.threadId;
     if (threadId === undefined) throw new Error("unexpected");
 
-    const gateway = new FakeAiGateway([
-      { kind: "success", response: "渡辺 三郎さんの件、承知しました" },
-    ]);
+    const gateway = new FakeAiGateway([{ kind: "success", response: "応答" }]);
     await sendMessage(
       "400015",
       { commandId: "00000000-0000-4000-8000-000000001502", threadId, text: "本文" },
       gateway,
     );
+    // AI応答は保存時に伏せ字化されるので、履歴ゲートを踏ませるには平文を差し込む。
+    await injectAssistantPii("400015", "00000000-0000-4000-8000-000000001504");
 
     const command = {
       commandId: "00000000-0000-4000-8000-000000001503",
@@ -534,7 +586,10 @@ describe("P1C チャット骨格", () => {
     const thread = final.threads.find((t) => t.threadId === threadId);
     expect(thread?.messages.map((m) => [m.role, m.text])).toEqual([
       ["user", "本文"],
+      ["assistant", "応答"],
+      // 差し込んだ平文のPII。これが履歴ゲートを踏ませている。
       ["assistant", "渡辺 三郎さんの件、承知しました"],
+      // ブロックされた送信のユーザー発言は1件だけ（再送で二重に積まれない）。
       ["user", "別の本文"],
     ]);
   });

@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import { containsPii, detectPii, stage4Patient } from "../src/pii.js";
+import { containsPii, detectPii, PII_REDACTION, redactPii, stage4Patient } from "../src/pii.js";
 
 describe("送信前PIIゲート", () => {
   it.each([
@@ -202,5 +202,37 @@ describe("containsPii", () => {
       memo: `${stage4Patient.name}さん`,
     });
     expect(containsPii(deep)).toBe(true);
+  });
+});
+
+describe("redactPii", () => {
+  it("PIIを含まないテキストはそのまま返す", () => {
+    expect(redactPii("ただのメモです")).toBe("ただのメモです");
+    expect(redactPii("")).toBe("");
+  });
+
+  it("既知のパターンを伏せ字へ置き換える", () => {
+    const redacted = redactPii(`${stage4Patient.name}さんの件`);
+    expect(redacted).not.toContain(stage4Patient.name);
+    expect(redacted).toContain(PII_REDACTION);
+    expect(redacted).toContain("さんの件");
+  });
+
+  it("同じ本文に複数回出てきても全部置き換える", () => {
+    const redacted = redactPii(
+      `${stage4Patient.name}さんと${stage4Patient.name}さん、連絡先は${stage4Patient.phone}`,
+    );
+    expect(detectPii(redacted)).toBeNull();
+  });
+
+  it("置換後のテキストはdetectPiiに反応しない", () => {
+    for (const source of [
+      `${stage4Patient.name}さんについて`,
+      `${stage4Patient.dob}生まれの方です`,
+      `連絡先は${stage4Patient.phone}です`,
+      `ご長男の${stage4Patient.familyName}様より`,
+    ]) {
+      expect(detectPii(redactPii(source)), source).toBeNull();
+    }
   });
 });

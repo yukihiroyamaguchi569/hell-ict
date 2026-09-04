@@ -13,6 +13,7 @@ import {
   initialChatSnapshot,
   initialTeamSnapshot,
   normalizeAssistantText,
+  redactPii,
   saveCheckpointCommandSchema,
   sendMessageCommandSchema,
   teamCodeSchema,
@@ -195,8 +196,16 @@ const replayProcessed = (
  * どちらもnullへ畳む——空の本文をsnapshotへ積むと、以後そのスレッドの読み出しが
  * parse失敗で丸ごと壊れる。上限超過はnormalizeAssistantTextが切り詰める。
  */
-const assistantTextOf = (outcome: CompleteChatMessageOutcome): string | null =>
-  outcome.kind === "success" ? normalizeAssistantText(outcome.text) : null;
+const assistantTextOf = (outcome: CompleteChatMessageOutcome): string | null => {
+  if (outcome.kind !== "success") return null;
+  const normalized = normalizeAssistantText(outcome.text);
+  if (normalized === null) return null;
+  // AI応答にPIIが混ざることがある（Stage 4の設計上、モデルは渡された文脈を復唱しうる）。
+  // 平文でchat_stateとprocessed台帳へ残すと、以後のGETでも配信され続けるので、保存前に
+  // 伏せ字へ置き換える。拒否ではなく置換を選ぶ理由はdomainのredactPiiに書いた。
+  // 伏せ字化で長さが変わりうるので、もう一度上限へ収める。
+  return normalizeAssistantText(redactPii(normalized));
+};
 
 export class TeamRoom extends DurableObject<Env> {
   constructor(ctx: DurableObjectState, env: Env) {

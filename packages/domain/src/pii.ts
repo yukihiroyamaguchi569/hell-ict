@@ -161,3 +161,24 @@ const walkHasPii = (value: unknown): boolean => {
  */
 export const containsPii = (value: unknown): boolean =>
   stringifiedHasPii(value) || walkHasPii(value);
+
+/** 伏せ字。元の桁数から値を推測させないよう、一致した長さに合わせず固定にする。 */
+export const PII_REDACTION = "■■■";
+
+/**
+ * 既知のPIIパターンをすべて伏せ字へ置き換える。detectPiiは「最初に一致したラベル」
+ * しか返さず位置も教えないので、置換のためにパターンを全件・全出現へ当て直す。
+ *
+ * AI応答に対しては保存拒否ではなく伏せ字を選ぶ。拒否にするとクライアントが再送し、
+ * OpenAIは同じ本文に同じような応答を返しやすいので、課金と待ち時間が増えるだけで
+ * 前へ進まない。伏せ字なら会話の文脈は残り、PIIだけがDOから消える。
+ */
+export const redactPii = (text: string): string =>
+  piiPatterns.reduce(
+    (redacted, pattern) =>
+      redacted.replace(
+        new RegExp(pattern.re.source, `${pattern.re.flags.replace("g", "")}g`),
+        PII_REDACTION,
+      ),
+    text,
+  );
