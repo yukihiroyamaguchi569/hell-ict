@@ -1000,4 +1000,31 @@ describe("P1C チャット骨格", () => {
     const resent = await beginDirect("400031", { commandId, threadId, text: "本文" });
     expect(resent).toEqual({ kind: "in-progress" });
   });
+  it("pending行が壊れていたら503で止め、状態も変えない", async () => {
+    await session("400032");
+    const created = await createThread("400032", "00000000-0000-4000-8000-000000003201", "副");
+    const { snapshot } = createThreadResultSchema.parse(await created.json());
+    const threadId = snapshot.threads[0]?.threadId;
+    if (threadId === undefined) throw new Error("unexpected");
+
+    const commandId = "00000000-0000-4000-8000-000000003202";
+    const gateway = new FakeAiGateway([{ kind: "success", response: "応答" }]);
+    await beginDirect("400032", { commandId, threadId, text: "本文" });
+    const before = await chatSnapshotOf("400032");
+
+    // claimed_atをISO 8601でない値へ壊す。「pending無し」と読み替えると、既に
+    // 保存済みのユーザーメッセージがもう一度積まれてしまう。
+    await runInDurableObject(env.TEAM_ROOM.getByName("400032"), (_instance, state) => {
+      state.storage.sql.exec(
+        "UPDATE pending_message_commands SET claimed_at = 'こわれた' WHERE command_id = ?",
+        commandId,
+      );
+    });
+
+    const response = await sendMessage("400032", { commandId, threadId, text: "本文" }, gateway);
+
+    expect(response.status).toBe(503);
+    expect(gateway.requests).toHaveLength(0);
+    await expect(chatSnapshotOf("400032")).resolves.toEqual(before);
+  });
 });

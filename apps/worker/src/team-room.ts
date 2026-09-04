@@ -61,13 +61,20 @@ type StoredState = { snapshot: string };
 type StoredChatState = { snapshot: string };
 type StoredThreadCommand = { result: string; fingerprint: string | null };
 type StoredMessageCommand = { result: string; fingerprint: string | null };
-type StoredPendingMessage = {
-  thread_id: string;
-  claimed_at: string | null;
-  prompt_profile: string | null;
-  fingerprint: string | null;
-  claim_generation: number | null;
-};
+/**
+ * pending行。SQLiteは列の型を強制しないので、読み出しも実行時に検証する。壊れた行を
+ * 「pending無し」と読み替えると、既に保存済みのユーザーメッセージがもう一度積まれる
+ * ——台帳行と同じく、不整合は黙って通さず503（時間を置いて再試行）へ倒す。
+ */
+const storedPendingMessageSchema = z.object({
+  thread_id: z.string().min(1),
+  claimed_at: z.iso.datetime().nullable(),
+  prompt_profile: z.string().nullable(),
+  fingerprint: z.string().nullable(),
+  claim_generation: z.number().int().nonnegative().nullable(),
+});
+
+type StoredPendingMessage = z.infer<typeof storedPendingMessageSchema>;
 type StoredCheckpointState = { snapshot: string };
 type StoredCheckpointCommand = { revision: SqlStorageValue; fingerprint: string | null };
 type ConflictReply = { conflict: true };
@@ -374,14 +381,19 @@ export class TeamRoom extends DurableObject<Env> {
       kind: command.kind,
     });
     if (!created.ok) throw new Error("スレッドの作成に失敗しました。");
-    this.saveChatSnapshot(created.snapshot);
     const result = createThreadResultSchema.parse({ snapshot: created.snapshot });
-    this.ctx.storage.sql.exec(
-      "INSERT INTO processed_thread_commands (command_id, result, fingerprint) VALUES (?, ?, ?)",
-      command.commandId,
-      JSON.stringify(result),
-      fingerprint,
-    );
+    // snapshotの更新と冪等台帳は必ず同時に成立させる。片方だけ書けると、スレッドは
+    // 増えたのに台帳に記録が無い状態になり、同じcommandIdの再送が新規作成として
+    // もう1本増やしてしまう（checkpointと同じ流儀）。
+    this.ctx.storage.transactionSync(() => {
+      this.saveChatSnapshot(created.snapshot);
+      this.ctx.storage.sql.exec(
+        "INSERT INTO processed_thread_commands (command_id, result, fingerprint) VALUES (?, ?, ?)",
+        command.commandId,
+        JSON.stringify(result),
+        fingerprint,
+      );
+    });
     this.broadcastChat(created.snapshot);
     return result;
   }
@@ -500,13 +512,7 @@ export class TeamRoom extends DurableObject<Env> {
         .toArray()[0] ?? null;
     if (processed !== null) return replayProcessed(processed, fingerprint);
 
-    const pending =
-      this.ctx.storage.sql
-        .exec<StoredPendingMessage>(
-          "SELECT thread_id, claimed_at, prompt_profile, fingerprint, claim_generation FROM pending_message_commands WHERE command_id = ?",
-          command.commandId,
-        )
-        .toArray()[0] ?? null;
+    const pending = this.readPending(command.commandId);
     if (pending !== null) return this.resumePending(teamCode, command, pending, validated);
 
     const snapshot = this.loadChatSnapshot(teamCode);
@@ -555,6 +561,21 @@ export class TeamRoom extends DurableObject<Env> {
    * 古ければ取り直して履歴を返す。どちらも新しい送信ではないので枠は消費しない。
    * beginChatMessageの複雑度を下げるための切り出し。
    */
+  /**
+   * pending行を読む。行が無ければnull。行はあるが値が壊れているときは例外にして、
+   * Worker側のcatchから503へ倒す（storedPendingMessageSchemaの注記を参照）。
+   */
+  private readPending(commandId: string): StoredPendingMessage | null {
+    const row =
+      this.ctx.storage.sql
+        .exec(
+          "SELECT thread_id, claimed_at, prompt_profile, fingerprint, claim_generation FROM pending_message_commands WHERE command_id = ?",
+          commandId,
+        )
+        .toArray()[0] ?? null;
+    return row === null ? null : storedPendingMessageSchema.parse(row);
+  }
+
   private resumePending(
     teamCode: TeamCode,
     command: SendMessageCommand,
@@ -622,13 +643,7 @@ export class TeamRoom extends DurableObject<Env> {
     if (processed !== null)
       return chatMessageResultSchema.parse(JSON.parse(processed.result) as unknown);
 
-    const pending =
-      this.ctx.storage.sql
-        .exec<StoredPendingMessage>(
-          "SELECT thread_id, claimed_at, prompt_profile, fingerprint, claim_generation FROM pending_message_commands WHERE command_id = ?",
-          commandId,
-        )
-        .toArray()[0] ?? null;
+    const pending = this.readPending(commandId);
     if (pending === null) throw new Error("該当する送信途中のメッセージがありません。");
     if ((pending.claim_generation ?? 0) !== claimGeneration) return { stale: true };
 
