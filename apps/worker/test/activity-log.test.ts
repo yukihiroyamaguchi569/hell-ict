@@ -6,8 +6,12 @@ import type { PromptProfile } from "@hell-ict/domain";
 import { beforeEach, describe, expect, it } from "vitest";
 import { z } from "zod";
 
-import { activitySchemaSql } from "../src/activity-log.js";
-import { DEFAULT_CHAT_RATE_LIMIT } from "../src/guard.js";
+import {
+  ACTIVITY_RATE_LIMIT_PER_MINUTE,
+  DEFAULT_CHAT_RATE_LIMIT,
+  RATE_LIMIT_WINDOW_MS,
+} from "../src/guard.js";
+import { activitySchemaSql, handleActivityPost } from "../src/activity-log.js";
 import { handleChatMessage, handleCreateThread } from "../src/index.js";
 import { postJson, session } from "./support.js";
 
@@ -114,6 +118,10 @@ const activity = (overrides: Record<string, unknown> = {}): Record<string, unkno
   clientAt: "2026-09-03T02:00:00.000Z",
   ...overrides,
 });
+
+/** 連番からUUID形式のcommandIdを作る（活動ログのschemaはUUIDを要求する）。 */
+const uniqueCommandId = (index: number): string =>
+  `00000000-0000-4000-8000-${String(index).padStart(12, "0")}`;
 
 const jsonBytes = (value: unknown): number =>
   new TextEncoder().encode(JSON.stringify(value)).length;
@@ -536,6 +544,72 @@ describe("活動ログ", () => {
       );
       expect(response.status).toBe(413);
       await expect(rows()).resolves.toEqual([]);
+    });
+
+    it("上限を超えた活動ログは429で、D1に書かない", async () => {
+      const teamCode = "500170";
+      const windowStartMs = 1_756_300_000_000;
+      const post = (index: number): Promise<Response> =>
+        handleActivityPost(
+          new Request(`https://example.test/api/teams/${teamCode}/activity`, {
+            method: "POST",
+            headers: { Origin: "https://example.test" },
+            body: JSON.stringify({ ...activity(), commandId: uniqueCommandId(index) }),
+          }),
+          env,
+          teamCode,
+          windowStartMs,
+        );
+
+      for (let index = 0; index < ACTIVITY_RATE_LIMIT_PER_MINUTE; index += 1) {
+        expect((await post(index)).status, `#${String(index)}`).toBe(200);
+      }
+      const accepted = (await rows()).length;
+      expect(accepted).toBe(ACTIVITY_RATE_LIMIT_PER_MINUTE);
+
+      const blocked = await post(ACTIVITY_RATE_LIMIT_PER_MINUTE);
+      expect(blocked.status).toBe(429);
+      expect(blocked.headers.get("Retry-After")).not.toBeNull();
+      await expect(rows()).resolves.toHaveLength(accepted);
+
+      // 窓が明ければまた書ける。
+      const revived = await handleActivityPost(
+        new Request(`https://example.test/api/teams/${teamCode}/activity`, {
+          method: "POST",
+          headers: { Origin: "https://example.test" },
+          body: JSON.stringify({ ...activity(), commandId: uniqueCommandId(900) }),
+        }),
+        env,
+        teamCode,
+        windowStartMs + RATE_LIMIT_WINDOW_MS,
+      );
+      expect(revived.status).toBe(200);
+      await expect(rows()).resolves.toHaveLength(accepted + 1);
+    });
+
+    it("活動ログの枠はチャットの枠と独立している", async () => {
+      const teamCode = "500171";
+      const windowStartMs = 1_756_400_000_000;
+      const room = env.TEAM_ROOM.getByName(teamCode);
+      // チャット枠を使い切っても、活動ログは書ける。
+      for (let index = 0; index < DEFAULT_CHAT_RATE_LIMIT; index += 1) {
+        await room.consumeChatAttempt(windowStartMs, DEFAULT_CHAT_RATE_LIMIT);
+      }
+      await expect(
+        room.consumeChatAttempt(windowStartMs, DEFAULT_CHAT_RATE_LIMIT),
+      ).resolves.toMatchObject({ allowed: false });
+
+      const response = await handleActivityPost(
+        new Request(`https://example.test/api/teams/${teamCode}/activity`, {
+          method: "POST",
+          headers: { Origin: "https://example.test" },
+          body: JSON.stringify({ ...activity(), commandId: uniqueCommandId(901) }),
+        }),
+        env,
+        teamCode,
+        windowStartMs,
+      );
+      expect(response.status).toBe(200);
     });
 
     it("上限以内の本文はこれまでどおり処理される", async () => {

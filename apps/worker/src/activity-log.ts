@@ -1,7 +1,8 @@
 import { containsPii, detectPii } from "@hell-ict/domain";
 import { z } from "zod";
 
-import { error, json, parseJson, PayloadTooLargeError } from "./http.js";
+import { ACTIVITY_RATE_LIMIT_PER_MINUTE } from "./guard.js";
+import { error, errorWithHeaders, json, parseJson, PayloadTooLargeError } from "./http.js";
 import type { RequestScope } from "./http.js";
 
 /**
@@ -219,6 +220,7 @@ export const handleActivityPost = async (
   request: Request,
   env: Env,
   teamCode: string,
+  nowMs: number = Date.now(),
 ): Promise<Response> => {
   let body: unknown;
   try {
@@ -230,6 +232,17 @@ export const handleActivityPost = async (
   }
   const parsed = clientActivitySchema.safeParse(body);
   if (!parsed.success) return error("活動ログの形式が不正です。", 400);
+
+  // 回数制限。無いと1チームがD1のactivity_eventsを無制限に増やせる。チャットとは
+  // 別枠で数えるので、ログが詰まってもゲーム操作は止まらない（その逆も同じ）。
+  const verdict = await env.TEAM_ROOM.getByName(teamCode)
+    .consumeActivityAttempt(nowMs, ACTIVITY_RATE_LIMIT_PER_MINUTE)
+    .catch(() => null);
+  if (verdict === null) return error("活動ログの記録に失敗しました。", 503);
+  if (!verdict.allowed)
+    return errorWithHeaders("活動ログの記録が多すぎます。少し待ってください。", 429, {
+      "Retry-After": String(verdict.retryAfterSeconds),
+    });
 
   try {
     await insertActivity(env, { ...parsed.data, teamCode });

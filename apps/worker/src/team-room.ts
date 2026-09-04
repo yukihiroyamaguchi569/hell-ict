@@ -84,7 +84,10 @@ export type BeginChatMessageOutcome =
 
 export type CompleteChatMessageOutcome = { kind: "success"; text: string } | { kind: "failure" };
 
-/** consumeChatAttemptの判定。超過なら待つべき秒数を返す。 */
+/** レート制限の用途。同じテーブル・同じ固定窓を、接頭辞で分けて数える。 */
+type RateLimitKind = "chat" | "activity";
+
+/** consumeChatAttempt / consumeActivityAttemptの判定。超過なら待つべき秒数を返す。 */
 export type RateLimitVerdict =
   | { readonly allowed: true }
   | { readonly allowed: false; readonly retryAfterSeconds: number };
@@ -364,13 +367,19 @@ export class TeamRoom extends DurableObject<Env> {
    *
    * `nowMs`はWorkerから渡す。DO内でDate.now()を直書きすると窓をテストから固定できない。
    */
-  private consumeRateLimit(nowMs: number, limit: number): number | null {
-    const bucket = rateLimitBucket(nowMs, RATE_LIMIT_WINDOW_MS);
+  private consumeRateLimit(kind: RateLimitKind, nowMs: number, limit: number): number | null {
+    // 用途ごとに接頭辞を付けて枠を分ける。チャットと活動ログを同じ枠で数えると、
+    // ログが詰まってゲーム操作が止まる（あるいはその逆）ことになる。
+    const bucket = `${kind}:${rateLimitBucket(nowMs, RATE_LIMIT_WINDOW_MS)}`;
     const count = this.rateLimitCount(bucket);
     if (count >= limit) return rateLimitRetryAfterSeconds(nowMs, RATE_LIMIT_WINDOW_MS);
-    // 固定窓なので過去の窓の行は不要。消費するときに掃除して1行だけ残す
+    // 固定窓なので過去の窓の行は不要。消費するときに掃除して用途ごとに1行だけ残す
     // （超過で戻るときは1行も書かないよう、判定より後に置く）。
-    this.ctx.storage.sql.exec("DELETE FROM rate_limit WHERE bucket <> ?", bucket);
+    this.ctx.storage.sql.exec(
+      "DELETE FROM rate_limit WHERE bucket <> ? AND bucket LIKE ?",
+      bucket,
+      `${kind}:%`,
+    );
     // `count + 1`ではなく読み取った値からの上書きにする。壊れた行へ加算し続けると
     // 上限へ永久に届かず、制限が黙って無効化される。
     this.ctx.storage.sql.exec(
@@ -407,7 +416,17 @@ export class TeamRoom extends DurableObject<Env> {
    * 通常経路はbeginChatMessageだけ」が枠を消費する分担にする。
    */
   async consumeChatAttempt(nowMs: number, limit: number): Promise<RateLimitVerdict> {
-    const retryAfterSeconds = this.consumeRateLimit(nowMs, limit);
+    const retryAfterSeconds = this.consumeRateLimit("chat", nowMs, limit);
+    return retryAfterSeconds === null ? { allowed: true } : { allowed: false, retryAfterSeconds };
+  }
+
+  /**
+   * 活動ログ1件ぶんの枠を消費する。POST /api/teams/:code/activity には回数制限が
+   * 無く、1チームがD1のactivity_eventsを無制限に増やせた。チャットとは別の枠で
+   * 数える（同じテーブル・同じ固定窓、接頭辞だけ違う）。
+   */
+  async consumeActivityAttempt(nowMs: number, limit: number): Promise<RateLimitVerdict> {
+    const retryAfterSeconds = this.consumeRateLimit("activity", nowMs, limit);
     return retryAfterSeconds === null ? { allowed: true } : { allowed: false, retryAfterSeconds };
   }
 
@@ -469,7 +488,7 @@ export class TeamRoom extends DurableObject<Env> {
     // ストレージが失敗しても、枠だけ減ってメッセージが残らない中途半端な状態にしない。
     // 超過のときはconsumeRateLimitが1行も書かずに戻るため、この中では何も起きない。
     const retryAfterSeconds = this.ctx.storage.transactionSync(() => {
-      const retry = this.consumeRateLimit(nowMs, limit);
+      const retry = this.consumeRateLimit("chat", nowMs, limit);
       if (retry !== null) return retry;
       this.saveChatSnapshot(appended.snapshot);
       const now = new Date().toISOString();
@@ -514,7 +533,7 @@ export class TeamRoom extends DurableObject<Env> {
     // 「失敗する本文を同じcommandIdで投げ続ける」だけでレート制限に一切当たらず
     // OpenAIを何度でも呼べてしまう。AIを呼ばない再送——processed（結果を返すだけ）と
     // クレームが生きている最中（in-progress）——は従来どおり消費しない。
-    const retryAfterSeconds = this.consumeRateLimit(gate.nowMs, gate.limit);
+    const retryAfterSeconds = this.consumeRateLimit("chat", gate.nowMs, gate.limit);
     // 超過してもpending行は消さない。ユーザー発言は既に保存済みで、行を消すと
     // 同じcommandIdの再送が新規送信として二重に積まれる（冪等性を失う）。
     if (retryAfterSeconds !== null) return { kind: "rate-limited", retryAfterSeconds };
