@@ -3754,6 +3754,8 @@
     add.textContent = "＋";
     add.addEventListener("click", createLiveThread);
     box.appendChild(add);
+    // タブは作り直されるので、＋の disabled もここで付け直す。
+    updateAiInputLock();
   }
 
   /* #ai-log を liveState のスレッド履歴から再描画する。role: user→「あなた」/mine、
@@ -3823,6 +3825,25 @@
       // 送信中は従来どおり文言を足さない（吹き出しで「入力中…」が出ている）。
       input.placeholder = !aiSending && aiThreadPending > 0 ? "スレッドを準備しています…" : "";
     }
+    // ＋ボタンも作成中は塞ぐ。連打すると同じ名前のスレッドが何本も生まれ、
+    // さらに応答の到着順が入れ替わると古いsnapshotで手元のタブが巻き戻る。
+    const add = document.querySelector("#ai-tabs .tab.add");
+    if (add) add.disabled = aiThreadPending > 0;
+  }
+
+  /* サーバのチャットsnapshotを取り込む。今持っている revision より古い応答は捨てる
+     ——create-thread と send-message は別々に飛ぶので、遅れて届いた古い snapshot を
+     そのまま代入すると、新しく作ったスレッドや直前の発言が画面から消える。
+     採用したときだけ true を返す（呼び出し側の再描画の判断に使う）。 */
+  function applyChatSnapshot(snapshot) {
+    if (!liveState || !snapshot || !Array.isArray(snapshot.threads)) return false;
+    const revision = Number(snapshot.revision);
+    const known = liveState.chatRevision || 0;
+    // revision を持たない応答（古いサーバ）は比較できないので素通しする。
+    if (Number.isFinite(revision) && revision < known) return false;
+    if (Number.isFinite(revision)) liveState.chatRevision = revision;
+    liveState.threads = snapshot.threads;
+    return true;
   }
 
   async function activateStageThread(id) {
@@ -3857,7 +3878,8 @@
     // ——409（上限）も含めてここへ落ちる（stage枠は独立なので実運用では起きない）。
     if (!res.ok || !res.body) return;
     if (!liveState || liveState.teamCode !== teamCode) return;
-    liveState.threads = res.body.snapshot.threads;
+    // 古い応答なら捨てる（別の作成が先に着いていれば、そちらの方が新しい）。
+    if (!applyChatSnapshot(res.body.snapshot)) return;
     const created = liveState.threads.find((t) => t.title === title);
     // 待っている間に別ステージへ移っていたら、そちらの切り替えを上書きしない。
     if (!created || view !== id) return;
@@ -3888,7 +3910,7 @@
       return;
     }
     if (!res.ok || !res.body) return;   // それ以外の失敗は、進行を止めない操作なので静かに諦める
-    liveState.threads = res.body.snapshot.threads;
+    if (!applyChatSnapshot(res.body.snapshot)) return;
     liveState.activeThreadId = liveState.threads[liveState.threads.length - 1].threadId;
     renderAiTabs();
     renderAiLogFromThread(liveState.activeThreadId);
@@ -4007,7 +4029,7 @@
     if (!liveState) return;
     const res = await liveFetch("/api/teams/" + liveState.teamCode + "/chat", { method: "GET" }, LIVE_RESTORE_TIMEOUT_MS);
     if (!res.ok || !res.body || !res.body.threads) return;
-    liveState.threads = res.body.threads;
+    if (!applyChatSnapshot(res.body)) return;
     if (!liveState.threads.some((t) => t.threadId === liveState.activeThreadId)) {
       liveState.activeThreadId = liveState.threads[0].threadId;
     }
@@ -4037,7 +4059,7 @@
 
     if (res.ok && res.body) {
       chatSendCommand.clear();   // 確定したのでIDを破棄する（次の送信は新しい試行）
-      liveState.threads = res.body.snapshot.threads;
+      applyChatSnapshot(res.body.snapshot);
       placeholder.querySelector(".body").innerHTML = esc(res.body.assistant.text).replace(/\n/g, "<br>");
       renderAiTabs();
       return;
@@ -5027,7 +5049,7 @@
 
     if (res.ok && res.body && res.body.assistant) {
       s1DraftCommand.clear();   // 確定したのでIDを破棄する（次の依頼は新しい試行）
-      if (res.body.snapshot && res.body.snapshot.threads) liveState.threads = res.body.snapshot.threads;
+      applyChatSnapshot(res.body.snapshot);
       if (view !== "s1") return;   // 下書き要求中に Stage 1 を離れていたら他ステージの中央ペインへ着弾させない
       it.bodyDraft = res.body.assistant.text;
       if (s1.open === it.key) s1Center();
