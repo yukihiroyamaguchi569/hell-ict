@@ -608,6 +608,9 @@
 .entry .teamname input::placeholder { color: var(--fg-muted); font-weight: 400; }
 /* LIVE時、POST /api/session 失敗時のエラー表示（サーバのmessageをそのまま出す）。 */
 .entry .entry-error { font-size: 14px; color: #c1121f; text-align: center; max-width: 42ch; }
+/* 起動時の疎通確認。確認中は淡く、失敗したときだけ赤くする（.bad） */
+.entry .entry-probe { font-size: 14px; color: var(--fg-muted); text-align: center; max-width: 42ch; }
+.entry .entry-probe.bad { color: #c1121f; }
 
 /* 幹部ブリーフィング — 急変直後、Stage 1 の冒頭。.entry と同じく不透明で
    下地を完全に隠す（ヘッダーの時計もリーダーボードも見せない）。
@@ -1354,7 +1357,11 @@
           </div>
           <!-- LIVE時のみ使う。scriptedのbtn-enterはgo("welcome")へ即抜けるため空のまま。 -->
           <div class="entry-error hide" id="entry-error"></div>
+          <!-- 起動時の /api/health プローブの状態。確認が終わるまで入室させない
+               （http(s)配信時のみ。file:// は最初からscripted） -->
+          <div class="entry-probe hide" id="entry-probe"></div>
           <button class="btn" id="btn-enter">入室する</button>
+          <button class="btn ghost hide" id="btn-probe-retry">再試行</button>
         </div>
 
         <!-- 幹部ブリーフィング：急変直後、Stage 1 の冒頭。事務長が一方向で告げるだけで、
@@ -3377,18 +3384,59 @@
   // スレッドID。scripted時は最後まで null のまま（sendAI等はこれで分岐する）。
   let liveState = null;
 
-  (async function probeLive() {
-    if (location.protocol !== "http:" && location.protocol !== "https:") return;
-    try {
-      const ctrl = new AbortController();
-      const timer = setTimeout(() => ctrl.abort(), 1500);
-      const res = await fetch(LIVE_API_BASE + "/api/health", { signal: ctrl.signal });
-      clearTimeout(timer);
-      LIVE = res.ok;
-    } catch {
-      LIVE = false;   // file://・8788（pythonサーバ、APIなし）はここに落ちる
+  /* プローブの結果。"pending"（確認中）／"live"（API有り）／"scripted"（file://）／
+     "failed"（http(s)なのに繋がらない）。 */
+  let liveProbeState = "pending";
+  /* 1.5秒では本番のコールドスタート（DO・D1の初回起動）に届かないことがある。
+     短すぎるタイムアウトは「黙ってscriptedで開始し、入室も保存も全部台本」という
+     いちばん気づきにくい事故を生むので、待つ側へ倒す。 */
+  const LIVE_PROBE_TIMEOUT_MS = 5000;
+
+  /* 確認が終わるまで入室させない。http(s)で開いている以上、APIがある前提の
+     配信物なので、繋がらないまま静かにscriptedへ落とさない——当日それに気づくのは
+     「入室したのに他のチームが帯に出ない」と言われた後になる。 */
+  function updateEntryProbeUi() {
+    const btn = $("btn-enter");
+    const note = $("entry-probe");
+    const retry = $("btn-probe-retry");
+    if (!btn || !note || !retry) return;
+    const pending = liveProbeState === "pending";
+    const failed = liveProbeState === "failed";
+    btn.disabled = pending || failed;
+    note.classList.toggle("hide", !(pending || failed));
+    note.classList.toggle("bad", failed);
+    note.textContent = failed
+      ? "サーバに接続できません。ネットワークを確認して再試行してください。"
+      : pending ? "接続を確認しています…" : "";
+    retry.classList.toggle("hide", !failed);
+  }
+
+  async function probeLive() {
+    // file:// は最初からscripted。プローブそのものを試みない（従来どおり）。
+    if (location.protocol !== "http:" && location.protocol !== "https:") {
+      liveProbeState = "scripted";
+      updateEntryProbeUi();
+      return;
     }
-  })();
+    liveProbeState = "pending";
+    updateEntryProbeUi();
+    const ctrl = new AbortController();
+    const timer = setTimeout(() => ctrl.abort(), LIVE_PROBE_TIMEOUT_MS);
+    try {
+      const res = await fetch(LIVE_API_BASE + "/api/health", { signal: ctrl.signal });
+      LIVE = res.ok;
+      liveProbeState = res.ok ? "live" : "failed";
+    } catch {
+      LIVE = false;
+      liveProbeState = "failed";
+    } finally {
+      clearTimeout(timer);
+    }
+    updateEntryProbeUi();
+  }
+
+  $("btn-probe-retry").addEventListener("click", probeLive);
+  probeLive();
 
   /* 429 の Retry-After（秒）を数える。RFC はHTTP-dateも許すが、Workerは秒で返すので
      秒だけを読む——読めなければ null にして、文言から秒数を落とす。 */
