@@ -63,8 +63,16 @@ import { error, isWebSocketRequest } from "./http.js";
 type StoredCommand = { result: string };
 type StoredState = { snapshot: string };
 type StoredChatState = { snapshot: string };
-type StoredThreadCommand = { result: string; fingerprint: string | null };
-type StoredMessageCommand = { result: string; fingerprint: string | null };
+/**
+ * 冪等台帳の行。fingerprintは取り違え検出の要なので、型指定だけで信用しない
+ * ——SQLiteは列の型を強制せず、壊れた値をそのまま渡すとmismatchesFingerprintが
+ * 黙って「照合できないので通す」側へ倒れ、別内容の再送を冪等再送として受けてしまう。
+ * 壊れていたら例外にし、Workerの503（時間を置いて再試行）へ倒す。
+ */
+const storedLedgerRowSchema = z.object({
+  result: z.string(),
+  fingerprint: fingerprintSchema.nullable(),
+});
 /**
  * pending行。SQLiteは列の型を強制しないので、読み出しも実行時に検証する。壊れた行を
  * 「pending無し」と読み替えると、既に保存済みのユーザーメッセージがもう一度積まれる
@@ -86,7 +94,11 @@ const storedPendingMessageSchema = z.object({
 
 type StoredPendingMessage = z.infer<typeof storedPendingMessageSchema>;
 type StoredCheckpointState = { snapshot: string };
-type StoredCheckpointCommand = { revision: SqlStorageValue; fingerprint: string | null };
+/** チェックポイント台帳の行。台帳のfingerprintを信用しない理由は上と同じ。 */
+const storedCheckpointCommandSchema = z.object({
+  revision: checkpointSnapshotSchema.shape.revision,
+  fingerprint: fingerprintSchema.nullable(),
+});
 type ConflictReply = { conflict: true };
 type UnknownThreadReply = { unknownThread: true };
 
@@ -542,14 +554,15 @@ export class TeamRoom extends DurableObject<Env> {
   private readProcessedMessage(
     commandId: string,
   ): { result: ChatMessageResult; fingerprint: string | null } | null {
-    const row =
+    const stored =
       this.ctx.storage.sql
-        .exec<StoredMessageCommand>(
+        .exec(
           "SELECT result, fingerprint FROM processed_message_commands WHERE command_id = ?",
           commandId,
         )
         .toArray()[0] ?? null;
-    if (row === null) return null;
+    if (stored === null) return null;
+    const row = storedLedgerRowSchema.parse(stored);
     const parsed = chatMessageResultSchema.parse(JSON.parse(row.result) as unknown);
     const redacted = redactChatMessageResultPii(parsed);
     if (redacted !== parsed) {
@@ -566,14 +579,15 @@ export class TeamRoom extends DurableObject<Env> {
   private readProcessedThread(
     commandId: string,
   ): { result: CreateThreadResult; fingerprint: string | null } | null {
-    const row =
+    const stored =
       this.ctx.storage.sql
-        .exec<StoredThreadCommand>(
+        .exec(
           "SELECT result, fingerprint FROM processed_thread_commands WHERE command_id = ?",
           commandId,
         )
         .toArray()[0] ?? null;
-    if (row === null) return null;
+    if (stored === null) return null;
+    const row = storedLedgerRowSchema.parse(stored);
     const parsed = createThreadResultSchema.parse(JSON.parse(row.result) as unknown);
     const snapshot = redactSnapshotPii(parsed.snapshot);
     if (snapshot !== parsed.snapshot) {
@@ -855,13 +869,14 @@ export class TeamRoom extends DurableObject<Env> {
     const teamCode = teamCodeSchema.parse(teamCodeInput);
     const command: SaveCheckpointCommand = saveCheckpointCommandSchema.parse(commandInput);
     const now = checkpointSnapshotSchema.shape.savedAt.parse(nowIsoInput);
-    const saved =
+    const savedRow =
       this.ctx.storage.sql
-        .exec<StoredCheckpointCommand>(
+        .exec(
           "SELECT revision, fingerprint FROM processed_checkpoint_commands WHERE command_id = ?",
           command.commandId,
         )
         .toArray()[0] ?? null;
+    const saved = savedRow === null ? null : storedCheckpointCommandSchema.parse(savedRow);
     const current = this.readCheckpoint();
     // 台帳の行も検証してから使う。壊れた行を「台帳に無い」と読み替えると、適用済みの
     // commandIdが未処理に見えて古いbodyを再適用してしまう。不整合は黙って通さず、
@@ -870,10 +885,7 @@ export class TeamRoom extends DurableObject<Env> {
       // 同じcommandIdで別のbodyを送る取り違えは冪等再送ではない。元の結果を返すと、
       // クライアントは保存したつもりの状態が入っていないことに気づけない。
       if (mismatchesFingerprint(saved.fingerprint, fingerprint)) return { rejected: "conflict" };
-      return this.replayCheckpoint(
-        current,
-        checkpointSnapshotSchema.shape.revision.parse(saved.revision),
-      );
+      return this.replayCheckpoint(current, saved.revision);
     }
 
     const applied = applyCheckpoint(current, command, { teamCode, now });

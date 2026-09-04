@@ -1141,6 +1141,34 @@ describe("P1C チャット骨格", () => {
     expect(stored).toContain(PII_REDACTION);
   });
 
+  it("台帳のfingerprintが壊れていたら503で止める", async () => {
+    // fingerprintは取り違え検出の要。壊れた値をnull扱いで素通しすると
+    // 「照合できないので通す」側へ倒れ、同じcommandIdで別内容を送る取り違えを
+    // 冪等再送として受けてしまう。読めない行は黙って通さず503にする。
+    await session("400038");
+    const created = await createThread("400038", "00000000-0000-4000-8000-000000003801", "副");
+    const { snapshot } = createThreadResultSchema.parse(await created.json());
+    const threadId = snapshot.threads[0]?.threadId;
+    if (threadId === undefined) throw new Error("unexpected");
+
+    const commandId = "00000000-0000-4000-8000-000000003802";
+    const gateway = new FakeAiGateway([{ kind: "success", response: "応答" }]);
+    expect(
+      (await sendMessage("400038", { commandId, threadId, text: "本文" }, gateway)).status,
+    ).toBe(200);
+
+    await runInDurableObject(env.TEAM_ROOM.getByName("400038"), (_instance, state) => {
+      state.storage.sql.exec(
+        "UPDATE processed_message_commands SET fingerprint = ? WHERE command_id = ?",
+        "こわれた",
+        commandId,
+      );
+    });
+
+    const replayed = await sendMessage("400038", { commandId, threadId, text: "本文" }, gateway);
+    expect(replayed.status).toBe(503);
+  });
+
   it("スレッド台帳に残った平文PIIも再生時に伏せ字化されて保存し直される", async () => {
     await session("400036");
     const commandId = "00000000-0000-4000-8000-000000003601";
