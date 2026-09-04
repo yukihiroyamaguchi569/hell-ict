@@ -3428,6 +3428,15 @@
   let entryRetry = probeLive;
   let entryBusy = false;   // 入室手続きの実行中（多重クリック防止）
 
+  /* 入室を止めていた状態の後始末。プローブのやり直しと台本モードの選択で
+     同じものを通す——片方だけ消し忘れると、ボタンがdisabledのまま残って
+     入室そのものができなくなる。 */
+  function clearEntryBlock() {
+    entryBlockMessage = null;
+    entryRetry = probeLive;
+    entryBusy = false;
+  }
+
   function updateEntryProbeUi() {
     const btn = $("btn-enter");
     const note = $("entry-probe");
@@ -3454,8 +3463,7 @@
       return;
     }
     liveProbeState = "pending";
-    entryBlockMessage = null;
-    entryRetry = probeLive;
+    clearEntryBlock();
     updateEntryProbeUi();
     const ctrl = new AbortController();
     const timer = setTimeout(() => ctrl.abort(), LIVE_PROBE_TIMEOUT_MS);
@@ -3483,6 +3491,15 @@
   $("btn-probe-offline").addEventListener("click", () => {
     LIVE = false;
     liveProbeState = "scripted";
+    // 入室手続きの途中（進行状況の取得失敗）から選ばれた場合、liveState は
+    // もう埋まっている。落とさないと「LIVE=false なのにセッションはある」という
+    // 中途半端な状態が残り、liveState だけを見ているスレッド作成が動いて
+    // 台本モードのはずの画面から通信が出る。
+    liveState = null;
+    // プローブ失敗だけでなく、入室手続きの途中（進行状況の取得失敗）から
+    // 選ばれることもある。そちらの理由も必ず消す——消し忘れると失敗表示と
+    // disabled が残り、台本モードを選んだのに入室できない。
+    clearEntryBlock();
     updateEntryProbeUi();
   });
 
@@ -3965,9 +3982,44 @@
     return true;
   }
 
+  /* スレッド作成の再送用ID。宛先は (title, kind) で決まる——makePendingCommand の
+     キーは3つの引数を繋いだものなので、3つ目は空で埋める。 */
+  const threadCreateCommand = makePendingCommand();
+
+  /* 作成要求の後始末。返り値は「liveState.threads を最新にできたか」。
+
+     成否が分からない失敗（通信断・タイムアウト＝status 0、5xx）だけは、IDを
+     捨てずに GET /chat で確かめる——サーバ側では作られているのに応答だけ
+     落ちた、が普通に起こる。そのまま次回 crypto.randomUUID() で振り直すと
+     同じ名前のスレッドが2本並ぶ。既にあればそれを採用してIDを捨て、無ければ
+     IDを持ったまま次の機会に同じ commandId で送り直す（サーバは同 commandId・
+     同内容なら200で同じ結果を返す）。
+
+     4xx（上限など）は確定した拒否なのでIDを捨てる。 */
+  async function settleThreadCreate(res, title, kind) {
+    if (res.ok && res.body) {
+      threadCreateCommand.clear(title, kind, "");
+      // 古い応答なら捨てる（別の作成が先に着いていれば、そちらの方が新しい）。
+      return applyChatSnapshot(res.body.snapshot);
+    }
+    const unknown = res.status === 0 || res.status >= 500;
+    if (!unknown) {
+      threadCreateCommand.clear(title, kind, "");
+      return false;
+    }
+    const teamCode = liveState ? liveState.teamCode : null;
+    await restoreChatFromServer();
+    if (!liveState || liveState.teamCode !== teamCode) return false;
+    if (!liveState.threads.some((t) => t.title === title)) return false;   // まだ無い。IDは持ち越す
+    threadCreateCommand.clear(title, kind, "");
+    return true;
+  }
+
   async function activateStageThread(id) {
     const title = STAGE_THREAD_TITLES[id];
-    if (!title || !liveState) return;      // scripted時はgo()のAI_GREETING_HTMLリセットだけで足りる
+    // scripted時はgo()のAI_GREETING_HTMLリセットだけで足りる。LIVE も見る——
+    // 台本モードを選んだ直後は liveState を落とすが、片方だけの判定を残さない。
+    if (!title || !LIVE || !liveState) return;
     const existing = liveState.threads.find((t) => t.title === title);
     if (existing) {
       liveState.activeThreadId = existing.threadId;
@@ -3988,17 +4040,19 @@
       // kind:"stage" はステージ入場で自動に作られる枠。サーバは stage(8件)と
       // manual(25件)を独立に数えるので、参加者が＋で足したスレッドの数に関係なく、
       // ステージぶんは必ず作れる。
-      body: JSON.stringify({ type: "create-thread", commandId: crypto.randomUUID(), title, kind: "stage" }),
+      body: JSON.stringify({
+        type: "create-thread",
+        commandId: threadCreateCommand.idFor(title, "stage", ""),
+        title,
+        kind: "stage",
+      }),
     });
     stageThreadCreating.delete(title);
     aiThreadPending--;
     updateAiInputLock();   // 成功・失敗のどちらでも必ず解除する
-    // 失敗しても進行は止めない。現行スレッドのまま従来どおり会話できる
-    // ——409（上限）も含めてここへ落ちる（stage枠は独立なので実運用では起きない）。
-    if (!res.ok || !res.body) return;
     if (!liveState || liveState.teamCode !== teamCode) return;
-    // 古い応答なら捨てる（別の作成が先に着いていれば、そちらの方が新しい）。
-    if (!applyChatSnapshot(res.body.snapshot)) return;
+    // 失敗しても進行は止めない。現行スレッドのまま従来どおり会話できる。
+    if (!(await settleThreadCreate(res, title, "stage"))) return;
     const created = liveState.threads.find((t) => t.title === title);
     // 待っている間に別ステージへ移っていたら、そちらの切り替えを上書きしない。
     if (!created || view !== id) return;
@@ -4018,7 +4072,12 @@
       headers: { "Content-Type": "application/json" },
       // kind:"manual" は参加者が＋で足す枠（上限25件）。省略時もmanual扱いだが、
       // stage側と対で読めるよう明示する。
-      body: JSON.stringify({ type: "create-thread", commandId: crypto.randomUUID(), title, kind: "manual" }),
+      body: JSON.stringify({
+        type: "create-thread",
+        commandId: threadCreateCommand.idFor(title, "manual", ""),
+        title,
+        kind: "manual",
+      }),
     });
     aiThreadPending--;
     updateAiInputLock();   // 成功・失敗のどちらでも必ず解除する
@@ -4028,9 +4087,12 @@
       aiBubble("システム", esc((res.body && res.body.message) || "スレッドは 25 件までです。"));
       return;
     }
-    if (!res.ok || !res.body) return;   // それ以外の失敗は、進行を止めない操作なので静かに諦める
-    if (!applyChatSnapshot(res.body.snapshot)) return;
-    liveState.activeThreadId = liveState.threads[liveState.threads.length - 1].threadId;
+    if (!liveState) return;
+    if (!(await settleThreadCreate(res, title, "manual"))) return;
+    const created = liveState.threads.find((t) => t.title === title);
+    liveState.activeThreadId = created
+      ? created.threadId
+      : liveState.threads[liveState.threads.length - 1].threadId;
     renderAiTabs();
     renderAiLogFromThread(liveState.activeThreadId);
   }
@@ -8305,8 +8367,8 @@
     }
     showEntryError("");
     if (entryBusy) return;   // ［入室する］と［再試行］の多重起動を止める
+    clearEntryBlock();
     entryBusy = true;
-    entryBlockMessage = null;
     updateEntryProbeUi();
     const sessionRes = await liveFetch("/api/session", {
       method: "POST",
