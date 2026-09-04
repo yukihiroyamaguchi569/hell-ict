@@ -3410,19 +3410,27 @@
   /* 確認が終わるまで入室させない。http(s)で開いている以上、APIがある前提の
      配信物なので、繋がらないまま静かにscriptedへ落とさない——当日それに気づくのは
      「入室したのに他のチームが帯に出ない」と言われた後になる。 */
+  /* 入室を止めている理由（プローブ失敗以外）。入室手続きの途中でサーバから
+     必要なものを取れなかったときに立て、［再試行］の宛先も差し替える。 */
+  let entryBlockMessage = null;
+  let entryRetry = probeLive;
+  let entryBusy = false;   // 入室手続きの実行中（多重クリック防止）
+
   function updateEntryProbeUi() {
     const btn = $("btn-enter");
     const note = $("entry-probe");
     const actions = $("probe-actions");
     if (!btn || !note || !actions) return;
-    const pending = liveProbeState === "pending";
-    const failed = liveProbeState === "failed";
+    const pending = liveProbeState === "pending" || entryBusy;
+    const failed = liveProbeState === "failed" || entryBlockMessage !== null;
     btn.disabled = pending || failed;
     note.classList.toggle("hide", !(pending || failed));
     note.classList.toggle("bad", failed);
-    note.textContent = failed
-      ? "サーバに接続できません。ネットワークを確認して再試行してください。"
-      : pending ? "接続を確認しています…" : "";
+    note.textContent = entryBlockMessage
+      ? entryBlockMessage
+      : liveProbeState === "failed"
+        ? "サーバに接続できません。ネットワークを確認して再試行してください。"
+        : pending ? (entryBusy ? "入室しています…" : "接続を確認しています…") : "";
     actions.classList.toggle("hide", !failed);
   }
 
@@ -3434,6 +3442,8 @@
       return;
     }
     liveProbeState = "pending";
+    entryBlockMessage = null;
+    entryRetry = probeLive;
     updateEntryProbeUi();
     const ctrl = new AbortController();
     const timer = setTimeout(() => ctrl.abort(), LIVE_PROBE_TIMEOUT_MS);
@@ -3450,7 +3460,9 @@
     updateEntryProbeUi();
   }
 
-  $("btn-probe-retry").addEventListener("click", probeLive);
+  // 宛先は状況で変わる——プローブ失敗なら再プローブ、入室手続きが途中で
+  // 失敗したなら入室のやり直し。
+  $("btn-probe-retry").addEventListener("click", () => entryRetry());
 
   /* 台本モードで進む、を明示的に選ぶ。開発用の静的サーバ配信（python -m http.server）
      と、会場でサーバが落ちたときの最後の手段。押されたら以後プローブし直さない
@@ -8265,7 +8277,7 @@
     el.textContent = message;
     el.classList.toggle("hide", !message);
   }
-  $("btn-enter").addEventListener("click", async () => {
+  async function attemptEnter() {
     const code = currentTeamCode();
     // チーム名は必須。LIVE・scriptedのどちらの経路でも先に止める。
     const name = currentTeamNameInput();
@@ -8280,21 +8292,25 @@
       return;
     }
     showEntryError("");
-    const btn = $("btn-enter");
-    btn.disabled = true;
+    if (entryBusy) return;   // ［入室する］と［再試行］の多重起動を止める
+    entryBusy = true;
+    entryBlockMessage = null;
+    updateEntryProbeUi();
     const sessionRes = await liveFetch("/api/session", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ teamCode: code }),
     });
     if (!sessionRes.ok) {
-      btn.disabled = false;
+      entryBusy = false;
+      updateEntryProbeUi();
       showEntryError((sessionRes.body && sessionRes.body.message) || "入室に失敗しました。時間を置いて再試行してください。");
       return;
     }
     const chatRes = await liveFetch("/api/teams/" + code + "/chat");
-    btn.disabled = false;
     if (!chatRes.ok || !chatRes.body) {
+      entryBusy = false;
+      updateEntryProbeUi();
       showEntryError((chatRes.body && chatRes.body.message) || "チャット状態の取得に失敗しました。時間を置いて再試行してください。");
       return;
     }
@@ -8309,10 +8325,24 @@
     };
     commitTeamName(code, name);
     // 保存済みのチェックポイントがあれば、そのステージへ戻す（進行台本 §5-1 の
-    // 手動ジャンプを不要にするための自動復帰）。取得できなくても入室は通す
-    // ——復帰できないことより、入室そのものが止まることのほうが痛い。
-    const cpRes = await liveFetch("/api/teams/" + code + "/checkpoint", { method: "GET" }, LIVE_RESTORE_TIMEOUT_MS);
-    const snapshot = cpRes.ok && cpRes.body && cpRes.body.checkpoint ? cpRes.body.checkpoint : null;
+    // 手動ジャンプを不要にするための自動復帰）。
+    // 制限時間は短縮版（LIVE_RESTORE_TIMEOUT_MS＝4秒）ではなく本送信と同じ20秒を使う。
+    // 4秒は「失敗しても進行に影響しない取り直し」のための値で、ここは違う——
+    // 取れなければ Prologue からやり直しになる一度きりの機会なので、待つ価値がある。
+    const cpRes = await liveFetch("/api/teams/" + code + "/checkpoint", { method: "GET" }, LIVE_TIMEOUT_MS);
+    // 「200で checkpoint が null（＝初回入室）」と「取得できなかった」を必ず分ける。
+    // 一緒くたに welcome へ通すと、サーバに進行が残っているチームを Prologue から
+    // やり直させることになる——復帰の仕組みごと無かったことになるのがいちばん痛い。
+    if (!cpRes.ok || !cpRes.body) {
+      entryBusy = false;
+      entryBlockMessage = "進行状況を取得できません。ネットワークを確認して再試行してください。";
+      entryRetry = attemptEnter;
+      updateEntryProbeUi();
+      return;
+    }
+    entryBusy = false;
+    updateEntryProbeUi();
+    const snapshot = cpRes.body.checkpoint || null;
     if (snapshot) liveState.checkpointRevision = snapshot.revision;
     adoptDataRevision(snapshot);   // 別タブが進めていれば、その先から番号を振り直す
     // チーム名がサーバへ届く最初の機会。commitTeamName の後（teamName 確定後）に送る。
@@ -8327,7 +8357,8 @@
       return;
     }
     resumeFromCheckpoint(snapshot, cpRes.body.serverNow);
-  });
+  }
+  $("btn-enter").addEventListener("click", attemptEnter);
 
   /* チェックポイントからの復帰。ステージ固有の状態（グリッドの中身・生成済み
      ポスター等）は預けていないので、戻す先は「そのステージの先頭」——赤帯や
