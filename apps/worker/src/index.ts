@@ -135,16 +135,20 @@ export const handleCreateThread = async (
           : `スレッドは${String(result.max)}件までです。不要なスレッドの利用をやめてから作成してください。`,
         409,
       );
-    // 作成されたスレッドは末尾へ足される（domainのcreateThread）。分析で
-    // 「いつ文脈を分けたか」を追えるよう、そのthreadIdごと記録する。
-    logActivity(scope, {
-      teamCode,
-      kind: "thread.create",
-      threadId: result.snapshot.threads.at(-1)?.threadId,
-      commandId: command.commandId,
-      meta: { title: command.title },
-    });
-    return json(result);
+    // 実際にスレッドが増えたときだけ記録する。冪等再送とステージスレッドの
+    // 重複抑止は既存のスナップショットを返すだけなので、ここで記録すると
+    // 「文脈を分けた回数」が水増しされる。threadIdもDOが作った当のIDを使う
+    // ——末尾のスレッドは、重複抑止で返した既存スナップショットでは無関係な1本になる。
+    if (result.created) {
+      logActivity(scope, {
+        teamCode,
+        kind: "thread.create",
+        threadId: result.threadId,
+        commandId: command.commandId,
+        meta: { title: command.title },
+      });
+    }
+    return json({ snapshot: result.snapshot });
   } catch {
     return error("スレッドの作成に失敗しました。時間を置いて再試行してください。", 503);
   }

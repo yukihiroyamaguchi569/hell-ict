@@ -32,6 +32,7 @@ import type {
   ChatMessage,
   ChatMessageResult,
   ChatSnapshot,
+  ChatThreadId,
   ChatThreadKind,
   CheckpointRejectionReason,
   CheckpointSnapshot,
@@ -108,6 +109,17 @@ const storedCheckpointCommandSchema = z.object({
   revision: checkpointSnapshotSchema.shape.revision,
   fingerprint: fingerprintSchema.nullable(),
 });
+/**
+ * スレッド作成の結果。`created`は「このリクエストで実際にスレッドが増えたか」で、
+ * 冪等再送とステージスレッドの重複抑止では false になる。Workerはこれを見て
+ * 活動ログの`thread.create`を記録するかどうかを決める——スナップショットの末尾を
+ * 作成されたスレッドとみなすと、増えていない経路でも記録が積まれ、しかも無関係な
+ * threadIdが載る。
+ */
+export type CreateThreadOutcome =
+  | { snapshot: ChatSnapshot; created: false }
+  | { snapshot: ChatSnapshot; created: true; threadId: ChatThreadId };
+
 type ConflictReply = { conflict: true };
 type UnknownThreadReply = { unknownThread: true };
 
@@ -462,7 +474,7 @@ export class TeamRoom extends DurableObject<Env> {
     teamCodeInput: unknown,
     commandInput: unknown,
     fingerprintInput: unknown,
-  ): Promise<CreateThreadResult | ThreadLimitReply | ConflictReply> {
+  ): Promise<CreateThreadOutcome | ThreadLimitReply | ConflictReply> {
     const fingerprint = fingerprintSchema.parse(fingerprintInput);
     const teamCode = teamCodeSchema.parse(teamCodeInput);
     const command: CreateThreadCommand = createThreadCommandSchema.parse(commandInput);
@@ -470,7 +482,7 @@ export class TeamRoom extends DurableObject<Env> {
     if (saved !== null) {
       // 同じcommandIdで別のタイトル・別のkindを送る取り違えは冪等再送ではない。
       if (mismatchesFingerprint(saved.fingerprint, fingerprint)) return { conflict: true };
-      return saved.result;
+      return { snapshot: saved.result.snapshot, created: false };
     }
     const snapshot = this.loadChatSnapshot(teamCode);
     // ステージ用スレッドはtitleがステージ名で一意、という契約にする。リロードや
@@ -489,8 +501,9 @@ export class TeamRoom extends DurableObject<Env> {
     if (countThreadsOfKind(snapshot, command.kind) >= max) {
       return { threadLimit: true, max, kind: command.kind };
     }
+    const threadId = chatThreadIdSchema.parse(crypto.randomUUID());
     const created = domainCreateThread(snapshot, {
-      threadId: crypto.randomUUID(),
+      threadId,
       title: command.title,
       kind: command.kind,
     });
@@ -509,7 +522,7 @@ export class TeamRoom extends DurableObject<Env> {
       );
     });
     this.broadcastChat(created.snapshot);
-    return result;
+    return { snapshot: result.snapshot, created: true, threadId };
   }
 
   /**
@@ -615,7 +628,7 @@ export class TeamRoom extends DurableObject<Env> {
     snapshot: ChatSnapshot,
     command: CreateThreadCommand,
     fingerprint: string,
-  ): CreateThreadResult {
+  ): CreateThreadOutcome {
     const result = createThreadResultSchema.parse({ snapshot });
     this.ctx.storage.sql.exec(
       "INSERT OR IGNORE INTO processed_thread_commands (command_id, result, fingerprint) VALUES (?, ?, ?)",
@@ -623,7 +636,7 @@ export class TeamRoom extends DurableObject<Env> {
       JSON.stringify(result),
       fingerprint,
     );
-    return result;
+    return { snapshot: result.snapshot, created: false };
   }
 
   /**

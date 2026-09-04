@@ -94,12 +94,13 @@ const createThread = async (
   teamCode: string,
   commandId: string,
   title: string,
+  kind?: "stage" | "manual",
 ): Promise<Response> => {
   const ctx = createExecutionContext();
   const response = await handleCreateThread(
     new Request(`https://example.test/api/teams/${teamCode}/chat/threads`, {
       method: "POST",
-      body: JSON.stringify({ type: "create-thread", commandId, title }),
+      body: JSON.stringify({ type: "create-thread", commandId, title, kind }),
     }),
     { env, ctx },
     teamCode,
@@ -355,6 +356,42 @@ describe("活動ログ", () => {
       expect(threadRows).toHaveLength(1);
       expect(threadRows[0]?.threadId).toBe(snapshot.threads.at(-1)?.threadId);
       expect(metaOf(threadRows[0])).toEqual({ title: "Stage 3" });
+    });
+
+    it("既存のステージスレッドを返しただけのときはthread.createを記録しない", async () => {
+      // ステージスレッドはtitleで一意。リロードやタブの競合で作成要求が二重に来ても
+      // スレッドは増えない。増えていないのに記録が積まれると、分析上は「文脈を
+      // 分けた回数」が水増しされ、しかも末尾スレッドの無関係なIDが載る。
+      const teamCode = "500011";
+      await session(teamCode);
+      const first = await createThread(
+        teamCode,
+        "00000000-0000-4000-8000-000000001101",
+        "Stage 3",
+        "stage",
+      );
+      const { snapshot } = createThreadResultSchema.parse(await first.json());
+      const created = snapshot.threads.at(-1)?.threadId;
+
+      // 参加者が手動スレッドを足し、末尾が別のスレッドになった状態を作る。
+      await createThread(teamCode, "00000000-0000-4000-8000-000000001102", "メモ", "manual");
+
+      // 別のcommandIdで同じステージスレッドをもう一度要求する（冪等台帳では止まらない）。
+      const again = await createThread(
+        teamCode,
+        "00000000-0000-4000-8000-000000001103",
+        "Stage 3",
+        "stage",
+      );
+      expect(again.status).toBe(200);
+      const replay = createThreadResultSchema.parse(await again.json());
+      // 入室時からあるメインスレッドを含めて3本。Stage 3 は増えていない。
+      expect(replay.snapshot.threads).toHaveLength(3);
+
+      const threadRows = (await rows()).filter((row) => row.kind === "thread.create");
+      // 記録は実際に増えた2本ぶんだけ。3本目（重複抑止）は積まれない。
+      expect(threadRows).toHaveLength(2);
+      expect(threadRows.map((row) => row.threadId)).toContain(created);
     });
 
     // metaにはサーバ生成のものでも利用者入力が混ざる（スレッドのtitleがそれ）。
