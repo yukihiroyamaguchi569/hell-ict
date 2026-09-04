@@ -1105,13 +1105,13 @@ describe("P1C チャット骨格", () => {
     expect(first.status).toBe(200);
 
     // 伏せ字化を入れる前に保存された台帳行を再現する（行には当時のsnapshot全体が入る）。
-    const readLedger = (): string =>
+    const readLedger = (): Promise<string> =>
       runInDurableObject(env.TEAM_ROOM.getByName("400035"), (_instance, state) => {
         const row = state.storage.sql
           .exec("SELECT result FROM processed_message_commands WHERE command_id = ?", commandId)
           .toArray()[0];
         return String(row?.result);
-      }) as unknown as string;
+      });
 
     await runInDurableObject(env.TEAM_ROOM.getByName("400035"), (_instance, state) => {
       const row = state.storage.sql
@@ -1133,7 +1133,7 @@ describe("P1C チャット骨格", () => {
     expect(JSON.stringify(body)).toContain(PII_REDACTION);
 
     // 行そのものが保存し直されている（2回目の読み出しで平文が残っていない）。
-    const stored = await Promise.resolve(readLedger());
+    const stored = await readLedger();
     expect(stored).not.toContain("渡辺 三郎");
     expect(stored).toContain(PII_REDACTION);
   });
