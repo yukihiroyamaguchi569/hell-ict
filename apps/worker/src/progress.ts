@@ -99,7 +99,26 @@ const eventRowSchema = z.object({
  * - teamName: 空文字で送られてくることがあるため、最新の「非空」の名前を採る。
  * - updatedAt: 生存確認なので復帰を含む全イベントの最新時刻を使う。
  */
-const TEAMS_SQL = `SELECT
+/**
+ * 許可リストの絞り込みはSQLへ入れる。取得後に落とすと、eventsのLIMIT 20を
+ * 未登録チームの行が食い潰し、許可チームの最新イベントがダッシュボードから
+ * 消える——「絞ってからLIMIT」でなければ意味がない。
+ *
+ * 未設定（null）なら条件を付けず全件を返す。プレースホルダは許可コードの数だけ
+ * 動的に組む（当日の配布数は多くても数十）。
+ */
+const teamFilter = (
+  allowlist: ReadonlySet<string> | null,
+  column: string,
+): { clause: string; params: string[] } => {
+  if (allowlist === null) return { clause: "", params: [] };
+  const codes = [...allowlist];
+  // 空の許可リスト（設定し損ね）はfail-closed。IN ()は書けないので常に偽の条件を置く。
+  if (codes.length === 0) return { clause: `WHERE 0`, params: [] };
+  return { clause: `WHERE ${column} IN (${codes.map(() => "?").join(", ")})`, params: codes };
+};
+
+const teamsSql = (filter: string): string => `SELECT
   e.team_code AS teamCode,
   COALESCE((
     SELECT i.team_name FROM progress_events i
@@ -109,10 +128,11 @@ const TEAMS_SQL = `SELECT
   COALESCE(MAX(CASE WHEN e.kind NOT IN ('jump', 'resume') THEN e.pos END), 0) AS pos,
   MAX(e.created_at) AS updatedAt
 FROM progress_events e
+${filter}
 GROUP BY e.team_code
 ORDER BY pos DESC, updatedAt ASC`;
 
-const EVENTS_SQL = `SELECT
+const eventsSql = (filter: string): string => `SELECT
   team_code AS teamCode,
   team_name AS teamName,
   pos,
@@ -120,6 +140,7 @@ const EVENTS_SQL = `SELECT
   kind,
   created_at AS createdAt
 FROM progress_events
+${filter}
 ORDER BY id DESC
 LIMIT 20`;
 
@@ -155,30 +176,27 @@ export const handleProgressPost = async (request: Request, env: Env): Promise<Re
 };
 
 /**
- * 許可リストに無いチームの行を落とす。POST側でも許可リストを当てているが、当日の
- * 設定が途中で入った場合や、設定前に積まれた行が残っている場合に、会場前面の
- * ダッシュボードへ知らないチームが並ぶのを防ぐ。未設定（null）なら全件を返す。
- *
- * SQLのWHERE INではなく取得後のフィルタにする——teamsは参加チーム数（1桁）、
- * eventsは最大20件で、絞り込みのコストは無視できる。SQLを組み立てないぶん、
- * 許可コードの数だけプレースホルダを増やす分岐を持たずに済む。
+ * 会場前面のダッシュボードが読む集計。POST側でも許可リストを当てているが、当日の
+ * 設定が途中で入った場合や、設定前に積まれた行が残っている場合に、知らないチームが
+ * 並ぶのを防ぐため、読み出し側でも絞る。
  */
-const visibleRows = <Row extends { teamCode: string }>(
-  rows: readonly Row[],
-  allowlist: ReadonlySet<string> | null,
-): Row[] => rows.filter((row) => isTeamCodeAllowed(row.teamCode, allowlist));
-
 export const handleProgressSummary = async (env: Env): Promise<Response> => {
   try {
     await ensureSchema(env.PROGRESS_DB);
-    const [teams, events] = await Promise.all([
-      env.PROGRESS_DB.prepare(TEAMS_SQL).all(),
-      env.PROGRESS_DB.prepare(EVENTS_SQL).all(),
-    ]);
     const allowlist = parseTeamCodes(env.TEAM_CODES);
+    const teamsFilter = teamFilter(allowlist, "e.team_code");
+    const eventsFilter = teamFilter(allowlist, "team_code");
+    const [teams, events] = await Promise.all([
+      env.PROGRESS_DB.prepare(teamsSql(teamsFilter.clause))
+        .bind(...teamsFilter.params)
+        .all(),
+      env.PROGRESS_DB.prepare(eventsSql(eventsFilter.clause))
+        .bind(...eventsFilter.params)
+        .all(),
+    ]);
     return json({
-      teams: visibleRows(z.array(teamRowSchema).parse(teams.results), allowlist),
-      events: visibleRows(z.array(eventRowSchema).parse(events.results), allowlist),
+      teams: z.array(teamRowSchema).parse(teams.results),
+      events: z.array(eventRowSchema).parse(events.results),
     });
   } catch {
     return error("進捗の取得に失敗しました。", 503);

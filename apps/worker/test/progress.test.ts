@@ -243,6 +243,36 @@ describe("進捗記録", () => {
     expect(all.events).toHaveLength(3);
   });
 
+  it("未許可チームのイベントが多くても、許可チームの最新イベントは埋もれない", async () => {
+    // 絞り込みがLIMIT 20の後だと、未登録チームの25件が枠を食い潰して許可チームの
+    // イベントがダッシュボードから消える。「絞ってからLIMIT」であることを固定する。
+    const insert = env.PROGRESS_DB.prepare(
+      `INSERT INTO progress_events (team_code, team_name, pos, view, kind, client_at)
+       VALUES (?, ?, 1, ?, 'clear', '')`,
+    );
+    await env.PROGRESS_DB.batch([
+      insert.bind("100001", "許可", "allowed-old"),
+      ...Array.from({ length: 25 }, (_unused, index) =>
+        insert.bind("999999", "未登録", `noise${String(index)}`),
+      ),
+    ]);
+
+    const saved = env.TEAM_CODES;
+    try {
+      env.TEAM_CODES = "100001";
+      const result = await summary();
+      expect(result.events.map((event) => event.view)).toEqual(["allowed-old"]);
+      expect(result.teams.map((team) => team.teamCode)).toEqual(["100001"]);
+    } finally {
+      env.TEAM_CODES = saved;
+    }
+
+    // 未設定なら従来どおり全チームから最新20件。
+    const all = await summary();
+    expect(all.events).toHaveLength(20);
+    expect(all.events.every((event) => event.teamCode === "999999")).toBe(true);
+  });
+
   it("teamsはpos降順、同順位は最終更新が古い順に並ぶ", async () => {
     const insert = env.PROGRESS_DB.prepare(
       `INSERT INTO progress_events (team_code, team_name, pos, view, kind, client_at, created_at)
