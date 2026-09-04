@@ -197,3 +197,12 @@ export const claimGenerationSchema = z.number().int().positive();
 export const beginChatGateSchema = z
   .object({ nowMs: nowMsSchema, limit: rateLimitCountSchema, fingerprint: fingerprintSchema })
   .strict();
+
+/**
+ * AI呼び出しの顛末。`text`はここでは長さを見ない——上限超過は
+ * normalizeAssistantTextが切り詰めるので、拒否にすると再送で同じ応答が返るだけになる。
+ */
+export const completeChatOutcomeSchema = z.discriminatedUnion("kind", [
+  z.object({ kind: z.literal("success"), text: z.string() }).strict(),
+  z.object({ kind: z.literal("failure") }).strict(),
+]);

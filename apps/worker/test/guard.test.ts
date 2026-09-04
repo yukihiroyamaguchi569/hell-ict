@@ -9,6 +9,7 @@ import { z } from "zod";
 import {
   beginChatGateSchema,
   claimGenerationSchema,
+  completeChatOutcomeSchema,
   corsHeadersFor,
   DEFAULT_CHAT_RATE_LIMIT,
   isOriginAllowed,
@@ -915,6 +916,25 @@ describe("DO RPCの補助入力の検証（Pure Function）", () => {
     expect(claimGenerationSchema.safeParse(1).success).toBe(true);
     for (const invalid of [0, -1, 1.5, Number.NaN]) {
       expect(claimGenerationSchema.safeParse(invalid).success, String(invalid)).toBe(false);
+    }
+  });
+
+  it("completeChatMessageのoutcomeはsuccess/failureの形だけを受ける", () => {
+    expect(completeChatOutcomeSchema.safeParse({ kind: "success", text: "応答" }).success).toBe(
+      true,
+    );
+    expect(completeChatOutcomeSchema.safeParse({ kind: "failure" }).success).toBe(true);
+    for (const invalid of [
+      { kind: "success" },
+      { kind: "failure", text: "余計" },
+      { kind: "unknown" },
+      { kind: "success", text: 1 },
+      null,
+      "failure",
+    ]) {
+      expect(completeChatOutcomeSchema.safeParse(invalid).success, JSON.stringify(invalid)).toBe(
+        false,
+      );
     }
   });
 

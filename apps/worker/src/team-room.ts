@@ -4,6 +4,7 @@ import {
   chatMessageResultSchema,
   chatMessageSchema,
   chatSnapshotSchema,
+  commandIdSchema,
   checkpointSnapshotSchema,
   commandResultSchema,
   countThreadsOfKind,
@@ -45,6 +46,7 @@ import { z } from "zod";
 import {
   beginChatGateSchema,
   claimGenerationSchema,
+  completeChatOutcomeSchema,
   fingerprintSchema,
   nowMsSchema,
   RATE_LIMIT_WINDOW_MS,
@@ -601,10 +603,14 @@ export class TeamRoom extends DurableObject<Env> {
    * ときは何も書かず`{ stale: true }`を返し、呼び出し側もsnapshotへ触れない。
    */
   async completeChatMessage(
-    commandId: string,
-    outcome: CompleteChatMessageOutcome,
+    commandIdInput: unknown,
+    outcomeInput: unknown,
     claimGenerationInput: unknown,
   ): Promise<ChatMessageResult | { retry: true } | { stale: true }> {
+    // 他のRPCと同じく、補助入力も実行時に検証する。壊れた値で台帳やクレームを
+    // 触らせない（弾いた入力は例外になり、Worker側のcatchが503へ倒す）。
+    const commandId = commandIdSchema.parse(commandIdInput);
+    const outcome: CompleteChatMessageOutcome = completeChatOutcomeSchema.parse(outcomeInput);
     const claimGeneration = claimGenerationSchema.parse(claimGenerationInput);
     const processed =
       this.ctx.storage.sql

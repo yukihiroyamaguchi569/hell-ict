@@ -966,4 +966,38 @@ describe("P1C チャット骨格", () => {
     );
     expect(applied).toMatchObject({ assistant: { text: "新しい応答" } });
   });
+  it("completeChatMessageの不正な入力は状態もクレームも変えない", async () => {
+    await session("400031");
+    const created = await createThread("400031", "00000000-0000-4000-8000-000000003101", "副");
+    const { snapshot } = createThreadResultSchema.parse(await created.json());
+    const threadId = snapshot.threads[0]?.threadId;
+    if (threadId === undefined) throw new Error("unexpected");
+
+    const commandId = "00000000-0000-4000-8000-000000003102";
+    const room = env.TEAM_ROOM.getByName("400031");
+    const begun = await beginDirect("400031", { commandId, threadId, text: "本文" });
+    expect(begun).toMatchObject({ kind: "pending", claimGeneration: 1 });
+
+    const before = await chatSnapshotOf("400031");
+    // 壊れたoutcome・壊れたcommandIdはDOで弾かれ、Worker側のcatchが503へ倒す。
+    for (const call of [
+      () => room.completeChatMessage(commandId, { kind: "unknown" }, 1),
+      () => room.completeChatMessage(commandId, { kind: "success" }, 1),
+      () => room.completeChatMessage("not-a-uuid", { kind: "failure" }, 1),
+    ]) {
+      let threw = false;
+      try {
+        await call();
+      } catch {
+        threw = true;
+      }
+      expect(threw).toBe(true);
+    }
+
+    // snapshotは動いていない。
+    await expect(chatSnapshotOf("400031")).resolves.toEqual(before);
+    // クレームも生きたまま（解放されていれば再送がpendingになる）。
+    const resent = await beginDirect("400031", { commandId, threadId, text: "本文" });
+    expect(resent).toEqual({ kind: "in-progress" });
+  });
 });
