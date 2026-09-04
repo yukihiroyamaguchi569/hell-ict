@@ -3457,6 +3457,10 @@
   /* ------------------------------------------------------------------ */
   const CHECKPOINT_DEBOUNCE_MS = 500;
   let checkpointTimer = null;
+  /* 罰ゲームの進行。"none"（未発動）→"in-progress"（実施中）→"done"（払い終えた）。
+     チェックポイントの data へそのまま載せ、復帰時に in-progress なら罰をやり直す。 */
+  let s3PenaltyState = "none";
+  let s4PenaltyState = "none";
   /* 「最後に要求した状態が、まだサーバで確認できていない」印。デバウンス待ちだけを
      見ていると、キューへ積んだ直後や送信中（fetchが返る前）のリロードで取りこぼす
      ——タイマーはもう null なので離脱時のflushが何もしない。要求で立て、200応答で
@@ -3467,15 +3471,21 @@
   let checkpointSeq = 0;
 
   /* 現在の状態をそのまま body へ写す。ステージ固有の状態（グリッドの中身・
-     生成済みポスター等）はまだ持たない——復元は「そのステージの先頭から」で、
-     data は空のまま送る（サーバは中身を解釈せず大きさだけを見る）。 */
+     生成済みポスター等）は持たない——復元は「そのステージの先頭から」。
+
+     data に入れるのは罰ゲームの進行だけ（"none" | "in-progress" | "done"）。
+     罠は1回で発動済みになるのに罰のUIはリロードで消えるので、これが無いと
+     「罠を踏んだ直後にリロードすれば罰だけ踏み倒せる」——罰は時間で払う設計
+     （企画書§6）なので、払わずに済む抜け道は塞ぐ。
+     data は平坦なオブジェクトで、個人情報は一切入れない（サーバはdata内のPIIを
+     422で拒否する）。 */
   function checkpointBody() {
     return {
       view: view,
       pos: TEAMS[2].pos,
       elapsedMs: elapsed * 1000,
       trap: { s3Used: s3TrapUsed, s4Used: s4TrapUsed },
-      data: {},
+      data: { s3Penalty: s3PenaltyState, s4Penalty: s4PenaltyState },
     };
   }
 
@@ -5940,6 +5950,7 @@
     hideOverlays();
     paneL.classList.remove("hide"); paneR.classList.remove("hide");
     s3Verdicting = false; s3TrapUsed = false; s3KarubeAutoNudged = false;
+    s3PenaltyState = "none";   // 罠フラグと対。復帰時は go() の後に書き戻す
     hasS3LabMail = true; hasS3KawaiMail = true; hasS3ShichoMail = true;
     // 着地は3B病棟師長メール——これが Stage 3 開始の引き金そのもの
     // （docs/materials/stage3_patients.md 実装メモ）。検査科メールは謎の発熱の種で
@@ -6109,6 +6120,10 @@
   /* 拡大対応業務：消毒液ボトルの補充。
      1本ずつ押して待つだけ。褒めも音も出さず、済んだ本数が増えるだけにする。 */
   function startPenalty() {
+    // 罰は時間で払う（企画書§6）。開始を即時に記録しないと、踏んだ直後の
+    // リロードで罰だけ踏み倒せる。
+    s3PenaltyState = "in-progress";
+    saveCheckpoint("s3-penalty-start", true);
     s3Bottles = [];
     for (let i = 0; i < S3_BOTTLES_5A; i++) s3Bottles.push({ ward: "5A", state: "todo" });
     s3BottlesExtraAdded = false;
@@ -6202,6 +6217,8 @@
   }
 
   function finishPenalty() {
+    s3PenaltyState = "done";
+    saveCheckpoint("s3-penalty-done", true);
     s3Stop();
     $("ov-lock").classList.add("hide");
     $("penalty-host").innerHTML = "";
@@ -6565,6 +6582,7 @@
     hideOverlays();
     paneL.classList.remove("hide"); paneR.classList.remove("hide");
     s4Verdicting = false; s4TrapUsed = false; s4Masked = new Set();
+    s4PenaltyState = "none";   // 罠フラグと対。復帰時は go() の後に書き戻す
     hasS4JimuMail = true;
     openIdx = "s4jimu"; readS4Jimu = false;
     renderMails("s4jimu");
@@ -6703,6 +6721,9 @@
      塗るべきトークンと塗ってはいけないトークンが混在し、判断がいる——
      Stage 3 のボトル補充（押して待つだけ）とは質の違う罰にしてある。 */
   function startS4Penalty() {
+    // Stage 3 の罰と同じ理由で、開始を即時に記録する（startPenalty のコメント参照）。
+    s4PenaltyState = "in-progress";
+    saveCheckpoint("s4-penalty-start", true);
     s4Masked = new Set();
     $("lock-hd").textContent = "インシデント対応業務：報告書の作成";
 
@@ -6775,6 +6796,8 @@
   }
 
   function finishS4Penalty() {
+    s4PenaltyState = "done";
+    saveCheckpoint("s4-penalty-done", true);
     s4Stop();
     $("ov-lock").classList.add("hide");
     $("penalty-host").innerHTML = "";
@@ -8126,10 +8149,46 @@
     s3TrapUsed = body.trap.s3Used;
     s4TrapUsed = body.trap.s4Used;
 
+    // 罰も同じく go() の後で戻す（renderStage3/renderStage4 が "none" へ戻すため）。
+    const data = body.data || {};
+    s3PenaltyState = data.s3Penalty || "none";
+    s4PenaltyState = data.s4Penalty || "none";
+    resumePenalty(target);
+
     reportProgress(TEAMS[2].pos, "resume");
     logActivity("resume", undefined, {
       view: target, savedView: body.view, pos: body.pos, elapsedMs: elapsed * 1000,
+      s3Penalty: s3PenaltyState, s4Penalty: s4PenaltyState,
     });
+  }
+
+  /* 罰ゲームの途中でリロードされていたら、そのステージで罰をやり直す。
+
+     途中から復元はしない——この罰は時間で払うもの（企画書§6）で、詰めた本数や
+     塗った箇所そのものに意味は無い。中断時点を復元するより、最初からやり直して
+     もう一度払わせる方が設計に合っており、保存する状態も「進行中かどうか」の
+     一語で済む。踏み倒しを防ぐのが目的なので、やり直しが重いのはむしろ正しい。
+
+     開始はステージの入場演出（赤帯・看護部長の一報）が終わってから。演出の最中に
+     ロックを重ねると、閉じた先にまたロックが居る、という読めない画面になる。
+     一報は復帰時には出さずに畳む——同じ知らせを二度読ませない。 */
+  const RESUME_PENALTY_DELAY_MS = 3200;   // renderStage3 の一報（2600ms）より後
+
+  function resumePenalty(target) {
+    if (target === "s3" && s3PenaltyState === "in-progress") {
+      later(() => {
+        if (view !== "s3") return;   // 判断C
+        $("ov-s3notice").classList.add("hide");
+        startPenalty();
+      }, RESUME_PENALTY_DELAY_MS);
+      return;
+    }
+    if (target === "s4" && s4PenaltyState === "in-progress") {
+      later(() => {
+        if (view !== "s4") return;   // 判断C
+        startS4Penalty();
+      }, RESUME_PENALTY_DELAY_MS);
+    }
   }
   $("btn-brief").addEventListener("click", s1Begin);
   // 段落待ちの早送り。[了解しました] 自身は s1Begin へ抜けるので拾わない。
