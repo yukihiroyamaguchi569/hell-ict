@@ -53,6 +53,7 @@ export {
   createThread,
   initialChatSnapshot,
   normalizeAssistantText,
+  redactSnapshotPii,
 } from "./chat.js";
 export type { ChatMutationResult } from "./chat.js";
 export {

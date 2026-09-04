@@ -534,63 +534,80 @@ describe("P1C チャット骨格", () => {
     expect(gateway.requests).toHaveLength(2);
   });
 
-  it("履歴に平文のPIIが残っていた場合は、AIを呼ばず422 history_piiで止める", async () => {
+  it("伏せ字化より前に保存された平文は、読み出し時に伏せ字化されて保存し直される", async () => {
     await session("400030");
     const created = await createThread("400030", "00000000-0000-4000-8000-000000003001", "副");
     const { snapshot } = createThreadResultSchema.parse(await created.json());
     const threadId = snapshot.threads[0]?.threadId;
     if (threadId === undefined) throw new Error("unexpected");
 
+    // 伏せ字化を入れる前に保存された行を再現する。
     await injectAssistantPii("400030", "00000000-0000-4000-8000-000000003002");
 
+    const first = chatSnapshotSchema.parse(await (await get("/api/teams/400030/chat")).json());
+    const firstTexts = first.threads.flatMap((thread) => thread.messages).map((m) => m.text);
+    expect(firstTexts.some((text) => text.includes("渡辺 三郎"))).toBe(false);
+    expect(firstTexts.some((text) => text.includes(PII_REDACTION))).toBe(true);
+
+    // 2回目も伏せ字（読み出し時に保存し直されている＝一度きりの移行）。
+    const stillRedacted = await runInDurableObject(
+      env.TEAM_ROOM.getByName("400030"),
+      (_instance, state) => {
+        const row = state.storage.sql
+          .exec("SELECT snapshot FROM chat_state WHERE id = 1")
+          .toArray()[0];
+        return String(row?.snapshot);
+      },
+    );
+    expect(stillRedacted).not.toContain("渡辺 三郎");
+    expect(stillRedacted).toContain(PII_REDACTION);
+
+    // 平文が残っていないので、その後の送信は履歴ゲートに掛からず通る。
     const gateway = new FakeAiGateway([{ kind: "success", response: "応答" }]);
     const response = await sendMessage(
       "400030",
       { commandId: "00000000-0000-4000-8000-000000003003", threadId, text: "本文" },
       gateway,
     );
-
-    expect(response.status).toBe(422);
-    expect(httpErrorSchema.parse(await response.json()).code).toBe("history_pii");
-    expect(gateway.requests).toHaveLength(0);
+    expect(response.status).toBe(200);
+    expect(gateway.requests).toHaveLength(1);
   });
 
-  it("履歴ブロック後、同じcommandIdで再送すると同じブロックが再現され、ユーザーメッセージは重複しない", async () => {
+  it("同じcommandIdの再送でユーザーメッセージが重複しない", async () => {
     await session("400015");
     const created = await createThread("400015", "00000000-0000-4000-8000-000000001501", "副");
     const { snapshot } = createThreadResultSchema.parse(await created.json());
     const threadId = snapshot.threads[0]?.threadId;
     if (threadId === undefined) throw new Error("unexpected");
 
-    const gateway = new FakeAiGateway([{ kind: "success", response: "応答" }]);
+    const gateway = new FakeAiGateway([
+      { kind: "success", response: "応答" },
+      { kind: "failure", error: new Error("一時障害") },
+      { kind: "success", response: "二度目の応答" },
+    ]);
     await sendMessage(
       "400015",
       { commandId: "00000000-0000-4000-8000-000000001502", threadId, text: "本文" },
       gateway,
     );
-    // AI応答は保存時に伏せ字化されるので、履歴ゲートを踏ませるには平文を差し込む。
-    await injectAssistantPii("400015", "00000000-0000-4000-8000-000000001504");
 
+    // AI失敗で戻ってきた送信を、同じcommandIdで再送する。
     const command = {
       commandId: "00000000-0000-4000-8000-000000001503",
       threadId,
       text: "別の本文",
     };
-    const first = await sendMessage("400015", command, gateway);
-    expect(first.status).toBe(422);
-    const retried = await sendMessage("400015", command, gateway);
-    expect(retried.status).toBe(422);
-    expect(gateway.requests).toHaveLength(1);
+    expect((await sendMessage("400015", command, gateway)).status).toBe(503);
+    expect((await sendMessage("400015", command, gateway)).status).toBe(200);
 
     const final = await chatSnapshotOf("400015");
     const thread = final.threads.find((t) => t.threadId === threadId);
+    // 「別の本文」は1件だけ（再送で二重に積まれない）。
     expect(thread?.messages.map((m) => [m.role, m.text])).toEqual([
       ["user", "本文"],
       ["assistant", "応答"],
-      // 差し込んだ平文のPII。これが履歴ゲートを踏ませている。
-      ["assistant", "渡辺 三郎さんの件、承知しました"],
-      // ブロックされた送信のユーザー発言は1件だけ（再送で二重に積まれない）。
       ["user", "別の本文"],
+      ["assistant", "二度目の応答"],
     ]);
   });
 

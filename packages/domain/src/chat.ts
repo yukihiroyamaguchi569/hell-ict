@@ -1,4 +1,5 @@
 import { sha256Hex } from "./fingerprint.js";
+import { redactPii } from "./pii.js";
 import { CHAT_MESSAGE_MAX_CHARS } from "./schemas/chat.js";
 import type {
   ChatMessage,
@@ -93,4 +94,28 @@ export const normalizeAssistantText = (text: string): string | null => {
   return trimmed.length > CHAT_MESSAGE_MAX_CHARS
     ? trimmed.slice(0, CHAT_MESSAGE_MAX_CHARS)
     : trimmed;
+};
+
+/**
+ * snapshot内の全メッセージ本文へredactPiiを掛ける。伏せ字化を入れる前に保存された
+ * 平文が、GET・WebSocket配信・台帳の再生から出続けるのを止めるための移行用。
+ *
+ * 変化が無ければ引数と同じ参照をそのまま返す。呼び出し側は参照比較だけで
+ * 「保存し直しが要るか」を判断でき、毎回の読み出しで書き込みが走らない。
+ */
+export const redactSnapshotPii = (snapshot: ChatSnapshot): ChatSnapshot => {
+  const threads = snapshot.threads.map((thread) => {
+    const messages = thread.messages.map((message) => {
+      const text = redactPii(message.text);
+      return text === message.text ? message : { ...message, text };
+    });
+    // 中身が1つも変わっていなければ元のthreadを返す（参照が変わらないことが
+    // 「保存し直しは要らない」の合図になる）。
+    return messages.every((message, index) => message === thread.messages[index])
+      ? thread
+      : { ...thread, messages };
+  });
+  return threads.every((thread, index) => thread === snapshot.threads[index])
+    ? snapshot
+    : { ...snapshot, threads };
 };

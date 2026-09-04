@@ -17,6 +17,7 @@ import {
   normalizeAssistantText,
   promptProfileSchema,
   redactPii,
+  redactSnapshotPii,
   saveCheckpointCommandSchema,
   sendMessageCommandSchema,
   teamCodeSchema,
@@ -202,9 +203,14 @@ const replayProcessed = (
   fingerprint: string,
 ): BeginChatMessageOutcome => {
   if (mismatchesFingerprint(processed.fingerprint, fingerprint)) return { kind: "conflict" };
+  const result = chatMessageResultSchema.parse(JSON.parse(processed.result) as unknown);
+  // 台帳の行は書き換えない（冪等の記録なので触らない）。再生するたびに伏せ字化して返す。
   return {
     kind: "already-processed",
-    result: chatMessageResultSchema.parse(JSON.parse(processed.result) as unknown),
+    result: {
+      snapshot: redactSnapshotPii(result.snapshot),
+      assistant: { ...result.assistant, text: redactPii(result.assistant.text) },
+    },
   };
 };
 
@@ -331,12 +337,23 @@ export class TeamRoom extends DurableObject<Env> {
 
   // ---- チャット ----
 
+  /**
+   * チャットのsnapshotを読む。伏せ字化を入れる前に保存された平文のPIIが、GET・
+   * WebSocket配信・台帳の再生から出続けないよう、読み出した時点で伏せ字へ置き換える。
+   * 内容が変わったらその場で保存し直す（一度きりの移行。次回以降は参照が変わらないので
+   * 書き込みは走らない）。
+   */
   private loadChatSnapshot(teamCode: TeamCode): ChatSnapshot {
     const stored =
       this.ctx.storage.sql
         .exec<StoredChatState>("SELECT snapshot FROM chat_state WHERE id = 1")
         .toArray()[0] ?? null;
-    if (stored !== null) return chatSnapshotSchema.parse(JSON.parse(stored.snapshot) as unknown);
+    if (stored !== null) {
+      const parsed = chatSnapshotSchema.parse(JSON.parse(stored.snapshot) as unknown);
+      const redacted = redactSnapshotPii(parsed);
+      if (redacted !== parsed) this.saveChatSnapshot(redacted);
+      return redacted;
+    }
     const snapshot = initialChatSnapshot(teamCode, crypto.randomUUID());
     this.ctx.storage.sql.exec(
       "INSERT INTO chat_state (id, snapshot) VALUES (1, ?)",
@@ -374,7 +391,8 @@ export class TeamRoom extends DurableObject<Env> {
     if (saved !== null) {
       // 同じcommandIdで別のタイトル・別のkindを送る取り違えは冪等再送ではない。
       if (mismatchesFingerprint(saved.fingerprint, fingerprint)) return { conflict: true };
-      return createThreadResultSchema.parse(JSON.parse(saved.result) as unknown);
+      const replayed = createThreadResultSchema.parse(JSON.parse(saved.result) as unknown);
+      return { snapshot: redactSnapshotPii(replayed.snapshot) };
     }
     const snapshot = this.loadChatSnapshot(teamCode);
     // 冪等再送（processed済み）は上限に関係なく従来の結果を返す。上限を当てるのは

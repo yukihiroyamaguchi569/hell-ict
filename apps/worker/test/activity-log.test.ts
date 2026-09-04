@@ -290,15 +290,19 @@ describe("活動ログ", () => {
       expect(piiRows[0]?.text).toBe("");
     });
 
-    it("履歴に混入したPIIのブロックはchat.history_piiとして残る", async () => {
+    it("伏せ字化より前に保存された平文があっても、送信は通り伏せ字で記録される", async () => {
       const threadId = await mainThreadId("500005", "00000000-0000-4000-8000-000000000501");
-      const gateway = new FakeAiGateway([{ kind: "success", response: "応答" }]);
+      const gateway = new FakeAiGateway([
+        { kind: "success", response: "応答" },
+        { kind: "success", response: "二度目の応答" },
+      ]);
       await chat(
         "500005",
         { commandId: "00000000-0000-4000-8000-000000000502", threadId, text: "本文" },
         gateway,
       );
-      // AI応答は保存時に伏せ字化されるので、履歴ゲートを踏ませるには平文を差し込む。
+      // 伏せ字化を入れる前に保存された行を再現する。読み出し時に伏せ字化されるので、
+      // 履歴ゲート（chat.history_pii）はもう踏まれない。
       await runInDurableObject(env.TEAM_ROOM.getByName("500005"), (_instance, state) => {
         const row = state.storage.sql
           .exec("SELECT snapshot FROM chat_state WHERE id = 1")
@@ -315,17 +319,19 @@ describe("活動ログ", () => {
           JSON.stringify(parsed),
         );
       });
-      const blocked = await chat(
+
+      const response = await chat(
         "500005",
         { commandId: "00000000-0000-4000-8000-000000000503", threadId, text: "別の本文" },
         gateway,
       );
-      expect(blocked.status).toBe(422);
+      expect(response.status).toBe(200);
 
-      const historyRows = (await rows()).filter((row) => row.kind === "chat.history_pii");
-      expect(historyRows).toHaveLength(1);
-      expect(historyRows[0]?.text).toBe("");
-      expect(historyRows[0]?.commandId).toBe("00000000-0000-4000-8000-000000000503");
+      const kinds = (await rows()).map((row) => row.kind);
+      expect(kinds).not.toContain("chat.history_pii");
+      // 活動ログへ渡る本文にも平文は残らない。
+      const stored = JSON.stringify(await rows());
+      expect(stored).not.toContain("渡辺 三郎");
     });
 
     it("スレッド作成はthread.createとしてtitleごと残る", async () => {
