@@ -8604,14 +8604,17 @@
     const snapshot = cpRes.body.checkpoint || null;
     if (snapshot) liveState.checkpointRevision = snapshot.revision;
     adoptDataRevision(snapshot);   // 別タブが進めていれば、その先から番号を振り直す
-    // チーム名がサーバへ届く最初の機会。commitTeamName の後（teamName 確定後）に送る。
-    reportProgress(TEAMS[2].pos, "entry");
     pollSummary();   // 帯を10秒待たずに一度埋める（以後は setInterval が回す）
     // Prologue圏（entry/welcome/inbox）までしか進んでいないチームは、初回入室と
     // 同じ扱いでよい——ここを pos で判定しないのは、go() がこの3画面にも
     // pos=1（S1の停留所）を振るため。ステージにはまだ入っていない。
     const savedView = snapshot ? snapshot.body.view : null;
     if (!snapshot || savedView === "entry" || savedView === "welcome" || savedView === "inbox") {
+      // 初回入室のときだけ entry を記録する。復帰でも送っていた頃は、まだ pos が
+      // 初期値1のまま entry が D1 へ入り、ダッシュボードとログ分析に
+      // 「再入室して Stage 1 へ戻った」と見えていた。復帰側は resume だけを送る
+      // （チーム名はそちらにも載るので、名前がサーバへ届かなくなることはない）。
+      reportProgress(TEAMS[2].pos, "entry");
       go("welcome");
       return;
     }
