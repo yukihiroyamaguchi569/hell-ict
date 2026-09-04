@@ -71,6 +71,15 @@ const beginDirect = async (
     },
   );
 
+/** 送信台帳に入っている result 文字列を command_id 順に読む。 */
+const ledgerResults = (teamCode: string): Promise<string[]> =>
+  runInDurableObject(env.TEAM_ROOM.getByName(teamCode), (_instance, state) =>
+    state.storage.sql
+      .exec("SELECT result FROM processed_message_commands ORDER BY command_id")
+      .toArray()
+      .map((row) => String(row.result)),
+  );
+
 /**
  * 保存経路の伏せ字化を迂回して、履歴へ平文のPIIを差し込む。伏せ字化を入れる前に
  * 保存された行など、想定外の経路で平文が残った状態を作り、外部送信の直前に効く
@@ -1167,6 +1176,71 @@ describe("P1C チャット骨格", () => {
 
     const replayed = await sendMessage("400038", { commandId, threadId, text: "本文" }, gateway);
     expect(replayed.status).toBe(503);
+  });
+
+  it("再送されない台帳行も、初回の読み出しで全行まとめて伏せ字化される", async () => {
+    // 読み出し時の伏せ字化は「再送された行」しか直せない。台帳の大半は二度と
+    // 再送されないので、平文はDOのストレージに残り続ける。全行走査で消しに行く。
+    await session("400037");
+    const created = await createThread("400037", "00000000-0000-4000-8000-000000003701", "副");
+    const { snapshot } = createThreadResultSchema.parse(await created.json());
+    const threadId = snapshot.threads[0]?.threadId;
+    if (threadId === undefined) throw new Error("unexpected");
+
+    const gateway = new FakeAiGateway([
+      { kind: "success", response: "応答1" },
+      { kind: "success", response: "応答2" },
+    ]);
+    const commandIds = [
+      "00000000-0000-4000-8000-000000003702",
+      "00000000-0000-4000-8000-000000003703",
+    ];
+    for (const commandId of commandIds) {
+      const sent = await sendMessage("400037", { commandId, threadId, text: "本文" }, gateway);
+      expect(sent.status).toBe(200);
+    }
+
+    // 移行を入れる前に書かれた状態を作る。完了印も消して「まだ走っていない」に戻す。
+    const injected = await runInDurableObject(
+      env.TEAM_ROOM.getByName("400037"),
+      (_instance, state) => {
+        state.storage.sql.exec("DELETE FROM migrations");
+        const rows = state.storage.sql
+          .exec("SELECT command_id, result FROM processed_message_commands")
+          .toArray();
+        for (const row of rows) {
+          state.storage.sql.exec(
+            "UPDATE processed_message_commands SET result = ? WHERE command_id = ?",
+            String(row.result).replace("応答", "渡辺 三郎さんの件、承知しました。応答"),
+            String(row.command_id),
+          );
+        }
+        return rows.length;
+      },
+    );
+    expect(injected).toBe(2);
+
+    // GET /chat を1回。再送はしていないので、直るのは全行走査の効果だけである。
+    expect((await get("/api/teams/400037/chat")).status).toBe(200);
+
+    const afterFirst = await ledgerResults("400037");
+    expect(afterFirst).toHaveLength(2);
+    for (const result of afterFirst) {
+      expect(result).not.toContain("渡辺 三郎");
+      expect(result).toContain(PII_REDACTION);
+    }
+
+    // 完了印が付いているので、2回目は1行も書き換えない。印を残したまま平文を
+    // 差し戻し、GET のあとも平文のままであることで「走っていない」を確かめる。
+    await runInDurableObject(env.TEAM_ROOM.getByName("400037"), (_instance, state) => {
+      state.storage.sql.exec(
+        "UPDATE processed_message_commands SET result = ? WHERE command_id = ?",
+        afterFirst[0]?.replace(PII_REDACTION, "渡辺 三郎"),
+        commandIds[0],
+      );
+    });
+    expect((await get("/api/teams/400037/chat")).status).toBe(200);
+    expect((await ledgerResults("400037"))[0]).toContain("渡辺 三郎");
   });
 
   it("スレッド台帳に残った平文PIIも再生時に伏せ字化されて保存し直される", async () => {
