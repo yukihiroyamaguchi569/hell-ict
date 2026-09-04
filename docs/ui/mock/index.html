@@ -380,6 +380,10 @@
   padding: 11px 26px; font-size: 16px; font-weight: 700; letter-spacing: .04em;
 }
 .btn:hover { filter: brightness(1.12); }
+/* 押せない状態を見た目でも伝える。疎通確認中・失敗中の［入室する］が押せる顔の
+   ままだと、参加者は連打して「壊れている」と受け取る。 */
+.btn:disabled { opacity: .45; cursor: default; filter: none; }
+.btn:disabled:hover { filter: none; }
 .btn.ghost { background: transparent; color: var(--fg); border-color: var(--rule); font-weight: 500; }
 .btn.ghost:hover { background: var(--surface-2); filter: none; }
 
@@ -608,6 +612,12 @@
 .entry .teamname input::placeholder { color: var(--fg-muted); font-weight: 400; }
 /* LIVE時、POST /api/session 失敗時のエラー表示（サーバのmessageをそのまま出す）。 */
 .entry .entry-error { font-size: 14px; color: #c1121f; text-align: center; max-width: 42ch; }
+/* 起動時の疎通確認。確認中は淡く、失敗したときだけ赤くする（.bad） */
+.entry .entry-probe { font-size: 14px; color: var(--fg-muted); text-align: center; max-width: 42ch; }
+.entry .entry-probe.bad { color: #c1121f; }
+.entry .probe-actions { display: flex; flex-direction: column; align-items: center; gap: 6px; }
+.entry .probe-buttons { display: flex; gap: 10px; flex-wrap: wrap; justify-content: center; }
+.entry .probe-note { font-size: 12px; color: var(--fg-muted); }
 
 /* 幹部ブリーフィング — 急変直後、Stage 1 の冒頭。.entry と同じく不透明で
    下地を完全に隠す（ヘッダーの時計もリーダーボードも見せない）。
@@ -1354,7 +1364,19 @@
           </div>
           <!-- LIVE時のみ使う。scriptedのbtn-enterはgo("welcome")へ即抜けるため空のまま。 -->
           <div class="entry-error hide" id="entry-error"></div>
+          <!-- 起動時の /api/health プローブの状態。確認が終わるまで入室させない
+               （http(s)配信時のみ。file:// は最初からscripted） -->
+          <div class="entry-probe hide" id="entry-probe"></div>
           <button class="btn" id="btn-enter">入室する</button>
+          <!-- プローブ失敗時だけ出す。台本モードは「黙って落ちる」のではなく
+               参加者・ファシリテーターが選ぶ最後の手段（README「ライブAPI接続」）。 -->
+          <div class="probe-actions hide" id="probe-actions">
+            <div class="probe-buttons">
+              <button class="btn ghost" id="btn-probe-retry">再試行</button>
+              <button class="btn ghost" id="btn-probe-offline">オフラインで進める（台本モード）</button>
+            </div>
+            <div class="probe-note">AI・保存・帯は動きません</div>
+          </div>
         </div>
 
         <!-- 幹部ブリーフィング：急変直後、Stage 1 の冒頭。事務長が一方向で告げるだけで、
@@ -3377,18 +3399,70 @@
   // スレッドID。scripted時は最後まで null のまま（sendAI等はこれで分岐する）。
   let liveState = null;
 
-  (async function probeLive() {
-    if (location.protocol !== "http:" && location.protocol !== "https:") return;
-    try {
-      const ctrl = new AbortController();
-      const timer = setTimeout(() => ctrl.abort(), 1500);
-      const res = await fetch(LIVE_API_BASE + "/api/health", { signal: ctrl.signal });
-      clearTimeout(timer);
-      LIVE = res.ok;
-    } catch {
-      LIVE = false;   // file://・8788（pythonサーバ、APIなし）はここに落ちる
+  /* プローブの結果。"pending"（確認中）／"live"（API有り）／"scripted"（file://）／
+     "failed"（http(s)なのに繋がらない）。 */
+  let liveProbeState = "pending";
+  /* 1.5秒では本番のコールドスタート（DO・D1の初回起動）に届かないことがある。
+     短すぎるタイムアウトは「黙ってscriptedで開始し、入室も保存も全部台本」という
+     いちばん気づきにくい事故を生むので、待つ側へ倒す。 */
+  const LIVE_PROBE_TIMEOUT_MS = 5000;
+
+  /* 確認が終わるまで入室させない。http(s)で開いている以上、APIがある前提の
+     配信物なので、繋がらないまま静かにscriptedへ落とさない——当日それに気づくのは
+     「入室したのに他のチームが帯に出ない」と言われた後になる。 */
+  function updateEntryProbeUi() {
+    const btn = $("btn-enter");
+    const note = $("entry-probe");
+    const actions = $("probe-actions");
+    if (!btn || !note || !actions) return;
+    const pending = liveProbeState === "pending";
+    const failed = liveProbeState === "failed";
+    btn.disabled = pending || failed;
+    note.classList.toggle("hide", !(pending || failed));
+    note.classList.toggle("bad", failed);
+    note.textContent = failed
+      ? "サーバに接続できません。ネットワークを確認して再試行してください。"
+      : pending ? "接続を確認しています…" : "";
+    actions.classList.toggle("hide", !failed);
+  }
+
+  async function probeLive() {
+    // file:// は最初からscripted。プローブそのものを試みない（従来どおり）。
+    if (location.protocol !== "http:" && location.protocol !== "https:") {
+      liveProbeState = "scripted";
+      updateEntryProbeUi();
+      return;
     }
-  })();
+    liveProbeState = "pending";
+    updateEntryProbeUi();
+    const ctrl = new AbortController();
+    const timer = setTimeout(() => ctrl.abort(), LIVE_PROBE_TIMEOUT_MS);
+    try {
+      const res = await fetch(LIVE_API_BASE + "/api/health", { signal: ctrl.signal });
+      LIVE = res.ok;
+      liveProbeState = res.ok ? "live" : "failed";
+    } catch {
+      LIVE = false;
+      liveProbeState = "failed";
+    } finally {
+      clearTimeout(timer);
+    }
+    updateEntryProbeUi();
+  }
+
+  $("btn-probe-retry").addEventListener("click", probeLive);
+
+  /* 台本モードで進む、を明示的に選ぶ。開発用の静的サーバ配信（python -m http.server）
+     と、会場でサーバが落ちたときの最後の手段。押されたら以後プローブし直さない
+     ——「黙ってscriptedへ落ちる」のを避けるのが今回の趣旨で、選んだこと自体は
+     参加者・ファシリテーターの意思決定として尊重する。 */
+  $("btn-probe-offline").addEventListener("click", () => {
+    LIVE = false;
+    liveProbeState = "scripted";
+    updateEntryProbeUi();
+  });
+
+  probeLive();
 
   /* 429 の Retry-After（秒）を数える。RFC はHTTP-dateも許すが、Workerは秒で返すので
      秒だけを読む——読めなければ null にして、文言から秒数を落とす。 */
@@ -3479,31 +3553,48 @@
      （企画書§6）なので、払わずに済む抜け道は塞ぐ。
      data は平坦なオブジェクトで、個人情報は一切入れない（サーバはdata内のPIIを
      422で拒否する）。 */
+  function checkpointData() {
+    return { s3Penalty: s3PenaltyState, s4Penalty: s4PenaltyState };
+  }
+
   function checkpointBody() {
+    const data = checkpointData();
     return {
       view: view,
       pos: TEAMS[2].pos,
       elapsedMs: elapsed * 1000,
       trap: { s3Used: s3TrapUsed, s4Used: s4TrapUsed },
-      data: { s3Penalty: s3PenaltyState, s4Penalty: s4PenaltyState },
-      dataRevision: nextDataRevision(),
+      data: data,
+      dataRevision: dataRevisionFor(data),
     };
   }
 
   /* data（罰の進行）の世代番号。pos と elapsedMs は数値そのものが単調なので
      後退を弾けるが、data は中身を見ても新旧が決まらない——同じ停留所にいる
      古いタブの flush が「まだ罰は始まっていない」を書き戻せてしまう。
-     そこで送るたびに増える番号を添え、サーバは pos → dataRevision の順で
-     新しい側を採る（flushの単調マージ）。
+     そこで世代番号を添え、サーバは pos → dataRevision の順で新しい側を採る。
 
-     次の値は「サーバから最後に受け取った値」と「自分が最後に送った値」の
-     大きい方＋1。GET・POST どちらの応答でも受け取った値を取り込むので、
-     別タブが先に進めていれば、こちらはその先から番号を振り直す。 */
-  function nextDataRevision() {
+     📌 番号を上げるのは「ローカルの data が変わった保存」だけ。ステージ遷移や
+     停留所の前進のように data が同じままの保存でも番号を上げてしまうと、
+     古いタブが「サーバの世代＋1」を名乗って自分の古い data を新しいものとして
+     押し通せる——世代番号が意味を持つのは「その data を作ったのは誰か」であって、
+     「誰が最後に喋ったか」ではない。data が変わっていない保存は、観測済みの
+     番号をそのまま送る（サーバは同値を許す）。 */
+  function dataRevisionFor(data) {
     if (!liveState) return 1;
-    const next = Math.max(liveState.serverDataRevision || 0, liveState.sentDataRevision || 0) + 1;
-    liveState.sentDataRevision = next;
-    return next;
+    const observed = Math.max(liveState.serverDataRevision || 0, liveState.sentDataRevision || 0);
+    const json = JSON.stringify(data);
+    if (json === liveState.sentDataJson) return observed;
+    liveState.sentDataRevision = observed + 1;
+    liveState.sentDataJson = json;
+    return liveState.sentDataRevision;
+  }
+
+  /* サーバの data を取り込んだ直後に呼ぶ。いま持っている data は「サーバが
+     持っていたもの」そのものなので、次の保存で新しい世代を名乗らせない。 */
+  function syncSentData() {
+    if (!liveState) return;
+    liveState.sentDataJson = JSON.stringify(checkpointData());
   }
 
   /* サーバのsnapshotから dataRevision を取り込む。後退させない。 */
@@ -3605,6 +3696,14 @@
     // expectedRevision とサーバの revision がずれていれば conflict、一致して
     // いれば「revisionは合っていたのに中身が後退していた」＝ regression、と
     // 構造だけで見分けられる。
+    // 拒否の理由に関わらず、取り直したサーバの状態をまず自分へ取り込む。
+    // conflict でも同じ——別タブが進めた罰の状態などを持たないまま body を
+    // 組み直すと、「サーバの世代を観測しただけの古い data」を新しい世代として
+    // 押し戻すことになる。取り込んだあとに syncSentData() で「この data は
+    // サーバ由来」と記録し、次の保存が余計な世代を名乗らないようにする。
+    adoptServerState(snapshot ? snapshot.body : null);
+    syncSentData();
+
     const conflicted = code === null ? serverRevision !== sentRevision : code === "conflict";
     if (conflicted) {
       // 同じPCで複数タブが開かれた等でrevisionがずれただけ。revisionを合わせて
@@ -3615,12 +3714,8 @@
       return;
     }
     // trap-regression／elapsed-regression／pos-regression／data-regression。
-    // いずれもサーバ値を採用して
-    // 再送はしない——次の保存（ステージ遷移・停留所の前進）が、取り込んだ値を
-    // 含む新しい body で自然に送られる。取り込みは再送後（retried）でも行う
-    // ——競合を直して送り直した先が後退だった、という順で来ることがあり、
-    // ここで諦めると追いつきが次の保存まで一巡遅れる。
-    adoptServerState(snapshot ? snapshot.body : null);
+    // いずれもサーバ値を採用済みで、再送はしない——次の保存（ステージ遷移・
+    // 停留所の前進）が、取り込んだ値を含む新しい body で自然に送られる。
   }
 
   /* キューへ積む。失敗はここで握りつぶし、チェーンが切れないようにする
@@ -3937,6 +4032,11 @@
         s4TrapUsed = true;
         // 本文は残さない（PIIの罠なので、送ろうとした個人情報をログへ写さない）。
         logActivity("trap.s4", undefined, { gate: "server" });
+        // 罰の開始も同じ保存に含める。罠の確定から startPenalty() までは
+        // 暗転と叱責で数秒あり、その間にリロードされると「罠は発動済み・罰は未実施」
+        // という、罰が二度と始まらない状態がサーバに残る（＝罰の踏み倒し）。
+        // 演出は復帰時にやり直さないが、罰そのものは resumePenalty() が始める。
+        s4PenaltyState = "in-progress";
         saveCheckpoint("trap-s4", true);   // デバウンスしない（踏んだ直後のリロードで罠が復活しないように）
         triggerLeak();
       } else {
@@ -3987,18 +4087,35 @@
      「処理済みの再送」と見なされて片方が消えていた。同じ宛先へ同じ文面を送り直した
      ときだけIDを再利用する、が正しい単位。
 
-     送信経路ごとに1枠ずつ持つ（AIチャットの sendAiLive と Stage 1 の s1DraftLive）
+     送信経路ごとに1つずつ持つ（AIチャットの sendAiLive と Stage 1 の s1DraftLive）
      ——どちらも同じメインスレッドへ書き込むが、進行中の試行は経路ごとに独立で、
-     片方の成功でもう片方のIDを捨ててはいけない。 */
+     片方の成功でもう片方のIDを捨ててはいけない。
+
+     未確定の試行は1件ではなくMapで持つ。1枠だけだと、スレッドAで失敗したあと
+     スレッドBへ送った時点でAのIDが上書きされ、Aの原文を送り直しても別コマンドに
+     なって発言が二重に積まれる。参加者は詰まったスレッドを放って別の話題を
+     始めるので、これは普通に起きる。上限を超えたら古い順に捨てる——20件あれば
+     1ステージ分の試行錯誤には足り、際限なく抱えても意味が無い。 */
+  const PENDING_COMMAND_LIMIT = 20;
+
   function makePendingCommand() {
-    let pending = null;
+    const pending = new Map();   // 指紋 → commandId（Mapは挿入順を保つ＝先頭が最も古い）
+    const keyOf = (threadId, promptProfile, text) => threadId + " " + promptProfile + " " + text;
     return {
       idFor(threadId, promptProfile, text) {
-        const key = threadId + " " + promptProfile + " " + text;
-        if (pending === null || pending.key !== key) pending = { key, commandId: crypto.randomUUID() };
-        return pending.commandId;
+        const key = keyOf(threadId, promptProfile, text);
+        const known = pending.get(key);
+        if (known !== undefined) return known;
+        const commandId = crypto.randomUUID();
+        pending.set(key, commandId);
+        while (pending.size > PENDING_COMMAND_LIMIT) pending.delete(pending.keys().next().value);
+        return commandId;
       },
-      clear() { pending = null; }
+      /* 解決した試行を捨てる。引数なしは全消し（入り直しなど）。 */
+      clear(threadId, promptProfile, text) {
+        if (threadId === undefined) { pending.clear(); return; }
+        pending.delete(keyOf(threadId, promptProfile, text));
+      }
     };
   }
 
@@ -4042,14 +4159,17 @@
     updateAiInputLock();
     // 再送用IDのキーにも入るので、送信本文と同じ一箇所から決める。
     const chatProfile = view === "s3" ? "s3" : "default";
+    // 応答が返る頃にはタブが切り替わっているかもしれないので、宛先は送信時点で
+    // 固定する（このキーで解決済みのIDを消す）。
+    const sentThreadId = liveState.activeThreadId;
     const placeholder = aiPlaceholderBubble();
     const res = await liveFetch("/api/teams/" + liveState.teamCode + "/chat/messages", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
         type: "send-message",
-        commandId: chatSendCommand.idFor(liveState.activeThreadId, chatProfile, text),
-        threadId: liveState.activeThreadId,
+        commandId: chatSendCommand.idFor(sentThreadId, chatProfile, text),
+        threadId: sentThreadId,
         text,
         promptProfile: chatProfile,
       }),
@@ -4058,7 +4178,7 @@
     updateAiInputLock();
 
     if (res.ok && res.body) {
-      chatSendCommand.clear();   // 確定したのでIDを破棄する（次の送信は新しい試行）
+      chatSendCommand.clear(sentThreadId, chatProfile, text);   // 確定したので破棄
       applyChatSnapshot(res.body.snapshot);
       placeholder.querySelector(".body").innerHTML = esc(res.body.assistant.text).replace(/\n/g, "<br>");
       renderAiTabs();
@@ -4073,7 +4193,7 @@
     // にならない。画面はサーバの状態と食い違っているので取り直して描き直す
     // （history_pii/ai_refusal では、保存済みのユーザー発言がここで現れる）。
     if (isUnsavedRejection(res)) {
-      chatSendCommand.clear();
+      chatSendCommand.clear(sentThreadId, chatProfile, text);
     } else {
       await restoreChatFromServer();
     }
@@ -4231,6 +4351,11 @@
             s4TrapUsed = true;
             // 本文は残さない（PIIの罠なので、送ろうとした個人情報をログへ写さない）。
             logActivity("trap.s4", undefined, { gate: "client", detected: hit.label });
+            // 罰の開始も同じ保存に含める。罠の確定から startPenalty() までは
+            // 暗転と叱責で数秒あり、その間にリロードされると「罠は発動済み・罰は未実施」
+            // という、罰が二度と始まらない状態がサーバに残る（＝罰の踏み倒し）。
+            // 演出は復帰時にやり直さないが、罰そのものは resumePenalty() が始める。
+            s4PenaltyState = "in-progress";
             saveCheckpoint("trap-s4", true);   // デバウンスしない（踏んだ直後のリロードで罠が復活しないように）
             triggerLeak();
           } else {
@@ -5034,13 +5159,15 @@
     if (btn) { btn.textContent = "下書き中…"; btn.disabled = true; }
 
     const text = s1BuildDraftText(it, hasCtx);
+    // 宛先は送信時点で固定する（sendAiLive と同じ理由）。
+    const sentThreadId = liveState.activeThreadId;
     const res = await liveFetch("/api/teams/" + liveState.teamCode + "/chat/messages", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
         type: "send-message",
-        commandId: s1DraftCommand.idFor(liveState.activeThreadId, "s1", text),
-        threadId: liveState.activeThreadId,
+        commandId: s1DraftCommand.idFor(sentThreadId, "s1", text),
+        threadId: sentThreadId,
         text,
         promptProfile: "s1",
       }),
@@ -5048,7 +5175,7 @@
     s1DraftBusy = false;
 
     if (res.ok && res.body && res.body.assistant) {
-      s1DraftCommand.clear();   // 確定したのでIDを破棄する（次の依頼は新しい試行）
+      s1DraftCommand.clear(sentThreadId, "s1", text);   // 確定したので破棄
       applyChatSnapshot(res.body.snapshot);
       if (view !== "s1") return;   // 下書き要求中に Stage 1 を離れていたら他ステージの中央ペインへ着弾させない
       it.bodyDraft = res.body.assistant.text;
@@ -5064,7 +5191,7 @@
     // 0（タイムアウト・断）/409（処理中）/503 は結果が未確定——同じIDで再送すれば
     // DO側の冪等性に当たる。
     const unsaved = isUnsavedRejection(res);
-    if (unsaved) s1DraftCommand.clear();
+    if (unsaved) s1DraftCommand.clear(sentThreadId, "s1", text);
 
     if (res.status === 429) {
       // レート制限だけは「失敗」ではなく「待て」なので、専用の文言をボタンへ出す。
@@ -6124,6 +6251,11 @@
       if (!s3TrapUsed) {
         s3TrapUsed = true;
         logActivity("trap.s3", undefined, { field: result.field || "" });
+        // 罰の開始も同じ保存に含める。罠の確定から startPenalty() までは
+        // 暗転と叱責で数秒あり、その間にリロードされると「罠は発動済み・罰は未実施」
+        // という、罰が二度と始まらない状態がサーバに残る（＝罰の踏み倒し）。
+        // 演出は復帰時にやり直さないが、罰そのものは resumePenalty() が始める。
+        s3PenaltyState = "in-progress";
         saveCheckpoint("trap-s3", true);   // デバウンスしない（踏んだ直後のリロードで罠が復活しないように）
         s3Verdicting = false;
         triggerTrap();
@@ -8247,6 +8379,7 @@
     const data = body.data || {};
     s3PenaltyState = data.s3Penalty || "none";
     s4PenaltyState = data.s4Penalty || "none";
+    syncSentData();   // いま持っている data はサーバ由来。次の保存で新世代を名乗らせない
     resumePenalty(target);
 
     reportProgress(TEAMS[2].pos, "resume");
