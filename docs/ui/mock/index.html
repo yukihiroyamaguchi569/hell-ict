@@ -3469,8 +3469,14 @@
     const timer = setTimeout(() => ctrl.abort(), LIVE_PROBE_TIMEOUT_MS);
     try {
       const res = await fetch(LIVE_API_BASE + "/api/health", { signal: ctrl.signal });
-      LIVE = res.ok;
-      liveProbeState = res.ok ? "live" : "failed";
+      // 200 だけでは足りない。静的ホスティングは存在しないパスへも index.html を
+      // 200 で返すので、res.ok だけを見ると「APIが居る」と誤認して LIVE になり、
+      // 以降のAPIが全部HTMLを返して静かに壊れる。健康診断の中身まで確かめる。
+      const health = res.ok ? await res.json().catch(() => null) : null;
+      const alive = !!health && health.status === "ok" &&
+        !!health.guards && typeof health.guards === "object";
+      LIVE = alive;
+      liveProbeState = alive ? "live" : "failed";
     } catch {
       LIVE = false;
       liveProbeState = "failed";
