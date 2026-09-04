@@ -1,4 +1,4 @@
-import { containsPii, detectPii } from "@hell-ict/domain";
+import { containsPii, detectPii, viewIdSchema } from "@hell-ict/domain";
 import { z } from "zod";
 
 import { ACTIVITY_RATE_LIMIT_PER_MINUTE } from "./guard.js";
@@ -200,11 +200,9 @@ const metaValueSchema = z.union([z.string().max(200), z.number(), z.boolean(), z
 const clientActivitySchema = z.object({
   commandId: z.uuid(),
   kind: activityKindSchema,
-  view: z
-    .string()
-    .min(1)
-    .max(32)
-    .regex(/^[a-z0-9-]+$/),
+  // 既知の画面idだけを受ける。自由文字列だと、text・metaのPIIゲートを素通りする
+  // 表示用の列が1つ残る（`/^[a-z0-9-]+$/`は電話番号を通してしまう）。
+  view: viewIdSchema,
   text: z.string().max(20000).optional(),
   meta: z
     .record(metaKeySchema, metaValueSchema)

@@ -17,7 +17,7 @@ const now = "2026-09-03T00:00:00.000Z";
 
 const body = (overrides: Partial<CheckpointBody> = {}): CheckpointBody =>
   checkpointBodySchema.parse({
-    view: "stage3-manual",
+    view: "s3",
     pos: 2,
     elapsedMs: 1000,
     trap: { s3Used: false, s4Used: false },
@@ -203,12 +203,12 @@ describe("チェックポイントの純粋関数", () => {
 
   it("同じposのままviewだけ戻る保存は許可する", () => {
     const result = applyCheckpoint(
-      snapshot(1, { pos: 4, view: "stage3-quiz" }),
-      command(1, { pos: 4, view: "stage3-manual" }),
+      snapshot(1, { pos: 4, view: "unlock" }),
+      command(1, { pos: 4, view: "s3" }),
       { teamCode: "000000", now },
     );
     if (!result.ok) throw new Error("unexpected");
-    expect(result.snapshot.body.view).toBe("stage3-manual");
+    expect(result.snapshot.body.view).toBe("s3");
   });
 
   it("elapsedMs後退とpos後退が同時に成立する場合はelapsedMsを優先する", () => {
@@ -369,7 +369,7 @@ describe("チェックポイントのschema", () => {
 
 describe("mergeCheckpoint（離脱時flushの単調合成）", () => {
   const current = body({
-    view: "stage3-manual",
+    view: "s3",
     pos: 3,
     elapsedMs: 5000,
     trap: { s3Used: true, s4Used: false },
@@ -378,7 +378,7 @@ describe("mergeCheckpoint（離脱時flushの単調合成）", () => {
 
   it("trapはOR、posとelapsedMsはmaxで合成する", () => {
     const incoming = body({
-      view: "stage4",
+      view: "s4",
       pos: 2,
       elapsedMs: 1000,
       trap: { s3Used: false, s4Used: true },
@@ -391,25 +391,25 @@ describe("mergeCheckpoint（離脱時flushの単調合成）", () => {
   });
 
   it("viewとdataはposが大きい側を採る", () => {
-    const ahead = body({ view: "stage4", pos: 5, data: { from: "incoming" } });
+    const ahead = body({ view: "s4", pos: 5, data: { from: "incoming" } });
     expect(mergeCheckpoint(current, ahead)).toMatchObject({
-      view: "stage4",
+      view: "s4",
       pos: 5,
       data: { from: "incoming" },
     });
 
-    const behind = body({ view: "stage2", pos: 1, data: { from: "incoming" } });
+    const behind = body({ view: "s2", pos: 1, data: { from: "incoming" } });
     expect(mergeCheckpoint(current, behind)).toMatchObject({
-      view: "stage3-manual",
+      view: "s3",
       pos: 3,
       data: { from: "current" },
     });
   });
 
   it("posが同値なら受信側を新しいとみなす", () => {
-    const same = body({ view: "stage3-notice", pos: 3, data: { from: "incoming" } });
+    const same = body({ view: "s35", pos: 3, data: { from: "incoming" } });
     expect(mergeCheckpoint(current, same)).toMatchObject({
-      view: "stage3-notice",
+      view: "s35",
       data: { from: "incoming" },
     });
   });
@@ -417,7 +417,7 @@ describe("mergeCheckpoint（離脱時flushの単調合成）", () => {
 
 describe("applyCheckpointのflush", () => {
   const saved = snapshot(7, {
-    view: "stage3-manual",
+    view: "s3",
     pos: 3,
     elapsedMs: 5000,
     trap: { s3Used: true, s4Used: false },
@@ -475,7 +475,7 @@ describe("applyCheckpointのflush", () => {
 
 describe("dataRevisionによるdataの前後関係", () => {
   const current = body({
-    view: "stage3-manual",
+    view: "s3",
     pos: 3,
     dataRevision: 5,
     data: { s3Penalty: "in-progress" },
@@ -486,7 +486,7 @@ describe("dataRevisionによるdataの前後関係", () => {
     const stale = body({ view: "s3", pos: 3, dataRevision: 2, data: { s3Penalty: "none" } });
     const merged = mergeCheckpoint(current, stale);
     expect(merged.data).toEqual({ s3Penalty: "in-progress" });
-    expect(merged.view).toBe("stage3-manual");
+    expect(merged.view).toBe("s3");
     expect(merged.dataRevision).toBe(5);
   });
 

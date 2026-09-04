@@ -694,6 +694,27 @@ describe("活動ログ", () => {
       expect(response.status).toBe(200);
     });
 
+    it.each([
+      ["電話番号のような文字列", "090-1234-5678"],
+      ["未知の画面id", "stage3-manual"],
+      ["空文字", ""],
+    ])("viewが既知の画面idでない(%s)ときは400で拒否し、行を増やさない", async (_label, view) => {
+      // `/^[a-z0-9-]+$/`は電話番号を通してしまい、text・metaのPIIゲートを素通りして
+      // D1へ残る。画面idは有限なのでenumで固定する。
+      const response = await postJson("/api/teams/500118/activity", { ...activity(), view });
+      expect(response.status).toBe(400);
+      await expect(rows()).resolves.toEqual([]);
+    });
+
+    it("既知の画面idは受け付ける", async () => {
+      const response = await postJson("/api/teams/500119/activity", {
+        ...activity(),
+        view: "s35",
+      });
+      expect(response.status).toBe(200);
+      await expect(rows()).resolves.toHaveLength(1);
+    });
+
     it("上限以内の本文はこれまでどおり処理される", async () => {
       // 上限判定がバイト数で行われ、通常の本文を巻き込まないことの確認。
       const response = await postJson("/api/teams/500117/activity", activity());

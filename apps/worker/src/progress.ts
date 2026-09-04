@@ -1,6 +1,6 @@
 import { z } from "zod";
 
-import { publicTeamId, redactPii, teamCodeSchema } from "@hell-ict/domain";
+import { publicTeamId, redactPii, teamCodeSchema, viewIdSchema } from "@hell-ict/domain";
 
 import { isTeamCodeAllowed, parseTeamCodes } from "./guard.js";
 import type { TeamCodeAllowlist } from "./guard.js";
@@ -73,7 +73,8 @@ const progressEventSchema = z.object({
   teamCode: z.string().regex(/^\d{6}$/),
   teamName: displayText(24),
   pos: z.number().int().min(0).max(7),
-  view: displayText(32),
+  // 既知の画面idだけを受ける（checkpoint・活動ログと同じenum）。
+  view: viewIdSchema,
   kind: z.enum(["entry", "clear", "jump", "resume"]),
   // 活動ログと同じくISO 8601で厳密に検証する。自由文字列のままだと、表示用の列に
   // 何でも入れられる経路が1つ残る（モックはtoISOString()を送るので互換性は保たれる）。
@@ -175,13 +176,14 @@ export const handleProgressPost = async (request: Request, env: Env): Promise<Re
     )
       .bind(
         event.teamCode,
-        // teamNameとviewは参加者が自由に入れられる表示用の値で、D1にも公開サマリーにも
+        // teamNameは参加者が自由に入れられる表示用の値で、D1にも公開サマリーにも
         // そのまま出る。PIIは伏せ字化してから保存する——拒否にしないのは、進捗記録が
         // 落ちるとダッシュボードからそのチームが消えて当日の進行が見えなくなるため。
         // 記録は残し、PIIだけを落とす。
+        // viewはschemaで既知の画面idに固定済みなので、そのまま入れてよい。
         redactPii(event.teamName),
         event.pos,
-        redactPii(event.view),
+        event.view,
         event.kind,
         event.clientAt,
       )

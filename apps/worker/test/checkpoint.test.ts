@@ -17,7 +17,7 @@ const now = "2026-09-03T10:00:00.000Z";
 const later = "2026-09-03T10:05:00.000Z";
 
 const body = (overrides: Partial<CheckpointBody> = {}): CheckpointBody => ({
-  view: "stage3-manual",
+  view: "s3",
   pos: 2,
   elapsedMs: 60_000,
   trap: { s3Used: false, s4Used: false },
@@ -268,7 +268,7 @@ describe("チェックポイントAPI", () => {
     await save("500020", {
       commandId: id("123"),
       expectedRevision: 0,
-      body: { pos: 4, view: "stage3-quiz" },
+      body: { pos: 4, view: "unlock" },
     });
 
     const next = await save(
@@ -276,14 +276,14 @@ describe("チェックポイントAPI", () => {
       {
         commandId: id("124"),
         expectedRevision: 1,
-        body: { pos: 4, view: "stage3-manual" },
+        body: { pos: 4, view: "s3" },
       },
       later,
     );
 
     expect(next.status).toBe(200);
     await expect(load("500020")).resolves.toMatchObject({
-      checkpoint: { revision: 2, body: { pos: 4, view: "stage3-manual" } },
+      checkpoint: { revision: 2, body: { pos: 4, view: "s3" } },
     });
   });
 
@@ -341,7 +341,7 @@ describe("チェックポイントAPI", () => {
   });
 
   it.each([
-    { label: "viewの不正文字", body: { view: "Stage_3" } },
+    { label: "viewが既知の画面idでない", body: { view: "Stage_3" } },
     { label: "posの範囲外", body: { pos: 8 } },
     { label: "elapsedMsの負値", body: { elapsedMs: -1 } },
   ])("$labelは400で拒否し、保存されない", async ({ body: overrides }) => {
@@ -359,7 +359,7 @@ describe("チェックポイントAPI", () => {
 
   it("JSONにならない数値（1e400）を含む保存は400で拒否し、保存されない", async () => {
     // JSON.stringifyでは作れない値なので、本文を生のJSONテキストで組み立てる。
-    const raw = `{"type":"save-checkpoint","commandId":"${id("125")}","expectedRevision":0,"body":{"view":"stage3-manual","pos":2,"elapsedMs":60000,"trap":{"s3Used":false,"s4Used":false},"data":{"score":1e400}}}`;
+    const raw = `{"type":"save-checkpoint","commandId":"${id("125")}","expectedRevision":0,"body":{"view":"s3","pos":2,"elapsedMs":60000,"trap":{"s3Used":false,"s4Used":false},"data":{"score":1e400}}}`;
     const response = await handleSaveCheckpoint(
       new Request("https://example.test/api/teams/500021/checkpoint", {
         method: "POST",

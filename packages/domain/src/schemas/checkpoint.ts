@@ -1,6 +1,7 @@
 import { z } from "zod";
 
 import { commandIdSchema, revisionSchema, teamCodeSchema } from "./team-state.js";
+import { viewIdSchema } from "./view.js";
 
 /**
  * `data`のJSON化サイズ上限。ステージ固有の状態はサーバーから見て不透明なので、
@@ -84,11 +85,8 @@ export const checkpointTrapSchema = z.object({ s3Used: z.boolean(), s4Used: z.bo
 
 export const checkpointBodySchema = z
   .object({
-    view: z
-      .string()
-      .min(1)
-      .max(32)
-      .regex(/^[a-z0-9-]+$/),
+    // 既知の画面idだけを受ける。自由文字列だと表示用の列がPIIの抜け道になる。
+    view: viewIdSchema,
     pos: z.number().int().min(0).max(7),
     elapsedMs: z.number().int().nonnegative().max(CHECKPOINT_ELAPSED_MAX_MS),
     trap: checkpointTrapSchema,

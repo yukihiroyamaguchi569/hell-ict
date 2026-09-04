@@ -162,16 +162,30 @@ describe("進捗記録", () => {
     expect((await summary()).teams).toMatchObject([{ teamName: "第一波", pos: 2 }]);
   });
 
-  it("表示用の文字列は拒否せず規定長へ切り詰める", async () => {
-    const response = await postJson(
-      "/api/progress",
-      event({ teamName: "あ".repeat(50), view: "v".repeat(60) }),
-    );
+  it("teamNameは拒否せず規定長へ切り詰める", async () => {
+    const response = await postJson("/api/progress", event({ teamName: "あ".repeat(50) }));
     expect(response.status).toBe(200);
 
     const result = await summary();
     expect(result.teams[0]?.teamName).toHaveLength(24);
-    expect(result.events[0]?.view).toHaveLength(32);
+  });
+
+  it.each([
+    ["電話番号のような文字列", "090-1234-5678"],
+    ["未知の画面id", "stage3-manual"],
+    ["空文字", ""],
+  ])("viewが既知の画面idでない(%s)ときは400で拒否する", async (_label, view) => {
+    // 自由文字列だと、表示用の列がPIIの抜け道になる（text・metaのゲートを素通りする）。
+    const response = await postJson("/api/progress", event({ view }));
+    expect(response.status).toBe(400);
+    await expect(rowCount()).resolves.toBe(0);
+  });
+
+  it("既知の画面idは受け付ける", async () => {
+    for (const view of ["entry", "s1", "s35", "final"]) {
+      const response = await postJson("/api/progress", event({ view }));
+      expect(response.status, view).toBe(200);
+    }
   });
 
   it.each([
@@ -186,25 +200,23 @@ describe("進捗記録", () => {
     await expect(rowCount()).resolves.toBe(0);
   });
 
-  it("teamNameとviewのPIIは伏せ字で保存され、summaryにも伏せ字で出る", async () => {
+  it("teamNameのPIIは伏せ字で保存され、summaryにも伏せ字で出る", async () => {
     // 進捗記録は落とさない（拒否にするとダッシュボードからそのチームが消える）。
     // 記録は残し、PIIだけを落とす。
     const response = await postJson(
       "/api/progress",
-      event({ teamName: `${stage4Patient.name}班`, view: stage4Patient.phone }),
+      event({ teamName: `${stage4Patient.name}班` }),
     );
     expect(response.status).toBe(200);
 
     const result = await summary();
     expect(result.teams[0]?.teamName).not.toContain(stage4Patient.name);
     expect(result.teams[0]?.teamName).toContain(PII_REDACTION);
-    expect(result.events[0]?.view).not.toContain(stage4Patient.phone);
     // D1にも平文は残っていない。
     const stored = await env.PROGRESS_DB.prepare(
-      "SELECT team_name, view FROM progress_events LIMIT 1",
+      "SELECT team_name FROM progress_events LIMIT 1",
     ).first();
     expect(JSON.stringify(stored)).not.toContain(stage4Patient.name);
-    expect(JSON.stringify(stored)).not.toContain(stage4Patient.phone);
   });
 
   it.each([
