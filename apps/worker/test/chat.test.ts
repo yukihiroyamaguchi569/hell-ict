@@ -643,4 +643,68 @@ describe("P1C チャット骨格", () => {
     expect(response.status).toBe(404);
     expect(gateway.requests).toHaveLength(0);
   });
+  it("同じcommandIdを別スレッドへ使い回すと409 conflictで、別スレッドの文脈をAIへ渡さない", async () => {
+    await session("400020");
+    const first = await createThread("400020", "00000000-0000-4000-8000-000000002001", "副");
+    const { snapshot } = createThreadResultSchema.parse(await first.json());
+    const mainThreadId = snapshot.threads[0]?.threadId;
+    const subThreadId = snapshot.threads[1]?.threadId;
+    if (mainThreadId === undefined || subThreadId === undefined) throw new Error("unexpected");
+
+    const commandId = "00000000-0000-4000-8000-000000002002";
+    // 先にDOを直接呼んでpending行を作る（AI応答待ちの状態を再現する）。
+    await beginDirect("400020", { commandId, threadId: mainThreadId, text: "本文" });
+
+    const gateway = new FakeAiGateway([{ kind: "success", response: "応答" }]);
+    const response = await sendMessage(
+      "400020",
+      { commandId, threadId: subThreadId, text: "本文" },
+      gateway,
+    );
+
+    expect(response.status).toBe(409);
+    expect(httpErrorSchema.parse(await response.json()).code).toBe("conflict");
+    expect(gateway.requests).toHaveLength(0);
+  });
+
+  it("同じcommandIdを別のpromptProfileで使い回すと409 conflict", async () => {
+    await session("400021");
+    const created = await createThread("400021", "00000000-0000-4000-8000-000000002101", "副");
+    const { snapshot } = createThreadResultSchema.parse(await created.json());
+    const threadId = snapshot.threads[0]?.threadId;
+    if (threadId === undefined) throw new Error("unexpected");
+
+    const commandId = "00000000-0000-4000-8000-000000002102";
+    // profile未指定は"default"として保存される。
+    await beginDirect("400021", { commandId, threadId, text: "本文" });
+
+    const gateway = new FakeAiGateway([{ kind: "success", response: "応答" }]);
+    const response = await sendMessage(
+      "400021",
+      { commandId, threadId, text: "本文", promptProfile: "s1" },
+      gateway,
+    );
+
+    expect(response.status).toBe(409);
+    expect(httpErrorSchema.parse(await response.json()).code).toBe("conflict");
+    expect(gateway.requests).toHaveLength(0);
+  });
+
+  it("同じスレッド・同じprofileの再送は従来どおり扱う", async () => {
+    await session("400022");
+    const created = await createThread("400022", "00000000-0000-4000-8000-000000002201", "副");
+    const { snapshot } = createThreadResultSchema.parse(await created.json());
+    const threadId = snapshot.threads[0]?.threadId;
+    if (threadId === undefined) throw new Error("unexpected");
+
+    const commandId = "00000000-0000-4000-8000-000000002202";
+    await beginDirect("400022", { commandId, threadId, text: "本文" });
+
+    const gateway = new FakeAiGateway([{ kind: "success", response: "応答" }]);
+    const response = await sendMessage("400022", { commandId, threadId, text: "本文" }, gateway);
+
+    // クレームが生きている間は"in-progress"（409）。conflictとは別のcodeなしの409。
+    expect(response.status).toBe(409);
+    expect(httpErrorSchema.parse(await response.json()).code).toBeUndefined();
+  });
 });

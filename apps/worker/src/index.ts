@@ -269,6 +269,8 @@ const beginOrRespond = async (
   if (begin.kind === "already-processed") return json(begin.result);
   if (begin.kind === "in-progress")
     return error("同じ内容が既に送信処理中です。少し待って再試行してください。", 409);
+  if (begin.kind === "conflict")
+    return error("同じ送信IDが別のスレッドで使われています。", 409, "conflict");
   return { history: begin.history };
 };
 
