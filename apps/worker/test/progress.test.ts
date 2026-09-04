@@ -1,14 +1,18 @@
 import { env, exports } from "cloudflare:workers";
 import { beforeEach, describe, expect, it } from "vitest";
+import { publicTeamId } from "@hell-ict/domain";
 import { z } from "zod";
 
 import { progressSchemaSql } from "../src/progress.js";
 import { get, postJson, TEST_ORIGIN } from "./support.js";
 
+// サマリーは生のチームコードを返さない。publicId（SHA-256の先頭8桁）と、
+// ?teamCode= で指定した自分の行だけに付くisSelfで構成される。
 const summarySchema = z.object({
   teams: z.array(
     z.object({
-      teamCode: z.string(),
+      publicId: z.string().regex(/^[0-9a-f]{8}$/),
+      isSelf: z.literal(true).optional(),
       teamName: z.string(),
       pos: z.number(),
       updatedAt: z.string(),
@@ -16,7 +20,8 @@ const summarySchema = z.object({
   ),
   events: z.array(
     z.object({
-      teamCode: z.string(),
+      publicId: z.string().regex(/^[0-9a-f]{8}$/),
+      isSelf: z.literal(true).optional(),
       teamName: z.string(),
       pos: z.number(),
       view: z.string(),
@@ -28,6 +33,9 @@ const summarySchema = z.object({
 
 type Summary = z.infer<typeof summarySchema>;
 
+/** 期待値を組むための公開ID。実装と同じ導出（SHA-256の先頭8桁）を使う。 */
+const idOf = (teamCode: string): Promise<string> => publicTeamId(teamCode);
+
 const event = (overrides: Record<string, unknown> = {}): Record<string, unknown> => ({
   teamCode: "100001",
   teamName: "感染対策室",
@@ -38,8 +46,8 @@ const event = (overrides: Record<string, unknown> = {}): Record<string, unknown>
   ...overrides,
 });
 
-const summary = async (): Promise<Summary> => {
-  const response = await get("/api/progress/summary");
+const summary = async (query = ""): Promise<Summary> => {
+  const response = await get(`/api/progress/summary${query}`);
   expect(response.status).toBe(200);
   return summarySchema.parse(await response.json());
 };
@@ -82,8 +90,8 @@ describe("進捗記録: スキーマ未適用のD1", () => {
     expect(responses.map((response) => response.status)).toEqual([200, 200]);
     await expect(responses[0]?.json()).resolves.toEqual({ ok: true });
     expect((await summary()).teams).toMatchObject([
-      { teamCode: "100002", pos: 3 },
-      { teamCode: "100001", pos: 1 },
+      { publicId: await idOf("100002"), pos: 3 },
+      { publicId: await idOf("100001"), pos: 1 },
     ]);
   });
 });
@@ -102,10 +110,12 @@ describe("進捗記録", () => {
     expect((await postJson("/api/progress", event({ pos: 2, view: "s2" }))).status).toBe(200);
 
     const result = await summary();
-    expect(result.teams).toMatchObject([{ teamCode: "100001", teamName: "感染対策室", pos: 2 }]);
+    expect(result.teams).toMatchObject([
+      { publicId: await idOf("100001"), teamName: "感染対策室", pos: 2 },
+    ]);
     expect(result.teams[0]?.updatedAt).not.toBe("");
     expect(result.events).toMatchObject([
-      { teamCode: "100001", pos: 2, view: "s2", kind: "clear" },
+      { publicId: await idOf("100001"), pos: 2, view: "s2", kind: "clear" },
     ]);
   });
 
@@ -114,14 +124,14 @@ describe("進捗記録", () => {
     await postJson("/api/progress", event({ pos: 5, kind: "jump", view: "s5" }));
 
     const result = await summary();
-    expect(result.teams).toMatchObject([{ teamCode: "100001", pos: 2 }]);
+    expect(result.teams).toMatchObject([{ publicId: await idOf("100001"), pos: 2 }]);
     expect(result.events[0]).toMatchObject({ kind: "jump", pos: 5 });
     expect(result.events).toHaveLength(2);
   });
 
   it("非jumpが1件も無いチームはpos 0として扱う", async () => {
     await postJson("/api/progress", event({ pos: 6, kind: "jump" }));
-    expect((await summary()).teams).toMatchObject([{ teamCode: "100001", pos: 0 }]);
+    expect((await summary()).teams).toMatchObject([{ publicId: await idOf("100001"), pos: 0 }]);
   });
 
   it("resumeは200で記録するが、jumpと同じくposへ算入しない", async () => {
@@ -130,20 +140,20 @@ describe("進捗記録", () => {
 
     expect(response.status).toBe(200);
     const result = await summary();
-    expect(result.teams).toMatchObject([{ teamCode: "100001", pos: 2 }]);
+    expect(result.teams).toMatchObject([{ publicId: await idOf("100001"), pos: 2 }]);
     expect(result.events[0]).toMatchObject({ kind: "resume", pos: 5 });
     expect(result.events).toHaveLength(2);
   });
 
   it("resumeしか無いチームはpos 0として扱う", async () => {
     await postJson("/api/progress", event({ pos: 6, kind: "resume" }));
-    expect((await summary()).teams).toMatchObject([{ teamCode: "100001", pos: 0 }]);
+    expect((await summary()).teams).toMatchObject([{ publicId: await idOf("100001"), pos: 0 }]);
   });
 
   it("posは最大値を採る（戻る操作で後退させない）", async () => {
     await postJson("/api/progress", event({ pos: 4, kind: "clear" }));
     await postJson("/api/progress", event({ pos: 1, kind: "entry" }));
-    expect((await summary()).teams).toMatchObject([{ teamCode: "100001", pos: 4 }]);
+    expect((await summary()).teams).toMatchObject([{ publicId: await idOf("100001"), pos: 4 }]);
   });
 
   it("teamNameは最新の非空の値を採る", async () => {
@@ -230,8 +240,11 @@ describe("進捗記録", () => {
     try {
       env.TEAM_CODES = "100001,100002";
       const filtered = await summary();
-      expect(filtered.teams.map((team) => team.teamCode)).toEqual(["100002", "100001"]);
-      expect(filtered.events.map((event) => event.teamCode)).not.toContain("999999");
+      expect(filtered.teams.map((team) => team.publicId)).toEqual([
+        await idOf("100002"),
+        await idOf("100001"),
+      ]);
+      expect(filtered.events.map((event) => event.publicId)).not.toContain(await idOf("999999"));
       expect(filtered.events).toHaveLength(2);
     } finally {
       env.TEAM_CODES = saved;
@@ -239,7 +252,11 @@ describe("進捗記録", () => {
 
     // 未設定なら従来どおり全件。
     const all = await summary();
-    expect(all.teams.map((team) => team.teamCode)).toEqual(["999999", "100002", "100001"]);
+    expect(all.teams.map((team) => team.publicId)).toEqual([
+      await idOf("999999"),
+      await idOf("100002"),
+      await idOf("100001"),
+    ]);
     expect(all.events).toHaveLength(3);
   });
 
@@ -262,7 +279,7 @@ describe("進捗記録", () => {
       env.TEAM_CODES = "100001";
       const result = await summary();
       expect(result.events.map((event) => event.view)).toEqual(["allowed-old"]);
-      expect(result.teams.map((team) => team.teamCode)).toEqual(["100001"]);
+      expect(result.teams.map((team) => team.publicId)).toEqual([await idOf("100001")]);
     } finally {
       env.TEAM_CODES = saved;
     }
@@ -270,7 +287,55 @@ describe("進捗記録", () => {
     // 未設定なら従来どおり全チームから最新20件。
     const all = await summary();
     expect(all.events).toHaveLength(20);
-    expect(all.events.every((event) => event.teamCode === "999999")).toBe(true);
+    const noiseId = await idOf("999999");
+    expect(all.events.every((event) => event.publicId === noiseId)).toBe(true);
+  });
+
+  it("応答に生の6桁チームコードが含まれない", async () => {
+    // サマリーは参加者の端末からも読める。生のコードが見えると、そのまま入室に使えてしまう。
+    await postJson("/api/progress", event({ teamCode: "100001", teamName: "感染対策室" }));
+    await postJson("/api/progress", event({ teamCode: "100002", teamName: "第二班" }));
+
+    const response = await get("/api/progress/summary");
+    const body = await response.text();
+    expect(body).not.toContain("100001");
+    expect(body).not.toContain("100002");
+    expect(body).toContain(await idOf("100001"));
+  });
+
+  it("?teamCodeを付けると自分の行だけisSelfが立つ", async () => {
+    await postJson("/api/progress", event({ teamCode: "100001", teamName: "自分" }));
+    await postJson("/api/progress", event({ teamCode: "100002", teamName: "他所" }));
+
+    const result = await summary("?teamCode=100001");
+    const selfId = await idOf("100001");
+    const selfRows = result.teams.filter((team) => team.isSelf === true);
+    expect(selfRows.map((team) => team.publicId)).toEqual([selfId]);
+    expect(result.teams.filter((team) => team.publicId !== selfId)).toSatisfy(
+      (rows: { isSelf?: true }[]) => rows.every((row) => row.isSelf === undefined),
+    );
+    expect(result.events.filter((e) => e.isSelf === true).map((e) => e.publicId)).toEqual([selfId]);
+  });
+
+  it("許可リストに無いコードを?teamCodeに付けてもisSelfは立たない", async () => {
+    await postJson("/api/progress", event({ teamCode: "100001", teamName: "自分" }));
+
+    const saved = env.TEAM_CODES;
+    try {
+      env.TEAM_CODES = "100001";
+      // 未登録のコードで他チームの行へisSelfを立てさせない。
+      const result = await summary("?teamCode=999999");
+      expect(result.teams.some((team) => team.isSelf === true)).toBe(false);
+      expect(result.events.some((e) => e.isSelf === true)).toBe(false);
+    } finally {
+      env.TEAM_CODES = saved;
+    }
+  });
+
+  it("?teamCodeを付けなければisSelfは付かない", async () => {
+    await postJson("/api/progress", event({ teamCode: "100001" }));
+    const result = await summary();
+    expect(result.teams.some((team) => team.isSelf === true)).toBe(false);
   });
 
   it("teamsはpos降順、同順位は最終更新が古い順に並ぶ", async () => {
@@ -285,7 +350,11 @@ describe("進捗記録", () => {
     ]);
 
     const result = await summary();
-    expect(result.teams.map((team) => team.teamCode)).toEqual(["100002", "100003", "100001"]);
+    expect(result.teams.map((team) => team.publicId)).toEqual([
+      await idOf("100002"),
+      await idOf("100003"),
+      await idOf("100001"),
+    ]);
   });
 
   it("eventsは新しい順に最大20件まで返す", async () => {

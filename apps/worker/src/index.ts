@@ -541,7 +541,7 @@ const handleChatSnapshot = async (env: Env, teamCode: TeamCode): Promise<Respons
 };
 
 const handleGet = (request: Request, env: Env, url: URL): Promise<Response> => {
-  if (url.pathname === "/api/progress/summary") return handleProgressSummary(env);
+  if (url.pathname === "/api/progress/summary") return handleProgressSummary(env, url);
   const teamCode = teamCodeFromPath(url.pathname, "/api/teams/", "/sync");
   if (teamCode !== null) return handleTeamSync(request, env, teamCode);
   const chatTeamCode = teamCodeFromPath(url.pathname, "/api/teams/", "/chat");

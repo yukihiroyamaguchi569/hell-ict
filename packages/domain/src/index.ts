@@ -57,6 +57,7 @@ export type { ChatMutationResult } from "./chat.js";
 export {
   checkpointFingerprint,
   createThreadFingerprint,
+  publicTeamId,
   sha256Hex,
   stableStringify,
 } from "./fingerprint.js";

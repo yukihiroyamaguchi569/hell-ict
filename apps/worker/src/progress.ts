@@ -1,5 +1,7 @@
 import { z } from "zod";
 
+import { publicTeamId, teamCodeSchema } from "@hell-ict/domain";
+
 import { isTeamCodeAllowed, parseTeamCodes } from "./guard.js";
 import { bodyErrorResponse, error, json, parseJson } from "./http.js";
 
@@ -180,10 +182,37 @@ export const handleProgressPost = async (request: Request, env: Env): Promise<Re
  * 設定が途中で入った場合や、設定前に積まれた行が残っている場合に、知らないチームが
  * 並ぶのを防ぐため、読み出し側でも絞る。
  */
-export const handleProgressSummary = async (env: Env): Promise<Response> => {
+/**
+ * 行のteamCodeを公開用IDへ差し替える。生のチームコードは返さない——サマリーは
+ * 参加者の端末からも読めるので、他チームのコードが見えるとそのまま入室に使えてしまう
+ * （コードが唯一の入室資格）。自分の行だけ`isSelf`で見分けられるようにする。
+ */
+const toPublicRow = async <Row extends { teamCode: string }>(
+  row: Row,
+  selfCode: string | null,
+): Promise<Omit<Row, "teamCode"> & { publicId: string; isSelf?: true }> => {
+  const { teamCode, ...rest } = row;
+  const publicId = await publicTeamId(teamCode);
+  return selfCode !== null && teamCode === selfCode
+    ? { ...rest, publicId, isSelf: true }
+    : { ...rest, publicId };
+};
+
+/**
+ * `?teamCode=`で自分の行を指定できる。許可リストを通らないコードは無視する
+ * （未登録のコードで他チームの行へisSelfを立てさせない）。
+ */
+const selfTeamCode = (url: URL, allowlist: ReadonlySet<string> | null): string | null => {
+  const parsed = teamCodeSchema.safeParse(url.searchParams.get("teamCode"));
+  if (!parsed.success) return null;
+  return isTeamCodeAllowed(parsed.data, allowlist) ? parsed.data : null;
+};
+
+export const handleProgressSummary = async (env: Env, url: URL): Promise<Response> => {
   try {
     await ensureSchema(env.PROGRESS_DB);
     const allowlist = parseTeamCodes(env.TEAM_CODES);
+    const selfCode = selfTeamCode(url, allowlist);
     const teamsFilter = teamFilter(allowlist, "e.team_code");
     const eventsFilter = teamFilter(allowlist, "team_code");
     const [teams, events] = await Promise.all([
@@ -195,8 +224,18 @@ export const handleProgressSummary = async (env: Env): Promise<Response> => {
         .all(),
     ]);
     return json({
-      teams: z.array(teamRowSchema).parse(teams.results),
-      events: z.array(eventRowSchema).parse(events.results),
+      teams: await Promise.all(
+        z
+          .array(teamRowSchema)
+          .parse(teams.results)
+          .map((row) => toPublicRow(row, selfCode)),
+      ),
+      events: await Promise.all(
+        z
+          .array(eventRowSchema)
+          .parse(events.results)
+          .map((row) => toPublicRow(row, selfCode)),
+      ),
     });
   } catch {
     return error("進捗の取得に失敗しました。", 503);

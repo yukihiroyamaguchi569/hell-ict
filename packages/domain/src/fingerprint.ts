@@ -50,3 +50,16 @@ export const createThreadFingerprint = (command: {
  */
 export const checkpointFingerprint = (body: unknown): Promise<string> =>
   sha256Hex(stableStringify(body));
+
+/**
+ * 進捗サマリーなど、参加者の端末へ配る表示用のチーム識別子。生のチームコードを
+ * 返すと、他チームのコードを拾った端末からそのチームのAPIを叩けてしまう
+ * （コードが唯一の入室資格なので、見えた時点で乗っ取れる）。ハッシュの先頭8桁だけを
+ * 返し、行の同一性（同じチームの行をまとめる・自分の行を強調する）に足りる情報へ絞る。
+ *
+ * 総当たりで元のコードへ戻せる長さではあるが、ここで守りたいのは「画面に映った他チームの
+ * コードをそのまま使われる」ことであって、秘密の保持ではない。入室そのものの防御は
+ * TEAM_CODESの許可リストが担う。
+ */
+export const publicTeamId = async (teamCode: string): Promise<string> =>
+  (await sha256Hex(teamCode)).slice(0, 8);
