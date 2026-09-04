@@ -4374,12 +4374,19 @@
       if (!parsed) { store.forget(key); return; }
       const thread = snapshot.threads.find((t) => t.threadId === parsed.threadId);
       if (!thread) return;   // スレッドごと見えない。判断できないので残す
-      const completed = thread.messages.some((m, i) => {
-        if (!m || m.role !== "user" || m.text !== parsed.text) return false;
-        const next = thread.messages[i + 1];
-        return !!next && next.role === "assistant";
-      });
-      if (completed) store.forget(key);
+      // 見るのは「同じ本文の user 発言のうち最後の1つ」。どれか一つでも
+      // assistant が続いていれば完了、としてはいけない——「要約して」のように
+      // 何度も打つ文面では、過去に完了した組が必ず見つかり、いま応答待ちの
+      // 分まで完了と誤判定して commandId を捨ててしまう。最後の1つが末尾で
+      // 未応答なら、それが今の未確定分。
+      let last = -1;
+      for (let i = 0; i < thread.messages.length; i++) {
+        const m = thread.messages[i];
+        if (m && m.role === "user" && m.text === parsed.text) last = i;
+      }
+      if (last < 0) return;   // まだ届いていない。保持して同じIDで送り直す
+      const next = thread.messages[last + 1];
+      if (next && next.role === "assistant") store.forget(key);
     });
   }
 
