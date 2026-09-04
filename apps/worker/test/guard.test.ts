@@ -1,6 +1,11 @@
 import { env, exports } from "cloudflare:workers";
 import { createExecutionContext, listDurableObjectIds, runInDurableObject } from "cloudflare:test";
-import { chatSnapshotSchema, createThreadResultSchema, httpErrorSchema } from "@hell-ict/domain";
+import {
+  chatSnapshotSchema,
+  createThreadResultSchema,
+  httpErrorSchema,
+  leaderboardSnapshotSchema,
+} from "@hell-ict/domain";
 import { FakeAiGateway } from "@hell-ict/domain/fakes";
 import type { FakeAiOutcome } from "@hell-ict/domain/fakes";
 import { describe, expect, it, vi } from "vitest";
@@ -30,7 +35,7 @@ import {
 } from "../src/guard.js";
 import { handleChatMessage } from "../src/index.js";
 import { MAX_MANUAL_THREADS_PER_TEAM, MAX_STAGE_THREADS_PER_TEAM } from "../src/team-room.js";
-import { get, postJson, session, TEST_ORIGIN, upgrade } from "./support.js";
+import { firstMessage, get, postJson, session, TEST_ORIGIN, upgrade } from "./support.js";
 
 const OTHER_ORIGIN = "https://evil.test";
 
@@ -1029,5 +1034,48 @@ describe("DO RPCの補助入力の検証（Pure Function）", () => {
     expect(beginChatGateSchema.safeParse({ ...valid, fingerprint: "短い" }).success).toBe(false);
     // 余計な項目は落とさず弾く（strict）。
     expect(beginChatGateSchema.safeParse({ ...valid, extra: 1 }).success).toBe(false);
+  });
+});
+
+describe("リーダーボードの配信範囲", () => {
+  /** 接続直後に届くスナップショットを1件だけ受け取って切る。 */
+  const leaderboardEntries = async (teamCode: string): Promise<number> => {
+    const response = await upgrade(`/api/leaderboard/sync?teamCode=${teamCode}`);
+    expect(response.status).toBe(101);
+    const snapshot = leaderboardSnapshotSchema.parse(await firstMessage(response));
+    return snapshot.entries.length;
+  };
+
+  it("TEAM_CODES設定後は、設定前に入った未許可コードを配信しない", async () => {
+    // 設定前の試験コードや前回開催のチームがleaderboard_entriesに残っていると、
+    // 当日の帯にゴーストとして並ぶ。行は消さず、配信時に絞る。
+    // RaceLeaderboardは"global"の単一DOで、テスト間で行が持ち越されるため、
+    // 件数は絶対値ではなく「絞る前後の差」で見る。
+    await session("500060");
+    await session("500061");
+    const unfiltered = await leaderboardEntries("500060");
+    expect(unfiltered).toBeGreaterThanOrEqual(2);
+
+    await withEnv({ TEAM_CODES: "500060" }, async () => {
+      await expect(leaderboardEntries("500060")).resolves.toBe(1);
+    });
+
+    // 設定を外せばまた見える（行そのものは消していない）。
+    await expect(leaderboardEntries("500060")).resolves.toBe(unfiltered);
+  });
+
+  it("TEAM_CODESが不正なら何も配信しない（fail-closed）", async () => {
+    const snapshot = await env.TEAM_ROOM.getByName("500062").join("500062");
+    const leaderboard = env.RACE_LEADERBOARD.getByName("global");
+
+    await withEnv({ TEAM_CODES: "500062,invalid" }, async () => {
+      // upsertの戻りも配信と同じsnapshot経路を通る。invalidは空になる。
+      const result = leaderboardSnapshotSchema.parse(await leaderboard.upsert("500062", snapshot));
+      expect(result.entries).toHaveLength(0);
+
+      // 入口ガードもinvalidで全404にするので、購読自体が届かない。
+      const response = await upgrade("/api/leaderboard/sync?teamCode=500062");
+      expect(response.status).toBe(404);
+    });
   });
 });
