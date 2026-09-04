@@ -329,7 +329,7 @@
           return row;
         };
 
-        const KIND_TEXT = { clear: "を突破", entry: "に到着", jump: "へ移動" };
+        const KIND_TEXT = { clear: "を突破", entry: "に到着", jump: "へ移動", resume: "へ復帰" };
 
         const eventText = (event) => {
           const pos = Math.min(STOPS.length - 1, Math.max(0, Number(event.pos) || 0));
