@@ -472,3 +472,60 @@ describe("applyCheckpointのflush", () => {
     });
   });
 });
+
+describe("dataRevisionによるdataの前後関係", () => {
+  const current = body({
+    view: "stage3-manual",
+    pos: 3,
+    dataRevision: 5,
+    data: { s3Penalty: "in-progress" },
+  });
+
+  it("同じposなら、dataRevisionの小さい側はdataを巻き戻さない", () => {
+    // 古いタブのflushが罰の進行状態をin-progressからnoneへ戻せてしまう経路を塞ぐ。
+    const stale = body({ view: "s3", pos: 3, dataRevision: 2, data: { s3Penalty: "none" } });
+    const merged = mergeCheckpoint(current, stale);
+    expect(merged.data).toEqual({ s3Penalty: "in-progress" });
+    expect(merged.view).toBe("stage3-manual");
+    expect(merged.dataRevision).toBe(5);
+  });
+
+  it("同じposなら、dataRevisionの大きい側が採用される", () => {
+    const fresh = body({ view: "s3", pos: 3, dataRevision: 9, data: { s3Penalty: "done" } });
+    const merged = mergeCheckpoint(current, fresh);
+    expect(merged.data).toEqual({ s3Penalty: "done" });
+    expect(merged.view).toBe("s3");
+    expect(merged.dataRevision).toBe(9);
+  });
+
+  it("同じposでdataRevisionも同じなら受信側を新しいとみなす", () => {
+    const same = body({ view: "s3", pos: 3, dataRevision: 5, data: { s3Penalty: "done" } });
+    expect(mergeCheckpoint(current, same)).toMatchObject({
+      view: "s3",
+      data: { s3Penalty: "done" },
+    });
+  });
+
+  it("posが違えばdataRevisionによらずposの大きい側を採る", () => {
+    const ahead = body({ view: "s4", pos: 5, dataRevision: 1, data: { from: "ahead" } });
+    expect(mergeCheckpoint(current, ahead)).toMatchObject({
+      pos: 5,
+      view: "s4",
+      data: { from: "ahead" },
+    });
+    // dataRevisionはmaxなので、進んだ側が小さくても後退しない。
+    expect(mergeCheckpoint(current, ahead).dataRevision).toBe(5);
+  });
+
+  it("通常保存でdataRevisionの後退はdata-regressionで拒否する", () => {
+    const saved = snapshot(1, { pos: 3, dataRevision: 5 });
+    expect(
+      applyCheckpoint(saved, command(1, { pos: 3, dataRevision: 4 }), { teamCode: "000000", now }),
+    ).toEqual({ ok: false, reason: "data-regression" });
+    // 同値は許可する（同じ画面の再保存）。
+    expect(
+      applyCheckpoint(saved, command(1, { pos: 3, dataRevision: 5 }), { teamCode: "000000", now })
+        .ok,
+    ).toBe(true);
+  });
+});

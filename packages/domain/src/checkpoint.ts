@@ -35,6 +35,7 @@ const detectRegression = (
   if (regressesTrap(current.trap, next.trap)) return "trap-regression";
   if (next.elapsedMs < current.elapsedMs) return "elapsed-regression";
   if (next.pos < current.pos) return "pos-regression";
+  if (next.dataRevision < current.dataRevision) return "data-regression";
   return null;
 };
 
@@ -51,16 +52,30 @@ const detectRegression = (
  * viewとdataは「その位置に居た側」を採る。posが同値なら受信側を新しいとみなす
  * （同じ停留所の中では後から届いた画面のほうが後の状態）。
  */
+/**
+ * view・dataをどちらから採るかを決める。まずposの大きい側、posが同じならdataRevision
+ * の大きい側、どちらも同じなら受信側を新しいとみなす。
+ *
+ * posだけで決めると、同じ停留所の中で古いタブのflushが新しいdataを巻き戻せる
+ * （罰の進行状態がin-progressからnoneへ戻る、など）。dataRevisionはクライアントが
+ * dataを書き換えるたび単調に増やす世代番号で、同一pos内の前後関係をこれで決める。
+ */
+const newerSide = (current: CheckpointBody, incoming: CheckpointBody): CheckpointBody => {
+  if (incoming.pos !== current.pos) return incoming.pos > current.pos ? incoming : current;
+  return incoming.dataRevision >= current.dataRevision ? incoming : current;
+};
+
 export const mergeCheckpoint = (
   current: CheckpointBody,
   incoming: CheckpointBody,
 ): CheckpointBody => {
-  const source = incoming.pos >= current.pos ? incoming : current;
+  const source = newerSide(current, incoming);
   return {
     view: source.view,
     data: source.data,
     pos: Math.max(current.pos, incoming.pos),
     elapsedMs: Math.max(current.elapsedMs, incoming.elapsedMs),
+    dataRevision: Math.max(current.dataRevision, incoming.dataRevision),
     trap: {
       s3Used: current.trap.s3Used || incoming.trap.s3Used,
       s4Used: current.trap.s4Used || incoming.trap.s4Used,

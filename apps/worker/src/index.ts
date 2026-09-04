@@ -371,6 +371,7 @@ const CHECKPOINT_REJECTION_MESSAGES = {
   "trap-regression": "発動済みの罠を取り消すチェックポイントは保存できません。",
   "elapsed-regression": "経過時間を巻き戻すチェックポイントは保存できません。",
   "pos-regression": "進行位置を巻き戻すチェックポイントは保存できません。",
+  "data-regression": "古い内容でチェックポイントを上書きすることはできません。",
 } as const satisfies Record<CheckpointRejectionReason, string>;
 
 /**

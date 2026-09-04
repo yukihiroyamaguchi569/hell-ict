@@ -21,6 +21,7 @@ const body = (overrides: Partial<CheckpointBody> = {}): CheckpointBody => ({
   pos: 2,
   elapsedMs: 60_000,
   trap: { s3Used: false, s4Used: false },
+  dataRevision: 0,
   data: { answer: "A" },
   ...overrides,
 });
@@ -671,6 +672,99 @@ describe("チェックポイントAPI", () => {
       const stale = await save(teamCode, { commandId: id("145"), expectedRevision: 0 });
       expect(stale.status).toBe(409);
       expect(httpErrorSchema.parse(await stale.json()).code).toBe("conflict");
+    });
+  });
+  describe("dataRevision", () => {
+    it("GETの応答にdataRevisionが含まれる", async () => {
+      const teamCode = "500160";
+      await save(teamCode, {
+        commandId: id("160"),
+        expectedRevision: 0,
+        body: { dataRevision: 3 },
+      });
+      const state = await load(teamCode);
+      expect(state.checkpoint).toMatchObject({ body: { dataRevision: 3 } });
+    });
+
+    it("dataRevisionを送らない古いクライアントは0として扱う", async () => {
+      const teamCode = "500161";
+      await save(teamCode, {
+        commandId: id("161"),
+        expectedRevision: 0,
+        rawBody: {
+          view: "s3",
+          pos: 2,
+          elapsedMs: 1000,
+          trap: { s3Used: false, s4Used: false },
+          data: {},
+        },
+      });
+      await expect(load(teamCode)).resolves.toMatchObject({
+        checkpoint: { body: { dataRevision: 0 } },
+      });
+    });
+
+    it("通常保存でdataRevisionを巻き戻すと409 data-regression", async () => {
+      const teamCode = "500162";
+      await save(teamCode, {
+        commandId: id("162"),
+        expectedRevision: 0,
+        body: { dataRevision: 5 },
+      });
+      const stale = await save(teamCode, {
+        commandId: id("163"),
+        expectedRevision: 1,
+        body: { dataRevision: 4 },
+      });
+      expect(stale.status).toBe(409);
+      expect(httpErrorSchema.parse(await stale.json()).code).toBe("data-regression");
+      await expect(load(teamCode)).resolves.toMatchObject({
+        checkpoint: { body: { dataRevision: 5 } },
+      });
+    });
+
+    it("同一posの古いflushはdataを巻き戻さない", async () => {
+      const teamCode = "500163";
+      // 罰の進行中を保存した状態。
+      await save(teamCode, {
+        commandId: id("164"),
+        expectedRevision: 0,
+        body: { pos: 3, dataRevision: 5, data: { s3Penalty: "in-progress" } },
+      });
+
+      // 古いタブが離脱時に投げるflush（同じpos・古いdataRevision）。
+      const flushed = await save(teamCode, {
+        commandId: id("165"),
+        expectedRevision: 0,
+        body: { pos: 3, dataRevision: 2, data: { s3Penalty: "none" } },
+        flush: true,
+      });
+
+      expect(flushed.status).toBe(200);
+      await expect(load(teamCode)).resolves.toMatchObject({
+        checkpoint: { body: { dataRevision: 5, data: { s3Penalty: "in-progress" } } },
+      });
+    });
+
+    it("同一posでdataRevisionが新しいflushは採用される", async () => {
+      const teamCode = "500164";
+      await save(teamCode, {
+        commandId: id("166"),
+        expectedRevision: 0,
+        body: { pos: 3, dataRevision: 5, data: { s3Penalty: "in-progress" } },
+      });
+
+      const flushed = await save(teamCode, {
+        commandId: id("167"),
+        expectedRevision: 0,
+        body: { pos: 3, dataRevision: 9, data: { s3Penalty: "done" } },
+        flush: true,
+      });
+
+      expect(flushed.status).toBe(200);
+      await expect(load(teamCode)).resolves.toMatchObject({
+        checkpoint: { body: { dataRevision: 9, data: { s3Penalty: "done" } } },
+      });
     });
   });
 });
