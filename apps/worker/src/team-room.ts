@@ -4,6 +4,7 @@ import {
   chatMessageResultSchema,
   chatMessageSchema,
   chatSnapshotSchema,
+  chatThreadIdSchema,
   commandIdSchema,
   checkpointSnapshotSchema,
   commandResultSchema,
@@ -14,6 +15,7 @@ import {
   initialChatSnapshot,
   initialTeamSnapshot,
   normalizeAssistantText,
+  promptProfileSchema,
   redactPii,
   saveCheckpointCommandSchema,
   sendMessageCommandSchema,
@@ -67,11 +69,17 @@ type StoredMessageCommand = { result: string; fingerprint: string | null };
  * ——台帳行と同じく、不整合は黙って通さず503（時間を置いて再試行）へ倒す。
  */
 const storedPendingMessageSchema = z.object({
-  thread_id: z.string().min(1),
+  thread_id: chatThreadIdSchema,
   claimed_at: z.iso.datetime().nullable(),
-  prompt_profile: z.string().nullable(),
-  fingerprint: z.string().nullable(),
-  claim_generation: z.number().int().nonnegative().nullable(),
+  // 列を足す前に作られた行はNULL。値があるなら既知のprofileでなければならない。
+  prompt_profile: promptProfileSchema.nullable(),
+  fingerprint: fingerprintSchema.nullable(),
+  claim_generation: z
+    .number()
+    .int()
+    .nonnegative()
+    .max(Number.MAX_SAFE_INTEGER - 1)
+    .nullable(),
 });
 
 type StoredPendingMessage = z.infer<typeof storedPendingMessageSchema>;

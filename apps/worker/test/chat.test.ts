@@ -1027,4 +1027,52 @@ describe("P1C チャット骨格", () => {
     expect(gateway.requests).toHaveLength(0);
     await expect(chatSnapshotOf("400032")).resolves.toEqual(before);
   });
+  it("pending行のthread_idがUUIDでなければ503で止め、AIも呼ばない", async () => {
+    await session("400033");
+    const created = await createThread("400033", "00000000-0000-4000-8000-000000003301", "副");
+    const { snapshot } = createThreadResultSchema.parse(await created.json());
+    const threadId = snapshot.threads[0]?.threadId;
+    if (threadId === undefined) throw new Error("unexpected");
+
+    const commandId = "00000000-0000-4000-8000-000000003302";
+    const gateway = new FakeAiGateway([{ kind: "success", response: "応答" }]);
+    await beginDirect("400033", { commandId, threadId, text: "本文" });
+    const before = await chatSnapshotOf("400033");
+
+    await runInDurableObject(env.TEAM_ROOM.getByName("400033"), (_instance, state) => {
+      state.storage.sql.exec(
+        "UPDATE pending_message_commands SET thread_id = 'not-a-uuid' WHERE command_id = ?",
+        commandId,
+      );
+    });
+
+    const response = await sendMessage("400033", { commandId, threadId, text: "本文" }, gateway);
+
+    expect(response.status).toBe(503);
+    expect(gateway.requests).toHaveLength(0);
+    await expect(chatSnapshotOf("400033")).resolves.toEqual(before);
+  });
+
+  it("pending行のprompt_profileが未知の値なら503で止める", async () => {
+    await session("400034");
+    const created = await createThread("400034", "00000000-0000-4000-8000-000000003401", "副");
+    const { snapshot } = createThreadResultSchema.parse(await created.json());
+    const threadId = snapshot.threads[0]?.threadId;
+    if (threadId === undefined) throw new Error("unexpected");
+
+    const commandId = "00000000-0000-4000-8000-000000003402";
+    const gateway = new FakeAiGateway([{ kind: "success", response: "応答" }]);
+    await beginDirect("400034", { commandId, threadId, text: "本文" });
+
+    await runInDurableObject(env.TEAM_ROOM.getByName("400034"), (_instance, state) => {
+      state.storage.sql.exec(
+        "UPDATE pending_message_commands SET prompt_profile = 'unknown' WHERE command_id = ?",
+        commandId,
+      );
+    });
+
+    const response = await sendMessage("400034", { commandId, threadId, text: "本文" }, gateway);
+    expect(response.status).toBe(503);
+    expect(gateway.requests).toHaveLength(0);
+  });
 });
