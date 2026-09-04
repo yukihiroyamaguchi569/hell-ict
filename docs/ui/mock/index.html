@@ -3937,6 +3937,11 @@
         s4TrapUsed = true;
         // 本文は残さない（PIIの罠なので、送ろうとした個人情報をログへ写さない）。
         logActivity("trap.s4", undefined, { gate: "server" });
+        // 罰の開始も同じ保存に含める。罠の確定から startPenalty() までは
+        // 暗転と叱責で数秒あり、その間にリロードされると「罠は発動済み・罰は未実施」
+        // という、罰が二度と始まらない状態がサーバに残る（＝罰の踏み倒し）。
+        // 演出は復帰時にやり直さないが、罰そのものは resumePenalty() が始める。
+        s4PenaltyState = "in-progress";
         saveCheckpoint("trap-s4", true);   // デバウンスしない（踏んだ直後のリロードで罠が復活しないように）
         triggerLeak();
       } else {
@@ -4231,6 +4236,11 @@
             s4TrapUsed = true;
             // 本文は残さない（PIIの罠なので、送ろうとした個人情報をログへ写さない）。
             logActivity("trap.s4", undefined, { gate: "client", detected: hit.label });
+            // 罰の開始も同じ保存に含める。罠の確定から startPenalty() までは
+            // 暗転と叱責で数秒あり、その間にリロードされると「罠は発動済み・罰は未実施」
+            // という、罰が二度と始まらない状態がサーバに残る（＝罰の踏み倒し）。
+            // 演出は復帰時にやり直さないが、罰そのものは resumePenalty() が始める。
+            s4PenaltyState = "in-progress";
             saveCheckpoint("trap-s4", true);   // デバウンスしない（踏んだ直後のリロードで罠が復活しないように）
             triggerLeak();
           } else {
@@ -6124,6 +6134,11 @@
       if (!s3TrapUsed) {
         s3TrapUsed = true;
         logActivity("trap.s3", undefined, { field: result.field || "" });
+        // 罰の開始も同じ保存に含める。罠の確定から startPenalty() までは
+        // 暗転と叱責で数秒あり、その間にリロードされると「罠は発動済み・罰は未実施」
+        // という、罰が二度と始まらない状態がサーバに残る（＝罰の踏み倒し）。
+        // 演出は復帰時にやり直さないが、罰そのものは resumePenalty() が始める。
+        s3PenaltyState = "in-progress";
         saveCheckpoint("trap-s3", true);   // デバウンスしない（踏んだ直後のリロードで罠が復活しないように）
         s3Verdicting = false;
         triggerTrap();
