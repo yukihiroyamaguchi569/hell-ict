@@ -48,13 +48,19 @@ export class RaceLeaderboard extends DurableObject<Env> {
     const teamCode = teamCodeSchema.parse(teamCodeInput);
     const snapshot = teamSnapshotSchema.parse(snapshotInput);
     if (teamCode !== snapshot.teamCode) throw new Error("チームコードが一致しません。");
+    // 既存行も読み出し時に検証する。型指定だけで信用すると、壊れた巨大な
+    // team_revisionが入っていた場合に以後の正常な更新がすべて「古い」と判定され、
+    // そのチームの帯が二度と進まなくなる。壊れていれば行が無かったものとして
+    // 上書きし、次のupsertで正常な値へ戻す。
     const existing =
       this.ctx.storage.sql
-        .exec<StoredLeaderboard>(
+        .exec(
           "SELECT team_code, team_revision, stage FROM leaderboard_entries WHERE team_code = ?",
           teamCode,
         )
-        .toArray()[0] ?? null;
+        .toArray()
+        .map((row) => storedLeaderboardSchema.safeParse(row).data)
+        .filter((row) => row !== undefined)[0] ?? null;
     if (existing !== null && existing.team_revision >= snapshot.revision)
       return this.snapshotFor(teamCode);
     this.ctx.storage.sql.exec(

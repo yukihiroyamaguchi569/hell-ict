@@ -1140,6 +1140,26 @@ describe("リーダーボードの配信範囲", () => {
     await expect(leaderboardEntries("500064")).resolves.toBe(before - 1);
   });
 
+  it("壊れた既存行はupsertで正常な行に置き換わる", async () => {
+    // team_revisionに巨大な値が残ると、以後の正常なrevisionはすべて「古い」と
+    // 判定され、そのチームの帯が二度と進まなくなる。壊れた行は無かった扱いにする。
+    const snapshot = await env.TEAM_ROOM.getByName("500068").join("500068");
+    const leaderboard = env.RACE_LEADERBOARD.getByName("global");
+    await leaderboard.upsert("500068", snapshot);
+
+    await runInDurableObject(env.RACE_LEADERBOARD.getByName("global"), (_instance, state) => {
+      state.storage.sql.exec(
+        "UPDATE leaderboard_entries SET team_revision = ? WHERE team_code = ?",
+        1e9 + 0.5,
+        "500068",
+      );
+    });
+
+    const result = leaderboardSnapshotSchema.parse(await leaderboard.upsert("500068", snapshot));
+    const entry = result.entries.find((row) => row.isSelf);
+    expect(entry?.teamRevision).toBe(snapshot.revision);
+  });
+
   it("meta.revisionが壊れていても配信は続く", async () => {
     await session("500066");
     await runInDurableObject(env.RACE_LEADERBOARD.getByName("global"), (_instance, state) => {
