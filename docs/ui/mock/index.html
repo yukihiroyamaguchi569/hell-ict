@@ -3540,15 +3540,29 @@
      activeThreadId が undefined のまま送信へ進む。 */
   const isChatSnapshot = (v) =>
     !!v && Array.isArray(v.threads) && v.threads.length > 0 && v.threads.every(isChatThread);
+  /* サーバは秒未満まで持つISO日時を返す。Date.parse だけだと "3" のような
+     文字列も通るので、書式と解釈の両方を見る。 */
+  const isIsoDateTime = (v) =>
+    typeof v === "string" &&
+    /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(\.\d+)?(Z|[+-]\d{2}:\d{2})$/.test(v) &&
+    Number.isFinite(Date.parse(v));
   const isCheckpointBody = (b) =>
-    !!b && typeof b.view === "string" && typeof b.pos === "number" &&
-    typeof b.elapsedMs === "number" && !!b.trap &&
-    typeof b.trap.s3Used === "boolean" && typeof b.trap.s4Used === "boolean";
+    !!b && typeof b.view === "string" && Number.isInteger(b.pos) &&
+    Number.isInteger(b.elapsedMs) && !!b.trap &&
+    typeof b.trap.s3Used === "boolean" && typeof b.trap.s4Used === "boolean" &&
+    !!b.data && typeof b.data === "object" &&
+    Number.isInteger(b.dataRevision) && b.dataRevision >= 0;
   const isCheckpointSnapshot = (v) =>
-    !!v && typeof v.revision === "number" && typeof v.savedAt === "string" && isCheckpointBody(v.body);
-  /* GET応答。checkpoint は「無い（null）」か「揃っている」かのどちらかだけを通す。 */
+    !!v && Number.isInteger(v.revision) && isIsoDateTime(v.savedAt) && isCheckpointBody(v.body);
+  /* GET応答。checkpoint キーが「有って null」か「有って揃っている」かだけを通す
+     ——キーごと無い応答（200 の {} など）を「初回入室」と読むと、進行が残って
+     いるチームを welcome へ戻してしまう。serverNow は経過時間の基準なので必須。 */
   const isCheckpointState = (b) =>
-    !!b && (b.checkpoint === null || b.checkpoint === undefined || isCheckpointSnapshot(b.checkpoint));
+    !!b && Object.prototype.hasOwnProperty.call(b, "checkpoint") &&
+    (b.checkpoint === null || isCheckpointSnapshot(b.checkpoint)) &&
+    isIsoDateTime(b.serverNow);
+  /* 保存応答（POST 200）。形が違えば「確認済み」にしない＝dirty を維持する。 */
+  const isSaveCheckpointResult = (b) => !!b && isCheckpointSnapshot(b.snapshot);
   const isAssistantReply = (b) =>
     !!b && !!b.assistant && typeof b.assistant.text === "string" && isChatSnapshot(b.snapshot);
 
@@ -3743,7 +3757,9 @@
       }),
     }, LIVE_RESTORE_TIMEOUT_MS);
     if (!liveState || liveState.teamCode !== teamCode) return;   // 待っている間に入り直していたら捨てる
-    if (res.ok && res.body && res.body.snapshot) {
+    // 形が違う200は「保存できた」と見なさない——dirty を維持したまま抜け、
+    // 離脱時の flush と次の保存にやり直させる。
+    if (res.ok && isSaveCheckpointResult(res.body)) {
       // 自分の保存が通った証拠は「送ったrevision+1が返ること」。それ以外
       // （冪等台帳による過去commandの再生など）は自分の一手ではないので
       // 採用しない——ずれたままなら次の保存が409 conflictで取り直す。
@@ -3765,7 +3781,7 @@
     const code = (res.body && typeof res.body.code === "string") ? res.body.code : null;
     const latest = await liveFetch("/api/teams/" + teamCode + "/checkpoint", { method: "GET" }, LIVE_RESTORE_TIMEOUT_MS);
     if (!liveState || liveState.teamCode !== teamCode) return;
-    if (!latest.ok || !latest.body) return;
+    if (!latest.ok || !isCheckpointState(latest.body)) return;
     const snapshot = latest.body.checkpoint;
     const serverRevision = snapshot ? snapshot.revision : 0;
     liveState.checkpointRevision = serverRevision;
