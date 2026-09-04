@@ -1,3 +1,5 @@
+import { z } from "zod";
+
 /**
  * 公開Worker APIの入口ガード（Origin検証・チームコード許可リスト・チーム単位の
  * レート制限）。判定はすべて副作用のないPure Functionとして置き、index.tsの
@@ -165,3 +167,30 @@ export const rateLimitRetryAfterSeconds = (nowMs: number, windowMs: number): num
   const windowEndMs = (Math.floor(nowMs / windowMs) + 1) * windowMs;
   return Math.max(1, Math.ceil((windowEndMs - nowMs) / 1000));
 };
+
+// ---- Durable Object RPCの補助入力 ----
+
+/**
+ * DOのRPCが受け取る補助入力の検証。commandやteamCodeと違いWorker側で組み立てる値だが、
+ * DOのRPCは外から呼べる境界なので同じように実行時検証する。素通しすると、NaNとの
+ * 比較が常にfalseになってレート制限が黙って無効化されたり、窓の計算が壊れたりする。
+ * 弾いた入力はDOが例外にし、Worker側のcatchが503へ倒す。
+ */
+export const nowMsSchema = z
+  .number()
+  .int()
+  .nonnegative()
+  .max(Number.MAX_SAFE_INTEGER - 1);
+
+/** 1窓あたりの上限値。用途を問わずチャット側の上限を天井として共用する。 */
+export const rateLimitCountSchema = z.number().int().positive().max(MAX_CHAT_RATE_LIMIT);
+
+/** 送信内容の指紋。SHA-256の16進64桁（小文字）だけを受け付ける。 */
+export const fingerprintSchema = z.string().regex(/^[0-9a-f]{64}$/);
+
+/** クレームの世代番号。1から始まる正の整数。 */
+export const claimGenerationSchema = z.number().int().positive();
+
+export const beginChatGateSchema = z
+  .object({ nowMs: nowMsSchema, limit: rateLimitCountSchema, fingerprint: fingerprintSchema })
+  .strict();

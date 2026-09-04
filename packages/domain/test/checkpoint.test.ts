@@ -529,3 +529,29 @@ describe("dataRevisionによるdataの前後関係", () => {
     ).toBe(true);
   });
 });
+
+describe("dataRevisionの上限", () => {
+  const withDataRevision = (dataRevision: number) =>
+    checkpointBodySchema.safeParse({
+      view: "s3",
+      pos: 2,
+      elapsedMs: 1000,
+      trap: { s3Used: false, s4Used: false },
+      data: {},
+      dataRevision,
+    });
+
+  it("上限ちょうど（MAX_SAFE_INTEGER - 1）は通る", () => {
+    expect(withDataRevision(Number.MAX_SAFE_INTEGER - 1).success).toBe(true);
+  });
+
+  it("MAX_SAFE_INTEGERは拒否する", () => {
+    // ここまで来ると以後の+1が精度を失い、世代番号として単調でなくなる。
+    expect(withDataRevision(Number.MAX_SAFE_INTEGER).success).toBe(false);
+  });
+
+  it("負数・小数も拒否する", () => {
+    expect(withDataRevision(-1).success).toBe(false);
+    expect(withDataRevision(1.5).success).toBe(false);
+  });
+});

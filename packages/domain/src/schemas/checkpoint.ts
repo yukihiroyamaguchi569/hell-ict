@@ -95,8 +95,16 @@ export const checkpointBodySchema = z
     // dataの世代番号。クライアントがdataを書き換えるたび単調に増やす。posだけでは
     // 同じ停留所の中の前後関係が分からず、離脱時flushの単調マージで「同じposなら
     // 受信側」を採ると、古いタブのflushが新しいdata（罰の進行状態など）を巻き戻せる。
-    // 既定0は、この項目を送らない古いクライアントとの互換。
-    dataRevision: z.number().int().nonnegative().default(0),
+    // 既定0は、この項目を送らない古いクライアントとの互換。上限を置くのは、
+    // Number.MAX_SAFE_INTEGERまで送られると以後の`+1`が精度を失って単調でなくなり、
+    // 世代番号として機能しなくなるため（クライアントは1ずつしか増やさないので、
+    // この値へ到達すること自体が異常入力である）。
+    dataRevision: z
+      .number()
+      .int()
+      .nonnegative()
+      .max(Number.MAX_SAFE_INTEGER - 1)
+      .default(0),
     // ステージ固有の状態は不透明なまま預かる。サーバーは形を解釈せず、
     // 大きさだけを見る——ステージ実装のたびにschemaを追う運用にしないため。
     // ただし値はJSONとして往復できるものに限る。素通しにするとInfinity・NaN・

@@ -41,7 +41,16 @@ import type {
 import { DurableObject } from "cloudflare:workers";
 import { z } from "zod";
 
-import { RATE_LIMIT_WINDOW_MS, rateLimitBucket, rateLimitRetryAfterSeconds } from "./guard.js";
+import {
+  beginChatGateSchema,
+  claimGenerationSchema,
+  fingerprintSchema,
+  nowMsSchema,
+  RATE_LIMIT_WINDOW_MS,
+  rateLimitBucket,
+  rateLimitCountSchema,
+  rateLimitRetryAfterSeconds,
+} from "./guard.js";
 import { error, isWebSocketRequest } from "./http.js";
 
 type StoredCommand = { result: string };
@@ -324,8 +333,9 @@ export class TeamRoom extends DurableObject<Env> {
   async createThread(
     teamCodeInput: unknown,
     commandInput: unknown,
-    fingerprint: string,
+    fingerprintInput: unknown,
   ): Promise<CreateThreadResult | ThreadLimitReply | ConflictReply> {
+    const fingerprint = fingerprintSchema.parse(fingerprintInput);
     const teamCode = teamCodeSchema.parse(teamCodeInput);
     const command: CreateThreadCommand = createThreadCommandSchema.parse(commandInput);
     const saved =
@@ -423,8 +433,12 @@ export class TeamRoom extends DurableObject<Env> {
    * 同じテーブル・同じ窓を使い、二重計上にならないよう「PII拒否経路はこれだけ、
    * 通常経路はbeginChatMessageだけ」が枠を消費する分担にする。
    */
-  async consumeChatAttempt(nowMs: number, limit: number): Promise<RateLimitVerdict> {
-    const retryAfterSeconds = this.consumeRateLimit("chat", nowMs, limit);
+  async consumeChatAttempt(nowMs: unknown, limit: unknown): Promise<RateLimitVerdict> {
+    const retryAfterSeconds = this.consumeRateLimit(
+      "chat",
+      nowMsSchema.parse(nowMs),
+      rateLimitCountSchema.parse(limit),
+    );
     return retryAfterSeconds === null ? { allowed: true } : { allowed: false, retryAfterSeconds };
   }
 
@@ -433,8 +447,12 @@ export class TeamRoom extends DurableObject<Env> {
    * 無く、1チームがD1のactivity_eventsを無制限に増やせた。チャットとは別の枠で
    * 数える（同じテーブル・同じ固定窓、接頭辞だけ違う）。
    */
-  async consumeActivityAttempt(nowMs: number, limit: number): Promise<RateLimitVerdict> {
-    const retryAfterSeconds = this.consumeRateLimit("activity", nowMs, limit);
+  async consumeActivityAttempt(nowMs: unknown, limit: unknown): Promise<RateLimitVerdict> {
+    const retryAfterSeconds = this.consumeRateLimit(
+      "activity",
+      nowMsSchema.parse(nowMs),
+      rateLimitCountSchema.parse(limit),
+    );
     return retryAfterSeconds === null ? { allowed: true } : { allowed: false, retryAfterSeconds };
   }
 
@@ -455,11 +473,12 @@ export class TeamRoom extends DurableObject<Env> {
   async beginChatMessage(
     teamCodeInput: unknown,
     commandInput: unknown,
-    gate: BeginChatMessageGate,
+    gate: unknown,
   ): Promise<BeginChatMessageOutcome | UnknownThreadReply> {
     const teamCode = teamCodeSchema.parse(teamCodeInput);
     const command: SendMessageCommand = sendMessageCommandSchema.parse(commandInput);
-    const { nowMs, limit, fingerprint } = gate;
+    const validated = beginChatGateSchema.parse(gate);
+    const { nowMs, limit, fingerprint } = validated;
     this.expirePendingMessages();
     const processed =
       this.ctx.storage.sql
@@ -477,7 +496,7 @@ export class TeamRoom extends DurableObject<Env> {
           command.commandId,
         )
         .toArray()[0] ?? null;
-    if (pending !== null) return this.resumePending(teamCode, command, pending, gate);
+    if (pending !== null) return this.resumePending(teamCode, command, pending, validated);
 
     const snapshot = this.loadChatSnapshot(teamCode);
     if (!snapshot.threads.some((thread) => thread.threadId === command.threadId)) {
@@ -575,8 +594,9 @@ export class TeamRoom extends DurableObject<Env> {
   async completeChatMessage(
     commandId: string,
     outcome: CompleteChatMessageOutcome,
-    claimGeneration: number,
+    claimGenerationInput: unknown,
   ): Promise<ChatMessageResult | { retry: true } | { stale: true }> {
+    const claimGeneration = claimGenerationSchema.parse(claimGenerationInput);
     const processed =
       this.ctx.storage.sql
         .exec<StoredMessageCommand>(
@@ -718,8 +738,9 @@ export class TeamRoom extends DurableObject<Env> {
     teamCodeInput: unknown,
     commandInput: unknown,
     nowIsoInput: unknown,
-    fingerprint: string,
+    fingerprintInput: unknown,
   ): Promise<CheckpointSnapshot | CheckpointRejection> {
+    const fingerprint = fingerprintSchema.parse(fingerprintInput);
     const teamCode = teamCodeSchema.parse(teamCodeInput);
     const command: SaveCheckpointCommand = saveCheckpointCommandSchema.parse(commandInput);
     const now = checkpointSnapshotSchema.shape.savedAt.parse(nowIsoInput);

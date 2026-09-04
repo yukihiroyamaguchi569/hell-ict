@@ -7,18 +7,23 @@ import { describe, expect, it, vi } from "vitest";
 import { z } from "zod";
 
 import {
+  beginChatGateSchema,
+  claimGenerationSchema,
   corsHeadersFor,
   DEFAULT_CHAT_RATE_LIMIT,
   isOriginAllowed,
   isOriginlessRequestAllowed,
+  fingerprintSchema,
   isTeamCodeAllowed,
   MAX_CHAT_RATE_LIMIT,
   MIN_CHAT_RATE_LIMIT,
+  nowMsSchema,
   parseAllowedOrigins,
   parseChatRateLimit,
   parseTeamCodes,
   RATE_LIMIT_WINDOW_MS,
   rateLimitBucket,
+  rateLimitCountSchema,
   rateLimitRetryAfterSeconds,
 } from "../src/guard.js";
 import { handleChatMessage } from "../src/index.js";
@@ -860,5 +865,58 @@ describe("チャット送信のレート制限", () => {
       windowStartMs + RATE_LIMIT_WINDOW_MS,
     );
     expect(retried.status).toBe(200);
+  });
+});
+
+describe("DO RPCの補助入力の検証（Pure Function）", () => {
+  // Worker側で組み立てる値だが、DOのRPCは外から呼べる境界なので実行時に検証する。
+  // 素通しするとNaNとの比較が常にfalseになり、レート制限が黙って無効化される。
+  // 弾いた入力はDOが例外にし、Worker側のcatchが503へ倒す。
+  it("nowMsは非負の安全な整数だけを受ける", () => {
+    expect(nowMsSchema.safeParse(0).success).toBe(true);
+    expect(nowMsSchema.safeParse(1_756_000_000_000).success).toBe(true);
+    expect(nowMsSchema.safeParse(Number.MAX_SAFE_INTEGER - 1).success).toBe(true);
+    for (const invalid of [Number.NaN, -1, 1.5, Number.MAX_SAFE_INTEGER, Infinity, "1", null]) {
+      expect(nowMsSchema.safeParse(invalid).success, String(invalid)).toBe(false);
+    }
+  });
+
+  it("上限値は1〜MAX_CHAT_RATE_LIMITの整数だけを受ける", () => {
+    expect(rateLimitCountSchema.safeParse(1).success).toBe(true);
+    expect(rateLimitCountSchema.safeParse(MAX_CHAT_RATE_LIMIT).success).toBe(true);
+    for (const invalid of [0, -5, 1.5, Number.NaN, MAX_CHAT_RATE_LIMIT + 1, "20"]) {
+      expect(rateLimitCountSchema.safeParse(invalid).success, String(invalid)).toBe(false);
+    }
+  });
+
+  it("指紋はSHA-256の16進64桁（小文字）だけを受ける", () => {
+    expect(fingerprintSchema.safeParse("a".repeat(64)).success).toBe(true);
+    for (const invalid of [
+      "",
+      "短すぎる",
+      "A".repeat(64),
+      "a".repeat(63),
+      "a".repeat(65),
+      "g".repeat(64),
+    ]) {
+      expect(fingerprintSchema.safeParse(invalid).success, invalid.slice(0, 8)).toBe(false);
+    }
+  });
+
+  it("claim generationは1以上の整数だけを受ける", () => {
+    expect(claimGenerationSchema.safeParse(1).success).toBe(true);
+    for (const invalid of [0, -1, 1.5, Number.NaN]) {
+      expect(claimGenerationSchema.safeParse(invalid).success, String(invalid)).toBe(false);
+    }
+  });
+
+  it("beginChatMessageのgateは3項目そろって初めて通る", () => {
+    const valid = { nowMs: 1_756_000_000_000, limit: 20, fingerprint: "a".repeat(64) };
+    expect(beginChatGateSchema.safeParse(valid).success).toBe(true);
+    expect(beginChatGateSchema.safeParse({ ...valid, nowMs: Number.NaN }).success).toBe(false);
+    expect(beginChatGateSchema.safeParse({ ...valid, limit: 0 }).success).toBe(false);
+    expect(beginChatGateSchema.safeParse({ ...valid, fingerprint: "短い" }).success).toBe(false);
+    // 余計な項目は落とさず弾く（strict）。
+    expect(beginChatGateSchema.safeParse({ ...valid, extra: 1 }).success).toBe(false);
   });
 });
