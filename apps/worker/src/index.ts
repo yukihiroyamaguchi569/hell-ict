@@ -1,5 +1,6 @@
 import {
   CHECKPOINT_DATA_TOO_LARGE_MESSAGE,
+  chatCommandFingerprint,
   checkpointStateSchema,
   containsPii,
   createThreadCommandSchema,
@@ -246,8 +247,8 @@ const logChatOutcome = (
   log("chat.failure");
 };
 
-/** beginChatMessageへ渡す、レート制限の固定窓の基準値。 */
-type ChatGate = { readonly nowMs: number; readonly limit: number };
+/** beginChatMessageへ渡す、レート制限の固定窓の基準値と送信内容の指紋。 */
+type ChatGate = { readonly nowMs: number; readonly limit: number; readonly fingerprint: string };
 
 /**
  * beginChatMessageを呼び、そのまま応答して終わる結果（DO失敗・スレッド不明・
@@ -260,9 +261,7 @@ const beginOrRespond = async (
   command: SendMessageCommand,
   gate: ChatGate,
 ): Promise<{ readonly history: readonly AiMessage[] } | Response> => {
-  const begin = await room
-    .beginChatMessage(teamCode, command, gate.nowMs, gate.limit)
-    .catch(() => null);
+  const begin = await room.beginChatMessage(teamCode, command, gate).catch(() => null);
   if (begin === null)
     return error("メッセージの処理に失敗しました。時間を置いて再試行してください。", 503);
   if ("unknownThread" in begin) return error("指定されたスレッドが見つかりません。", 404);
@@ -274,7 +273,7 @@ const beginOrRespond = async (
   if (begin.kind === "in-progress")
     return error("同じ内容が既に送信処理中です。少し待って再試行してください。", 409);
   if (begin.kind === "conflict")
-    return error("同じ送信IDが別のスレッドで使われています。", 409, "conflict");
+    return error("同じ送信IDが別の内容で使われています。", 409, "conflict");
   return { history: begin.history };
 };
 
@@ -329,7 +328,13 @@ export const handleChatMessage = async (
 
   const log = chatLogger(scope, teamCode, command);
   const room = scope.env.TEAM_ROOM.getByName(teamCode);
-  const gate: ChatGate = { nowMs, limit: parseChatRateLimit(scope.env.CHAT_RATE_LIMIT_PER_MINUTE) };
+  // 指紋はここで計算してDOへ渡す。DOの中でawaitすると、その隙に同じcommandIdの
+  // 別リクエストが入り込み、冪等判定と枠消費が二重に走りうる。
+  const gate: ChatGate = {
+    nowMs,
+    limit: parseChatRateLimit(scope.env.CHAT_RATE_LIMIT_PER_MINUTE),
+    fingerprint: await chatCommandFingerprint(command),
+  };
 
   // 送信前PIIゲート（企画書§7）。ユーザーメッセージを保存させず、OpenAIへも一切送らない。
   if (detectPii(command.text) !== null) return respondToPiiBlock(room, gate, log, command);

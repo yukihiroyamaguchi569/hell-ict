@@ -46,11 +46,12 @@ type StoredCommand = { result: string };
 type StoredState = { snapshot: string };
 type StoredChatState = { snapshot: string };
 type StoredThreadCommand = { result: string };
-type StoredMessageCommand = { result: string };
+type StoredMessageCommand = { result: string; fingerprint: string | null };
 type StoredPendingMessage = {
   thread_id: string;
   claimed_at: string | null;
   prompt_profile: string | null;
+  fingerprint: string | null;
 };
 type StoredCheckpointState = { snapshot: string };
 type StoredCheckpointCommand = { revision: SqlStorageValue };
@@ -125,13 +126,53 @@ const storedRateLimitSchema = z.object({ count: z.number().int().nonnegative() }
 const promptProfileOf = (command: SendMessageCommand): string => command.promptProfile ?? "default";
 
 /**
- * pending行と受信commandが同じ送信を指しているか。threadIdが違えば取り違えである。
- * promptProfileは、列を足す前に作られた行ではNULLなので照合をスキップする——
- * 古い行を理由に正当な再送を弾かないことを優先する。
+ * beginChatMessageへ渡す、コマンド本体以外の入力。fingerprintの計算はWebCryptoで
+ * 非同期なのでWorker側で済ませて渡す——DOの中でawaitすると、その隙に同じcommandIdの
+ * 別リクエストが入り込み、冪等判定と枠消費が二重に走りうる。
  */
-const mismatchesPending = (pending: StoredPendingMessage, command: SendMessageCommand): boolean => {
+export type BeginChatMessageGate = {
+  readonly nowMs: number;
+  readonly limit: number;
+  readonly fingerprint: string;
+};
+
+/**
+ * 記録済みの指紋と受信commandが同じ内容を指しているか。指紋を持たない行
+ * （この列を足す前に作られたもの）は照合をスキップする——古い行を理由に正当な
+ * 再送を弾かないことを優先する。
+ */
+const mismatchesFingerprint = (stored: string | null, fingerprint: string): boolean =>
+  stored !== null && stored !== fingerprint;
+
+/**
+ * pending行と受信commandが同じ送信を指しているか。指紋があれば指紋だけで足りる
+ * （threadId・promptProfile・本文をすべて畳んである）。指紋を持たない古い行は、
+ * 従来どおりthreadIdとpromptProfileで照合する。
+ */
+const mismatchesPending = (
+  pending: StoredPendingMessage,
+  command: SendMessageCommand,
+  fingerprint: string,
+): boolean => {
+  if (pending.fingerprint !== null) return mismatchesFingerprint(pending.fingerprint, fingerprint);
   if (pending.thread_id !== command.threadId) return true;
   return pending.prompt_profile !== null && pending.prompt_profile !== promptProfileOf(command);
+};
+
+/**
+ * processed行から冪等再送の結果を組み立てる。内容が違えば冪等再送ではないので、
+ * 元の結果を返さずconflictにする——返してしまうと、クライアントは送ったつもりの
+ * 本文が消えたことに気づけない。
+ */
+const replayProcessed = (
+  processed: StoredMessageCommand,
+  fingerprint: string,
+): BeginChatMessageOutcome => {
+  if (mismatchesFingerprint(processed.fingerprint, fingerprint)) return { kind: "conflict" };
+  return {
+    kind: "already-processed",
+    result: chatMessageResultSchema.parse(JSON.parse(processed.result) as unknown),
+  };
 };
 
 export class TeamRoom extends DurableObject<Env> {
@@ -150,20 +191,24 @@ export class TeamRoom extends DurableObject<Env> {
       "CREATE TABLE IF NOT EXISTS processed_thread_commands (command_id TEXT PRIMARY KEY, result TEXT NOT NULL)",
     );
     this.ctx.storage.sql.exec(
-      "CREATE TABLE IF NOT EXISTS processed_message_commands (command_id TEXT PRIMARY KEY, result TEXT NOT NULL)",
+      "CREATE TABLE IF NOT EXISTS processed_message_commands (command_id TEXT PRIMARY KEY, result TEXT NOT NULL, fingerprint TEXT)",
     );
     this.ctx.storage.sql.exec(
-      "CREATE TABLE IF NOT EXISTS pending_message_commands (command_id TEXT PRIMARY KEY, thread_id TEXT NOT NULL, created_at TEXT NOT NULL, claimed_at TEXT, prompt_profile TEXT)",
+      "CREATE TABLE IF NOT EXISTS pending_message_commands (command_id TEXT PRIMARY KEY, thread_id TEXT NOT NULL, created_at TEXT NOT NULL, claimed_at TEXT, prompt_profile TEXT, fingerprint TEXT)",
     );
     // 既にテーブルを持つDOにはCREATE TABLE IF NOT EXISTSが効かないので、列を後から足す。
     // 2度目以降は「列が既にある」で失敗するだけなので握りつぶす。既存行のprompt_profileは
     // NULLになり、照合をスキップする（下のmismatchesPending）。
-    try {
-      this.ctx.storage.sql.exec(
-        "ALTER TABLE pending_message_commands ADD COLUMN prompt_profile TEXT",
-      );
-    } catch {
-      // 列が既に存在する。
+    for (const statement of [
+      "ALTER TABLE pending_message_commands ADD COLUMN prompt_profile TEXT",
+      "ALTER TABLE pending_message_commands ADD COLUMN fingerprint TEXT",
+      "ALTER TABLE processed_message_commands ADD COLUMN fingerprint TEXT",
+    ]) {
+      try {
+        this.ctx.storage.sql.exec(statement);
+      } catch {
+        // 列が既に存在する。
+      }
     }
     this.ctx.storage.sql.exec(
       "CREATE TABLE IF NOT EXISTS checkpoint_state (id INTEGER PRIMARY KEY CHECK (id = 1), snapshot TEXT NOT NULL)",
@@ -371,33 +416,29 @@ export class TeamRoom extends DurableObject<Env> {
   async beginChatMessage(
     teamCodeInput: unknown,
     commandInput: unknown,
-    nowMs: number,
-    limit: number,
+    gate: BeginChatMessageGate,
   ): Promise<BeginChatMessageOutcome | UnknownThreadReply> {
     const teamCode = teamCodeSchema.parse(teamCodeInput);
     const command: SendMessageCommand = sendMessageCommandSchema.parse(commandInput);
+    const { nowMs, limit, fingerprint } = gate;
     this.expirePendingMessages();
     const processed =
       this.ctx.storage.sql
         .exec<StoredMessageCommand>(
-          "SELECT result FROM processed_message_commands WHERE command_id = ?",
+          "SELECT result, fingerprint FROM processed_message_commands WHERE command_id = ?",
           command.commandId,
         )
         .toArray()[0] ?? null;
-    if (processed !== null)
-      return {
-        kind: "already-processed",
-        result: chatMessageResultSchema.parse(JSON.parse(processed.result) as unknown),
-      };
+    if (processed !== null) return replayProcessed(processed, fingerprint);
 
     const pending =
       this.ctx.storage.sql
         .exec<StoredPendingMessage>(
-          "SELECT thread_id, claimed_at, prompt_profile FROM pending_message_commands WHERE command_id = ?",
+          "SELECT thread_id, claimed_at, prompt_profile, fingerprint FROM pending_message_commands WHERE command_id = ?",
           command.commandId,
         )
         .toArray()[0] ?? null;
-    if (pending !== null) return this.resumePending(teamCode, command, pending);
+    if (pending !== null) return this.resumePending(teamCode, command, { pending, fingerprint });
 
     const snapshot = this.loadChatSnapshot(teamCode);
     if (!snapshot.threads.some((thread) => thread.threadId === command.threadId)) {
@@ -421,12 +462,13 @@ export class TeamRoom extends DurableObject<Env> {
       this.saveChatSnapshot(appended.snapshot);
       const now = new Date().toISOString();
       this.ctx.storage.sql.exec(
-        "INSERT INTO pending_message_commands (command_id, thread_id, created_at, claimed_at, prompt_profile) VALUES (?, ?, ?, ?, ?)",
+        "INSERT INTO pending_message_commands (command_id, thread_id, created_at, claimed_at, prompt_profile, fingerprint) VALUES (?, ?, ?, ?, ?, ?)",
         command.commandId,
         command.threadId,
         now,
         now,
         promptProfileOf(command),
+        fingerprint,
       );
       return null;
     });
@@ -443,12 +485,13 @@ export class TeamRoom extends DurableObject<Env> {
   private resumePending(
     teamCode: TeamCode,
     command: SendMessageCommand,
-    pending: StoredPendingMessage,
+    found: { pending: StoredPendingMessage; fingerprint: string },
   ): BeginChatMessageOutcome {
-    // 同じcommandIdを別スレッド／別profileで使い回した送信は、冪等再送ではなく
-    // クライアント側の取り違えである。pendingの履歴を流用すると、別スレッドの文脈を
-    // そのままAIへ渡してしまうので、流用せずに突き返す。
-    if (mismatchesPending(pending, command)) return { kind: "conflict" };
+    const { pending } = found;
+    // 同じcommandIdを別の内容（別スレッド／別profile／別本文）で使い回した送信は、
+    // 冪等再送ではなくクライアント側の取り違えである。pendingの履歴を流用すると、
+    // 別スレッドの文脈をそのままAIへ渡してしまうので、流用せずに突き返す。
+    if (mismatchesPending(pending, command, found.fingerprint)) return { kind: "conflict" };
     if (!this.isClaimStale(pending.claimed_at)) return { kind: "in-progress" };
     // 未クレーム、またはクレームが古い（AI呼び出しが完了しないまま終わった）ので、
     // ここで改めてクレームを取り直してから再試行させる。
@@ -468,7 +511,7 @@ export class TeamRoom extends DurableObject<Env> {
     const processed =
       this.ctx.storage.sql
         .exec<StoredMessageCommand>(
-          "SELECT result FROM processed_message_commands WHERE command_id = ?",
+          "SELECT result, fingerprint FROM processed_message_commands WHERE command_id = ?",
           commandId,
         )
         .toArray()[0] ?? null;
@@ -478,7 +521,7 @@ export class TeamRoom extends DurableObject<Env> {
     const pending =
       this.ctx.storage.sql
         .exec<StoredPendingMessage>(
-          "SELECT thread_id, claimed_at, prompt_profile FROM pending_message_commands WHERE command_id = ?",
+          "SELECT thread_id, claimed_at, prompt_profile, fingerprint FROM pending_message_commands WHERE command_id = ?",
           commandId,
         )
         .toArray()[0] ?? null;
@@ -515,9 +558,12 @@ export class TeamRoom extends DurableObject<Env> {
       assistant: assistantMessage,
     });
     this.ctx.storage.sql.exec(
-      "INSERT INTO processed_message_commands (command_id, result) VALUES (?, ?)",
+      // pending行の指紋をそのまま引き継ぐ。processed側にも残しておかないと、
+      // 完了後の再送で内容の取り違えを検出できない。
+      "INSERT INTO processed_message_commands (command_id, result, fingerprint) VALUES (?, ?, ?)",
       commandId,
       JSON.stringify(result),
+      pending.fingerprint,
     );
     this.ctx.storage.sql.exec(
       "DELETE FROM pending_message_commands WHERE command_id = ?",

@@ -1,6 +1,7 @@
 import { env } from "cloudflare:workers";
 import { createExecutionContext, waitOnExecutionContext } from "cloudflare:test";
 import {
+  chatCommandFingerprint,
   chatMessageResultSchema,
   chatSnapshotSchema,
   createThreadResultSchema,
@@ -47,19 +48,23 @@ const sendMessage = async (
 };
 
 /**
- * DOのbeginChatMessageを直接呼ぶ。レート制限の固定窓を握るnowMs/limitも渡す
- * （省略すると実行時にNaN・undefinedが渡り、制限が効かない状態でテストが通ってしまう）。
+ * DOのbeginChatMessageを直接呼ぶ。レート制限の固定窓を握るnowMs/limitと送信内容の
+ * 指紋も渡す（省略すると実行時にNaN・undefinedが渡り、制限や取り違え検出が効かない
+ * 状態でテストが通ってしまう）。
  */
-const beginDirect = (
+const beginDirect = async (
   teamCode: string,
-  command: { commandId: string; threadId: string; text: string },
+  command: { commandId: string; threadId: string; text: string; promptProfile?: PromptProfile },
   nowMs = Date.now(),
 ): Promise<unknown> =>
   env.TEAM_ROOM.getByName(teamCode).beginChatMessage(
     teamCode,
     { type: "send-message", ...command },
-    nowMs,
-    DEFAULT_CHAT_RATE_LIMIT,
+    {
+      nowMs,
+      limit: DEFAULT_CHAT_RATE_LIMIT,
+      fingerprint: await chatCommandFingerprint(command),
+    },
   );
 
 type PromptProfileCase = {
@@ -706,5 +711,62 @@ describe("P1C チャット骨格", () => {
     // クレームが生きている間は"in-progress"（409）。conflictとは別のcodeなしの409。
     expect(response.status).toBe(409);
     expect(httpErrorSchema.parse(await response.json()).code).toBeUndefined();
+  });
+  it("同じcommandIdで別の本文を送ると409 conflictで、AIも呼ばず保存もしない", async () => {
+    await session("400023");
+    const created = await createThread("400023", "00000000-0000-4000-8000-000000002301", "副");
+    const { snapshot } = createThreadResultSchema.parse(await created.json());
+    const threadId = snapshot.threads[0]?.threadId;
+    if (threadId === undefined) throw new Error("unexpected");
+
+    const commandId = "00000000-0000-4000-8000-000000002302";
+    await beginDirect("400023", { commandId, threadId, text: "最初の本文" });
+    const before = await chatSnapshotOf("400023");
+
+    const gateway = new FakeAiGateway([{ kind: "success", response: "応答" }]);
+    const response = await sendMessage(
+      "400023",
+      { commandId, threadId, text: "すり替えた本文" },
+      gateway,
+    );
+
+    expect(response.status).toBe(409);
+    expect(httpErrorSchema.parse(await response.json()).code).toBe("conflict");
+    expect(gateway.requests).toHaveLength(0);
+    await expect(chatSnapshotOf("400023")).resolves.toEqual(before);
+  });
+
+  it("処理済みcommandIdへ別の本文を送っても409 conflict", async () => {
+    await session("400024");
+    const created = await createThread("400024", "00000000-0000-4000-8000-000000002401", "副");
+    const { snapshot } = createThreadResultSchema.parse(await created.json());
+    const threadId = snapshot.threads[0]?.threadId;
+    if (threadId === undefined) throw new Error("unexpected");
+
+    const commandId = "00000000-0000-4000-8000-000000002402";
+    const gateway = new FakeAiGateway([{ kind: "success", response: "応答" }]);
+    const first = await sendMessage("400024", { commandId, threadId, text: "最初の本文" }, gateway);
+    expect(first.status).toBe(200);
+    const firstBody = await first.json();
+
+    // 完了後（processed行）でも内容の取り違えは検出する。
+    const swapped = await sendMessage(
+      "400024",
+      { commandId, threadId, text: "すり替えた本文" },
+      gateway,
+    );
+    expect(swapped.status).toBe(409);
+    expect(httpErrorSchema.parse(await swapped.json()).code).toBe("conflict");
+    expect(gateway.requests).toHaveLength(1);
+
+    // 同じ内容の再送は従来どおり、同じ結果をそのまま返す。
+    const resent = await sendMessage(
+      "400024",
+      { commandId, threadId, text: "最初の本文" },
+      gateway,
+    );
+    expect(resent.status).toBe(200);
+    await expect(resent.json()).resolves.toEqual(firstBody);
+    expect(gateway.requests).toHaveLength(1);
   });
 });

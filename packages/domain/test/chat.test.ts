@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 
 import {
   appendMessage,
+  chatCommandFingerprint,
   countThreadsOfKind,
   createThread,
   initialChatSnapshot,
@@ -123,5 +124,36 @@ describe("countThreadsOfKind", () => {
     if (!withManual.ok) throw new Error("unexpected");
     expect(countThreadsOfKind(withManual.snapshot, "stage")).toBe(1);
     expect(countThreadsOfKind(withManual.snapshot, "manual")).toBe(2);
+  });
+});
+
+describe("chatCommandFingerprint", () => {
+  const base = { threadId: mainThreadId, text: "本文" } as const;
+
+  it("同じ内容は同じ指紋になる（SHA-256の16進64桁）", async () => {
+    const first = await chatCommandFingerprint(base);
+    const second = await chatCommandFingerprint({ ...base });
+    expect(first).toBe(second);
+    expect(first).toMatch(/^[0-9a-f]{64}$/);
+  });
+
+  it("threadId・promptProfile・本文のどれが変わっても指紋が変わる", async () => {
+    const original = await chatCommandFingerprint(base);
+    expect(await chatCommandFingerprint({ ...base, threadId: otherThreadId })).not.toBe(original);
+    expect(await chatCommandFingerprint({ ...base, text: "別の本文" })).not.toBe(original);
+    expect(await chatCommandFingerprint({ ...base, promptProfile: "s3" })).not.toBe(original);
+  });
+
+  it('promptProfile未指定は"default"と同じ指紋になる', async () => {
+    expect(await chatCommandFingerprint(base)).toBe(
+      await chatCommandFingerprint({ ...base, promptProfile: "default" }),
+    );
+  });
+
+  it("フィールドの境界が潰れない", async () => {
+    // 区切りに改行を挟むので、隣接フィールドへ文字を移しても同じ指紋にならない。
+    const left = await chatCommandFingerprint({ threadId: "ab", text: "c" });
+    const right = await chatCommandFingerprint({ threadId: "a", text: "bc" });
+    expect(left).not.toBe(right);
   });
 });
