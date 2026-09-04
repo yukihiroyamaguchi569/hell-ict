@@ -1092,4 +1092,92 @@ describe("P1C チャット骨格", () => {
     expect(response.status).toBe(503);
     expect(gateway.requests).toHaveLength(0);
   });
+  it("台帳に残った平文PIIは、再生時に伏せ字化されて行ごと保存し直される", async () => {
+    await session("400035");
+    const created = await createThread("400035", "00000000-0000-4000-8000-000000003501", "副");
+    const { snapshot } = createThreadResultSchema.parse(await created.json());
+    const threadId = snapshot.threads[0]?.threadId;
+    if (threadId === undefined) throw new Error("unexpected");
+
+    const commandId = "00000000-0000-4000-8000-000000003502";
+    const gateway = new FakeAiGateway([{ kind: "success", response: "応答" }]);
+    const first = await sendMessage("400035", { commandId, threadId, text: "本文" }, gateway);
+    expect(first.status).toBe(200);
+
+    // 伏せ字化を入れる前に保存された台帳行を再現する（行には当時のsnapshot全体が入る）。
+    const readLedger = (): string =>
+      runInDurableObject(env.TEAM_ROOM.getByName("400035"), (_instance, state) => {
+        const row = state.storage.sql
+          .exec("SELECT result FROM processed_message_commands WHERE command_id = ?", commandId)
+          .toArray()[0];
+        return String(row?.result);
+      }) as unknown as string;
+
+    await runInDurableObject(env.TEAM_ROOM.getByName("400035"), (_instance, state) => {
+      const row = state.storage.sql
+        .exec("SELECT result FROM processed_message_commands WHERE command_id = ?", commandId)
+        .toArray()[0];
+      const injected = String(row?.result).replace("応答", "渡辺 三郎さんの件、承知しました");
+      state.storage.sql.exec(
+        "UPDATE processed_message_commands SET result = ? WHERE command_id = ?",
+        injected,
+        commandId,
+      );
+    });
+
+    // 同じcommandIdの再送（＝台帳の再生）で伏せ字の結果が返る。
+    const replayed = await sendMessage("400035", { commandId, threadId, text: "本文" }, gateway);
+    expect(replayed.status).toBe(200);
+    const body = chatMessageResultSchema.parse(await replayed.json());
+    expect(JSON.stringify(body)).not.toContain("渡辺 三郎");
+    expect(JSON.stringify(body)).toContain(PII_REDACTION);
+
+    // 行そのものが保存し直されている（2回目の読み出しで平文が残っていない）。
+    const stored = await Promise.resolve(readLedger());
+    expect(stored).not.toContain("渡辺 三郎");
+    expect(stored).toContain(PII_REDACTION);
+  });
+
+  it("スレッド台帳に残った平文PIIも再生時に伏せ字化されて保存し直される", async () => {
+    await session("400036");
+    const commandId = "00000000-0000-4000-8000-000000003601";
+    const created = await createThread("400036", commandId, "副");
+    expect(created.status).toBe(200);
+
+    await runInDurableObject(env.TEAM_ROOM.getByName("400036"), (_instance, state) => {
+      const row = state.storage.sql
+        .exec("SELECT result FROM processed_thread_commands WHERE command_id = ?", commandId)
+        .toArray()[0];
+      const parsed = JSON.parse(String(row?.result)) as {
+        snapshot: { threads: { messages: unknown[] }[] };
+      };
+      parsed.snapshot.threads[0]?.messages.push({
+        messageId: "00000000-0000-4000-8000-000000003602",
+        role: "assistant",
+        text: "渡辺 三郎さんの件、承知しました",
+        createdAt: "2026-09-05T00:00:00.000Z",
+      });
+      state.storage.sql.exec(
+        "UPDATE processed_thread_commands SET result = ? WHERE command_id = ?",
+        JSON.stringify(parsed),
+        commandId,
+      );
+    });
+
+    const replayed = await createThread("400036", commandId, "副");
+    expect(replayed.status).toBe(200);
+    expect(JSON.stringify(await replayed.json())).not.toContain("渡辺 三郎");
+
+    const stored = await runInDurableObject(
+      env.TEAM_ROOM.getByName("400036"),
+      (_instance, state) => {
+        const row = state.storage.sql
+          .exec("SELECT result FROM processed_thread_commands WHERE command_id = ?", commandId)
+          .toArray()[0];
+        return String(row?.result);
+      },
+    );
+    expect(stored).not.toContain("渡辺 三郎");
+    expect(stored).toContain(PII_REDACTION);
+  });
 });

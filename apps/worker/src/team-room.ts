@@ -16,6 +16,7 @@ import {
   initialTeamSnapshot,
   normalizeAssistantText,
   promptProfileSchema,
+  redactChatMessageResultPii,
   redactPii,
   redactSnapshotPii,
   saveCheckpointCommandSchema,
@@ -199,20 +200,12 @@ const mismatchesPending = (
  * 本文が消えたことに気づけない。
  */
 const replayProcessed = (
-  processed: StoredMessageCommand,
+  processed: { result: ChatMessageResult; fingerprint: string | null },
   fingerprint: string,
-): BeginChatMessageOutcome => {
-  if (mismatchesFingerprint(processed.fingerprint, fingerprint)) return { kind: "conflict" };
-  const result = chatMessageResultSchema.parse(JSON.parse(processed.result) as unknown);
-  // 台帳の行は書き換えない（冪等の記録なので触らない）。再生するたびに伏せ字化して返す。
-  return {
-    kind: "already-processed",
-    result: {
-      snapshot: redactSnapshotPii(result.snapshot),
-      assistant: { ...result.assistant, text: redactPii(result.assistant.text) },
-    },
-  };
-};
+): BeginChatMessageOutcome =>
+  mismatchesFingerprint(processed.fingerprint, fingerprint)
+    ? { kind: "conflict" }
+    : { kind: "already-processed", result: processed.result };
 
 /**
  * 応答をsnapshotへ載せられる形へ整える。失敗と、載せられない応答（空白だけ）は
@@ -381,18 +374,11 @@ export class TeamRoom extends DurableObject<Env> {
     const fingerprint = fingerprintSchema.parse(fingerprintInput);
     const teamCode = teamCodeSchema.parse(teamCodeInput);
     const command: CreateThreadCommand = createThreadCommandSchema.parse(commandInput);
-    const saved =
-      this.ctx.storage.sql
-        .exec<StoredThreadCommand>(
-          "SELECT result, fingerprint FROM processed_thread_commands WHERE command_id = ?",
-          command.commandId,
-        )
-        .toArray()[0] ?? null;
+    const saved = this.readProcessedThread(command.commandId);
     if (saved !== null) {
       // 同じcommandIdで別のタイトル・別のkindを送る取り違えは冪等再送ではない。
       if (mismatchesFingerprint(saved.fingerprint, fingerprint)) return { conflict: true };
-      const replayed = createThreadResultSchema.parse(JSON.parse(saved.result) as unknown);
-      return { snapshot: redactSnapshotPii(replayed.snapshot) };
+      return saved.result;
     }
     const snapshot = this.loadChatSnapshot(teamCode);
     // ステージ用スレッドはtitleがステージ名で一意、という契約にする。リロードや
@@ -548,6 +534,58 @@ export class TeamRoom extends DurableObject<Env> {
     return result;
   }
 
+  /**
+   * 送信の冪等台帳を読む。行には当時のsnapshot全体が入るので、平文のPIIが残っていれば
+   * 伏せ字化して行ごと保存し直す（chat_stateと同じ一度きりの移行）。返却値だけ
+   * 伏せ字にしても、行の中の平文は次の再生でまた読まれる。
+   */
+  private readProcessedMessage(
+    commandId: string,
+  ): { result: ChatMessageResult; fingerprint: string | null } | null {
+    const row =
+      this.ctx.storage.sql
+        .exec<StoredMessageCommand>(
+          "SELECT result, fingerprint FROM processed_message_commands WHERE command_id = ?",
+          commandId,
+        )
+        .toArray()[0] ?? null;
+    if (row === null) return null;
+    const parsed = chatMessageResultSchema.parse(JSON.parse(row.result) as unknown);
+    const redacted = redactChatMessageResultPii(parsed);
+    if (redacted !== parsed) {
+      this.ctx.storage.sql.exec(
+        "UPDATE processed_message_commands SET result = ? WHERE command_id = ?",
+        JSON.stringify(redacted),
+        commandId,
+      );
+    }
+    return { result: redacted, fingerprint: row.fingerprint };
+  }
+
+  /** スレッド作成の冪等台帳。readProcessedMessageと同じ理由で行ごと保存し直す。 */
+  private readProcessedThread(
+    commandId: string,
+  ): { result: CreateThreadResult; fingerprint: string | null } | null {
+    const row =
+      this.ctx.storage.sql
+        .exec<StoredThreadCommand>(
+          "SELECT result, fingerprint FROM processed_thread_commands WHERE command_id = ?",
+          commandId,
+        )
+        .toArray()[0] ?? null;
+    if (row === null) return null;
+    const parsed = createThreadResultSchema.parse(JSON.parse(row.result) as unknown);
+    const snapshot = redactSnapshotPii(parsed.snapshot);
+    if (snapshot !== parsed.snapshot) {
+      this.ctx.storage.sql.exec(
+        "UPDATE processed_thread_commands SET result = ? WHERE command_id = ?",
+        JSON.stringify({ snapshot }),
+        commandId,
+      );
+    }
+    return { result: { snapshot }, fingerprint: row.fingerprint };
+  }
+
   async beginChatMessage(
     teamCodeInput: unknown,
     commandInput: unknown,
@@ -558,13 +596,7 @@ export class TeamRoom extends DurableObject<Env> {
     const validated = beginChatGateSchema.parse(gate);
     const { nowMs, limit, fingerprint } = validated;
     this.expirePendingMessages();
-    const processed =
-      this.ctx.storage.sql
-        .exec<StoredMessageCommand>(
-          "SELECT result, fingerprint FROM processed_message_commands WHERE command_id = ?",
-          command.commandId,
-        )
-        .toArray()[0] ?? null;
+    const processed = this.readProcessedMessage(command.commandId);
     if (processed !== null) return replayProcessed(processed, fingerprint);
 
     const pending = this.readPending(command.commandId);
@@ -688,15 +720,9 @@ export class TeamRoom extends DurableObject<Env> {
     const commandId = commandIdSchema.parse(commandIdInput);
     const outcome: CompleteChatMessageOutcome = completeChatOutcomeSchema.parse(outcomeInput);
     const claimGeneration = claimGenerationSchema.parse(claimGenerationInput);
-    const processed =
-      this.ctx.storage.sql
-        .exec<StoredMessageCommand>(
-          "SELECT result, fingerprint FROM processed_message_commands WHERE command_id = ?",
-          commandId,
-        )
-        .toArray()[0] ?? null;
-    if (processed !== null)
-      return chatMessageResultSchema.parse(JSON.parse(processed.result) as unknown);
+    // 伏せ字化と行の保存し直しを含む読み出しをここでも通す（beginと同じ）。
+    const processed = this.readProcessedMessage(commandId);
+    if (processed !== null) return processed.result;
 
     const pending = this.readPending(commandId);
     if (pending === null) throw new Error("該当する送信途中のメッセージがありません。");

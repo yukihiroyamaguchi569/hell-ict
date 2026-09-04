@@ -3,6 +3,7 @@ import { redactPii } from "./pii.js";
 import { CHAT_MESSAGE_MAX_CHARS } from "./schemas/chat.js";
 import type {
   ChatMessage,
+  ChatMessageResult,
   ChatSnapshot,
   ChatThreadId,
   ChatThreadKind,
@@ -118,4 +119,18 @@ export const redactSnapshotPii = (snapshot: ChatSnapshot): ChatSnapshot => {
   return threads.every((thread, index) => thread === snapshot.threads[index])
     ? snapshot
     : { ...snapshot, threads };
+};
+
+/**
+ * 冪等台帳へ保存したチャット結果の伏せ字化。台帳の行には当時のsnapshot全体が入るので、
+ * 返却値だけ伏せ字にしても行の中には平文が残り続ける（呼び出し側が行ごと保存し直す）。
+ *
+ * redactSnapshotPiiと同じく、変化が無ければ引数と同じ参照を返す。
+ */
+export const redactChatMessageResultPii = (result: ChatMessageResult): ChatMessageResult => {
+  const snapshot = redactSnapshotPii(result.snapshot);
+  const text = redactPii(result.assistant.text);
+  return snapshot === result.snapshot && text === result.assistant.text
+    ? result
+    : { snapshot, assistant: { ...result.assistant, text } };
 };
