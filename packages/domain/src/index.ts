@@ -3,7 +3,9 @@ export type { ExternalMessage } from "./schemas/external-message.js";
 export {
   commandIdSchema,
   commandResultSchema,
+  leaderboardEntrySchema,
   leaderboardSnapshotSchema,
+  revisionSchema,
   teamCodeSchema,
   teamCommandSchema,
   teamSnapshotSchema,
@@ -53,6 +55,7 @@ export {
   createThread,
   initialChatSnapshot,
   normalizeAssistantText,
+  redactChatMessageResultPii,
   redactSnapshotPii,
 } from "./chat.js";
 export type { ChatMutationResult } from "./chat.js";

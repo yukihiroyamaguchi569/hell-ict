@@ -1,12 +1,34 @@
-import { leaderboardSnapshotSchema, teamCodeSchema, teamSnapshotSchema } from "@hell-ict/domain";
+import {
+  leaderboardEntrySchema,
+  leaderboardSnapshotSchema,
+  revisionSchema,
+  teamCodeSchema,
+  teamSnapshotSchema,
+} from "@hell-ict/domain";
 import type { LeaderboardSnapshot, TeamCode } from "@hell-ict/domain";
 import { DurableObject } from "cloudflare:workers";
+import { z } from "zod";
 
 import { isTeamCodeAllowed, parseTeamCodes } from "./guard.js";
 import { error, isWebSocketRequest } from "./http.js";
 
-type StoredLeaderboard = { team_code: string; team_revision: number; stage: "prologue" | "stage1" };
-type StoredRevision = { revision: number };
+/**
+ * leaderboard_entriesの行。SQLiteは列の型を強制しないので、読み出しも実行時に検証する。
+ *
+ * 壊れた行は配信全体を止めずスキップする——ここで例外にすると、1チームの1行が壊れた
+ * だけで全購読者の帯が更新されなくなる。レースの表示は「1チームが欠ける」ほうが
+ * 「全員の画面が止まる」より害が小さい。
+ */
+const storedLeaderboardSchema = z.object({
+  team_code: teamCodeSchema,
+  team_revision: revisionSchema,
+  stage: leaderboardEntrySchema.shape.stage,
+});
+
+type StoredLeaderboard = z.infer<typeof storedLeaderboardSchema>;
+
+/** meta.revisionも同じ理由で、壊れていたら0として扱い配信は続ける。 */
+const storedRevisionSchema = z.object({ revision: revisionSchema });
 
 export class RaceLeaderboard extends DurableObject<Env> {
   constructor(ctx: DurableObjectState, env: Env) {
@@ -80,16 +102,18 @@ export class RaceLeaderboard extends DurableObject<Env> {
    */
   private readEntries(): { revision: number; rows: StoredLeaderboard[] } {
     const meta = this.ctx.storage.sql
-      .exec<StoredRevision>("SELECT value AS revision FROM leaderboard_meta WHERE key = 'revision'")
-      .one();
+      .exec("SELECT value AS revision FROM leaderboard_meta WHERE key = 'revision'")
+      .toArray()[0];
     const allowlist = parseTeamCodes(this.env.TEAM_CODES);
     const rows = this.ctx.storage.sql
-      .exec<StoredLeaderboard>(
+      .exec(
         "SELECT team_code, team_revision, stage FROM leaderboard_entries ORDER BY team_revision DESC, team_code ASC",
       )
       .toArray()
+      .map((row) => storedLeaderboardSchema.safeParse(row).data)
+      .filter((row) => row !== undefined)
       .filter((row) => isTeamCodeAllowed(row.team_code, allowlist));
-    return { revision: meta?.revision ?? 0, rows };
+    return { revision: storedRevisionSchema.safeParse(meta).data?.revision ?? 0, rows };
   }
 
   private snapshotFrom(

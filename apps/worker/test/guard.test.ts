@@ -1122,6 +1122,34 @@ describe("リーダーボードの配信範囲", () => {
     await expect(leaderboardEntries("500060")).resolves.toBe(unfiltered);
   });
 
+  it("壊れた行があっても他チームの配信は止まらない", async () => {
+    // 1行の破損で全購読者の帯が止まるほうが、1チームが欠けるより害が大きい。
+    await session("500064");
+    await session("500065");
+    const before = await leaderboardEntries("500064");
+    expect(before).toBeGreaterThanOrEqual(2);
+
+    await runInDurableObject(env.RACE_LEADERBOARD.getByName("global"), (_instance, state) => {
+      state.storage.sql.exec(
+        "UPDATE leaderboard_entries SET stage = 'こわれた' WHERE team_code = ?",
+        "500065",
+      );
+    });
+
+    // 壊れた1行だけが落ち、残りは配信される。
+    await expect(leaderboardEntries("500064")).resolves.toBe(before - 1);
+  });
+
+  it("meta.revisionが壊れていても配信は続く", async () => {
+    await session("500066");
+    await runInDurableObject(env.RACE_LEADERBOARD.getByName("global"), (_instance, state) => {
+      state.storage.sql.exec(
+        "UPDATE leaderboard_meta SET value = 'こわれた' WHERE key = 'revision'",
+      );
+    });
+    await expect(leaderboardEntries("500066")).resolves.toBeGreaterThanOrEqual(1);
+  });
+
   it("TEAM_CODESが不正なら何も配信しない（fail-closed）", async () => {
     const snapshot = await env.TEAM_ROOM.getByName("500062").join("500062");
     const leaderboard = env.RACE_LEADERBOARD.getByName("global");
