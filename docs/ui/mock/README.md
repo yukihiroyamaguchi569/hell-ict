@@ -3,7 +3,7 @@
 **捨てる前提の使い捨て実装。** React 実装へ持ち越すのは CSS トークン名（`--bg` `--accent` 等、[00_共通シェルと通奏低音.md](../00_共通シェルと通奏低音.md) 実装メモ）だけで、
 JS 構造そのものは資産ではない。単一ファイル・フレームワーク無し・ビルド無し。ブラウザで直接開けば動く。
 
-このファイルは本体 5500行超を頭から読まずに済ませるための地図。**該当関数だけを Read で読む。**
+このファイルは本体 8000行超を頭から読まずに済ませるための地図。**該当関数だけを Read で読む。**
 
 > 📌 **企画書 v0.8.0 へ反映済み。以後は企画書が正典。** モックと企画書が食い違ったら企画書を正とし、
 > モック側を直すか、企画書の改訂として上げる（CLAUDE.md の読む地図どおり）。
@@ -95,8 +95,9 @@ JS 構造そのものは資産ではない。単一ファイル・フレーム�
 （ボタンの下に「AI・保存・帯は動きません」を添える）。開発用の静的サーバ配信（`python -m http.server` など）
 と、会場でサーバが落ちたときの最後の手段。押すと `LIVE=false` で確定し、以後プローブし直さない。
 
-- `LIVE=true` かつ入室成功後（`liveState` が埋まった後）は、Stage 3・3.5・4・Final の `sendAI()`
-  が `sendAiLive()` 経由で実Worker API（`/api/teams/:code/chat/messages` 等）を叩く。
+- `LIVE=true` かつ入室成功後（`liveState` が埋まった後）は、Stage 3・3.5・4 の `sendAI()`
+  が `sendAiLive()` 経由で実Worker API（`/api/teams/:code/chat/messages` 等）を叩く
+  （`liveTurn` の対象は `s3`・`s35`・`s4` の3つだけ。**Final は入らない**——右ペインごと畳むので送る導線が無い）。
   スレッドタブ（`renderAiTabs()`）・`promptProfile`（Stage 3 のときだけ `"s3"`、それ以外は
   `"default"`）・422（`pii_blocked`）のStage 4ゲート処理は、この経路にのみ存在する。
   **スレッド作成の `kind`**（2026-09-04追加）：ステージ入場で自動に作る枠（`activateStageThread()`）は
@@ -166,7 +167,7 @@ JS 構造そのものは資産ではない。単一ファイル・フレーム�
   POSTは1本のPromiseチェーンで**直列化**し、
   bodyは必ず送る直前の最新状態から組み直す（古いbodyが後から新しいrevisionで通ると状態が巻き戻る）。
   成功応答のrevisionは、送った`expectedRevision`+1と一致するときだけ採用する。409は応答の `code`
-  （`conflict` / `trap-regression` / `elapsed-regression` / `pos-regression`）で分岐し、
+  （`conflict` / `trap-regression` / `elapsed-regression` / `pos-regression` / `data-regression`）で分岐し、
   競合なら`revision`を取り直して同じbodyを1回だけ再送、後退（罠・経過時間・停留所）なら
   サーバ値を採用して再送しない（`adoptServerState()`）。`code` を持たない応答へは、
   送った`expectedRevision`とサーバの`revision`のずれで競合かどうかを見分けるフォールバックがある。
@@ -412,13 +413,13 @@ Stage 5 に罠は無く、`sendAI()`（2379）は `view === "s5"` のとき `S4_
 
 ## 既知の設計負債（新ステージを足すと必ず踏む）
 
-- `TEAMS[2].pos`（自チームの位置）の直接代入が10箇所超に散在（Stage 3・3.5・4・5・Final 分でさらに増えた）。`STEPS` 側に持たせて一元化されていない。**`TEAMS` の配列の形は、この散在した代入をそのまま動かし続けるために温存してある**——2026-08-22 に帯の表示を自チームだけに変えた後も `kind:"other"`/`"lead"` の行を消していないのはそのため（`drawMarks()` が読まなくなっただけ）。
-- **リーダーボード帯に描くのは自チームのマーカー1つだけ**（2026-08-22 ユーザー決定）。ダミーの他班を並べると、入室時にチーム自身が入力した名前（ヘッダーのチップ・感謝状には反映済み）と食い違う嘘が帯だけに残るため。ラベルは `teamName`、未入室・devbar直行時は `TEAMS[2].nm`（"B班"）へフォールバックする（感謝状 `fShowHandover()` と同じ流儀。チーム自身の入力なので `esc()` を通す）。**他チームのライブ表示は本実装の宿題**（全体用 Durable Object から配信・企画書§7）。仕様の正典は [`../00_共通シェルと通奏低音.md`](../00_共通シェルと通奏低音.md) §5 の ⚠️。
+- `TEAMS[2].pos`（自チームの位置）の直接代入が10箇所超に散在（Stage 3・3.5・4・5・Final 分でさらに増えた）。`STEPS` 側に持たせて一元化されていない。**`TEAMS` の配列の形は、この散在した代入をそのまま動かし続けるために温存してある**——2026-08-22 に帯の表示を自チームだけに絞った際も `kind:"other"`/`"lead"` の行を消さずに残し、2026-09-03 に全チーム表示へ戻したときは `kind:"other"` の行をサーバの集計で丸ごと入れ替える形にした（`syncTeamsFromSummary()` が `TEAMS[2]` の席だけ固定して詰め替える）。
+- **リーダーボード帯は、実データが取れているときだけ全チームを描く**（2026-09-03変更）。2026-08-22 に自チームだけへ絞ったのは、ダミーの他班を並べると入室時にチーム自身が入力した名前（ヘッダーのチップ・感謝状には反映済み）と食い違う嘘が帯だけに残るためで、`GET /api/progress/summary` から実際の位置が取れるようになった今はその理由が消えている。scripted時（実データ無し）は従来どおり自チームだけ。ラベルは `teamName`、未入室・devbar直行時は `TEAMS[2].nm`（"B班"）へフォールバックする（感謝状 `fShowHandover()` と同じ流儀。チーム自身の入力なので `esc()` を通す）。同じ停留所に並んだチームは3段まで縦に積み、溢れた分は「ほかNチーム」へまとめる（`drawMarks()`）。仕様の正典は [`../00_共通シェルと通奏低音.md`](../00_共通シェルと通奏低音.md) §5 の ⚠️。
 - **Enterで何かが起きる入力欄には、必ず `imeComposing(e)` ガードを入れる**（2026-08-22・実プレイで踏んだ）。日本語の変換確定Enterが送信・移動として発火し、書きかけの文がAIへ飛んでいた。現在のガード対象は3つ——`#ai-input`（送信）・グリッドのセル（下へ移動）・`#f-line-input`（一言の確定）。**Enterハンドラを足すときは同じガードから書き始めること**（参加者は全員が日本語入力）。
 - `#fever`（院内状況インジケータ）の直接代入も同様に散在。Stage 4・5・Final は値を動かさない（14のまま）が、リセット処理では他の値に戻す必要があり、結局同じ場所に手を入れることになる。
 - `unlock` オーバーレイの文言は、表示する側（`unlockSequence()`/`stage3UnlockSequence()`/`stage35UnlockSequence()`/`stage4UnlockSequence()`/`stage5UnlockSequence()`）が**毎回明示的にセットし直す**形にした。**`#ov-lock` の見出し（`#lock-hd`）も Stage 4 追加時に同じ流儀に揃えた**——HTMLの初期値に頼ると、どちらが先に使われたかで文言が化ける。次のステージを足す時もこの流儀を踏襲すること（Stage 5・Final は罠・罰が無いので `#ov-lock` 自体を触らない）。
 - `data-mode="crisis"` は Stage 3 で初めて使われるようになった。Stage 3.5・4・5・Final も `crisis` のまま（転調は起きない）。
-- 右ペインのAIチャットが応答を返す `view` は `sendAI()` がガードしており、**LIVE時とscripted時で範囲が違う**。LIVE時（`liveState` 確立済み）は `s3`・`s35`・`s4`・`final` を実APIへ通す（`liveTurn`）。台本応答を返すのは `s2`・`s3`・`s4`・`s35`・`s5`・`final`。**`s2` はLIVE・scriptedのどちらでも台本固定**（`s2ScriptedTable()`。2026-08-22 ユーザー決定。理由は上の「実AI接続」節）——旧 `devNotice`（「実AI接続時に有効になります」の案内バブル）はこの変更で不要になり削除した。**Stage 1 は右ペインを持たない**が、中央ペインの「AIに下書きさせる」ボタンが `s1DraftLive()` で実APIを呼ぶ（`promptProfile: "s1"`）ので、**Stage 1もLIVE時は実AIを使う**。Stage 5 だけは台本の文章応答ではなく `s5Generate()` へ分岐する（LIVE時も同じ——実APIを呼ばない）。**Final は台本応答を持たない**（`F_REQUEST_TRIGGER`/`F_AI_REPLY` は 2026-08-22 に削除）——scripted時はトリガー不一致と同じ既定応答へ合流する。
+- 右ペインのAIチャットが応答を返す `view` は `sendAI()` がガードしており、**LIVE時とscripted時で範囲が違う**。LIVE時（`liveState` 確立済み）は `s3`・`s35`・`s4` を実APIへ通す（`liveTurn`）。台本応答を返すのは `s2`・`s3`・`s4`・`s35`・`s5`。**`final` はどちらにも入らない**——`sendAI()` の入口ガードで即 return するので、Final のAIチャットは応答を返さない。**`s2` はLIVE・scriptedのどちらでも台本固定**（`s2ScriptedTable()`。2026-08-22 ユーザー決定。理由は上の「実AI接続」節）——旧 `devNotice`（「実AI接続時に有効になります」の案内バブル）はこの変更で不要になり削除した。**Stage 1 は右ペインを持たない**が、中央ペインの「AIに下書きさせる」ボタンが `s1DraftLive()` で実APIを呼ぶ（`promptProfile: "s1"`）ので、**Stage 1もLIVE時は実AIを使う**。Stage 5 だけは台本の文章応答ではなく `s5Generate()` へ分岐する（LIVE時も同じ——実APIを呼ばない）。**Final は台本応答も実API接続も持たない**（`F_REQUEST_TRIGGER`/`F_AI_REPLY` は 2026-08-22 に削除。`sendAI()` のガードにも `final` は無い）。
 - **右ペイン（`.pane-r`）の幅は `flex: 0 0 380px` だけでは決まり切らない。** flex要素の既定 `min-width: auto` が flex-basis を上書きするため、中身の min-content が 380px を超えるとペインが勝手に広がる。ステージ入場ごとに増えるスレッドタブ（`STAGE_THREAD_TITLES`）がこれを踏み、Stage 5（メイン＋5ステージ＝6枚）でペインが約478pxまで広がって、右端から400pxに置いてある院内連絡先（`.phs`）がAIの入力欄に重なっていた（2026-08-22・実プレイで報告、同日修正）。`min-width: 0`／`max-width: 380px` と、`.ai .tabs` の `overflow-x: auto`＋`.ai .tab { flex: 0 0 auto }` で塞いである。**左ペインや今後増えるペインでも同じ罠がある。**
 - `wait()`（Promise版タイマー）は `clearLater()` でキャンセルされない。Stage 3・3.5・4・5・Final の新設シーケンスは要所に `if (view !== "sX") return;` の軽いガードを入れて緩和したが、**根本修正はしていない**。
 - **動的に注入した要素は必ず後始末する。** `startPenalty()`/`startS4Penalty()` は `#penalty-host` の中身を都度生成するので、`finishPenalty()`/`finishS4Penalty()` と `hideOverlays()` の両方で空にしている。**Stage 4 は `pane-r.locked` という別種の後始末も増えた**（同じく `finishS4Penalty()` と `hideOverlays()` の両方で外す）。**Stage 3.5・5・Final は罰ゲームが無いので `#penalty-host`/`pane-r.locked` の後始末は不要**——Stage 5 は代わりに `#s5-gen`（残り生成回数の表示）を `go()` の共通リセットで毎回 `hide` に戻し `renderStage5()` だけが外す、という独自の器を持つ。
