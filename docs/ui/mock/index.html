@@ -3775,10 +3775,14 @@
     const res = await liveFetch("/api/teams/" + teamCode + "/chat/threads", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ type: "create-thread", commandId: crypto.randomUUID(), title }),
+      // kind:"stage" はステージ入場で自動に作られる枠。サーバは stage(8件)と
+      // manual(25件)を独立に数えるので、参加者が＋で足したスレッドの数に関係なく、
+      // ステージぶんは必ず作れる。
+      body: JSON.stringify({ type: "create-thread", commandId: crypto.randomUUID(), title, kind: "stage" }),
     });
     stageThreadCreating.delete(title);
-    // 失敗しても進行は止めない。現行スレッドのまま従来どおり会話できる。
+    // 失敗しても進行は止めない。現行スレッドのまま従来どおり会話できる
+    // ——409（上限）も含めてここへ落ちる（stage枠は独立なので実運用では起きない）。
     if (!res.ok || !res.body) return;
     if (!liveState || liveState.teamCode !== teamCode) return;
     liveState.threads = res.body.snapshot.threads;
@@ -3796,9 +3800,17 @@
     const res = await liveFetch("/api/teams/" + liveState.teamCode + "/chat/threads", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ type: "create-thread", commandId: crypto.randomUUID(), title }),
+      // kind:"manual" は参加者が＋で足す枠（上限25件）。省略時もmanual扱いだが、
+      // stage側と対で読めるよう明示する。
+      body: JSON.stringify({ type: "create-thread", commandId: crypto.randomUUID(), title, kind: "manual" }),
     });
-    if (!res.ok || !res.body) return;   // スレッド追加は進行を止めない操作なので、失敗しても静かに諦める
+    if (res.status === 409) {
+      // 上限に当たった。黙って何も起きないと「＋が壊れている」ように見えるので、
+      // 理由だけは告げる（進行は止めない——今のスレッドでそのまま会話できる）。
+      aiBubble("システム", esc((res.body && res.body.message) || "スレッドは 25 件までです。"));
+      return;
+    }
+    if (!res.ok || !res.body) return;   // それ以外の失敗は、進行を止めない操作なので静かに諦める
     liveState.threads = res.body.snapshot.threads;
     liveState.activeThreadId = liveState.threads[liveState.threads.length - 1].threadId;
     renderAiTabs();
