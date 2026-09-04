@@ -105,6 +105,11 @@ JS 構造そのものは資産ではない。単一ファイル・フレーム�
   下書き（`draftCtx`/`draftPlain`）に落ちる。
 - Stage 5 はLIVE時も画像生成APIを呼ばない。`s5Generate()` が事前生成の候補画像をプロンプトの
   タグ一致で出し分ける従来どおりの専用フローのまま。
+- **422 の扱いは `code` で分ける**（2026-09-04追加）。`pii_blocked`（送信前ゲート／未保存）のときだけ
+  再送用の `commandId` を破棄する。`history_pii`・`ai_refusal` は**ユーザー発言が保存済み**（AI未応答）なので
+  IDを保持し、`GET /api/teams/:code/chat` を取り直して再描画する——同じ本文を送り直すと同じ`commandId`で
+  送られ、DO側の冪等性に当たって二重保存にならない（`isUnsavedRejection()`。AIチャットとStage 1の下書きで共通）。
+  `code`を持たない422は「保存済み」側へ倒す（取り違えたときの損が片側だけ大きいため）。エラー文言は従来どおり。
 - **429（レート制限）は「失敗」ではなく「待て」として出す**（2026-09-04追加）。`liveFetch()` が
   `Retry-After`（秒）を `retryAfter` として返し、AIチャット（`handleLiveChatError()`）とStage 1の
   下書き（`s1DraftLive()`）が「送信が多すぎます。N 秒待ってからもう一度送ってください。」を表示する
@@ -127,6 +132,10 @@ JS 構造そのものは資産ではない。単一ファイル・フレーム�
   下ろす）で追い、`pagehide`／`visibilitychange(hidden)` で dirty なら最新状態から組み直して
   `keepalive: true` の fetch で投げ切る——**デバウンス待ちだけでなく、キュー待ち・送信中（fetchが返る前）の
   リロードでも送る**。ここを取りこぼすと、罠を踏んだ直後にリロードしたチームだけ同じ罠をもう一度踏める。
+  この離脱時の1発だけは body に **`flush: true`** を付ける（通常経路には付けない）——送信中の通常POSTと
+  同じ`expectedRevision`を握っているため素のままだと片方が409になり、離脱側が負けると残したかった罠フラグが
+  落ちる。flush の保存はサーバがrevisionの一致を要求せず、trapはOR・posとelapsedMsはmax・viewとdataはposが
+  大きい側、で単調にマージして200を返す。
   POSTは1本のPromiseチェーンで**直列化**し、
   bodyは必ず送る直前の最新状態から組み直す（古いbodyが後から新しいrevisionで通ると状態が巻き戻る）。
   成功応答のrevisionは、送った`expectedRevision`+1と一致するときだけ採用する。409は応答の `code`

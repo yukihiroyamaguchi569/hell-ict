@@ -3595,9 +3595,13 @@
      復帰したチームが同じ罠をもう一度踏めてしまう。
 
      キューは通さない——チェーンの手前に何か詰まっていると離脱までに送れない。
-     送信中のPOSTと二重になるが、commandId は新規で構わない：サーバは
-     revision の CAS と罠・経過時間・停留所の後退拒否で守られており、
-     古い方が後から通っても状態を巻き戻せない。 */
+
+     `flush: true` を付ける。送信中の通常POSTとこれは同じ expectedRevision を握って
+     いるので、素のまま投げると片方が 409 conflict になる——離脱側が負けると、
+     まさに残したかった罠フラグが落ちる。flush を立てた保存だけは、サーバが
+     revision の一致を要求せず、trap は OR・pos と elapsedMs は max・view と data は
+     pos が大きい側、で単調にマージして 200 を返す（どちらが先に着いても後退しない）。
+     通常経路には付けない——CAS を外すのは離脱時の1発だけに限る。 */
   function flushCheckpoint() {
     if (!checkpointDirty) return;
     if (checkpointTimer !== null) clearTimeout(checkpointTimer);
@@ -3612,6 +3616,7 @@
           commandId: crypto.randomUUID(),
           expectedRevision: liveState.checkpointRevision,
           body: checkpointBody(),
+          flush: true,
         }),
         keepalive: true,
       }).catch(() => {});
@@ -3864,16 +3869,23 @@
      同じ commandId を再利用しなければならない——送信のたびに crypto.randomUUID()
      で振り直していたため、20秒タイムアウト後の再送が別コマンドとして通り、
      ユーザーメッセージの二重保存とOpenAIの二重呼び出しを起こしていた
-     （2026-08-22 修正）。キーは送信テキスト——同じ文面を送り直したときだけIDを
-     再利用し、別の文面を送ったら新しい試行として扱う。
+     （2026-08-22 修正）。
+
+     キーは threadId・promptProfile・本文の3つを繋いだもの。本文だけを見ていた頃は、
+     別スレッド（Stage 2 のタブと Stage 3 のタブ）や別ステージ（promptProfile が
+     "default" と "s3"）へ同じ文面を送ると同じ commandId が再利用され、2通目が
+     「処理済みの再送」と見なされて片方が消えていた。同じ宛先へ同じ文面を送り直した
+     ときだけIDを再利用する、が正しい単位。
+
      送信経路ごとに1枠ずつ持つ（AIチャットの sendAiLive と Stage 1 の s1DraftLive）
      ——どちらも同じメインスレッドへ書き込むが、進行中の試行は経路ごとに独立で、
      片方の成功でもう片方のIDを捨ててはいけない。 */
   function makePendingCommand() {
     let pending = null;
     return {
-      idFor(text) {
-        if (pending === null || pending.text !== text) pending = { text, commandId: crypto.randomUUID() };
+      idFor(threadId, promptProfile, text) {
+        const key = threadId + " " + promptProfile + " " + text;
+        if (pending === null || pending.key !== key) pending = { key, commandId: crypto.randomUUID() };
         return pending.commandId;
       },
       clear() { pending = null; }
@@ -3881,6 +3893,22 @@
   }
 
   const chatSendCommand = makePendingCommand();
+
+  /* サーバに何も保存されないまま確定した拒否か。ここが false のときは、
+     ユーザー発言だけが保存済み（AIは未応答）なので、commandId を捨ててはいけない
+     ——捨てると同じ本文の再送が別コマンドになり、発言が二重に積まれる。
+
+     422 の内訳はサーバの code で分かる：
+       pii_blocked … 送信前ゲートで止めた。何も保存されていない
+       history_pii … 履歴にPIIを見つけて中断。ユーザー発言は保存済み
+       ai_refusal  … AIが回答を拒否。ユーザー発言は保存済み
+     code が読めない422（codeを載せる前のサーバ）は「保存済み」側に倒す
+     ——IDを持ち越しても、未保存なら台帳に無いので普通に処理されるだけで害が無く、
+     取り違えたときの損（二重保存）が片側だけ大きいため。 */
+  function isUnsavedRejection(res) {
+    if (res.status === 400) return true;   // schema違反。DOへ渡る前に落ちている
+    return res.status === 422 && res.body !== null && res.body.code === "pii_blocked";
+  }
 
   /* 送信に失敗した後のスレッド表示を、サーバのスナップショットで復元する。
      プレースホルダを消すだけだと、DO側では適用済みなのに画面から消えた
@@ -3902,16 +3930,18 @@
   async function sendAiLive(text) {
     aiSending = true;
     $("ai-send").disabled = true;
+    // 再送用IDのキーにも入るので、送信本文と同じ一箇所から決める。
+    const chatProfile = view === "s3" ? "s3" : "default";
     const placeholder = aiPlaceholderBubble();
     const res = await liveFetch("/api/teams/" + liveState.teamCode + "/chat/messages", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
         type: "send-message",
-        commandId: chatSendCommand.idFor(text),
+        commandId: chatSendCommand.idFor(liveState.activeThreadId, chatProfile, text),
         threadId: liveState.activeThreadId,
         text,
-        promptProfile: view === "s3" ? "s3" : "default",
+        promptProfile: chatProfile,
       }),
     });
     aiSending = false;
@@ -3925,12 +3955,14 @@
       return;
     }
     placeholder.remove();   // プレースホルダは残留させない（差し替え or 削除のどちらか必ず）
-    // 400（長すぎ）・422（PIIゲート/AI拒否）はコマンドが適用されずに確定した拒否
-    // なので、IDを持ち越さず、サーバ状態も動いていないから取り直さない。
-    // 0（タイムアウト・ネットワーク断）・409（処理中）・503（一時障害）は結果が
-    // 未確定——同じIDで再送すればDO側の冪等性に当たる。この場合だけ、DO側で適用
-    // 済みかどうかが画面から判断できないので、スナップショットを取り直して描き直す。
-    if (res.status === 400 || res.status === 422) {
+    // 何も保存されずに確定した拒否（400・422 pii_blocked）は、IDを持ち越さず、
+    // サーバ状態も動いていないから取り直さない。
+    // それ以外——422 history_pii/ai_refusal（ユーザー発言は保存済み・AI未応答）、
+    // 0（タイムアウト・断）、409（処理中）、503（一時障害）——はIDを保持する。
+    // 同じ本文を送り直せば同じcommandIdで送られ、DO側の冪等性に当たって二重保存
+    // にならない。画面はサーバの状態と食い違っているので取り直して描き直す
+    // （history_pii/ai_refusal では、保存済みのユーザー発言がここで現れる）。
+    if (isUnsavedRejection(res)) {
       chatSendCommand.clear();
     } else {
       await restoreChatFromServer();
@@ -4895,7 +4927,7 @@
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
         type: "send-message",
-        commandId: s1DraftCommand.idFor(text),
+        commandId: s1DraftCommand.idFor(liveState.activeThreadId, "s1", text),
         threadId: liveState.activeThreadId,
         text,
         promptProfile: "s1",
@@ -4912,12 +4944,15 @@
       return;
     }
 
-    // 400（長すぎ）/422（PII等）は適用されずに確定した拒否なのでIDを持ち越さない。
+    // sendAiLive と同じ切り分け。何も保存されずに確定した拒否（400・422
+    // pii_blocked）だけIDを捨てる。422 history_pii/ai_refusal はユーザー発言が
+    // 保存済みなので持ち越す——捨てると再送が別コマンドになり発言が二重に積まれる。
     // 429（レート制限）も本文はまだ処理されていないが、同じ下書きを送り直すのが
     // 自然なのでIDは持ち越す（待ってから押し直せば冪等に当たる）。
     // 0（タイムアウト・断）/409（処理中）/503 は結果が未確定——同じIDで再送すれば
     // DO側の冪等性に当たる。
-    if (res.status === 400 || res.status === 422) s1DraftCommand.clear();
+    const unsaved = isUnsavedRejection(res);
+    if (unsaved) s1DraftCommand.clear();
 
     if (res.status === 429) {
       // レート制限だけは「失敗」ではなく「待て」なので、専用の文言をボタンへ出す。
@@ -4926,7 +4961,8 @@
       return;   // 未確定ではないのでスナップショットの取り直しも要らない
     }
 
-    // 422（PII等）/409（二重送信）/503・タイムアウト、いずれもここへ集約する。
+    // 422（PIIゲート・履歴PII・AI拒否）/409（二重送信）/503・タイムアウト、
+    // いずれもここへ集約する。
     // Stage1は締切が短いので、専用の警告行は作らずボタンの文言を一時的に
     // 差し替えるだけにして、必ず再クリック可能な状態へ戻す（固まらせない）。
     // ——スナップショットの取り直し（下）より先にここを済ませる。取り直しの
@@ -4937,7 +4973,7 @@
     // 結果が未確定のまま liveState.threads を放置すると、Stage 2 でAIペインを開いた
     // ときに実際の履歴とズレる。sendAiLive と同じ restoreChatFromServer() で
     // 取り直しておく（表示の復元ではなく、状態の整合が目的）。
-    if (res.status !== 400 && res.status !== 422) await restoreChatFromServer();
+    if (!unsaved) await restoreChatFromServer();
   }
 
   /* 下書きボタンを失敗表示へ戻し、少し置いて元の文言へ戻す。s1DraftLive の
