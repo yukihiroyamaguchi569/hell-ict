@@ -5,6 +5,7 @@ import {
   chatSnapshotSchema,
   checkpointSnapshotSchema,
   commandResultSchema,
+  countThreadsOfKind,
   createThread as domainCreateThread,
   createThreadCommandSchema,
   createThreadResultSchema,
@@ -23,6 +24,7 @@ import type {
   ChatMessage,
   ChatMessageResult,
   ChatSnapshot,
+  ChatThreadKind,
   CheckpointRejectionReason,
   CheckpointSnapshot,
   CommandResult,
@@ -64,8 +66,8 @@ export type CheckpointRejection = { rejected: CheckpointRejectionReason };
  */
 class CheckpointConflictError extends Error {}
 
-/** スレッド上限に達した作成要求。DOには何も保存しない。 */
-export type ThreadLimitReply = { threadLimit: true; max: number };
+/** スレッド上限に達した作成要求。DOには何も保存しない。kindごとに文言を変える。 */
+export type ThreadLimitReply = { threadLimit: true; max: number; kind: ChatThreadKind };
 
 export type BeginChatMessageOutcome =
   | { kind: "already-processed"; result: ChatMessageResult }
@@ -103,11 +105,18 @@ const PENDING_MESSAGE_EXPIRY_MS = 6 * 60 * 60 * 1000;
 const CLAIM_TIMEOUT_MS = 45 * 1000;
 
 /**
- * 1チームが持てるスレッド数の上限。ステージごとに自動で開くスレッド（5本）に加えて、
- * 参加者が手で足す余裕を見た値。これを超える作成要求は、DOのストレージを
- * 際限なく膨らませる操作か暴走とみなして拒否する。
+ * 1チームが持てるスレッド数の上限。kindごとに独立して数える——上限を1本にすると、
+ * 手動スレッドを作りすぎたチームがステージ進行そのものを止めてしまう。
+ * どちらもDOのストレージが際限なく膨らむのを防ぐための粗い上限である。
  */
-export const MAX_THREADS_PER_TEAM = 30;
+export const MAX_MANUAL_THREADS_PER_TEAM = 25;
+/** ステージが自動で開く5本に、改名・再設計の余裕を足した値。 */
+export const MAX_STAGE_THREADS_PER_TEAM = 8;
+
+const THREAD_LIMITS: Readonly<Record<ChatThreadKind, number>> = {
+  manual: MAX_MANUAL_THREADS_PER_TEAM,
+  stage: MAX_STAGE_THREADS_PER_TEAM,
+};
 
 /** rate_limitの行。壊れた値でレート制限が黙って無効化されないよう実行時に検証する。 */
 const storedRateLimitSchema = z.object({ count: z.number().int().nonnegative() });
@@ -266,13 +275,15 @@ export class TeamRoom extends DurableObject<Env> {
     if (saved !== null) return createThreadResultSchema.parse(JSON.parse(saved.result) as unknown);
     const snapshot = this.loadChatSnapshot(teamCode);
     // 冪等再送（processed済み）は上限に関係なく従来の結果を返す。上限を当てるのは
-    // 新しいスレッドを実際に増やすときだけである。
-    if (snapshot.threads.length >= MAX_THREADS_PER_TEAM) {
-      return { threadLimit: true, max: MAX_THREADS_PER_TEAM };
+    // 新しいスレッドを実際に増やすときだけである。kindごとに独立して数える。
+    const max = THREAD_LIMITS[command.kind];
+    if (countThreadsOfKind(snapshot, command.kind) >= max) {
+      return { threadLimit: true, max, kind: command.kind };
     }
     const created = domainCreateThread(snapshot, {
       threadId: crypto.randomUUID(),
       title: command.title,
+      kind: command.kind,
     });
     if (!created.ok) throw new Error("スレッドの作成に失敗しました。");
     this.saveChatSnapshot(created.snapshot);

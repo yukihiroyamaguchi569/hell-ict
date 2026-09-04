@@ -115,9 +115,13 @@ export const handleCreateThread = async (
   try {
     const result = await scope.env.TEAM_ROOM.getByName(teamCode).createThread(teamCode, command);
     // 上限超過は何も作られていないので、活動ログにも作成として残さない。
+    // 文言はkindで変える——手動の上限は参加者が減らせるが、ステージ用の枠は
+    // 参加者の操作では空かないので、同じ案内を出すと直しようのない指示になる。
     if ("threadLimit" in result)
       return error(
-        `スレッドは1チーム${String(result.max)}件までです。不要なスレッドの利用をやめてから作成してください。`,
+        result.kind === "stage"
+          ? "ステージ用スレッドの上限に達しました。"
+          : `スレッドは${String(result.max)}件までです。不要なスレッドの利用をやめてから作成してください。`,
         409,
       );
     // 作成されたスレッドは末尾へ足される（domainのcreateThread）。分析で

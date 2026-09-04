@@ -1,4 +1,4 @@
-import type { ChatMessage, ChatSnapshot, ChatThreadId } from "./schemas/chat.js";
+import type { ChatMessage, ChatSnapshot, ChatThreadId, ChatThreadKind } from "./schemas/chat.js";
 import type { TeamCode } from "./schemas/team-state.js";
 
 export const initialChatSnapshot = (
@@ -16,7 +16,7 @@ export type ChatMutationResult =
 
 export const createThread = (
   snapshot: ChatSnapshot,
-  params: { threadId: ChatThreadId; title: string },
+  params: { threadId: ChatThreadId; title: string; kind: ChatThreadKind },
 ): ChatMutationResult => {
   if (snapshot.threads.some((thread) => thread.threadId === params.threadId)) {
     return { ok: false, reason: "duplicate-thread" };
@@ -28,11 +28,18 @@ export const createThread = (
       revision: snapshot.revision + 1,
       threads: [
         ...snapshot.threads,
-        { threadId: params.threadId, title: params.title, messages: [] },
+        { threadId: params.threadId, title: params.title, kind: params.kind, messages: [] },
       ],
     },
   };
 };
+
+/**
+ * `kind`ごとのスレッド数。kindを持たないスレッド（この項目を足す前に作られたもの）は
+ * manualとして数える——ステージ用の枠を、過去のスレッドで先に埋めさせない。
+ */
+export const countThreadsOfKind = (snapshot: ChatSnapshot, kind: ChatThreadKind): number =>
+  snapshot.threads.filter((thread) => (thread.kind ?? "manual") === kind).length;
 
 export const appendMessage = (
   snapshot: ChatSnapshot,

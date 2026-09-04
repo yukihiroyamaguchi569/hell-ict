@@ -1,6 +1,11 @@
 import { describe, expect, it } from "vitest";
 
-import { appendMessage, createThread, initialChatSnapshot } from "../src/chat.js";
+import {
+  appendMessage,
+  countThreadsOfKind,
+  createThread,
+  initialChatSnapshot,
+} from "../src/chat.js";
 import { chatMessageSchema } from "../src/schemas/chat.js";
 
 const mainThreadId = "00000000-0000-4000-8000-000000000001";
@@ -45,7 +50,7 @@ describe("チャットスレッドの純粋関数", () => {
 
   it("他スレッドの順序を保ったまま、対象スレッドだけへ追加する", () => {
     const base = initialChatSnapshot("000000", mainThreadId);
-    const withSecond = createThread(base, { threadId: otherThreadId, title: "副" });
+    const withSecond = createThread(base, { threadId: otherThreadId, title: "副", kind: "manual" });
     if (!withSecond.ok) throw new Error("unexpected");
     const first = appendMessage(withSecond.snapshot, {
       threadId: mainThreadId,
@@ -63,19 +68,60 @@ describe("チャットスレッドの純粋関数", () => {
 
   it("スレッドを作成し、重複threadIdを拒否する", () => {
     const snapshot = initialChatSnapshot("000000", mainThreadId);
-    const created = createThread(snapshot, { threadId: otherThreadId, title: "副" });
+    const created = createThread(snapshot, {
+      threadId: otherThreadId,
+      title: "副",
+      kind: "manual",
+    });
     expect(created).toEqual({
       ok: true,
       snapshot: {
         ...snapshot,
         revision: 1,
-        threads: [...snapshot.threads, { threadId: otherThreadId, title: "副", messages: [] }],
+        threads: [
+          ...snapshot.threads,
+          { threadId: otherThreadId, title: "副", kind: "manual", messages: [] },
+        ],
       },
     });
     if (!created.ok) throw new Error("unexpected");
-    expect(createThread(created.snapshot, { threadId: mainThreadId, title: "重複" })).toEqual({
+    expect(
+      createThread(created.snapshot, { threadId: mainThreadId, title: "重複", kind: "manual" }),
+    ).toEqual({
       ok: false,
       reason: "duplicate-thread",
     });
+  });
+});
+
+describe("countThreadsOfKind", () => {
+  const base = initialChatSnapshot("000000", mainThreadId);
+
+  it("kindを持たない既存スレッドはmanualとして数える", () => {
+    // initialChatSnapshotのメインスレッドはkindを持たない。ステージ枠を過去の
+    // スレッドで先に埋めさせないため、manual側へ寄せる。
+    expect(base.threads[0]?.kind).toBeUndefined();
+    expect(countThreadsOfKind(base, "manual")).toBe(1);
+    expect(countThreadsOfKind(base, "stage")).toBe(0);
+  });
+
+  it("kindごとに独立して数える", () => {
+    const withStage = createThread(base, {
+      threadId: otherThreadId,
+      title: "Stage 1",
+      kind: "stage",
+    });
+    if (!withStage.ok) throw new Error("unexpected");
+    expect(countThreadsOfKind(withStage.snapshot, "stage")).toBe(1);
+    expect(countThreadsOfKind(withStage.snapshot, "manual")).toBe(1);
+
+    const withManual = createThread(withStage.snapshot, {
+      threadId: "00000000-0000-4000-8000-000000000003",
+      title: "副",
+      kind: "manual",
+    });
+    if (!withManual.ok) throw new Error("unexpected");
+    expect(countThreadsOfKind(withManual.snapshot, "stage")).toBe(1);
+    expect(countThreadsOfKind(withManual.snapshot, "manual")).toBe(2);
   });
 });

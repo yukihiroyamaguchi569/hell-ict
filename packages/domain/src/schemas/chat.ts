@@ -15,10 +15,19 @@ export const chatMessageSchema = z
   })
   .strict();
 
+/**
+ * スレッドの出どころ。ステージ進行が自動で開くもの（stage）と、参加者が足すもの
+ * （manual）を分けて数えるために持つ——上限を1本にすると、手動スレッドを作りすぎた
+ * チームがステージ進行そのものを止めてしまう。
+ */
+export const chatThreadKindSchema = z.enum(["stage", "manual"]);
+
 export const chatThreadSchema = z
   .object({
     threadId: chatThreadIdSchema,
     title: z.string().trim().min(1).max(40),
+    // kindを持たないスレッド（この列を足す前に作られたもの）はmanualとして数える。
+    kind: chatThreadKindSchema.optional(),
     messages: z.array(chatMessageSchema),
   })
   .strict();
@@ -36,6 +45,8 @@ export const createThreadCommandSchema = z
     type: z.literal("create-thread"),
     commandId: commandIdSchema,
     title: z.string().trim().min(1).max(40),
+    // 既存クライアントはkindを送らない。参加者の手動追加として扱う。
+    kind: chatThreadKindSchema.default("manual"),
   })
   .strict();
 
@@ -77,6 +88,7 @@ export type ChatRole = z.infer<typeof chatRoleSchema>;
 export type PromptProfile = z.infer<typeof promptProfileSchema>;
 export type ChatMessage = z.infer<typeof chatMessageSchema>;
 export type ChatThread = z.infer<typeof chatThreadSchema>;
+export type ChatThreadKind = z.infer<typeof chatThreadKindSchema>;
 export type ChatSnapshot = z.infer<typeof chatSnapshotSchema>;
 export type CreateThreadCommand = z.infer<typeof createThreadCommandSchema>;
 export type SendMessageCommand = z.infer<typeof sendMessageCommandSchema>;

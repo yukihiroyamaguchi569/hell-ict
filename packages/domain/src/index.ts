@@ -22,6 +22,7 @@ export {
   chatMessageResultSchema,
   chatMessageSchema,
   chatSnapshotSchema,
+  chatThreadKindSchema,
   chatThreadSchema,
   createThreadCommandSchema,
   createThreadResultSchema,
@@ -37,12 +38,13 @@ export type {
   ChatSnapshot,
   ChatThread,
   ChatThreadId,
+  ChatThreadKind,
   CreateThreadCommand,
   CreateThreadResult,
   PromptProfile,
   SendMessageCommand,
 } from "./schemas/chat.js";
-export { appendMessage, createThread, initialChatSnapshot } from "./chat.js";
+export { appendMessage, countThreadsOfKind, createThread, initialChatSnapshot } from "./chat.js";
 export type { ChatMutationResult } from "./chat.js";
 export {
   CHECKPOINT_DATA_MAX_BYTES,

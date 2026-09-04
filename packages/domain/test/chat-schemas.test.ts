@@ -56,7 +56,8 @@ describe("チャットschemaの境界", () => {
   it("コマンドはtypeで判別され、未知typeと欠落フィールドを拒否する", () => {
     const createThread = { type: "create-thread", commandId, title: "副" };
     const sendMessage = { type: "send-message", commandId, threadId, text: "本文" };
-    expect(chatCommandSchema.parse(createThread)).toEqual(createThread);
+    // kindを送らない既存クライアントはmanualとして解釈される（既定値）。
+    expect(chatCommandSchema.parse(createThread)).toEqual({ ...createThread, kind: "manual" });
     expect(chatCommandSchema.parse(sendMessage)).toEqual(sendMessage);
     for (const input of [
       { type: "delete-thread", commandId, threadId },

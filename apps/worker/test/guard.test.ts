@@ -22,7 +22,7 @@ import {
   rateLimitRetryAfterSeconds,
 } from "../src/guard.js";
 import { handleChatMessage } from "../src/index.js";
-import { MAX_THREADS_PER_TEAM } from "../src/team-room.js";
+import { MAX_MANUAL_THREADS_PER_TEAM, MAX_STAGE_THREADS_PER_TEAM } from "../src/team-room.js";
 import { get, postJson, session, TEST_ORIGIN, upgrade } from "./support.js";
 
 const OTHER_ORIGIN = "https://evil.test";
@@ -465,54 +465,116 @@ describe("ヘルスチェックのguards", () => {
 });
 
 describe("スレッド数の上限", () => {
-  it("上限まで作れ、超えた分は409でDOに保存しない", async () => {
-    await session("500040");
-    // 入室時点でメインスレッドが1本ある。残り枠ぶんちょうど作れることを確かめる。
-    const created = await get("/api/teams/500040/chat");
-    const initial = chatSnapshotSchema.parse(await created.json()).threads.length;
+  const createThread = (
+    teamCode: string,
+    commandId: string,
+    title: string,
+    kind?: "stage" | "manual",
+  ): Promise<Response> =>
+    postJson(`/api/teams/${teamCode}/chat/threads`, {
+      type: "create-thread",
+      commandId,
+      title,
+      ...(kind === undefined ? {} : { kind }),
+    });
 
-    for (let index = initial; index < MAX_THREADS_PER_TEAM; index += 1) {
-      const response = await postJson("/api/teams/500040/chat/threads", {
-        type: "create-thread",
-        commandId: messageCommandId(2000 + index),
-        title: `副${String(index)}`,
-      });
+  const threadsOf = async (teamCode: string): Promise<number> => {
+    const response = await get(`/api/teams/${teamCode}/chat`);
+    return chatSnapshotSchema.parse(await response.json()).threads.length;
+  };
+
+  it("手動スレッドは上限まで作れ、超えた分は409でDOに保存しない", async () => {
+    await session("500040");
+    // 入室時点のメインスレッドはkindを持たない＝manualとして数える。
+    const initial = await threadsOf("500040");
+    expect(initial).toBe(1);
+
+    for (let index = initial; index < MAX_MANUAL_THREADS_PER_TEAM; index += 1) {
+      const response = await createThread(
+        "500040",
+        messageCommandId(2000 + index),
+        `副${String(index)}`,
+      );
       expect(response.status, `#${String(index)}`).toBe(200);
     }
 
-    const blocked = await postJson("/api/teams/500040/chat/threads", {
-      type: "create-thread",
-      commandId: messageCommandId(2100),
-      title: "あふれる",
-    });
+    const blocked = await createThread("500040", messageCommandId(2100), "あふれる");
     expect(blocked.status).toBe(409);
     await expect(blocked.json()).resolves.toMatchObject({
-      message: expect.stringContaining(String(MAX_THREADS_PER_TEAM)),
+      message: expect.stringContaining(String(MAX_MANUAL_THREADS_PER_TEAM)),
+    });
+    await expect(threadsOf("500040")).resolves.toBe(MAX_MANUAL_THREADS_PER_TEAM);
+  });
+
+  it("手動を使い切ってもステージ用スレッドは作れる（枠は独立）", async () => {
+    await session("500042");
+    const initial = await threadsOf("500042");
+    for (let index = initial; index < MAX_MANUAL_THREADS_PER_TEAM; index += 1) {
+      await createThread("500042", messageCommandId(2500 + index), `副${String(index)}`);
+    }
+    expect((await createThread("500042", messageCommandId(2600), "あふれる")).status).toBe(409);
+
+    // 手動が満杯でも、ステージ進行は止まらない。
+    const stage = await createThread("500042", messageCommandId(2601), "Stage 1", "stage");
+    expect(stage.status).toBe(200);
+    await expect(threadsOf("500042")).resolves.toBe(MAX_MANUAL_THREADS_PER_TEAM + 1);
+  });
+
+  it("ステージ用スレッドは上限を超えると409で、文言が手動と違う", async () => {
+    await session("500043");
+    for (let index = 0; index < MAX_STAGE_THREADS_PER_TEAM; index += 1) {
+      const response = await createThread(
+        "500043",
+        messageCommandId(2700 + index),
+        `Stage ${String(index)}`,
+        "stage",
+      );
+      expect(response.status, `#${String(index)}`).toBe(200);
+    }
+
+    const blocked = await createThread("500043", messageCommandId(2800), "Stage 9", "stage");
+    expect(blocked.status).toBe(409);
+    await expect(blocked.json()).resolves.toMatchObject({
+      message: "ステージ用スレッドの上限に達しました。",
     });
 
-    // 上限を超えるスレッドはDOに残っていない。
-    const after = await get("/api/teams/500040/chat");
-    expect(chatSnapshotSchema.parse(await after.json()).threads).toHaveLength(MAX_THREADS_PER_TEAM);
+    // ステージ枠を使い切っても、手動枠はまだ空いている。
+    const manual = await createThread("500043", messageCommandId(2801), "手動");
+    expect(manual.status).toBe(200);
+  });
+
+  it("kindを送らない既存クライアントの作成はmanualとして数える", async () => {
+    await session("500044");
+    const created = await createThread("500044", messageCommandId(2900), "副");
+    expect(created.status).toBe(200);
+    // manual枠だけが減っているので、ステージ枠は満額残っている。
+    for (let index = 0; index < MAX_STAGE_THREADS_PER_TEAM; index += 1) {
+      const response = await createThread(
+        "500044",
+        messageCommandId(2910 + index),
+        `Stage ${String(index)}`,
+        "stage",
+      );
+      expect(response.status, `#${String(index)}`).toBe(200);
+    }
   });
 
   it("上限に達していても、処理済みcommandIdの再送は同じ結果を返す", async () => {
     await session("500041");
     const commandId = messageCommandId(2200);
-    const create = (id: string, title: string): Promise<Response> =>
-      postJson("/api/teams/500041/chat/threads", { type: "create-thread", commandId: id, title });
 
-    const firstResponse = await create(commandId, "副1");
+    const firstResponse = await createThread("500041", commandId, "副1");
     expect(firstResponse.status).toBe(200);
     const firstBody = await firstResponse.json();
 
-    const snapshot = chatSnapshotSchema.parse(await (await get("/api/teams/500041/chat")).json());
-    for (let index = snapshot.threads.length; index < MAX_THREADS_PER_TEAM; index += 1) {
-      await create(messageCommandId(2300 + index), `副${String(index)}`);
+    const initial = await threadsOf("500041");
+    for (let index = initial; index < MAX_MANUAL_THREADS_PER_TEAM; index += 1) {
+      await createThread("500041", messageCommandId(2300 + index), `副${String(index)}`);
     }
-    expect((await create(messageCommandId(2400), "あふれる")).status).toBe(409);
+    expect((await createThread("500041", messageCommandId(2400), "あふれる")).status).toBe(409);
 
     // 上限に達した後でも、既に処理したcommandIdの再送は409にせず同じ結果を返す。
-    const resent = await create(commandId, "副1");
+    const resent = await createThread("500041", commandId, "副1");
     expect(resent.status).toBe(200);
     await expect(resent.json()).resolves.toEqual(firstBody);
   });
