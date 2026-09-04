@@ -3428,6 +3428,15 @@
   let entryRetry = probeLive;
   let entryBusy = false;   // 入室手続きの実行中（多重クリック防止）
 
+  /* 入室を止めていた状態の後始末。プローブのやり直しと台本モードの選択で
+     同じものを通す——片方だけ消し忘れると、ボタンがdisabledのまま残って
+     入室そのものができなくなる。 */
+  function clearEntryBlock() {
+    entryBlockMessage = null;
+    entryRetry = probeLive;
+    entryBusy = false;
+  }
+
   function updateEntryProbeUi() {
     const btn = $("btn-enter");
     const note = $("entry-probe");
@@ -3454,8 +3463,7 @@
       return;
     }
     liveProbeState = "pending";
-    entryBlockMessage = null;
-    entryRetry = probeLive;
+    clearEntryBlock();
     updateEntryProbeUi();
     const ctrl = new AbortController();
     const timer = setTimeout(() => ctrl.abort(), LIVE_PROBE_TIMEOUT_MS);
@@ -3483,6 +3491,10 @@
   $("btn-probe-offline").addEventListener("click", () => {
     LIVE = false;
     liveProbeState = "scripted";
+    // プローブ失敗だけでなく、入室手続きの途中（進行状況の取得失敗）から
+    // 選ばれることもある。そちらの理由も必ず消す——消し忘れると失敗表示と
+    // disabled が残り、台本モードを選んだのに入室できない。
+    clearEntryBlock();
     updateEntryProbeUi();
   });
 
@@ -8305,8 +8317,8 @@
     }
     showEntryError("");
     if (entryBusy) return;   // ［入室する］と［再試行］の多重起動を止める
+    clearEntryBlock();
     entryBusy = true;
-    entryBlockMessage = null;
     updateEntryProbeUi();
     const sessionRes = await liveFetch("/api/session", {
       method: "POST",
