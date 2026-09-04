@@ -3486,7 +3486,32 @@
       elapsedMs: elapsed * 1000,
       trap: { s3Used: s3TrapUsed, s4Used: s4TrapUsed },
       data: { s3Penalty: s3PenaltyState, s4Penalty: s4PenaltyState },
+      dataRevision: nextDataRevision(),
     };
+  }
+
+  /* data（罰の進行）の世代番号。pos と elapsedMs は数値そのものが単調なので
+     後退を弾けるが、data は中身を見ても新旧が決まらない——同じ停留所にいる
+     古いタブの flush が「まだ罰は始まっていない」を書き戻せてしまう。
+     そこで送るたびに増える番号を添え、サーバは pos → dataRevision の順で
+     新しい側を採る（flushの単調マージ）。
+
+     次の値は「サーバから最後に受け取った値」と「自分が最後に送った値」の
+     大きい方＋1。GET・POST どちらの応答でも受け取った値を取り込むので、
+     別タブが先に進めていれば、こちらはその先から番号を振り直す。 */
+  function nextDataRevision() {
+    if (!liveState) return 1;
+    const next = Math.max(liveState.serverDataRevision || 0, liveState.sentDataRevision || 0) + 1;
+    liveState.sentDataRevision = next;
+    return next;
+  }
+
+  /* サーバのsnapshotから dataRevision を取り込む。後退させない。 */
+  function adoptDataRevision(snapshot) {
+    if (!liveState || !snapshot || !snapshot.body) return;
+    const seen = Number(snapshot.body.dataRevision);
+    if (!Number.isFinite(seen)) return;
+    liveState.serverDataRevision = Math.max(liveState.serverDataRevision || 0, seen);
   }
 
   /* 経過時計の表示だけを書き直す（setInterval の次のティックを待たない）。 */
@@ -3514,6 +3539,12 @@
     if (typeof server.pos === "number" && server.pos > TEAMS[2].pos) {
       TEAMS[2].pos = server.pos;
       drawMarks();
+    }
+    // data-regression で拒否されたということは、こちらの data が古い。罰の進行は
+    // サーバ側が正なので、そのまま取り込む（払い終えた罰を未実施へ戻さない）。
+    if (server.data) {
+      if (server.data.s3Penalty) s3PenaltyState = server.data.s3Penalty;
+      if (server.data.s4Penalty) s4PenaltyState = server.data.s4Penalty;
     }
   }
 
@@ -3546,6 +3577,7 @@
       // 自分の保存が通った証拠は「送ったrevision+1が返ること」。それ以外
       // （冪等台帳による過去commandの再生など）は自分の一手ではないので
       // 採用しない——ずれたままなら次の保存が409 conflictで取り直す。
+      adoptDataRevision(res.body.snapshot);
       if (res.body.snapshot.revision === sentRevision + 1) {
         liveState.checkpointRevision = res.body.snapshot.revision;
         // ここだけが「サーバで確認できた」と言える地点。送った後に新しい要求が
@@ -3557,8 +3589,8 @@
     // 409 以外（通信断・503・404）はそのまま諦める。次の保存でまた送られる。
     if (res.status !== 409) return;
 
-    // 409 の理由は4種類（conflict／trap-regression／elapsed-regression／
-    // pos-regression）。サーバが機械可読な code で返すので、それで分岐する
+    // 409 の理由は5種類（conflict／trap-regression／elapsed-regression／
+    // pos-regression／data-regression）。サーバが機械可読な code で返すので分岐する
     // ——日本語のmessageを文字列一致で読むと、文言を直したとたんに壊れる。
     const code = (res.body && typeof res.body.code === "string") ? res.body.code : null;
     const latest = await liveFetch("/api/teams/" + teamCode + "/checkpoint", { method: "GET" }, LIVE_RESTORE_TIMEOUT_MS);
@@ -3568,6 +3600,7 @@
     const serverRevision = snapshot ? snapshot.revision : 0;
     liveState.checkpointRevision = serverRevision;
     liveState.checkpointTrap = snapshot ? snapshot.body.trap : null;
+    adoptDataRevision(snapshot);
     // code を持たない応答（codeを載せる前のサーバ）へのフォールバック。送った
     // expectedRevision とサーバの revision がずれていれば conflict、一致して
     // いれば「revisionは合っていたのに中身が後退していた」＝ regression、と
@@ -3581,7 +3614,8 @@
       if (!retried) await postCheckpoint(true);
       return;
     }
-    // trap-regression／elapsed-regression／pos-regression。サーバ値を採用して
+    // trap-regression／elapsed-regression／pos-regression／data-regression。
+    // いずれもサーバ値を採用して
     // 再送はしない——次の保存（ステージ遷移・停留所の前進）が、取り込んだ値を
     // 含む新しい body で自然に送られる。取り込みは再送後（retried）でも行う
     // ——競合を直して送り直した先が後退だった、という順で来ることがあり、
@@ -8115,6 +8149,9 @@
       threads: chatRes.body.threads,
       activeThreadId: chatRes.body.threads[0].threadId,
       checkpointRevision: 0,
+      chatRevision: chatRes.body.revision || 0,   // 古いsnapshotで巻き戻さないための世代番号
+      serverDataRevision: 0,   // GET直後に adoptDataRevision で埋める
+      sentDataRevision: 0,
     };
     commitTeamName(code, name);
     // 保存済みのチェックポイントがあれば、そのステージへ戻す（進行台本 §5-1 の
@@ -8123,6 +8160,7 @@
     const cpRes = await liveFetch("/api/teams/" + code + "/checkpoint", { method: "GET" }, LIVE_RESTORE_TIMEOUT_MS);
     const snapshot = cpRes.ok && cpRes.body && cpRes.body.checkpoint ? cpRes.body.checkpoint : null;
     if (snapshot) liveState.checkpointRevision = snapshot.revision;
+    adoptDataRevision(snapshot);   // 別タブが進めていれば、その先から番号を振り直す
     // チーム名がサーバへ届く最初の機会。commitTeamName の後（teamName 確定後）に送る。
     reportProgress(TEAMS[2].pos, "entry");
     pollSummary();   // 帯を10秒待たずに一度埋める（以後は setInterval が回す）
