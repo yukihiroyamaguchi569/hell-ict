@@ -134,8 +134,10 @@ describe("Origin判定（Pure Function）", () => {
     expect(isOriginAllowed("https://a.test", url, allowed)).toBe(true);
     expect(isOriginAllowed("https://b.test/", url, allowed)).toBe(true);
     expect(isOriginAllowed("https://c.test", url, allowed)).toBe(false);
-    // 許可リストを明示したら、同一オリジンであっても列挙されていなければ通さない。
-    expect(isOriginAllowed("https://worker.test", url, allowed)).toBe(false);
+    // ALLOWED_ORIGINSは「追加で許可するオリジン」。同一オリジンは列挙の有無に
+    // 関わらず常に通す——別オリジンを1つ足したとたんに配信元の自分自身が弾かれ、
+    // モックが動かなくなる踏み方をしないため。
+    expect(isOriginAllowed("https://worker.test", url, allowed)).toBe(true);
   });
 
   it("ALLOWED_ORIGINS未設定ならリクエストURLと同じoriginだけを許可する", () => {
@@ -295,11 +297,17 @@ describe("入口ガード（Origin）", () => {
     expect(withoutOrigin.status).toBe(200);
   });
 
-  it("ALLOWED_ORIGINSを設定すると、その別オリジンだけを通す", async () => {
+  it("ALLOWED_ORIGINSは追加の許可であり、同一オリジンは常に通る", async () => {
     await withEnv({ ALLOWED_ORIGINS: ` ${OTHER_ORIGIN}/ ` }, async () => {
-      const allowed = await fetchWithHeaders("/api/session", "POST", { Origin: OTHER_ORIGIN });
-      expect(allowed.status).toBe(200);
-      const rejected = await fetchWithHeaders("/api/session", "POST", { Origin: TEST_ORIGIN });
+      const added = await fetchWithHeaders("/api/session", "POST", { Origin: OTHER_ORIGIN });
+      expect(added.status).toBe(200);
+      // 配信元（リクエストURLと同じorigin）は列挙していなくても通る。
+      const sameOrigin = await fetchWithHeaders("/api/session", "POST", { Origin: TEST_ORIGIN });
+      expect(sameOrigin.status).toBe(200);
+      // 列挙にも同一オリジンにも当たらないものは従来どおり403。
+      const rejected = await fetchWithHeaders("/api/session", "POST", {
+        Origin: "https://unknown.test",
+      });
       expect(rejected.status).toBe(403);
     });
   });

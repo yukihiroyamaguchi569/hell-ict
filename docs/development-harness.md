@@ -45,7 +45,7 @@ pnpm verify:full
 
 | 変数 | 未設定時の既定 | 設定する場面 |
 |---|---|---|
-| `ALLOWED_ORIGINS` | リクエストURLと同じoriginだけ許可 | 別オリジンのページからAPIを叩くとき（開発時に`localStorage.hellApiBase`で別ポートの`wrangler dev`へ向ける場合など）。カンマ区切り、末尾スラッシュと空白は無視する。許可した別オリジンには`Access-Control-Allow-Origin`と`Vary: Origin`を返し、`OPTIONS /api/*`のpreflightへ204を返す |
+| `ALLOWED_ORIGINS` | 同一オリジンのみ | **追加で**許可するオリジンをカンマ区切りで列挙する（末尾スラッシュと空白は無視）。同一オリジン（リクエストURLと同じorigin）は設定の有無に関わらず常に許可されるので、ここへ書く必要はない——書き換えではなく追加なので、1つ足したとたんに配信元が弾かれる、ということは起きない。別オリジンのページからAPIを叩くとき（開発時に`localStorage.hellApiBase`で別ポートの`wrangler dev`へ向ける場合など）に設定する。許可した別オリジンには`Access-Control-Allow-Origin`と`Vary: Origin`を返し、`OPTIONS /api/*`のpreflightへ204を返す |
 | `TEAM_CODES` | 6桁なら任意のコードで入室できる（ローカル開発とE2Eを壊さないための意図的なfail-open） | 本番。事前配布した6桁コードをカンマ区切りで列挙する。列挙外のコードは入室・チーム操作・リーダーボード購読・進捗記録のすべてで404になり、Durable ObjectもD1の行も作らない。**空文字や`,`だけを設定した場合は「設定し損ね」とみなして全コードを拒否する（fail-closed）** |
 | `CHAT_RATE_LIMIT_PER_MINUTE` | 20 | 1チームが1分あたりに送れるチャット数を変えるとき。受け付けるのは1〜600の整数だけで、範囲外・非数値・`1e100`のような指数表記は既定の20へ倒す（実際に効いている値は`/api/health`の`guards.chatRateLimitPerMinute`に出る）。超過は429と`Retry-After`で返し、OpenAIを呼ばずユーザーメッセージも保存しない |
 

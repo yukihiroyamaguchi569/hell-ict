@@ -37,9 +37,12 @@ export const isOriginAllowed = (
   allowedOrigins: readonly string[],
 ): boolean => {
   if (originHeader === null) return false;
-  const allowed = allowedOrigins.length === 0 ? [requestUrl.origin] : allowedOrigins;
   const origin = normalizeOrigin(originHeader);
-  return allowed.some((candidate) => normalizeOrigin(candidate) === origin);
+  // 同一オリジンは常に許可する。ALLOWED_ORIGINSは「追加で許可するオリジン」であって、
+  // 許可集合の置き換えではない——別オリジンを1つ足したとたんに、配信元である自分自身が
+  // 弾かれてモックが動かなくなる、という踏み方をしないため。
+  if (origin === requestUrl.origin) return true;
+  return allowedOrigins.some((candidate) => normalizeOrigin(candidate) === origin);
 };
 
 /**
