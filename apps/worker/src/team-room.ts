@@ -78,6 +78,11 @@ export type BeginChatMessageOutcome =
 
 export type CompleteChatMessageOutcome = { kind: "success"; text: string } | { kind: "failure" };
 
+/** consumeChatAttemptの判定。超過なら待つべき秒数を返す。 */
+export type RateLimitVerdict =
+  | { readonly allowed: true }
+  | { readonly allowed: false; readonly retryAfterSeconds: number };
+
 /**
  * AI呼び出しが失敗し続け、クライアントが二度と同じcommandIdで再送しない場合に
  * pending_message_commandsが際限なく残るのを防ぐ猶予期間。研修は120分で終わる
@@ -323,6 +328,19 @@ export class TeamRoom extends DurableObject<Env> {
         .toArray()[0] ?? null;
     if (row === null) return 0;
     return storedRateLimitSchema.safeParse(row).data?.count ?? 0;
+  }
+
+  /**
+   * 送信前PIIゲートで拒否する送信のために、レート制限の枠を1つだけ消費する。
+   *
+   * PII拒否はbeginChatMessageへ進まないため通常の枠消費を通らず、PII入りの本文を
+   * 連投するだけで活動ログ（activity_events）を無限に増やせてしまう。beginChatMessageと
+   * 同じテーブル・同じ窓を使い、二重計上にならないよう「PII拒否経路はこれだけ、
+   * 通常経路はbeginChatMessageだけ」が枠を消費する分担にする。
+   */
+  async consumeChatAttempt(nowMs: number, limit: number): Promise<RateLimitVerdict> {
+    const retryAfterSeconds = this.consumeRateLimit(nowMs, limit);
+    return retryAfterSeconds === null ? { allowed: true } : { allowed: false, retryAfterSeconds };
   }
 
   /**

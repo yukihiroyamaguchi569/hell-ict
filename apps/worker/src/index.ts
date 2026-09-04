@@ -283,6 +283,32 @@ export type ChatMessageDeps = {
   readonly nowMs: number;
 };
 
+/**
+ * 送信前PIIゲートで拒否するときの応答。拒否もレート制限の枠を1つ消費する——この経路は
+ * beginChatMessageへ進まないので通常の枠消費を通らず、PII入りの本文を連投するだけで
+ * 活動ログを無限に増やせてしまう。超過なら429で、ログも書かない。
+ *
+ * 通した場合は本文をD1にも残さない（外部へ出さないのと同じ理由）。長さだけ残して、
+ * 「どのくらいの分量を書いていて弾かれたか」を分析で追えるようにする。何も保存して
+ * いないので"pii_blocked"を付け、新しいcommandIdで書き直せることを示す。
+ */
+const respondToPiiBlock = async (
+  room: DurableObjectStub<TeamRoom>,
+  gate: ChatGate,
+  log: ChatLogger,
+  command: SendMessageCommand,
+): Promise<Response> => {
+  const verdict = await room.consumeChatAttempt(gate.nowMs, gate.limit).catch(() => null);
+  if (verdict === null)
+    return error("メッセージの処理に失敗しました。時間を置いて再試行してください。", 503);
+  if (!verdict.allowed)
+    return errorWithHeaders("送信が多すぎます。少し待ってから再試行してください。", 429, {
+      "Retry-After": String(verdict.retryAfterSeconds),
+    });
+  log("chat.pii_blocked", { meta: { length: command.text.length } });
+  return error("個人情報を検知したため、送信をブロックしました。", 422, "pii_blocked");
+};
+
 export const handleChatMessage = async (
   request: Request,
   scope: RequestScope,
@@ -297,22 +323,14 @@ export const handleChatMessage = async (
     return bodyErrorResponse(caught, "commandの形式が不正です。");
   }
 
-  // 送信前PIIゲート（企画書§7）。DO・AiGatewayのどちらにも触れる前に止める——
-  // ユーザーメッセージを保存させず、OpenAIへも一切送らない。何も保存していないので
-  // "pii_blocked"を付け、クライアントが新しいcommandIdで書き直せることを示す。
-  // 本文はD1にも残さない（外部へ出さないのと同じ理由。長さだけ残して、
-  // 「どのくらいの分量を書いていて弾かれたか」を分析で追えるようにする）。
   const log = chatLogger(scope, teamCode, command);
-  if (detectPii(command.text) !== null) {
-    log("chat.pii_blocked", { meta: { length: command.text.length } });
-    return error("個人情報を検知したため、送信をブロックしました。", 422, "pii_blocked");
-  }
-
   const room = scope.env.TEAM_ROOM.getByName(teamCode);
-  const begun = await beginOrRespond(room, teamCode, command, {
-    nowMs,
-    limit: parseChatRateLimit(scope.env.CHAT_RATE_LIMIT_PER_MINUTE),
-  });
+  const gate: ChatGate = { nowMs, limit: parseChatRateLimit(scope.env.CHAT_RATE_LIMIT_PER_MINUTE) };
+
+  // 送信前PIIゲート（企画書§7）。ユーザーメッセージを保存させず、OpenAIへも一切送らない。
+  if (detectPii(command.text) !== null) return respondToPiiBlock(room, gate, log, command);
+
+  const begun = await beginOrRespond(room, teamCode, command, gate);
   if (begun instanceof Response) return begun;
 
   // ここまで来た送信だけを1行として記録する（already-processedの再送とレート制限超過は

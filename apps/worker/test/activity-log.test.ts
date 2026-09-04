@@ -7,6 +7,7 @@ import { beforeEach, describe, expect, it } from "vitest";
 import { z } from "zod";
 
 import { activitySchemaSql } from "../src/activity-log.js";
+import { DEFAULT_CHAT_RATE_LIMIT } from "../src/guard.js";
 import { handleChatMessage, handleCreateThread } from "../src/index.js";
 import { postJson, session } from "./support.js";
 
@@ -60,6 +61,7 @@ const chat = async (
   teamCode: string,
   command: { commandId: string; threadId: string; text: string; promptProfile?: PromptProfile },
   aiGateway: FakeAiGateway,
+  nowMs = Date.now(),
 ): Promise<Response> => {
   const ctx = createExecutionContext();
   const response = await handleChatMessage(
@@ -69,7 +71,7 @@ const chat = async (
     }),
     { env, ctx },
     teamCode,
-    { aiGateway, nowMs: Date.now() },
+    { aiGateway, nowMs },
   );
   await waitOnExecutionContext(ctx);
   return response;
@@ -548,6 +550,86 @@ describe("活動ログ", () => {
       const response = await postJson("/api/teams/500107/activity", activity());
       expect(response.status).toBe(503);
       await env.PROGRESS_DB.exec(activitySchemaSql);
+    });
+  });
+  describe("PII拒否の連投", () => {
+    // PII拒否はbeginChatMessageへ進まないため通常の枠消費を通らず、以前は
+    // PII入りの本文を連投するだけでactivity_eventsを無限に増やせた。
+    it("上限を超えたPII送信は429になり、活動ログも増えない", async () => {
+      const teamCode = "500150";
+      const threadId = await mainThreadId(teamCode, "00000000-0000-4000-8000-000000005150");
+      const windowStartMs = 1_756_000_000_000;
+      const gateway = new FakeAiGateway([]);
+      const piiText = "渡辺 三郎さんの件で返信文を書いてください";
+      const before = (await rows()).length;
+
+      for (let index = 0; index < DEFAULT_CHAT_RATE_LIMIT; index += 1) {
+        const response = await chat(
+          teamCode,
+          {
+            commandId: `00000000-0000-4000-8000-${String(5200 + index).padStart(12, "0")}`,
+            threadId,
+            text: piiText,
+          },
+          gateway,
+          windowStartMs,
+        );
+        expect(response.status, `#${String(index)}`).toBe(422);
+      }
+      const afterLimit = (await rows()).length;
+      expect(afterLimit).toBe(before + DEFAULT_CHAT_RATE_LIMIT);
+
+      const blocked = await chat(
+        teamCode,
+        {
+          commandId: "00000000-0000-4000-8000-000000005300",
+          threadId,
+          text: piiText,
+        },
+        gateway,
+        windowStartMs,
+      );
+
+      expect(blocked.status).toBe(429);
+      expect(blocked.headers.get("Retry-After")).not.toBeNull();
+      // 429の経路はログを書かない。
+      await expect(rows()).resolves.toHaveLength(afterLimit);
+      expect(gateway.requests).toHaveLength(0);
+    });
+
+    it("PII拒否で消費した枠は通常送信の枠と同じものを使う", async () => {
+      const teamCode = "500151";
+      const threadId = await mainThreadId(teamCode, "00000000-0000-4000-8000-000000005151");
+      const windowStartMs = 1_756_100_000_000;
+      const gateway = new FakeAiGateway([{ kind: "success", response: "応答" }]);
+
+      // PII拒否で上限ぶん使い切ると、正当な送信も同じ窓では通らない（二重計上せず、
+      // 同じテーブル・同じ窓を共有していることの確認）。
+      for (let index = 0; index < DEFAULT_CHAT_RATE_LIMIT; index += 1) {
+        await chat(
+          teamCode,
+          {
+            commandId: `00000000-0000-4000-8000-${String(5400 + index).padStart(12, "0")}`,
+            threadId,
+            text: "渡辺 三郎さんの件で返信文を書いてください",
+          },
+          gateway,
+          windowStartMs,
+        );
+      }
+
+      const normal = await chat(
+        teamCode,
+        {
+          commandId: "00000000-0000-4000-8000-000000005500",
+          threadId,
+          text: "ふつうの本文",
+        },
+        gateway,
+        windowStartMs,
+      );
+      expect(normal.status).toBe(429);
+      expect(gateway.requests).toHaveLength(0);
     });
   });
 });
