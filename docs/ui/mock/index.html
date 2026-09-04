@@ -3818,7 +3818,8 @@
      いるので、素のまま投げると片方が 409 conflict になる——離脱側が負けると、
      まさに残したかった罠フラグが落ちる。flush を立てた保存だけは、サーバが
      revision の一致を要求せず、trap は OR・pos と elapsedMs は max・view と data は
-     pos が大きい側、で単調にマージして 200 を返す（どちらが先に着いても後退しない）。
+     「pos が大きい側 → 同じ pos なら dataRevision が大きい側 → それも同じなら受信側」で
+     単調にマージして 200 を返す（どちらが先に着いても後退しない）。
      通常経路には付けない——CAS を外すのは離脱時の1発だけに限る。 */
   function flushCheckpoint() {
     if (!checkpointDirty) return;
