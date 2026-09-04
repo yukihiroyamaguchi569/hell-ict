@@ -3524,6 +3524,34 @@
 
   /* fetchを{ok,status,body,retryAfter}へ正規化する。ネットワーク断・タイムアウトも
      例外を投げさせず status:0 として呼び出し側の分岐へ寄せる。 */
+  /* ------------------------------------------------------------------ */
+  /* LIVE応答の実行時検証                                                 */
+  /*                                                                    */
+  /* 200 が返ったからといって中身が契約どおりとは限らない（デプロイの        */
+  /* 食い違い、プロキシの差し込み、別サービスの応答）。素直に読みに行くと    */
+  /* 「threads[0] が undefined」で例外になり、そこで止まった関数は          */
+  /* entryBusy を戻さないまま——入室ボタンが「入室しています…」で固まる。   */
+  /* 読む前に形を確かめ、違っていれば通信失敗と同じ経路（busy解除・         */
+  /* エラー表示・再試行）へ倒す。                                        */
+  /* ------------------------------------------------------------------ */
+  const isChatThread = (t) =>
+    !!t && typeof t.threadId === "string" && typeof t.title === "string" && Array.isArray(t.messages);
+  /* スレッドは必ず1本以上ある（サーバが「メイン」を必ず作る）。空配列を通すと
+     activeThreadId が undefined のまま送信へ進む。 */
+  const isChatSnapshot = (v) =>
+    !!v && Array.isArray(v.threads) && v.threads.length > 0 && v.threads.every(isChatThread);
+  const isCheckpointBody = (b) =>
+    !!b && typeof b.view === "string" && typeof b.pos === "number" &&
+    typeof b.elapsedMs === "number" && !!b.trap &&
+    typeof b.trap.s3Used === "boolean" && typeof b.trap.s4Used === "boolean";
+  const isCheckpointSnapshot = (v) =>
+    !!v && typeof v.revision === "number" && typeof v.savedAt === "string" && isCheckpointBody(v.body);
+  /* GET応答。checkpoint は「無い（null）」か「揃っている」かのどちらかだけを通す。 */
+  const isCheckpointState = (b) =>
+    !!b && (b.checkpoint === null || b.checkpoint === undefined || isCheckpointSnapshot(b.checkpoint));
+  const isAssistantReply = (b) =>
+    !!b && !!b.assistant && typeof b.assistant.text === "string" && isChatSnapshot(b.snapshot);
+
   async function liveFetch(path, options, timeoutMs) {
     const ctrl = new AbortController();
     const timer = setTimeout(() => ctrl.abort(), timeoutMs || LIVE_TIMEOUT_MS);
@@ -3982,7 +4010,8 @@
      そのまま代入すると、新しく作ったスレッドや直前の発言が画面から消える。
      採用したときだけ true を返す（呼び出し側の再描画の判断に使う）。 */
   function applyChatSnapshot(snapshot) {
-    if (!liveState || !snapshot || !Array.isArray(snapshot.threads)) return false;
+    // 形が違う応答は捨てる。空の threads を入れると、以後どのスレッドも選べない。
+    if (!liveState || !isChatSnapshot(snapshot)) return false;
     const revision = Number(snapshot.revision);
     const known = liveState.chatRevision || 0;
     // revision を持たない応答（古いサーバ）は比較できないので素通しする。
@@ -4009,7 +4038,7 @@
   async function settleThreadCreate(res, title, kind) {
     if (res.ok && res.body) {
       threadCreateCommand.clear(title, kind, "");
-      // 古い応答なら捨てる（別の作成が先に着いていれば、そちらの方が新しい）。
+      // 古い応答・形の違う応答なら捨てる（applyChatSnapshot が両方を見る）。
       return applyChatSnapshot(res.body.snapshot);
     }
     const unknown = res.status === 0 || res.status >= 500;
@@ -4241,8 +4270,7 @@
   async function restoreChatFromServer() {
     if (!liveState) return;
     const res = await liveFetch("/api/teams/" + liveState.teamCode + "/chat", { method: "GET" }, LIVE_RESTORE_TIMEOUT_MS);
-    if (!res.ok || !res.body || !res.body.threads) return;
-    if (!applyChatSnapshot(res.body)) return;
+    if (!res.ok || !applyChatSnapshot(res.body)) return;
     if (!liveState.threads.some((t) => t.threadId === liveState.activeThreadId)) {
       liveState.activeThreadId = liveState.threads[0].threadId;
     }
@@ -4273,7 +4301,9 @@
     aiSending = false;
     updateAiInputLock();
 
-    if (res.ok && res.body) {
+    // 200でも assistant.text と snapshot が揃っていなければ成功扱いにしない
+    // ——読みに行って例外になると、吹き出しが「AIが入力中…」のまま残る。
+    if (res.ok && isAssistantReply(res.body)) {
       chatSendCommand.clear(sentThreadId, chatProfile, text);   // 確定したので破棄
       applyChatSnapshot(res.body.snapshot);
       placeholder.querySelector(".body").innerHTML = esc(res.body.assistant.text).replace(/\n/g, "<br>");
@@ -5270,7 +5300,7 @@
     });
     s1DraftBusy = false;
 
-    if (res.ok && res.body && res.body.assistant) {
+    if (res.ok && isAssistantReply(res.body)) {
       s1DraftCommand.clear(sentThreadId, "s1", text);   // 確定したので破棄
       applyChatSnapshot(res.body.snapshot);
       if (view !== "s1") return;   // 下書き要求中に Stage 1 を離れていたら他ステージの中央ペインへ着弾させない
@@ -8380,21 +8410,32 @@
     clearEntryBlock();
     entryBusy = true;
     updateEntryProbeUi();
+    // 途中で何が起きても必ず busy を戻す。ここを取りこぼすと、入室ボタンが
+    // 「入室しています…」で固定されて手も足も出なくなる。
+    try {
+      await runEnter(code, name);
+    } finally {
+      entryBusy = false;
+      updateEntryProbeUi();
+    }
+  }
+
+  async function runEnter(code, name) {
     const sessionRes = await liveFetch("/api/session", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ teamCode: code }),
     });
     if (!sessionRes.ok) {
-      entryBusy = false;
-      updateEntryProbeUi();
       showEntryError((sessionRes.body && sessionRes.body.message) || "入室に失敗しました。時間を置いて再試行してください。");
       return;
     }
     const chatRes = await liveFetch("/api/teams/" + code + "/chat");
-    if (!chatRes.ok || !chatRes.body) {
-      entryBusy = false;
-      updateEntryProbeUi();
+    // 200でも中身が契約どおりとは限らない。読む前に形を確かめる
+    // （空の threads を通すと activeThreadId が undefined のまま進む）。
+    if (!chatRes.ok || !isChatSnapshot(chatRes.body)) {
+      entryBlockMessage = "入室に失敗しました。ネットワークを確認して再試行してください。";
+      entryRetry = attemptEnter;
       showEntryError((chatRes.body && chatRes.body.message) || "チャット状態の取得に失敗しました。時間を置いて再試行してください。");
       return;
     }
@@ -8417,15 +8458,11 @@
     // 「200で checkpoint が null（＝初回入室）」と「取得できなかった」を必ず分ける。
     // 一緒くたに welcome へ通すと、サーバに進行が残っているチームを Prologue から
     // やり直させることになる——復帰の仕組みごと無かったことになるのがいちばん痛い。
-    if (!cpRes.ok || !cpRes.body) {
-      entryBusy = false;
+    if (!cpRes.ok || !isCheckpointState(cpRes.body)) {
       entryBlockMessage = "進行状況を取得できません。ネットワークを確認して再試行してください。";
       entryRetry = attemptEnter;
-      updateEntryProbeUi();
       return;
     }
-    entryBusy = false;
-    updateEntryProbeUi();
     const snapshot = cpRes.body.checkpoint || null;
     if (snapshot) liveState.checkpointRevision = snapshot.revision;
     adoptDataRevision(snapshot);   // 別タブが進めていれば、その先から番号を振り直す
