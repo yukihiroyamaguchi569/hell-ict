@@ -337,6 +337,46 @@ describe("活動ログ", () => {
     });
   });
 
+  describe("旧インデックスからの移行", () => {
+    it("旧定義のUNIQUEが残ったD1でも、新しいインデックスへ置き換わる", async () => {
+      // CREATE INDEX IF NOT EXISTS は「同じ名前が既にある」だけで何もしない。
+      // 名前を変えずにキー構成だけ直しても既存のD1には反映されず、狭いキーで
+      // 本物のイベントが捨てられ続ける。
+      await env.PROGRESS_DB.exec(DROP_TABLE);
+      await env.PROGRESS_DB.exec(
+        "CREATE TABLE IF NOT EXISTS activity_events (id INTEGER PRIMARY KEY AUTOINCREMENT, event_id TEXT NOT NULL DEFAULT '', team_code TEXT NOT NULL, kind TEXT NOT NULL, view TEXT NOT NULL DEFAULT '', thread_id TEXT NOT NULL DEFAULT '', message_id TEXT NOT NULL DEFAULT '', command_id TEXT NOT NULL DEFAULT '', role TEXT NOT NULL DEFAULT '', text TEXT NOT NULL DEFAULT '', meta TEXT NOT NULL DEFAULT '{}', client_at TEXT NOT NULL DEFAULT '', created_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ','now')));",
+      );
+      // 旧定義: command_idだけの狭いキー。別チームの同じcommandIdが衝突する。
+      await env.PROGRESS_DB.exec(
+        "CREATE UNIQUE INDEX IF NOT EXISTS idx_activity_command ON activity_events(command_id) WHERE command_id <> '';",
+      );
+
+      await env.PROGRESS_DB.exec(activitySchemaSql);
+
+      const indexes = await env.PROGRESS_DB.prepare(
+        "SELECT name FROM sqlite_master WHERE type = 'index' AND tbl_name = 'activity_events'",
+      ).all();
+      const names = z
+        .array(z.object({ name: z.string() }))
+        .parse(indexes.results)
+        .map((row) => row.name);
+      expect(names).toContain("idx_activity_idempotency_v2");
+      expect(names).not.toContain("idx_activity_command");
+
+      // 別チームの同じcommandIdが両方入る（旧定義なら片方が黙って捨てられていた）。
+      const commandId = uniqueCommandId(700);
+      const insert = env.PROGRESS_DB.prepare(
+        "INSERT OR IGNORE INTO activity_events (team_code, kind, command_id) VALUES (?, 'verdict.s1', ?)",
+      );
+      await env.PROGRESS_DB.batch([
+        insert.bind("500180", commandId),
+        insert.bind("500181", commandId),
+      ]);
+      const stored = await rows();
+      expect(stored.filter((row) => row.commandId === commandId)).toHaveLength(2);
+    });
+  });
+
   describe("クライアントからの記録（POST /api/teams/:code/activity）", () => {
     it("提出と判定を1行として受け取る", async () => {
       const response = await postJson("/api/teams/500101/activity", activity());

@@ -15,4 +15,8 @@ CREATE TABLE IF NOT EXISTS activity_events (
 );
 CREATE INDEX IF NOT EXISTS idx_activity_team ON activity_events(team_code, id);
 CREATE INDEX IF NOT EXISTS idx_activity_kind ON activity_events(kind);
-CREATE UNIQUE INDEX IF NOT EXISTS idx_activity_command ON activity_events(event_id, team_code, command_id, kind) WHERE command_id <> '';
+-- 定義を変えるときは名前も変え、旧名を落としてから作り直す。CREATE INDEX IF NOT
+-- EXISTS は「同じ名前が既にある」だけで何もしないため、キー構成を変えても既存の
+-- D1 には反映されない（src/activity-log.ts の activitySchemaSql と同じ内容）。
+DROP INDEX IF EXISTS idx_activity_command;
+CREATE UNIQUE INDEX IF NOT EXISTS idx_activity_idempotency_v2 ON activity_events(event_id, team_code, command_id, kind) WHERE command_id <> '';
