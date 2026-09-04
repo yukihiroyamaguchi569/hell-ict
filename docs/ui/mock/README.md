@@ -201,8 +201,12 @@ JS 構造そのものは資産ではない。単一ファイル・フレーム�
   ——`renderStage3()`/`renderStage4()` が入場のたびにリセットするため。
 - **活動ログ**（`logActivity()`）と**全チームの帯**。提出・判定・罠・復帰を
   `POST /api/teams/:code/activity` へ fire-and-forget で積み（Stage 4のPII罠と保健所提出だけは
-  本文を送らない）、`GET /api/progress/summary` を（入室済みのときだけ）10秒ごとにポーリングして他チームの位置を
-  `TEAMS` へ流し込む（`syncTeamsFromSummary()`）。帯は自チームを最下段に、同じ停留所のチームを
+  本文を送らない）、`GET /api/progress/summary?teamCode=自分のコード` を（入室済みのときだけ）10秒ごとにポーリングして
+  他チームの位置を `TEAMS` へ流し込む（`syncTeamsFromSummary()`）。**サーバは生の `teamCode` を返さない**
+  （2026-09-04変更）——他チームのコードが端末から読めると、なりすまして進行を書き換えられる。代わりに
+  突合できない `publicId`（8桁hex）が返り、自分の行だけはクエリに `?teamCode=` を付けたときに `isSelf: true`
+  が付く。自チームの判定はこの `isSelf` で行い（生コードの突合は廃止）、`isSelf` の行は捨てて自前の
+  `TEAMS[2]` を使う（サーバの集計はこちらの `pos` より1拍遅れる）。帯は自チームを最下段に、同じ停留所のチームを
   3段まで縦に積み、溢れた分は「ほかNチーム」へまとめる（`drawMarks()`）。
 
 ## ステージごとのエントリ

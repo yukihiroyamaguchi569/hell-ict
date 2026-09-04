@@ -3221,19 +3221,28 @@
   /* ------------------------------------------------------------------ */
   const SUMMARY_POLL_MS = 10000;
 
-  /* teams[] は apps/worker/src/progress.ts の teamRowSchema（teamCode /
-     teamName / pos / updatedAt）。自チームの行は捨てる——自前の TEAMS[2] が
-     正で、サーバの集計はこちらの pos より1拍遅れることがある。
+  /* teams[] は apps/worker/src/progress.ts の teamRowSchema（publicId / teamName /
+     pos / updatedAt / isSelf?）。サーバは生の teamCode を返さない——他チームの
+     コードが配られた端末から読めると、なりすまして進行を書き換えられる。
+     代わりに突合できない publicId（8桁hex）が来て、自分の行だけはクエリに
+     `?teamCode=` を付けたときに isSelf: true が付く。
+
+     自チームの行は捨てる——自前の TEAMS[2] が正で、サーバの集計はこちらの pos より
+     1拍遅れることがある。
 
      📌 自チームは TEAMS[2] に固定したまま入れ替える。各ステージが
      TEAMS[2].pos を直接書く既存の散在箇所（設計負債・10箇所超）が index に
      依存しているため、席をずらすとそこが全部壊れる。空席は kind:"empty" で
      埋める（drawMarks は kind:"other" しか描かない）。 */
   function syncTeamsFromSummary(rows) {
-    const myCode = liveState ? liveState.teamCode : null;
     const others = rows
-      .filter((r) => r && typeof r.pos === "number" && r.teamCode !== myCode)
-      .map((r) => ({ pos: r.pos, kind: "other", nm: String(r.teamName || "").slice(0, 24) || "（無名）" }));
+      .filter((r) => r && typeof r.pos === "number" && r.isSelf !== true)
+      .map((r) => ({
+        pos: r.pos,
+        kind: "other",
+        publicId: typeof r.publicId === "string" ? r.publicId : "",
+        nm: String(r.teamName || "").slice(0, 24) || "（無名）",
+      }));
     const next = [
       others[0] || { pos: 0, kind: "empty" },
       others[1] || { pos: 0, kind: "empty" },
@@ -3250,7 +3259,10 @@
      置かれた端末が10秒ごとにサーバを叩き続けるだけになる。 */
   async function pollSummary() {
     if (!LIVE || !liveState) return;
-    const res = await liveFetch("/api/progress/summary", { method: "GET" }, LIVE_RESTORE_TIMEOUT_MS);
+    // 自分の行を教えてもらうためにコードを添える。付けないと isSelf が付かず、
+    // 自チームが他チームとして二重に描かれる。
+    const path = "/api/progress/summary?teamCode=" + encodeURIComponent(liveState.teamCode);
+    const res = await liveFetch(path, { method: "GET" }, LIVE_RESTORE_TIMEOUT_MS);
     if (res.ok && res.body && Array.isArray(res.body.teams)) syncTeamsFromSummary(res.body.teams);
   }
   // later() は使わない（go() の clearLater() に回収されるとポーリングが止まる）。
