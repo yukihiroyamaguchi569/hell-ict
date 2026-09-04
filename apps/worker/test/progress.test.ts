@@ -67,7 +67,12 @@ const rowCount = async (): Promise<number> => {
   return z.number().parse(row);
 };
 
-const DROP_TABLE = "DROP TABLE IF EXISTS progress_events;";
+// migrationsも一緒に落とす。完了印が残っていると、白紙のつもりのテストで
+// 一度きりの移行が走らない。
+const DROP_TABLE = [
+  "DROP TABLE IF EXISTS progress_events;",
+  "DROP TABLE IF EXISTS migrations;",
+].join("\n");
 
 // このpoolではD1の中身がテスト間で巻き戻らない（KVやDOと違い持ち越される）ため、
 // 各テストの冒頭でテーブルごと作り直して白紙から始める。
@@ -100,6 +105,51 @@ describe("進捗記録", () => {
   beforeEach(async () => {
     await env.PROGRESS_DB.exec(DROP_TABLE);
     await env.PROGRESS_DB.exec(progressSchemaSql);
+  });
+
+  it("伏せ字化を入れる前にD1へ積まれた平文PIIを、サマリー1回で行ごと消す", async () => {
+    // 読み出し側の伏せ字化は公開される値を守るだけで、D1の行は平文のまま残る。
+    // 保存経路（POST /api/progress）を通さず直接入れて、その状態を作る。
+    await env.PROGRESS_DB.prepare(
+      `INSERT INTO progress_events (team_code, team_name, pos, view, kind, client_at)
+       VALUES (?, ?, ?, ?, ?, ?)`,
+    )
+      .bind("100001", "渡辺 三郎 班", 2, "s2", "clear", "2026-08-23T02:00:00.000Z")
+      .run();
+
+    await summary();
+
+    const stored = await env.PROGRESS_DB.prepare(
+      "SELECT team_name FROM progress_events WHERE team_code = ?",
+    )
+      .bind("100001")
+      .first("team_name");
+    expect(z.string().parse(stored)).not.toContain("渡辺 三郎");
+    expect(z.string().parse(stored)).toContain(PII_REDACTION);
+  });
+
+  it("完了印が付いた後は、D1の行を書き換え直さない", async () => {
+    // 移行は一度きり。印が付いた後も走るなら、当日のサマリーのたびに全行走査が
+    // 走ることになる。印を残したまま平文を差し戻し、変化しないことで確かめる。
+    await env.PROGRESS_DB.prepare(
+      `INSERT INTO progress_events (team_code, team_name, pos, view, kind, client_at)
+       VALUES (?, ?, ?, ?, ?, ?)`,
+    )
+      .bind("100003", "渡辺 三郎 班", 2, "s2", "clear", "2026-08-23T02:00:00.000Z")
+      .run();
+    await summary();
+
+    await env.PROGRESS_DB.prepare("UPDATE progress_events SET team_name = ? WHERE team_code = ?")
+      .bind("渡辺 三郎 班", "100003")
+      .run();
+    await summary();
+
+    const stored = await env.PROGRESS_DB.prepare(
+      "SELECT team_name FROM progress_events WHERE team_code = ?",
+    )
+      .bind("100003")
+      .first("team_name");
+    expect(z.string().parse(stored)).toBe("渡辺 三郎 班");
   });
 
   it("イベントが1件も無いときteamsとeventsは空配列を返す", async () => {

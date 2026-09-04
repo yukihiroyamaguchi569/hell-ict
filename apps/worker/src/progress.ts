@@ -29,6 +29,7 @@ import { bodyErrorResponse, error, json, parseJson } from "./http.js";
 export const progressSchemaSql = [
   "CREATE TABLE IF NOT EXISTS progress_events (id INTEGER PRIMARY KEY AUTOINCREMENT, team_code TEXT NOT NULL, team_name TEXT NOT NULL DEFAULT '', pos INTEGER NOT NULL, view TEXT NOT NULL DEFAULT '', kind TEXT NOT NULL, client_at TEXT NOT NULL DEFAULT '', created_at TEXT NOT NULL DEFAULT (datetime('now')));",
   "CREATE INDEX IF NOT EXISTS idx_progress_team ON progress_events(team_code, id);",
+  "CREATE TABLE IF NOT EXISTS migrations (name TEXT PRIMARY KEY);",
 ].join("\n");
 
 /**
@@ -57,6 +58,67 @@ export const ensureSchema = (db: SchemaRunner): Promise<void> => {
     },
   );
   return schemaReady;
+};
+
+/** 完了印の名前。D1のmigrationsに残るので、変えると移行がもう一度走る。 */
+const PROGRESS_PII_MIGRATION = "progress-pii-redaction";
+
+/** DISTINCTで拾う組。SQLiteは列の型を強制しないので、読み出しも検証してから使う。 */
+const progressTextPairSchema = z.object({ team_name: z.string(), view: z.string() });
+
+/**
+ * 伏せ字化を入れる前にD1へ積まれた行の平文PIIを、一度だけ消しに行く。
+ *
+ * 読み出し側の伏せ字化（redactDisplayText）は公開される値を守るだけで、D1の行は
+ * 平文のまま残る。研修が終わってもデータベースに氏名が残るのは、表に出るか出ないかとは
+ * 別の問題なので、行そのものを書き換える。
+ *
+ * 「済んだかどうか」はD1のmigrations行だけで判断し、プロセス内のフラグでは覚えない
+ * ——覚えると、Workerのインスタンスごとに1回ずつ走るうえ、状態がテストから戻せなくなる。
+ * 主キー1行の参照はサマリー1回あたりの負荷として無視できる。
+ *
+ * 伏せ字化にはredactPiiだけを使い、6桁コードの伏せ字化（redactDisplayText）は掛けない
+ * ——あちらは現在のTEAM_CODESに依存する判定で、設定が入る前にこの移行が走ると
+ * 「そのとき知らなかったコード」を取りこぼしたまま完了印が付く。コードの伏せ字化は
+ * 読み出し側が毎回やり直すので、行の移行はPIIだけに絞るのが安全側になる。
+ *
+ * 失敗しても握りつぶし、次のリクエストでやり直す。移行が転けたせいで当日の
+ * ダッシュボードが落ちるほうが害が大きい（公開される値は読み出し側が守っている）。
+ */
+export const migrateProgressPii = async (db: D1Database): Promise<void> => {
+  try {
+    await runProgressPiiMigration(db);
+  } catch {
+    // 次のサマリーでやり直す。
+  }
+};
+
+const runProgressPiiMigration = async (db: D1Database): Promise<void> => {
+  const done = await db
+    .prepare("SELECT name FROM migrations WHERE name = ?")
+    .bind(PROGRESS_PII_MIGRATION)
+    .first();
+  if (done !== null) return;
+  const pairs = await db.prepare("SELECT DISTINCT team_name, view FROM progress_events").all();
+  // 組ごとに1文へまとめる。行ごとにUPDATEを撃つと、当日の行数次第で移行が長引く。
+  const updates = z
+    .array(progressTextPairSchema)
+    .parse(pairs.results)
+    .map((pair) => ({ pair, name: redactPii(pair.team_name), view: redactPii(pair.view) }))
+    .filter(({ pair, name, view }) => name !== pair.team_name || view !== pair.view)
+    .map(({ pair, name, view }) =>
+      db
+        .prepare(
+          "UPDATE progress_events SET team_name = ?, view = ? WHERE team_name = ? AND view = ?",
+        )
+        .bind(name, view, pair.team_name, pair.view),
+    );
+  // 完了印はOR IGNORE。サマリーが同時に2本来ても、UPDATEは伏せ字済みの行に対して
+  // 何も選ばないので繰り返して害がなく、印の重複だけを避ければよい。
+  await db.batch([
+    ...updates,
+    db.prepare("INSERT OR IGNORE INTO migrations (name) VALUES (?)").bind(PROGRESS_PII_MIGRATION),
+  ]);
 };
 
 /**
@@ -269,6 +331,7 @@ const selfTeamCode = (url: URL, allowlist: TeamCodeAllowlist): string | null => 
 export const handleProgressSummary = async (env: Env, url: URL): Promise<Response> => {
   try {
     await ensureSchema(env.PROGRESS_DB);
+    await migrateProgressPii(env.PROGRESS_DB);
     const allowlist = parseTeamCodes(env.TEAM_CODES);
     const selfCode = selfTeamCode(url, allowlist);
     const teamsFilter = teamFilter(allowlist, "e.team_code");
