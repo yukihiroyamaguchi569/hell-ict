@@ -44,7 +44,7 @@ export const collectMessages = (response: Response, count: number): Promise<unkn
       try {
         received.push(typeof event.data === "string" ? (JSON.parse(event.data) as unknown) : null);
       } catch (parseError) {
-        reject(parseError as Error);
+        reject(parseError instanceof Error ? parseError : new Error(String(parseError)));
         return;
       }
       if (received.length >= count) resolve();

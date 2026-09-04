@@ -6,6 +6,7 @@ import {
   PII_REDACTION,
   chatCommandFingerprint,
   chatMessageResultSchema,
+  chatMessageSchema,
   chatSnapshotSchema,
   createThreadResultSchema,
   httpErrorSchema,
@@ -78,13 +79,15 @@ const beginDirect = async (
 const injectAssistantPii = (teamCode: string, messageId: string): Promise<void> =>
   runInDurableObject(env.TEAM_ROOM.getByName(teamCode), (_instance, state) => {
     const row = state.storage.sql.exec("SELECT snapshot FROM chat_state WHERE id = 1").toArray()[0];
-    const parsed = JSON.parse(String(row?.snapshot)) as { threads: { messages: unknown[] }[] };
-    parsed.threads[0]?.messages.push({
-      messageId,
-      role: "assistant",
-      text: "渡辺 三郎さんの件、承知しました",
-      createdAt: "2026-09-04T00:00:00.000Z",
-    });
+    const parsed = chatSnapshotSchema.parse(JSON.parse(String(row?.snapshot)) as unknown);
+    parsed.threads[0]?.messages.push(
+      chatMessageSchema.parse({
+        messageId,
+        role: "assistant",
+        text: "渡辺 三郎さんの件、承知しました",
+        createdAt: "2026-09-04T00:00:00.000Z",
+      }),
+    );
     state.storage.sql.exec(
       "UPDATE chat_state SET snapshot = ? WHERE id = 1",
       JSON.stringify(parsed),
@@ -1148,15 +1151,15 @@ describe("P1C チャット骨格", () => {
       const row = state.storage.sql
         .exec("SELECT result FROM processed_thread_commands WHERE command_id = ?", commandId)
         .toArray()[0];
-      const parsed = JSON.parse(String(row?.result)) as {
-        snapshot: { threads: { messages: unknown[] }[] };
-      };
-      parsed.snapshot.threads[0]?.messages.push({
-        messageId: "00000000-0000-4000-8000-000000003602",
-        role: "assistant",
-        text: "渡辺 三郎さんの件、承知しました",
-        createdAt: "2026-09-05T00:00:00.000Z",
-      });
+      const parsed = createThreadResultSchema.parse(JSON.parse(String(row?.result)) as unknown);
+      parsed.snapshot.threads[0]?.messages.push(
+        chatMessageSchema.parse({
+          messageId: "00000000-0000-4000-8000-000000003602",
+          role: "assistant",
+          text: "渡辺 三郎さんの件、承知しました",
+          createdAt: "2026-09-05T00:00:00.000Z",
+        }),
+      );
       state.storage.sql.exec(
         "UPDATE processed_thread_commands SET result = ? WHERE command_id = ?",
         JSON.stringify(parsed),

@@ -4,7 +4,12 @@ import {
   runInDurableObject,
   waitOnExecutionContext,
 } from "cloudflare:test";
-import { createThreadResultSchema, PII_REDACTION } from "@hell-ict/domain";
+import {
+  chatMessageSchema,
+  chatSnapshotSchema,
+  createThreadResultSchema,
+  PII_REDACTION,
+} from "@hell-ict/domain";
 import { FakeAiGateway } from "@hell-ict/domain/fakes";
 import type { PromptProfile } from "@hell-ict/domain";
 import { beforeEach, describe, expect, it } from "vitest";
@@ -307,13 +312,15 @@ describe("活動ログ", () => {
         const row = state.storage.sql
           .exec("SELECT snapshot FROM chat_state WHERE id = 1")
           .toArray()[0];
-        const parsed = JSON.parse(String(row?.snapshot)) as { threads: { messages: unknown[] }[] };
-        parsed.threads[0]?.messages.push({
-          messageId: "00000000-0000-4000-8000-000000000504",
-          role: "assistant",
-          text: "渡辺 三郎さんの件、承知しました",
-          createdAt: "2026-09-04T00:00:00.000Z",
-        });
+        const parsed = chatSnapshotSchema.parse(JSON.parse(String(row?.snapshot)) as unknown);
+        parsed.threads[0]?.messages.push(
+          chatMessageSchema.parse({
+            messageId: "00000000-0000-4000-8000-000000000504",
+            role: "assistant",
+            text: "渡辺 三郎さんの件、承知しました",
+            createdAt: "2026-09-04T00:00:00.000Z",
+          }),
+        );
         state.storage.sql.exec(
           "UPDATE chat_state SET snapshot = ? WHERE id = 1",
           JSON.stringify(parsed),
