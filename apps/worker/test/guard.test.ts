@@ -697,6 +697,51 @@ describe("スレッド数の上限", () => {
     await expect(resent.json()).resolves.toEqual(firstBody);
   });
 
+  it("同titleのステージ用スレッドは、別commandIdで作り直しても増えない", async () => {
+    // リロードやタブの競合で同じステージの作成要求が二重に来ても増やさない。
+    // commandIdは要求ごとに新しいので、冪等台帳だけでは止められない。
+    await session("500046");
+    const before = await threadsOf("500046");
+
+    const first = await createThread("500046", messageCommandId(3100), "Stage 2", "stage");
+    expect(first.status).toBe(200);
+    await expect(threadsOf("500046")).resolves.toBe(before + 1);
+
+    const again = await createThread("500046", messageCommandId(3101), "Stage 2", "stage");
+    expect(again.status).toBe(200);
+    await expect(threadsOf("500046")).resolves.toBe(before + 1);
+
+    // 別のステージ名なら増える。
+    const other = await createThread("500046", messageCommandId(3102), "Stage 3", "stage");
+    expect(other.status).toBe(200);
+    await expect(threadsOf("500046")).resolves.toBe(before + 2);
+  });
+
+  it("手動スレッドは同titleでも増える（参加者が同じ名前を付けてよい）", async () => {
+    await session("500047");
+    const before = await threadsOf("500047");
+
+    await createThread("500047", messageCommandId(3200), "メモ");
+    await createThread("500047", messageCommandId(3201), "メモ");
+
+    await expect(threadsOf("500047")).resolves.toBe(before + 2);
+  });
+
+  it("同titleのstageを重ねてもstage枠は1本しか消費しない", async () => {
+    await session("500048");
+    for (let index = 0; index < MAX_STAGE_THREADS_PER_TEAM + 3; index += 1) {
+      const response = await createThread(
+        "500048",
+        messageCommandId(3300 + index),
+        "Stage 1",
+        "stage",
+      );
+      expect(response.status, `#${String(index)}`).toBe(200);
+    }
+    // 入室時のメイン1本＋Stage 1の1本だけ。
+    await expect(threadsOf("500048")).resolves.toBe(2);
+  });
+
   it("上限に達していても、処理済みcommandIdの再送は同じ結果を返す", async () => {
     await session("500041");
     const commandId = messageCommandId(2200);

@@ -395,6 +395,16 @@ export class TeamRoom extends DurableObject<Env> {
       return { snapshot: redactSnapshotPii(replayed.snapshot) };
     }
     const snapshot = this.loadChatSnapshot(teamCode);
+    // ステージ用スレッドはtitleがステージ名で一意、という契約にする。リロードや
+    // タブの競合で同じステージの作成要求が二重に来ても増やさない——commandIdは
+    // 要求ごとに新しいので、冪等台帳だけでは同名スレッドの増殖を止められない。
+    // manualは参加者が同じ名前を付けてよいので従来どおり増やす。
+    if (command.kind === "stage") {
+      const existing = snapshot.threads.find(
+        (thread) => (thread.kind ?? "manual") === "stage" && thread.title === command.title,
+      );
+      if (existing !== undefined) return this.replayExistingThread(snapshot, command, fingerprint);
+    }
     // 冪等再送（processed済み）は上限に関係なく従来の結果を返す。上限を当てるのは
     // 新しいスレッドを実際に増やすときだけである。kindごとに独立して数える。
     const max = THREAD_LIMITS[command.kind];
@@ -519,6 +529,25 @@ export class TeamRoom extends DurableObject<Env> {
    * 超過したときはユーザーメッセージを保存せず（saveChatSnapshotより手前で返す）、
    * 呼び出し側もAiGatewayに触れない。
    */
+  /**
+   * 既に同じステージ用スレッドがある作成要求へ、現在のsnapshotをそのまま返す。
+   * 台帳へも記録して、同じcommandIdの再送が同じ結果を返すようにする。
+   */
+  private replayExistingThread(
+    snapshot: ChatSnapshot,
+    command: CreateThreadCommand,
+    fingerprint: string,
+  ): CreateThreadResult {
+    const result = createThreadResultSchema.parse({ snapshot });
+    this.ctx.storage.sql.exec(
+      "INSERT OR IGNORE INTO processed_thread_commands (command_id, result, fingerprint) VALUES (?, ?, ?)",
+      command.commandId,
+      JSON.stringify(result),
+      fingerprint,
+    );
+    return result;
+  }
+
   async beginChatMessage(
     teamCodeInput: unknown,
     commandInput: unknown,
