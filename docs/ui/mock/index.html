@@ -380,6 +380,10 @@
   padding: 11px 26px; font-size: 16px; font-weight: 700; letter-spacing: .04em;
 }
 .btn:hover { filter: brightness(1.12); }
+/* 押せない状態を見た目でも伝える。疎通確認中・失敗中の［入室する］が押せる顔の
+   ままだと、参加者は連打して「壊れている」と受け取る。 */
+.btn:disabled { opacity: .45; cursor: default; filter: none; }
+.btn:disabled:hover { filter: none; }
 .btn.ghost { background: transparent; color: var(--fg); border-color: var(--rule); font-weight: 500; }
 .btn.ghost:hover { background: var(--surface-2); filter: none; }
 
@@ -611,6 +615,9 @@
 /* 起動時の疎通確認。確認中は淡く、失敗したときだけ赤くする（.bad） */
 .entry .entry-probe { font-size: 14px; color: var(--fg-muted); text-align: center; max-width: 42ch; }
 .entry .entry-probe.bad { color: #c1121f; }
+.entry .probe-actions { display: flex; flex-direction: column; align-items: center; gap: 6px; }
+.entry .probe-buttons { display: flex; gap: 10px; flex-wrap: wrap; justify-content: center; }
+.entry .probe-note { font-size: 12px; color: var(--fg-muted); }
 
 /* 幹部ブリーフィング — 急変直後、Stage 1 の冒頭。.entry と同じく不透明で
    下地を完全に隠す（ヘッダーの時計もリーダーボードも見せない）。
@@ -1361,7 +1368,15 @@
                （http(s)配信時のみ。file:// は最初からscripted） -->
           <div class="entry-probe hide" id="entry-probe"></div>
           <button class="btn" id="btn-enter">入室する</button>
-          <button class="btn ghost hide" id="btn-probe-retry">再試行</button>
+          <!-- プローブ失敗時だけ出す。台本モードは「黙って落ちる」のではなく
+               参加者・ファシリテーターが選ぶ最後の手段（README「ライブAPI接続」）。 -->
+          <div class="probe-actions hide" id="probe-actions">
+            <div class="probe-buttons">
+              <button class="btn ghost" id="btn-probe-retry">再試行</button>
+              <button class="btn ghost" id="btn-probe-offline">オフラインで進める（台本モード）</button>
+            </div>
+            <div class="probe-note">AI・保存・帯は動きません</div>
+          </div>
         </div>
 
         <!-- 幹部ブリーフィング：急変直後、Stage 1 の冒頭。事務長が一方向で告げるだけで、
@@ -3398,8 +3413,8 @@
   function updateEntryProbeUi() {
     const btn = $("btn-enter");
     const note = $("entry-probe");
-    const retry = $("btn-probe-retry");
-    if (!btn || !note || !retry) return;
+    const actions = $("probe-actions");
+    if (!btn || !note || !actions) return;
     const pending = liveProbeState === "pending";
     const failed = liveProbeState === "failed";
     btn.disabled = pending || failed;
@@ -3408,7 +3423,7 @@
     note.textContent = failed
       ? "サーバに接続できません。ネットワークを確認して再試行してください。"
       : pending ? "接続を確認しています…" : "";
-    retry.classList.toggle("hide", !failed);
+    actions.classList.toggle("hide", !failed);
   }
 
   async function probeLive() {
@@ -3436,6 +3451,17 @@
   }
 
   $("btn-probe-retry").addEventListener("click", probeLive);
+
+  /* 台本モードで進む、を明示的に選ぶ。開発用の静的サーバ配信（python -m http.server）
+     と、会場でサーバが落ちたときの最後の手段。押されたら以後プローブし直さない
+     ——「黙ってscriptedへ落ちる」のを避けるのが今回の趣旨で、選んだこと自体は
+     参加者・ファシリテーターの意思決定として尊重する。 */
+  $("btn-probe-offline").addEventListener("click", () => {
+    LIVE = false;
+    liveProbeState = "scripted";
+    updateEntryProbeUi();
+  });
+
   probeLive();
 
   /* 429 の Retry-After（秒）を数える。RFC はHTTP-dateも許すが、Workerは秒で返すので
