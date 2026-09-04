@@ -154,6 +154,20 @@ export const handleProgressPost = async (request: Request, env: Env): Promise<Re
   }
 };
 
+/**
+ * 許可リストに無いチームの行を落とす。POST側でも許可リストを当てているが、当日の
+ * 設定が途中で入った場合や、設定前に積まれた行が残っている場合に、会場前面の
+ * ダッシュボードへ知らないチームが並ぶのを防ぐ。未設定（null）なら全件を返す。
+ *
+ * SQLのWHERE INではなく取得後のフィルタにする——teamsは参加チーム数（1桁）、
+ * eventsは最大20件で、絞り込みのコストは無視できる。SQLを組み立てないぶん、
+ * 許可コードの数だけプレースホルダを増やす分岐を持たずに済む。
+ */
+const visibleRows = <Row extends { teamCode: string }>(
+  rows: readonly Row[],
+  allowlist: ReadonlySet<string> | null,
+): Row[] => rows.filter((row) => isTeamCodeAllowed(row.teamCode, allowlist));
+
 export const handleProgressSummary = async (env: Env): Promise<Response> => {
   try {
     await ensureSchema(env.PROGRESS_DB);
@@ -161,9 +175,10 @@ export const handleProgressSummary = async (env: Env): Promise<Response> => {
       env.PROGRESS_DB.prepare(TEAMS_SQL).all(),
       env.PROGRESS_DB.prepare(EVENTS_SQL).all(),
     ]);
+    const allowlist = parseTeamCodes(env.TEAM_CODES);
     return json({
-      teams: z.array(teamRowSchema).parse(teams.results),
-      events: z.array(eventRowSchema).parse(events.results),
+      teams: visibleRows(z.array(teamRowSchema).parse(teams.results), allowlist),
+      events: visibleRows(z.array(eventRowSchema).parse(events.results), allowlist),
     });
   } catch {
     return error("進捗の取得に失敗しました。", 503);

@@ -215,6 +215,34 @@ describe("進捗記録", () => {
     await expect(rowCount()).resolves.toBe(0);
   });
 
+  it("TEAM_CODES設定時、summaryは許可コードの行だけを返す", async () => {
+    const insert = env.PROGRESS_DB.prepare(
+      `INSERT INTO progress_events (team_code, team_name, pos, view, kind, client_at, created_at)
+       VALUES (?, ?, ?, '', 'clear', '', ?)`,
+    );
+    await env.PROGRESS_DB.batch([
+      insert.bind("100001", "許可A", 3, "2026-08-23 01:00:00"),
+      insert.bind("100002", "許可B", 5, "2026-08-23 01:00:01"),
+      insert.bind("999999", "未登録", 7, "2026-08-23 01:00:02"),
+    ]);
+
+    const saved = env.TEAM_CODES;
+    try {
+      env.TEAM_CODES = "100001,100002";
+      const filtered = await summary();
+      expect(filtered.teams.map((team) => team.teamCode)).toEqual(["100002", "100001"]);
+      expect(filtered.events.map((event) => event.teamCode)).not.toContain("999999");
+      expect(filtered.events).toHaveLength(2);
+    } finally {
+      env.TEAM_CODES = saved;
+    }
+
+    // 未設定なら従来どおり全件。
+    const all = await summary();
+    expect(all.teams.map((team) => team.teamCode)).toEqual(["999999", "100002", "100001"]);
+    expect(all.events).toHaveLength(3);
+  });
+
   it("teamsはpos降順、同順位は最終更新が古い順に並ぶ", async () => {
     const insert = env.PROGRESS_DB.prepare(
       `INSERT INTO progress_events (team_code, team_name, pos, view, kind, client_at, created_at)
