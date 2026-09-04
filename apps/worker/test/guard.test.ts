@@ -25,6 +25,7 @@ import {
   RATE_LIMIT_WINDOW_MS,
   rateLimitBucket,
   rateLimitCountSchema,
+  teamCodesStatus,
   rateLimitRetryAfterSeconds,
 } from "../src/guard.js";
 import { handleChatMessage } from "../src/index.js";
@@ -161,9 +162,11 @@ describe("Origin判定（Pure Function）", () => {
 });
 
 describe("チームコード許可リスト（Pure Function）", () => {
-  it("未設定だけがnull（＝何でも通す）", () => {
-    expect(parseTeamCodes(undefined)).toBeNull();
-    expect(isTeamCodeAllowed("999999", null)).toBe(true);
+  it("未設定だけがunset（＝何でも通す）", () => {
+    const allowlist = parseTeamCodes(undefined);
+    expect(allowlist).toEqual({ kind: "unset" });
+    expect(isTeamCodeAllowed("999999", allowlist)).toBe(true);
+    expect(teamCodesStatus(allowlist)).toEqual({ teamCodes: false, teamCodesCount: 0 });
   });
 
   it("設定されているが空なら、fail-closedで全コードを拒否する", () => {
@@ -171,8 +174,9 @@ describe("チームコード許可リスト（Pure Function）", () => {
     // 設定したつもりのまま誰でも入れる状態を無言で作ってしまう。
     for (const raw of ["", "   ", ",", " , "]) {
       const allowlist = parseTeamCodes(raw);
-      expect(allowlist, raw).not.toBeNull();
+      expect(allowlist, raw).toEqual({ kind: "list", codes: new Set() });
       expect(isTeamCodeAllowed("100001", allowlist), raw).toBe(false);
+      expect(teamCodesStatus(allowlist), raw).toEqual({ teamCodes: true, teamCodesCount: 0 });
     }
   });
 
@@ -181,6 +185,46 @@ describe("チームコード許可リスト（Pure Function）", () => {
     expect(isTeamCodeAllowed("100001", allowlist)).toBe(true);
     expect(isTeamCodeAllowed("100002", allowlist)).toBe(true);
     expect(isTeamCodeAllowed("100003", allowlist)).toBe(false);
+    expect(teamCodesStatus(allowlist)).toEqual({ teamCodes: true, teamCodesCount: 2 });
+  });
+
+  it("6桁数字でない要素が1つでも混ざればinvalidで全拒否", () => {
+    // 検証しないと、healthが「設定済み」を返して本番前確認を通過した後、当日
+    // 入室できないという順序で気づくことになる。一部だけ通すのは、いちばん
+    // 切り分けにくい壊れ方なので採らない。
+    for (const raw of [
+      "100001,100002x",
+      "100001, 10001",
+      "100001,１２３４５６",
+      "100001,abcdef",
+      "100001,1000012",
+    ]) {
+      const allowlist = parseTeamCodes(raw);
+      expect(allowlist, raw).toEqual({ kind: "invalid" });
+      expect(isTeamCodeAllowed("100001", allowlist), raw).toBe(false);
+      expect(teamCodesStatus(allowlist), raw).toEqual({
+        teamCodes: "invalid",
+        teamCodesCount: 0,
+      });
+    }
+  });
+
+  it("全角カンマと読点も区切りとして受ける（手入力運用のため）", () => {
+    for (const raw of ["100001，100002", "100001、100002", "100001，100002、100003"]) {
+      const allowlist = parseTeamCodes(raw);
+      expect(isTeamCodeAllowed("100001", allowlist), raw).toBe(true);
+      expect(isTeamCodeAllowed("100002", allowlist), raw).toBe(true);
+    }
+    expect(teamCodesStatus(parseTeamCodes("100001，100002"))).toEqual({
+      teamCodes: true,
+      teamCodesCount: 2,
+    });
+  });
+
+  it("重複は除去して数える", () => {
+    const allowlist = parseTeamCodes("100001,100002,100001");
+    expect(isTeamCodeAllowed("100001", allowlist)).toBe(true);
+    expect(teamCodesStatus(allowlist)).toEqual({ teamCodes: true, teamCodesCount: 2 });
   });
 });
 
@@ -470,10 +514,49 @@ describe("ヘルスチェックのguards", () => {
       const body = await response.json();
       expect(body).toEqual({
         status: "ok",
-        guards: { teamCodes: true, allowedOrigins: true, chatRateLimitPerMinute: 20 },
+        guards: {
+          teamCodes: true,
+          teamCodesCount: 2,
+          allowedOrigins: true,
+          chatRateLimitPerMinute: 20,
+        },
       });
       expect(JSON.stringify(body)).not.toContain("100001");
       expect(JSON.stringify(body)).not.toContain(OTHER_ORIGIN);
+    });
+  });
+
+  it('TEAM_CODESが壊れているとteamCodesが"invalid"になり、全チームが入室できない', async () => {
+    // healthが「設定済み」を返して本番前確認を通過した後、当日入室できない、という
+    // 順序で気づくのを避ける。壊れた設定はここで見える。
+    await withEnv({ TEAM_CODES: "100001,100002x" }, async () => {
+      const response = await get("/api/health");
+      await expect(response.json()).resolves.toMatchObject({
+        guards: { teamCodes: "invalid", teamCodesCount: 0 },
+      });
+
+      const before = await listDurableObjectIds(env.TEAM_ROOM);
+      expect((await session("100001")).status).toBe(404);
+      expect((await session("100002")).status).toBe(404);
+      await expect(listDurableObjectIds(env.TEAM_ROOM)).resolves.toEqual(before);
+    });
+  });
+
+  it("全角カンマ区切りでも正しく数え、入室できる", async () => {
+    await withEnv({ TEAM_CODES: "500050，500051" }, async () => {
+      await expect((await get("/api/health")).json()).resolves.toMatchObject({
+        guards: { teamCodes: true, teamCodesCount: 2 },
+      });
+      expect((await session("500050")).status).toBe(200);
+      expect((await session("500052")).status).toBe(404);
+    });
+  });
+
+  it("重複を書いてもteamCodesCountは一意の件数を返す", async () => {
+    await withEnv({ TEAM_CODES: "500053,500054,500053" }, async () => {
+      await expect((await get("/api/health")).json()).resolves.toMatchObject({
+        guards: { teamCodes: true, teamCodesCount: 2 },
+      });
     });
   });
 });

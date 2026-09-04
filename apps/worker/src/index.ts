@@ -34,6 +34,7 @@ import {
   parseAllowedOrigins,
   parseChatRateLimit,
   parseTeamCodes,
+  teamCodesStatus,
 } from "./guard.js";
 import type { CorsHeaders } from "./guard.js";
 import {
@@ -570,8 +571,12 @@ const handleGet = (request: Request, env: Env, url: URL): Promise<Response> => {
  * 本番でそのまま残っていても例外やログには現れないため、目視できる形で出す。
  * 値そのもの（配布したチームコードや許可オリジン）は伏せ、設定の有無だけを返す。
  */
-const guardStatus = (env: Env): Record<string, boolean | number> => ({
-  teamCodes: parseTeamCodes(env.TEAM_CODES) !== null,
+const guardStatus = (env: Env): Record<string, boolean | number | string> => ({
+  // teamCodesは true / false / "invalid" の3値。"invalid"は「設定されているが値が
+  // 壊れている（6桁数字でない要素が混ざっている）」で、全チームが404になる状態を指す。
+  // teamCodesCountは有効な件数——配布したチーム数と突き合わせれば、書き損じや
+  // 重複をデプロイ後に見つけられる。
+  ...teamCodesStatus(parseTeamCodes(env.TEAM_CODES)),
   allowedOrigins: parseAllowedOrigins(env.ALLOWED_ORIGINS).length > 0,
   chatRateLimitPerMinute: parseChatRateLimit(env.CHAT_RATE_LIMIT_PER_MINUTE),
 });

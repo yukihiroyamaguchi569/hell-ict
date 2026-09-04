@@ -21,7 +21,12 @@ describe("P1B Worker", () => {
     await expect(response.json()).resolves.toEqual({
       status: "ok",
       // 運用値の設定状況。テスト環境ではどれも未設定なので既定のまま出る。
-      guards: { teamCodes: false, allowedOrigins: false, chatRateLimitPerMinute: 20 },
+      guards: {
+        teamCodes: false,
+        teamCodesCount: 0,
+        allowedOrigins: false,
+        chatRateLimitPerMinute: 20,
+      },
     });
     await expect(listDurableObjectIds(env.TEAM_ROOM)).resolves.toEqual([]);
     await expect(listDurableObjectIds(env.RACE_LEADERBOARD)).resolves.toEqual([]);

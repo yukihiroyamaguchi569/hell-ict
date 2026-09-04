@@ -3,6 +3,7 @@ import { z } from "zod";
 import { publicTeamId, teamCodeSchema } from "@hell-ict/domain";
 
 import { isTeamCodeAllowed, parseTeamCodes } from "./guard.js";
+import type { TeamCodeAllowlist } from "./guard.js";
 import { bodyErrorResponse, error, json, parseJson } from "./http.js";
 
 /**
@@ -110,12 +111,13 @@ const eventRowSchema = z.object({
  * 動的に組む（当日の配布数は多くても数十）。
  */
 const teamFilter = (
-  allowlist: ReadonlySet<string> | null,
+  allowlist: TeamCodeAllowlist,
   column: string,
 ): { clause: string; params: string[] } => {
-  if (allowlist === null) return { clause: "", params: [] };
-  const codes = [...allowlist];
-  // 空の許可リスト（設定し損ね）はfail-closed。IN ()は書けないので常に偽の条件を置く。
+  if (allowlist.kind === "unset") return { clause: "", params: [] };
+  const codes = allowlist.kind === "list" ? [...allowlist.codes] : [];
+  // 空の許可リスト（設定し損ね）と不正な設定はfail-closed。IN ()は書けないので
+  // 常に偽の条件を置く。
   if (codes.length === 0) return { clause: `WHERE 0`, params: [] };
   return { clause: `WHERE ${column} IN (${codes.map(() => "?").join(", ")})`, params: codes };
 };
@@ -202,7 +204,7 @@ const toPublicRow = async <Row extends { teamCode: string }>(
  * `?teamCode=`で自分の行を指定できる。許可リストを通らないコードは無視する
  * （未登録のコードで他チームの行へisSelfを立てさせない）。
  */
-const selfTeamCode = (url: URL, allowlist: ReadonlySet<string> | null): string | null => {
+const selfTeamCode = (url: URL, allowlist: TeamCodeAllowlist): string | null => {
   const parsed = teamCodeSchema.safeParse(url.searchParams.get("teamCode"));
   if (!parsed.success) return null;
   return isTeamCodeAllowed(parsed.data, allowlist) ? parsed.data : null;

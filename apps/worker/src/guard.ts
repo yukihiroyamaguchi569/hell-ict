@@ -1,3 +1,4 @@
+import { teamCodeSchema } from "@hell-ict/domain";
 import { z } from "zod";
 
 /**
@@ -102,33 +103,59 @@ export const corsHeadersFor = (
 };
 
 /**
- * カンマ区切りの`TEAM_CODES`を集合へ。
+ * `TEAM_CODES`の解析結果。
  *
- * 「未設定」と「設定されているが空」を区別する。未設定（undefined）だけがnull＝
- * 許可リスト無し＝何でも通す。ローカル開発とE2Eを壊さないための意図的なfail-openで、
- * この既定は維持する（設定漏れは`GET /api/health`のguardsで検知する）。
- *
- * 一方、空文字や","だけを設定した場合は「許可リストを効かせるつもりで値を間違えた」と
- * みなし、空集合を返してすべて拒否する（fail-closed）。fail-openへ倒すと、設定した
- * つもりのまま誰でも入れる状態を無言で作ってしまう。
+ * - `unset`: 環境変数そのものが無い。許可リスト無し＝何でも通す。ローカル開発とE2Eを
+ *   壊さないための意図的なfail-openで、この既定は維持する（設定漏れは
+ *   `GET /api/health`のguardsで検知する）。
+ * - `invalid`: 設定されているが、6桁数字でない要素が1つでも混ざっている。すべて拒否する
+ *   （fail-closed）——一部だけ通すと、当日「入れるチームと入れないチームがある」という
+ *   いちばん切り分けにくい形で壊れる。
+ * - `list`: 検証を通ったコードの集合。空集合（`","`だけ等）もここで、全て拒否になる。
  */
-export const parseTeamCodes = (raw: string | undefined): ReadonlySet<string> | null => {
-  if (raw === undefined) return null;
-  return new Set(
-    raw
-      .split(",")
-      .map((code) => code.trim())
-      .filter((code) => code.length > 0),
-  );
+export type TeamCodeAllowlist =
+  | { readonly kind: "unset" }
+  | { readonly kind: "invalid" }
+  | { readonly kind: "list"; readonly codes: ReadonlySet<string> };
+
+/**
+ * 区切り文字。半角カンマに加えて全角カンマ「，」と読点「、」も受ける——当日の配布表から
+ * 手で貼る運用で、日本語入力のまま打った区切りが混ざるのは十分ありうる。ここで
+ * 弾いても得るものはなく、invalidにして入室できなくなるほうが損が大きい。
+ */
+const TEAM_CODE_SEPARATORS = /[,，、]/;
+
+/**
+ * カンマ区切りの`TEAM_CODES`を解析する。要素ごとに6桁数字を検証し、1つでも不正なら
+ * `invalid`にする——検証しないと`100001,100002x`のような値でもhealthが「設定済み」を
+ * 返し、本番前確認を通過した後で当日入室できない、という順序で気づくことになる。
+ * 重複は除去する（同じコードを2度書いても件数の期待値がずれないようにする）。
+ */
+export const parseTeamCodes = (raw: string | undefined): TeamCodeAllowlist => {
+  if (raw === undefined) return { kind: "unset" };
+  const entries = raw
+    .split(TEAM_CODE_SEPARATORS)
+    .map((code) => code.trim())
+    .filter((code) => code.length > 0);
+  if (entries.some((code) => !teamCodeSchema.safeParse(code).success)) return { kind: "invalid" };
+  return { kind: "list", codes: new Set(entries) };
 };
 
 /** 許可リストが無ければ（＝TEAM_CODES未設定なら）何でも通す。 */
-export const isTeamCodeAllowed = (code: string, allowlist: ReadonlySet<string> | null): boolean =>
-  allowlist === null || allowlist.has(code);
+export const isTeamCodeAllowed = (code: string, allowlist: TeamCodeAllowlist): boolean => {
+  if (allowlist.kind === "unset") return true;
+  if (allowlist.kind === "invalid") return false;
+  return allowlist.codes.has(code);
+};
 
-// ---- チャット送信のレート制限（固定窓） ----
-
-/** 固定窓の幅。`CHAT_RATE_LIMIT_PER_MINUTE`が「1分あたり」を意味する根拠。 */
+/** `GET /api/health`のguardsへ載せる表示。値そのものは出さず、状態と件数だけを返す。 */
+export const teamCodesStatus = (
+  allowlist: TeamCodeAllowlist,
+): { teamCodes: boolean | "invalid"; teamCodesCount: number } => {
+  if (allowlist.kind === "unset") return { teamCodes: false, teamCodesCount: 0 };
+  if (allowlist.kind === "invalid") return { teamCodes: "invalid", teamCodesCount: 0 };
+  return { teamCodes: true, teamCodesCount: allowlist.codes.size };
+};
 export const RATE_LIMIT_WINDOW_MS = 60_000;
 
 /** 既定の上限。研修中の1チームが1分に20通を超えるのは操作ミスか暴走とみなす。 */
