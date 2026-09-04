@@ -4321,10 +4321,18 @@
     };
   }
 
-  /* 再入室したときの突き合わせ。未確定として持っているIDのうち、その本文が
-     既にサーバのスレッドへ user 発言として入っているものは「確定済み」——
-     持ち続けると、参加者が同じ文面を打ち直したときに冪等の再送と見なされ、
-     本来送りたかった2通目が黙って捨てられる。 */
+  /* 再入室したときの突き合わせ。未確定として持っているIDのうち、既に
+     「AIの応答まで終わっている」ものだけを捨てる。
+
+     📌 user 発言が入っているだけでは捨てない。サーバはAIを呼ぶ前に user 発言を
+     保存するので、AI処理中や失敗直後のリロードでは「user だけあって assistant が
+     無い」状態が普通に見える。ここで捨てると再送が新しいUUIDになり、サーバ側の
+     pending が別コマンドとして走って発言もOpenAI呼び出しも二重になる。
+     assistant が続いているときだけ完了とみなし、そうでなければIDを持ったまま
+     同じ commandId で送り直す（サーバは pending を再開してAIを呼び直す）。
+
+     逆に完了したものを持ち続けると、参加者が同じ文面を打ち直したときに冪等の
+     再送と見なされ、本来送りたかった2通目が黙って捨てられる。 */
   function reconcilePendingCommands(store, snapshot) {
     if (!isChatSnapshot(snapshot)) return;
     store.keys().forEach((key) => {
@@ -4332,8 +4340,12 @@
       if (!parsed) { store.forget(key); return; }
       const thread = snapshot.threads.find((t) => t.threadId === parsed.threadId);
       if (!thread) return;   // スレッドごと見えない。判断できないので残す
-      const saved = thread.messages.some((m) => m && m.role === "user" && m.text === parsed.text);
-      if (saved) store.forget(key);
+      const completed = thread.messages.some((m, i) => {
+        if (!m || m.role !== "user" || m.text !== parsed.text) return false;
+        const next = thread.messages[i + 1];
+        return !!next && next.role === "assistant";
+      });
+      if (completed) store.forget(key);
     });
   }
 

@@ -142,8 +142,10 @@ JS 構造そのものは資産ではない。単一ファイル・フレーム�
   `:s1draft`。書き込みは変更のたび、読み込みは入室時、JSON形状が壊れていれば丸ごと捨てる）——メモリだけだと
   「AI待ちの最中にリロード」で未確定IDが消え、同じ本文を送り直したときに新しいUUIDになる。サーバでは先の
   要求が完了していることがあり、発言もOpenAI呼び出しも二重になる。タブを閉じたら消えてよい状態なので
-  `localStorage` ではなく `sessionStorage`。再入室時は `GET /chat` の snapshot と突き合わせ、指紋の本文が
-  既に user 発言として保存されているものは「確定済み」として捨てる（`reconcilePendingCommands()`）。
+  `localStorage` ではなく `sessionStorage`。再入室時は `GET /chat` の snapshot と突き合わせ、指紋の本文の
+  **直後に assistant 発言があるものだけ**「確定済み」として捨てる（`reconcilePendingCommands()`）——サーバは
+  AIを呼ぶ前に user 発言を保存するので、「user だけあって assistant が無い」は AI処理中・失敗直後のリロードで
+  普通に見える状態であり、そこで捨てると再送が新UUIDになって発言もOpenAI呼び出しも二重になる。
 - **429（レート制限）は「失敗」ではなく「待て」として出す**（2026-09-04追加）。`liveFetch()` が
   `Retry-After`（秒）を `retryAfter` として返し、AIチャット（`handleLiveChatError()`）とStage 1の
   下書き（`s1DraftLive()`）が「送信が多すぎます。N 秒待ってからもう一度送ってください。」を表示する
