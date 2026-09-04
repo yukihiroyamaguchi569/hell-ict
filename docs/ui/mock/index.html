@@ -4240,28 +4240,104 @@
      1ステージ分の試行錯誤には足り、際限なく抱えても意味が無い。 */
   const PENDING_COMMAND_LIMIT = 20;
 
-  function makePendingCommand() {
+  const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+
+  /* 指紋（threadId + " " + promptProfile + " " + 本文）を分解して戻す。
+     threadId と promptProfile に空白は入らないので、先頭2つの空白で切れる。
+     本文にはいくらでも空白が入りうるので、3つ目以降は分けない。 */
+  function parsePendingKey(key) {
+    const first = key.indexOf(" ");
+    const second = key.indexOf(" ", first + 1);
+    if (first < 0 || second < 0) return null;
+    return {
+      threadId: key.slice(0, first),
+      promptProfile: key.slice(first + 1, second),
+      text: key.slice(second + 1),
+    };
+  }
+
+  /* `slot` を渡すと sessionStorage へ永続化する（渡さなければメモリのみ）。
+     メモリだけだと「AI待ちの最中にリロード」で未確定IDが消え、同じ本文を
+     送り直したときに新しいUUIDになる——サーバでは先の要求が完了しているので、
+     ユーザー発言もOpenAI呼び出しも二重になる。タブを閉じたら消えてよい類の
+     状態なので localStorage ではなく sessionStorage を使う。 */
+  function makePendingCommand(slot) {
     const pending = new Map();   // 指紋 → commandId（Mapは挿入順を保つ＝先頭が最も古い）
+    let storageKey = null;
     const keyOf = (threadId, promptProfile, text) => threadId + " " + promptProfile + " " + text;
+
+    const persist = () => {
+      if (storageKey === null) return;
+      try {
+        sessionStorage.setItem(storageKey, JSON.stringify(Array.from(pending.entries())));
+      } catch {}   // 容量超過・プライベートモード。永続化できなくても進行は止めない
+    };
+    const trim = () => {
+      while (pending.size > PENDING_COMMAND_LIMIT) pending.delete(pending.keys().next().value);
+    };
+
     return {
       idFor(threadId, promptProfile, text) {
         const key = keyOf(threadId, promptProfile, text);
         const known = pending.get(key);
         if (known !== undefined) return known;
-        const commandId = crypto.randomUUID();
-        pending.set(key, commandId);
-        while (pending.size > PENDING_COMMAND_LIMIT) pending.delete(pending.keys().next().value);
-        return commandId;
+        pending.set(key, crypto.randomUUID());
+        trim();
+        persist();
+        return pending.get(key);
       },
       /* 解決した試行を捨てる。引数なしは全消し（入り直しなど）。 */
       clear(threadId, promptProfile, text) {
-        if (threadId === undefined) { pending.clear(); return; }
-        pending.delete(keyOf(threadId, promptProfile, text));
+        if (threadId === undefined) pending.clear();
+        else pending.delete(keyOf(threadId, promptProfile, text));
+        persist();
+      },
+      forget(key) { pending.delete(key); persist(); },
+      keys() { return Array.from(pending.keys()); },
+
+      /* 入室時に、そのチームぶんの未確定IDを読み戻す。壊れていれば丸ごと捨てる
+         ——半端に拾うより、次の送信で新しいIDを振る方が害が小さい。 */
+      load(teamCode) {
+        if (!slot) return;
+        storageKey = "hellPending:" + teamCode + ":" + slot;
+        pending.clear();
+        let raw = null;
+        try { raw = sessionStorage.getItem(storageKey); } catch { return; }
+        if (!raw) return;
+        let parsed = null;
+        try { parsed = JSON.parse(raw); } catch { parsed = null; }
+        const valid = Array.isArray(parsed) && parsed.every((pair) =>
+          Array.isArray(pair) && pair.length === 2 &&
+          typeof pair[0] === "string" && pair[0].length > 0 &&
+          typeof pair[1] === "string" && UUID_RE.test(pair[1]));
+        if (!valid) {
+          try { sessionStorage.removeItem(storageKey); } catch {}
+          return;
+        }
+        parsed.forEach((pair) => pending.set(pair[0], pair[1]));
+        trim();
+        persist();
       }
     };
   }
 
-  const chatSendCommand = makePendingCommand();
+  /* 再入室したときの突き合わせ。未確定として持っているIDのうち、その本文が
+     既にサーバのスレッドへ user 発言として入っているものは「確定済み」——
+     持ち続けると、参加者が同じ文面を打ち直したときに冪等の再送と見なされ、
+     本来送りたかった2通目が黙って捨てられる。 */
+  function reconcilePendingCommands(store, snapshot) {
+    if (!isChatSnapshot(snapshot)) return;
+    store.keys().forEach((key) => {
+      const parsed = parsePendingKey(key);
+      if (!parsed) { store.forget(key); return; }
+      const thread = snapshot.threads.find((t) => t.threadId === parsed.threadId);
+      if (!thread) return;   // スレッドごと見えない。判断できないので残す
+      const saved = thread.messages.some((m) => m && m.role === "user" && m.text === parsed.text);
+      if (saved) store.forget(key);
+    });
+  }
+
+  const chatSendCommand = makePendingCommand("chat");
 
   /* サーバに何も保存されないまま確定した拒否か。ここが false のときは、
      ユーザー発言だけが保存済み（AIは未応答）なので、commandId を捨ててはいけない
@@ -5288,7 +5364,7 @@
   // コンテキストで押し直したときだけIDが再利用され、要点を書き足してから
   // 押し直せば新しい試行になる——参加者の意図（同じものを再送 vs 作り直し）と
   // 一致する。
-  const s1DraftCommand = makePendingCommand();
+  const s1DraftCommand = makePendingCommand("s1draft");
 
   // s1Draftの実Worker経路。メインスレッド（liveState.activeThreadId）をそのまま
   // 使う——Stage1専用のスレッドは作らない。Stage2以降のチャットUIに下書き依頼の
@@ -8466,6 +8542,14 @@
       sentDataRevision: 0,
     };
     commitTeamName(code, name);
+    // 未確定の送信IDを読み戻し、サーバのスレッドと突き合わせる。「AI待ちの
+    // 最中にリロード」を挟んでも、同じ本文の送り直しが同じ commandId になる
+    // ——サーバでは先の要求が完了していることがあり、新しいIDで送ると発言も
+    // OpenAI呼び出しも二重になる。既に保存済みだと分かったぶんはここで捨てる。
+    chatSendCommand.load(code);
+    s1DraftCommand.load(code);
+    reconcilePendingCommands(chatSendCommand, chatRes.body);
+    reconcilePendingCommands(s1DraftCommand, chatRes.body);
     // 保存済みのチェックポイントがあれば、そのステージへ戻す（進行台本 §5-1 の
     // 手動ジャンプを不要にするための自動復帰）。
     // 制限時間は短縮版（LIVE_RESTORE_TIMEOUT_MS＝4秒）ではなく本送信と同じ20秒を使う。
