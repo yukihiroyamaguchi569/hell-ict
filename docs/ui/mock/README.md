@@ -90,6 +90,11 @@ JS 構造そのものは資産ではない。単一ファイル・フレーム�
   が `sendAiLive()` 経由で実Worker API（`/api/teams/:code/chat/messages` 等）を叩く。
   スレッドタブ（`renderAiTabs()`）・`promptProfile`（Stage 3 のときだけ `"s3"`、それ以外は
   `"default"`）・422（`pii_blocked`）のStage 4ゲート処理は、この経路にのみ存在する。
+  **スレッド作成の `kind`**（2026-09-04追加）：ステージ入場で自動に作る枠（`activateStageThread()`）は
+  `kind: "stage"`、参加者が＋ボタンで足す枠（`createLiveThread()`）は `kind: "manual"` を送る。サーバは
+  stage（8件）と manual（25件）を独立に数えるので、＋を使い切ってもステージぶんのスレッドは必ず作れる。
+  ＋の 409（上限）はサーバの message をAIペインへ短く出すだけで進行は止めない（自動枠の409も現行どおり黙って
+  今のスレッドを使い続ける）。
 - **Stage 2 はLIVE時も実APIを呼ばない**（2026-08-22 ユーザー決定）。`sendAI()` は必ず
   `s2ScriptedTable()` の整形済みラインリスト（見出し行つき6列のタブ区切り）を返す——実GPTは
   出力形式が安定せず、箇条書き・スペース整列・列数違いで返るとグリッドへ貼り戻せないまま
