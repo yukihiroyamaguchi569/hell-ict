@@ -3661,7 +3661,7 @@
      始め直してもレースの経過時間は巻き戻らない、という扱いにするため
      （罰＝時間で払う設計で、時計のリセットが抜け道になるのを塞ぐ）。 */
   function adoptServerState(server) {
-    if (!server) return;
+    if (!server) return false;
     if (server.trap && server.trap.s3Used) s3TrapUsed = true;
     if (server.trap && server.trap.s4Used) s4TrapUsed = true;
     if (typeof server.elapsedMs === "number" && server.elapsedMs > elapsed * 1000) {
@@ -3672,12 +3672,22 @@
       TEAMS[2].pos = server.pos;
       drawMarks();
     }
-    // data-regression で拒否されたということは、こちらの data が古い。罰の進行は
-    // サーバ側が正なので、そのまま取り込む（払い終えた罰を未実施へ戻さない）。
-    if (server.data) {
-      if (server.data.s3Penalty) s3PenaltyState = server.data.s3Penalty;
-      if (server.data.s4Penalty) s4PenaltyState = server.data.s4Penalty;
-    }
+    // data だけは「大きい方を採る」が使えない——中身（none/in-progress/done）を
+    // 見ても新旧が決まらないので、世代番号で決める。サーバの方が新しいときだけ
+    // 採り、同じか古ければローカルを残す。
+    //
+    // 無条件に採ると両方向へ壊れる。こちらが done（rev 6）でサーバが
+    // in-progress（rev 5）なら、払い終えた罰が未実施へ戻されたうえ、
+    // syncSentData() がそれを「サーバ由来」と記録して rev 6 のまま送り返す
+    // ——サーバの古い内容を自分の世代で上書きしてしまう。逆にこちらが古い
+    // in-progress でサーバが新しい none のときに採らなければ、罰を踏み倒せる。
+    // 採用したかどうかを返し、呼び出し側は採用したときだけ syncSentData() を通す。
+    const serverDataRevision = Number(server.dataRevision) || 0;
+    const sentDataRevision = liveState ? liveState.sentDataRevision || 0 : 0;
+    if (!server.data || serverDataRevision <= sentDataRevision) return false;
+    if (server.data.s3Penalty) s3PenaltyState = server.data.s3Penalty;
+    if (server.data.s4Penalty) s4PenaltyState = server.data.s4Penalty;
+    return true;
   }
 
   /* サーバへ1本ずつ送る。POSTを並行させると、先に投げた古いbodyが後から
@@ -3740,10 +3750,10 @@
     // 拒否の理由に関わらず、取り直したサーバの状態をまず自分へ取り込む。
     // conflict でも同じ——別タブが進めた罰の状態などを持たないまま body を
     // 組み直すと、「サーバの世代を観測しただけの古い data」を新しい世代として
-    // 押し戻すことになる。取り込んだあとに syncSentData() で「この data は
-    // サーバ由来」と記録し、次の保存が余計な世代を名乗らないようにする。
-    adoptServerState(snapshot ? snapshot.body : null);
-    syncSentData();
+    // 押し戻すことになる。data を実際に取り込んだときだけ syncSentData() で
+    // 「この data はサーバ由来」と記録する——取り込まなかった（こちらの方が
+    // 新しい）のに記録すると、自分の data をサーバ由来と誤って扱う。
+    if (adoptServerState(snapshot ? snapshot.body : null)) syncSentData();
 
     const conflicted = code === null ? serverRevision !== sentRevision : code === "conflict";
     if (conflicted) {
