@@ -115,22 +115,35 @@ describe("チェックポイントAPI", () => {
     expect(snapshot.revision).toBe(1);
   });
 
-  it("同じcommandIdの再送は状態を進めず同じsnapshotを返す", async () => {
+  it("同じcommandId・同じ本文の再送は状態を進めず同じsnapshotを返す", async () => {
     const first = await save("500004", { commandId: id("103"), expectedRevision: 0 });
     const firstResult = saveCheckpointResultSchema.parse(await first.json());
 
-    // 再送は本文が変わっていても保存済み結果を返す（冪等）。
-    const again = await save(
-      "500004",
-      { commandId: id("103"), expectedRevision: 0, body: { pos: 7 } },
-      later,
-    );
+    const again = await save("500004", { commandId: id("103"), expectedRevision: 0 }, later);
 
     expect(again.status).toBe(200);
     await expect(again.json()).resolves.toEqual(firstResult);
     const state = await load("500004");
     expect(state.checkpoint?.revision).toBe(1);
     expect(state.checkpoint?.body.pos).toBe(2);
+  });
+
+  it("同じcommandIdで別の本文を送ると409 conflictで、状態も動かない", async () => {
+    // commandIdは冪等キーだが内容とは結びついていない。元の結果をそのまま返すと、
+    // クライアントは保存したつもりの状態が入っていないことに気づけない。
+    await save("500005", { commandId: id("104"), expectedRevision: 0 });
+
+    const swapped = await save(
+      "500005",
+      { commandId: id("104"), expectedRevision: 0, body: { pos: 7 } },
+      later,
+    );
+
+    expect(swapped.status).toBe(409);
+    expect(httpErrorSchema.parse(await swapped.json()).code).toBe("conflict");
+    await expect(load("500005")).resolves.toMatchObject({
+      checkpoint: { revision: 1, body: { pos: 2 } },
+    });
   });
 
   it("上書き済みのcommandIdの再送は409で拒否し、古いbodyを復活させない", async () => {
@@ -513,8 +526,12 @@ describe("チェックポイントAPI", () => {
       checkpoint: { revision: 21, body: { pos: 7 } },
     });
 
-    // 直前の保存の再送は、状態を進めず現在のsnapshotを返す。
-    const kept = await save(teamCode, { commandId: commandIdAt(20), expectedRevision: 20 });
+    // 直前の保存の再送（同じ本文）は、状態を進めず現在のsnapshotを返す。
+    const kept = await save(teamCode, {
+      commandId: commandIdAt(20),
+      expectedRevision: 20,
+      body: { pos: 7 },
+    });
     expect(kept.status).toBe(200);
     const { snapshot } = saveCheckpointResultSchema.parse(await kept.json());
     expect(snapshot).toMatchObject({ revision: 21, body: { pos: 7 } });

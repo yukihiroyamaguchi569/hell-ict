@@ -1,3 +1,4 @@
+import { sha256Hex } from "./fingerprint.js";
 import { CHAT_MESSAGE_MAX_CHARS } from "./schemas/chat.js";
 import type {
   ChatMessage,
@@ -69,15 +70,12 @@ export const appendMessage = (
  * 区切りに改行を挟むのは、隣接するフィールドの境界を潰さないため（"ab"+"c" と
  * "a"+"bc" が同じ指紋にならないようにする）。
  */
-export const chatCommandFingerprint = async (command: {
+export const chatCommandFingerprint = (command: {
   readonly threadId: string;
   readonly promptProfile?: PromptProfile;
   readonly text: string;
-}): Promise<string> => {
-  const source = `${command.threadId}\n${command.promptProfile ?? "default"}\n${command.text}`;
-  const digest = await crypto.subtle.digest("SHA-256", new TextEncoder().encode(source));
-  return [...new Uint8Array(digest)].map((byte) => byte.toString(16).padStart(2, "0")).join("");
-};
+}): Promise<string> =>
+  sha256Hex(`${command.threadId}\n${command.promptProfile ?? "default"}\n${command.text}`);
 
 /**
  * OpenAIの応答をchatMessageSchemaのtextに載る形へ整える。載せられないならnullを返し、

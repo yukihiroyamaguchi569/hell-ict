@@ -1,6 +1,6 @@
 import { env, exports } from "cloudflare:workers";
 import { createExecutionContext, listDurableObjectIds, runInDurableObject } from "cloudflare:test";
-import { chatSnapshotSchema, createThreadResultSchema } from "@hell-ict/domain";
+import { chatSnapshotSchema, createThreadResultSchema, httpErrorSchema } from "@hell-ict/domain";
 import { FakeAiGateway } from "@hell-ict/domain/fakes";
 import type { FakeAiOutcome } from "@hell-ict/domain/fakes";
 import { describe, expect, it, vi } from "vitest";
@@ -557,6 +557,29 @@ describe("スレッド数の上限", () => {
       );
       expect(response.status, `#${String(index)}`).toBe(200);
     }
+  });
+
+  it("同じcommandIdで別のタイトルのスレッドを作ると409 conflict", async () => {
+    await session("500045");
+    const commandId = messageCommandId(3000);
+    const first = await createThread("500045", commandId, "副1");
+    expect(first.status).toBe(200);
+    const firstBody = await first.json();
+
+    // 内容が違う再送は冪等再送ではない。元の結果を返すと、クライアントは作った
+    // つもりのスレッドが無いことに気づけない。
+    const swapped = await createThread("500045", commandId, "別のタイトル");
+    expect(swapped.status).toBe(409);
+    expect(httpErrorSchema.parse(await swapped.json()).code).toBe("conflict");
+
+    // kindだけ違う再送も同じ扱い。
+    const otherKind = await createThread("500045", commandId, "副1", "stage");
+    expect(otherKind.status).toBe(409);
+
+    // 同じ内容の再送は従来どおり同じ結果を返す。
+    const resent = await createThread("500045", commandId, "副1");
+    expect(resent.status).toBe(200);
+    await expect(resent.json()).resolves.toEqual(firstBody);
   });
 
   it("上限に達していても、処理済みcommandIdの再送は同じ結果を返す", async () => {

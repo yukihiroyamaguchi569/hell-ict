@@ -55,6 +55,12 @@ export {
 } from "./chat.js";
 export type { ChatMutationResult } from "./chat.js";
 export {
+  checkpointFingerprint,
+  createThreadFingerprint,
+  sha256Hex,
+  stableStringify,
+} from "./fingerprint.js";
+export {
   CHECKPOINT_DATA_MAX_BYTES,
   CHECKPOINT_DATA_MAX_DEPTH,
   CHECKPOINT_DATA_TOO_LARGE_MESSAGE,

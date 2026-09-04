@@ -47,7 +47,7 @@ import { error, isWebSocketRequest } from "./http.js";
 type StoredCommand = { result: string };
 type StoredState = { snapshot: string };
 type StoredChatState = { snapshot: string };
-type StoredThreadCommand = { result: string };
+type StoredThreadCommand = { result: string; fingerprint: string | null };
 type StoredMessageCommand = { result: string; fingerprint: string | null };
 type StoredPendingMessage = {
   thread_id: string;
@@ -57,7 +57,7 @@ type StoredPendingMessage = {
   claim_generation: number | null;
 };
 type StoredCheckpointState = { snapshot: string };
-type StoredCheckpointCommand = { revision: SqlStorageValue };
+type StoredCheckpointCommand = { revision: SqlStorageValue; fingerprint: string | null };
 type ConflictReply = { conflict: true };
 type UnknownThreadReply = { unknownThread: true };
 
@@ -202,7 +202,7 @@ export class TeamRoom extends DurableObject<Env> {
       "CREATE TABLE IF NOT EXISTS chat_state (id INTEGER PRIMARY KEY CHECK (id = 1), snapshot TEXT NOT NULL)",
     );
     this.ctx.storage.sql.exec(
-      "CREATE TABLE IF NOT EXISTS processed_thread_commands (command_id TEXT PRIMARY KEY, result TEXT NOT NULL)",
+      "CREATE TABLE IF NOT EXISTS processed_thread_commands (command_id TEXT PRIMARY KEY, result TEXT NOT NULL, fingerprint TEXT)",
     );
     this.ctx.storage.sql.exec(
       "CREATE TABLE IF NOT EXISTS processed_message_commands (command_id TEXT PRIMARY KEY, result TEXT NOT NULL, fingerprint TEXT)",
@@ -218,6 +218,8 @@ export class TeamRoom extends DurableObject<Env> {
       "ALTER TABLE pending_message_commands ADD COLUMN fingerprint TEXT",
       "ALTER TABLE processed_message_commands ADD COLUMN fingerprint TEXT",
       "ALTER TABLE pending_message_commands ADD COLUMN claim_generation INTEGER NOT NULL DEFAULT 0",
+      "ALTER TABLE processed_thread_commands ADD COLUMN fingerprint TEXT",
+      "ALTER TABLE processed_checkpoint_commands ADD COLUMN fingerprint TEXT",
     ]) {
       try {
         this.ctx.storage.sql.exec(statement);
@@ -229,7 +231,7 @@ export class TeamRoom extends DurableObject<Env> {
       "CREATE TABLE IF NOT EXISTS checkpoint_state (id INTEGER PRIMARY KEY CHECK (id = 1), snapshot TEXT NOT NULL)",
     );
     this.ctx.storage.sql.exec(
-      "CREATE TABLE IF NOT EXISTS processed_checkpoint_commands (command_id TEXT PRIMARY KEY, revision INTEGER NOT NULL, created_at TEXT NOT NULL)",
+      "CREATE TABLE IF NOT EXISTS processed_checkpoint_commands (command_id TEXT PRIMARY KEY, revision INTEGER NOT NULL, created_at TEXT NOT NULL, fingerprint TEXT)",
     );
     this.ctx.storage.sql.exec(
       "CREATE TABLE IF NOT EXISTS rate_limit (bucket TEXT PRIMARY KEY, count INTEGER NOT NULL)",
@@ -322,17 +324,22 @@ export class TeamRoom extends DurableObject<Env> {
   async createThread(
     teamCodeInput: unknown,
     commandInput: unknown,
-  ): Promise<CreateThreadResult | ThreadLimitReply> {
+    fingerprint: string,
+  ): Promise<CreateThreadResult | ThreadLimitReply | ConflictReply> {
     const teamCode = teamCodeSchema.parse(teamCodeInput);
     const command: CreateThreadCommand = createThreadCommandSchema.parse(commandInput);
     const saved =
       this.ctx.storage.sql
         .exec<StoredThreadCommand>(
-          "SELECT result FROM processed_thread_commands WHERE command_id = ?",
+          "SELECT result, fingerprint FROM processed_thread_commands WHERE command_id = ?",
           command.commandId,
         )
         .toArray()[0] ?? null;
-    if (saved !== null) return createThreadResultSchema.parse(JSON.parse(saved.result) as unknown);
+    if (saved !== null) {
+      // 同じcommandIdで別のタイトル・別のkindを送る取り違えは冪等再送ではない。
+      if (mismatchesFingerprint(saved.fingerprint, fingerprint)) return { conflict: true };
+      return createThreadResultSchema.parse(JSON.parse(saved.result) as unknown);
+    }
     const snapshot = this.loadChatSnapshot(teamCode);
     // 冪等再送（processed済み）は上限に関係なく従来の結果を返す。上限を当てるのは
     // 新しいスレッドを実際に増やすときだけである。kindごとに独立して数える。
@@ -349,9 +356,10 @@ export class TeamRoom extends DurableObject<Env> {
     this.saveChatSnapshot(created.snapshot);
     const result = createThreadResultSchema.parse({ snapshot: created.snapshot });
     this.ctx.storage.sql.exec(
-      "INSERT INTO processed_thread_commands (command_id, result) VALUES (?, ?)",
+      "INSERT INTO processed_thread_commands (command_id, result, fingerprint) VALUES (?, ?, ?)",
       command.commandId,
       JSON.stringify(result),
+      fingerprint,
     );
     this.broadcastChat(created.snapshot);
     return result;
@@ -710,6 +718,7 @@ export class TeamRoom extends DurableObject<Env> {
     teamCodeInput: unknown,
     commandInput: unknown,
     nowIsoInput: unknown,
+    fingerprint: string,
   ): Promise<CheckpointSnapshot | CheckpointRejection> {
     const teamCode = teamCodeSchema.parse(teamCodeInput);
     const command: SaveCheckpointCommand = saveCheckpointCommandSchema.parse(commandInput);
@@ -717,7 +726,7 @@ export class TeamRoom extends DurableObject<Env> {
     const saved =
       this.ctx.storage.sql
         .exec<StoredCheckpointCommand>(
-          "SELECT revision FROM processed_checkpoint_commands WHERE command_id = ?",
+          "SELECT revision, fingerprint FROM processed_checkpoint_commands WHERE command_id = ?",
           command.commandId,
         )
         .toArray()[0] ?? null;
@@ -725,16 +734,20 @@ export class TeamRoom extends DurableObject<Env> {
     // 台帳の行も検証してから使う。壊れた行を「台帳に無い」と読み替えると、適用済みの
     // commandIdが未処理に見えて古いbodyを再適用してしまう。不整合は黙って通さず、
     // 例外にしてWorkerの503（時間を置いて再試行）へ倒す。
-    if (saved !== null)
+    if (saved !== null) {
+      // 同じcommandIdで別のbodyを送る取り違えは冪等再送ではない。元の結果を返すと、
+      // クライアントは保存したつもりの状態が入っていないことに気づけない。
+      if (mismatchesFingerprint(saved.fingerprint, fingerprint)) return { rejected: "conflict" };
       return this.replayCheckpoint(
         current,
         checkpointSnapshotSchema.shape.revision.parse(saved.revision),
       );
+    }
 
     const applied = applyCheckpoint(current, command, { teamCode, now });
     if (!applied.ok) return { rejected: applied.reason };
     try {
-      this.writeCheckpoint(applied.snapshot, command, current);
+      this.writeCheckpoint(applied.snapshot, command, { current, fingerprint });
     } catch (caught) {
       if (caught instanceof CheckpointConflictError) return { rejected: "conflict" };
       throw caught;
@@ -752,8 +765,9 @@ export class TeamRoom extends DurableObject<Env> {
   private writeCheckpoint(
     snapshot: CheckpointSnapshot,
     command: SaveCheckpointCommand,
-    current: CheckpointSnapshot | null,
+    context: { current: CheckpointSnapshot | null; fingerprint: string },
   ): void {
+    const { current, fingerprint } = context;
     // flushはCASを掛けずに確定させるので、照合はクライアントが申告したexpectedRevision
     // ではなく、直前に読んだ現在のrevision（合成の土台）で行う。通常の保存は従来どおり。
     const casRevision = command.flush === true ? current?.revision : command.expectedRevision;
@@ -773,10 +787,11 @@ export class TeamRoom extends DurableObject<Env> {
             ).rowsWritten;
       if (written === 0) throw new CheckpointConflictError();
       this.ctx.storage.sql.exec(
-        "INSERT INTO processed_checkpoint_commands (command_id, revision, created_at) VALUES (?, ?, ?)",
+        "INSERT INTO processed_checkpoint_commands (command_id, revision, created_at, fingerprint) VALUES (?, ?, ?, ?)",
         command.commandId,
         snapshot.revision,
         snapshot.savedAt,
+        fingerprint,
       );
     });
   }

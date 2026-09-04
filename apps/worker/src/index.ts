@@ -1,9 +1,11 @@
 import {
   CHECKPOINT_DATA_TOO_LARGE_MESSAGE,
   chatCommandFingerprint,
+  checkpointFingerprint,
   checkpointStateSchema,
   containsPii,
   createThreadCommandSchema,
+  createThreadFingerprint,
   detectPii,
   saveCheckpointCommandSchema,
   saveCheckpointResultSchema,
@@ -114,7 +116,14 @@ export const handleCreateThread = async (
     return bodyErrorResponse(caught, "commandの形式が不正です。");
   }
   try {
-    const result = await scope.env.TEAM_ROOM.getByName(teamCode).createThread(teamCode, command);
+    const result = await scope.env.TEAM_ROOM.getByName(teamCode).createThread(
+      teamCode,
+      command,
+      await createThreadFingerprint(command),
+    );
+    // 同じcommandIdを別のタイトル・kindで使い回した取り違え。何も作られていない。
+    if ("conflict" in result)
+      return error("同じ送信IDが別の内容で使われています。", 409, "conflict");
     // 上限超過は何も作られていないので、活動ログにも作成として残さない。
     // 文言はkindで変える——手動の上限は参加者が減らせるが、ステージ用の枠は
     // 参加者の操作では空かないので、同じ案内を出すと直しようのない指示になる。
@@ -464,6 +473,7 @@ export const handleSaveCheckpoint = async (
       teamCode,
       parsed.command,
       nowIso,
+      await checkpointFingerprint(parsed.command.body),
     );
     // 拒否理由はcodeにも載せる。クライアントは日本語文言ではなくこの値で分岐する。
     if ("rejected" in result)
