@@ -14,3 +14,26 @@
  */
 export const isDuplicateColumn = (caught: unknown): boolean =>
   caught instanceof Error && caught.message.includes("duplicate column name");
+
+/**
+ * 列追加の移行が必要とするのは`exec`だけ。テストからFakeを渡せるよう最小限へ絞る
+ * （`SqlStorage`のexecはgenericで、Fakeが返す値を作れない）。
+ */
+export type AddColumnRunner = { readonly exec: (query: string) => unknown };
+
+/**
+ * `ALTER TABLE ... ADD COLUMN`を順に当て、「列が既にある」失敗だけを握って次へ進む。
+ * それ以外の失敗はその場で投げ、残りの文を実行しない。
+ *
+ * 対象テーブルの`CREATE TABLE`をすべて流し終えてから呼ぶこと。まだ無いテーブルへ当てると
+ * `no such table`で失敗し、握らないここでは初期化そのものが落ちる。
+ */
+export const applyAddColumns = (sql: AddColumnRunner, statements: readonly string[]): void => {
+  for (const statement of statements) {
+    try {
+      sql.exec(statement);
+    } catch (caught) {
+      if (!isDuplicateColumn(caught)) throw caught;
+    }
+  }
+};
