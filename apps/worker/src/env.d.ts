@@ -18,7 +18,7 @@ export {};
  */
 
 /**
- * ALLOWED_ORIGINS / TEAM_CODES / CHAT_RATE_LIMIT_PER_MINUTEは、秘匿情報ではないが
+ * ALLOWED_ORIGINS / TEAM_MAX / CHAT_RATE_LIMIT_PER_MINUTEは、秘匿情報ではないが
  * 会ごとに変わる運用値なので`wrangler.jsonc`の`vars`へ値を書かず、デプロイ前に
  * ダッシュボードまたは`wrangler deploy --var`で与える（未設定でも既定動作で動く）。
  * 未設定を型で表すため`string | undefined`とし、guard.tsのパーサが既定へ倒す。
@@ -27,8 +27,9 @@ declare global {
   interface HellIctVars {
     OPENAI_API_KEY: string;
     EVENT_ID?: string;
+    EVENT_NO?: string;
     ALLOWED_ORIGINS?: string;
-    TEAM_CODES?: string;
+    TEAM_MAX?: string;
     CHAT_RATE_LIMIT_PER_MINUTE?: string;
   }
 

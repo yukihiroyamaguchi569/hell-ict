@@ -33,8 +33,8 @@ import {
   isTeamCodeAllowed,
   parseAllowedOrigins,
   parseChatRateLimit,
-  parseTeamCodes,
-  teamCodesStatus,
+  parseTeamCodeRule,
+  teamCodeRuleStatus,
 } from "./guard.js";
 import type { CorsHeaders } from "./guard.js";
 import {
@@ -73,8 +73,8 @@ const handleSession = async (request: Request, env: Env): Promise<Response> => {
     return bodyErrorResponse(caught, "teamCodeはASCII数字6桁で指定してください。");
   }
   // 入室コードは本文にあるため入口ガードでは見られない。DOへ触れる直前でここだけ当てる
-  // （未登録コードのチーム状態を作らせない）。応答は存在を明かさない404に揃える。
-  if (!isTeamCodeAllowed(teamCode, parseTeamCodes(env.TEAM_CODES))) {
+  // （規則に合わないコードのチーム状態を作らせない）。応答は存在を明かさない404に揃える。
+  if (!isTeamCodeAllowed(teamCode, parseTeamCodeRule(env))) {
     return new Response("Not found", { status: 404 });
   }
   try {
@@ -577,28 +577,27 @@ const handleGet = (request: Request, env: Env, url: URL): Promise<Response> => {
  *
  * Origin検証はブラウザ経由の悪用（CSRF・他サイトからの読み取り）を止める層であって、
  * 認証ではない。非ブラウザからの直接アクセスはOriginを詐称できるため、そちらは
- * TEAM_CODESの許可リストとレート制限で抑える（詳細はguard.ts先頭の注記）。
+ * チームコードの規則判定とレート制限で抑える（詳細はguard.ts先頭の注記）。
  *
  * 通す場合はnullを返す。
  */
 /**
  * ヘルスチェックへ載せる運用値の状態。デプロイ後に`GET /api/health`を見るだけで
- * 設定漏れが分かるようにする——TEAM_CODES未設定のfail-openは意図した既定であり、
+ * 設定漏れが分かるようにする——EVENT_NO未設定のfail-openは意図した既定であり、
  * 本番でそのまま残っていても例外やログには現れないため、目視できる形で出す。
- * 値そのもの（配布したチームコードや許可オリジン）は伏せ、設定の有無だけを返す。
+ * 許可オリジンの値そのものは伏せ、設定の有無だけを返す。
  */
 const guardStatus = (env: Env): Record<string, boolean | number | string> => ({
-  // teamCodesは true / false / "invalid" の3値。"invalid"は「設定されているが値が
-  // 壊れている（6桁数字でない要素が混ざっている）」で、全チームが404になる状態を指す。
-  // teamCodesCountは有効な件数——配布したチーム数と突き合わせれば、書き損じや
-  // 重複をデプロイ後に見つけられる。
-  ...teamCodesStatus(parseTeamCodes(env.TEAM_CODES)),
+  // eventNoは開催回そのもの（"02"）／未設定のfalse／壊れているときの"invalid"。
+  // teamMaxは効いている上限／規則が効いていないfalse／壊れているときの"invalid"。
+  // "invalid"は全チームが404になる状態を指すので、デプロイ後にここで捕まえる。
+  ...teamCodeRuleStatus(parseTeamCodeRule(env)),
   allowedOrigins: parseAllowedOrigins(env.ALLOWED_ORIGINS).length > 0,
   chatRateLimitPerMinute: parseChatRateLimit(env.CHAT_RATE_LIMIT_PER_MINUTE),
 });
 
 /**
- * 許可リストを当てる対象のチームコードを取り出す。`/api/teams/:code/*`はパスから、
+ * 規則判定を当てる対象のチームコードを取り出す。`/api/teams/:code/*`はパスから、
  * `/api/leaderboard/sync`はクエリから読む（リーダーボードのDOはグローバル1つで、
  * チームコードはクエリでしか渡ってこない）。
  */
@@ -615,8 +614,8 @@ const guardApiRequest = (request: Request, env: Env, url: URL): Response | null 
     return error("許可されていない送信元からのリクエストです。", 403);
   }
   const teamCode = guardedTeamCode(url);
-  if (teamCode !== null && !isTeamCodeAllowed(teamCode, parseTeamCodes(env.TEAM_CODES))) {
-    // 未登録コードの存在を明かさないよう、経路自体が無いときと同じ404に揃える。
+  if (teamCode !== null && !isTeamCodeAllowed(teamCode, parseTeamCodeRule(env))) {
+    // 規則に合わないコードの存在を明かさないよう、経路自体が無いときと同じ404に揃える。
     return new Response("Not found", { status: 404 });
   }
   return null;
