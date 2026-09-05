@@ -4,23 +4,23 @@
   "main": "./src/index.ts",
   "compatibility_date": "2026-08-20",
   "compatibility_flags": ["nodejs_compat"],
-  // ALLOWED_ORIGINS / TEAM_CODES / CHAT_RATE_LIMIT_PER_MINUTE は入口ガード
+  // ALLOWED_ORIGINS / EVENT_NO / TEAM_MAX / CHAT_RATE_LIMIT_PER_MINUTE は入口ガード
   // （src/guard.ts）の運用値。会ごとに変わるのでここへ値を書かず、本番デプロイ前に
   // Cloudflareダッシュボードの Variables か `wrangler deploy --var NAME:VALUE` で与える
-  // （秘匿情報ではないのでsecretにはしない）。いずれも未設定のままでも既定動作で動く。
+  // （EVENT_NOだけは開催回ごとに変えるので `wrangler secret put EVENT_NO` を使う）。
+  // いずれも未設定のままでも既定動作で動く。
   //
   // - ALLOWED_ORIGINS: 「追加で」許可するOriginをカンマ区切りで列挙（末尾スラッシュと
   //   空白は無視）。同一オリジンは設定の有無に関わらず常に許可されるので書かなくてよい。配信版はモックHTMLを
   //   Assetsから同一オリジンで配るので、本番は未設定でよい。別オリジンのページから
   //   叩く場合（開発時に localStorage.hellApiBase で別ポートのwrangler devへ向ける等）
   //   だけ設定する。例: "http://127.0.0.1:8788,http://localhost:8788"
-  // - TEAM_CODES: 事前配布した6桁チームコードをカンマ区切りで列挙。設定すると
-  //   一覧に無いコードは404で拒否する（未設定なら6桁なら何でも入室できる）。空文字や
-  //   ","だけを設定した場合は設定し損ねとみなして全コードを拒否する（fail-closed）。
-  //   要素は1つずつ6桁数字として検証し、1つでも不正なら全体を無効として全拒否する。
-  //   区切りは全角カンマ「，」と読点「、」も受ける。重複は除去する。
-  //   設定できているかは GET /api/health の guards.teamCodes と teamCodesCount で確認する。
-  //   例: 2026-08-23のテストプレイはチームA〜Gに "100001,100002,100003,100004,100005,100006,100007" を配布した。
+  // - EVENT_NO: 開催回の2桁数字。チームコードは [開催回2桁][チーム番号4桁] で、
+  //   上2桁が一致し下4桁が1〜TEAM_MAXのコードだけを通す（未設定なら6桁なら何でも
+  //   入室できる）。2桁数字でない値は全コードを拒否する（fail-closed）。
+  //   例: 第2回のチーム1は "020001"。事前登録は要らないので、予備は次の番号を配ればよい。
+  // - TEAM_MAX: チーム番号の上限。未設定なら100。1〜9999の数字以外は全拒否（fail-closed）。
+  //   設定できているかは GET /api/health の guards.eventNo と guards.teamMax で確認する。
   // - CHAT_RATE_LIMIT_PER_MINUTE: 1チームが1分あたりに送れるチャット数。未設定なら20。
   //   受け付けるのは1〜600の整数のみで、範囲外・非数値は既定の20へ倒す。
   "vars": {
