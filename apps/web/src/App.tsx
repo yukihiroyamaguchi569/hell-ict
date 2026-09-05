@@ -95,6 +95,53 @@ const submitChatMessage = async (
   return parsed.data.snapshot;
 };
 
+type EntryScreenProps = {
+  teamCode: string;
+  message: string;
+  canRetry: boolean;
+  onTeamCodeChange: (value: string) => void;
+  onJoin: () => void;
+  onRetry: () => void;
+};
+
+/**
+ * 入室欄。保存済みコードからの復元に失敗したときは［再試行］も出す——失敗した時点で
+ * WebSocketも開かないので、この画面から先へは進めない。App本体の分岐を増やさない
+ * ための切り出しでもある。
+ */
+const EntryScreen = ({
+  teamCode,
+  message,
+  canRetry,
+  onTeamCodeChange,
+  onJoin,
+  onRetry,
+}: EntryScreenProps) => (
+  <main>
+    <p className="eyebrow">聖クロノス総合病院 / ICT研修</p>
+    <h1>地獄のICT</h1>
+    <label htmlFor="team-code">チームコード</label>
+    <input
+      id="team-code"
+      inputMode="numeric"
+      maxLength={6}
+      value={teamCode}
+      onChange={(event) => {
+        onTeamCodeChange(event.target.value);
+      }}
+    />
+    <button type="button" onClick={onJoin}>
+      入室する
+    </button>
+    {canRetry && (
+      <button type="button" onClick={onRetry}>
+        再試行
+      </button>
+    )}
+    <p role="status">{message}</p>
+  </main>
+);
+
 /** 帯の表示だけを持つ。App本体の分岐を増やさないための切り出し。 */
 const LeaderboardPane = ({ snapshot }: { snapshot: LeaderboardSnapshot | null }) => (
   <aside>
@@ -234,17 +281,27 @@ export const App = () => {
     [acceptTeamSyncMessage],
   );
 
+  /**
+   * WebSocketは入室（`/api/session`）が成功してからだけ開く。並行して開くと、
+   * sessionが失敗しても socket の snapshot だけで操作できる画面が出てしまい、
+   * 世代がnullのまま書き込みが黙って落ちる。世代が入っていること自体が
+   * 「入室が成立した」の印なので、それを接続の条件にする。
+   */
   useEffect(() => {
-    if (joinedCode === null) return;
+    if (joinedCode === null || resetGeneration === null) return;
     return connect(joinedCode);
-  }, [connect, joinedCode]);
+  }, [connect, joinedCode, resetGeneration]);
 
   /**
    * 入室手続き。snapshotと世代は`/api/session`が1回のやり取りで返すので、必ずここを
    * 通す。手で入室したときも、保存済みコードからの復帰でも同じ経路にする。
    */
+  /** 保存済みコードからの復元に失敗したか。入室欄に［再試行］を出すために持つ。 */
+  const [restoreFailed, setRestoreFailed] = useState(false);
+
   const reportRestoreFailure = useCallback(() => {
-    setMessage("進行状況を取得できません。接続を確認して再読み込みしてください。");
+    setRestoreFailed(true);
+    setMessage("復元に失敗しました。接続を確認して再試行してください。");
   }, []);
 
   const openSession = useCallback(async (code: string): Promise<SessionOutcome> => {
@@ -258,6 +315,7 @@ export const App = () => {
     if (seq !== sessionSeq.current) return "superseded";
     if (!parsed.success) return "failed";
     openedCode.current = code;
+    setRestoreFailed(false);
     setResetGeneration(parsed.data.generation);
     // 入室応答はその時点のサーバ正で、世代と組で受け取っている。revisionの単調性
     // （acceptTeamSnapshot）は通さずそのまま採る——別チームへ入り直したときや、
@@ -283,6 +341,15 @@ export const App = () => {
     } catch {
       setMessage("入室できませんでした。接続を確認して再試行してください。");
     }
+  };
+
+  /** 復元に失敗したときの再試行。保存済みコードでもう一度入室手続きから通す。 */
+  const retryRestore = (): void => {
+    if (joinedCode === null) return;
+    setMessage("復元しています…");
+    void openSession(joinedCode).then((outcome) => {
+      if (outcome === "failed") reportRestoreFailure();
+    }, reportRestoreFailure);
   };
 
   const enterStage1 = async (): Promise<void> => {
@@ -362,29 +429,16 @@ export const App = () => {
 
   if (snapshot === null)
     return (
-      <main>
-        <p className="eyebrow">聖クロノス総合病院 / ICT研修</p>
-        <h1>地獄のICT</h1>
-        <label htmlFor="team-code">チームコード</label>
-        <input
-          id="team-code"
-          inputMode="numeric"
-          maxLength={6}
-          value={teamCode}
-          onChange={(event) => {
-            setTeamCode(event.target.value);
-          }}
-        />
-        <button
-          type="button"
-          onClick={() => {
-            void join();
-          }}
-        >
-          入室する
-        </button>
-        <p role="status">{message}</p>
-      </main>
+      <EntryScreen
+        teamCode={teamCode}
+        message={message}
+        canRetry={restoreFailed}
+        onTeamCodeChange={setTeamCode}
+        onJoin={() => {
+          void join();
+        }}
+        onRetry={retryRestore}
+      />
     );
 
   return (
