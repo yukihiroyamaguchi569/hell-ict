@@ -12,6 +12,7 @@ import {
 import { isTeamCodeAllowed, parseTeamCodeRule } from "./guard.js";
 import type { TeamCodeRule } from "./guard.js";
 import { bodyErrorResponse, error, json, parseJson } from "./http.js";
+import { isDuplicateColumn } from "./sqlite.js";
 
 /**
  * テストプレイ当日の進捗記録。参加者のブラウザから位置イベントをD1へ積み、
@@ -41,17 +42,6 @@ export const progressSchemaSql = [
 const PROGRESS_ALTERS = [
   "ALTER TABLE progress_events ADD COLUMN generation INTEGER NOT NULL DEFAULT 0;",
 ];
-
-/**
- * `ADD COLUMN`が「列が既にある」で失敗したときだけ握る。SQLiteはこの場合だけ
- * `duplicate column name: <列名>`を返す。
- *
- * すべての例外を握ると、テーブルが無い・D1が落ちている、といった本物の失敗まで
- * 「移行済み」として通してしまい、列の無いままschemaReadyが成功で固定される
- * ——以後のINSERTが延々503を返し続け、しかも初期化はもうやり直されない。
- */
-const isDuplicateColumn = (caught: unknown): boolean =>
-  caught instanceof Error && caught.message.includes("duplicate column name");
 
 /**
  * schema/progress.sqlの適用忘れで当日リクエストが全滅しないよう、初回アクセス時に

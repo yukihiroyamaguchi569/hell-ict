@@ -12,6 +12,7 @@ import { z } from "zod";
 
 import { isTeamCodeAllowed, parseTeamCodeRule } from "./guard.js";
 import { error, isWebSocketRequest } from "./http.js";
+import { isDuplicateColumn } from "./sqlite.js";
 
 /**
  * leaderboard_entriesの行。SQLiteは列の型を強制しないので、読み出しも実行時に検証する。
@@ -48,14 +49,15 @@ export class RaceLeaderboard extends DurableObject<Env> {
     this.ctx.storage.sql.exec(
       "CREATE TABLE IF NOT EXISTS leaderboard_fences (team_code TEXT PRIMARY KEY, generation INTEGER NOT NULL)",
     );
-    // 既にテーブルを持つDOには列を後から足す。2度目以降は「列が既にある」で
-    // 失敗するだけなので握りつぶす（team-room.tsと同じ流儀）。
+    // 既にテーブルを持つDOには列を後から足す。2度目以降は必ず「列が既にある」で
+    // 失敗するので、その1種類だけを握る。ほかの失敗まで握ると、列の無いまま
+    // コンストラクタが通り、以後upsertが世代を書けないまま動き続ける。
     try {
       this.ctx.storage.sql.exec(
         "ALTER TABLE leaderboard_entries ADD COLUMN generation INTEGER NOT NULL DEFAULT 0",
       );
-    } catch {
-      // 列が既に存在する。
+    } catch (caught) {
+      if (!isDuplicateColumn(caught)) throw caught;
     }
     this.ctx.storage.sql.exec(
       "INSERT OR IGNORE INTO leaderboard_meta (key, value) VALUES ('revision', 0)",
