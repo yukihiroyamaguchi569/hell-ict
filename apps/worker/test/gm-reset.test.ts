@@ -149,6 +149,18 @@ const chatSnapshot = async (teamCode: string): Promise<{ threads: ChatThreadRow[
     .parse(await response.json());
 };
 
+/** 帯に載っているそのチームの行（段階と世代）。消えていればnull。 */
+const leaderboardEntry = (
+  teamCode: string,
+): Promise<{ stage: string; generation: number } | null> =>
+  runInDurableObject(env.RACE_LEADERBOARD.getByName("global"), (_instance, state) => {
+    const row =
+      state.storage.sql
+        .exec("SELECT stage, generation FROM leaderboard_entries WHERE team_code = ?", teamCode)
+        .toArray()[0] ?? null;
+    return row === null ? null : z.object({ stage: z.string(), generation: z.number() }).parse(row);
+  });
+
 /** 帯に載っているそのチームの行数。0なら消えている。 */
 const leaderboardRows = (teamCode: string): Promise<number> =>
   runInDurableObject(
@@ -774,6 +786,40 @@ describe("GMリセット: リーダーボードのフェンス", () => {
       // 行を直に数える——upsertで読み直すと、その呼び出し自体が行を作り直してしまう。
       await leaderboard.resetTeam(teamCode, 1);
       await expect(leaderboardRows(teamCode)).resolves.toBe(1);
+    });
+  });
+
+  it("帯のリセットより先に新世代で載り直した行は、そのリセットで消えない", async () => {
+    await withEnv({ ADMIN_TOKEN }, async () => {
+      const teamCode = "370004";
+      const leaderboard = env.RACE_LEADERBOARD.getByName("global");
+      const room = env.TEAM_ROOM.getByName(teamCode);
+      await session(teamCode);
+      expect((await enterStage1(teamCode, "00000000-0000-4000-8000-000000001601", 0)).status).toBe(
+        200,
+      );
+      await expect(leaderboardEntry(teamCode)).resolves.toMatchObject({
+        stage: "stage1",
+        generation: 0,
+      });
+
+      // TeamRoomだけリセットし、帯のリセットが届く前に入り直す（GMリセットの途中の状態）。
+      await room.resetTeam(teamCode);
+      const rejoined = await room.join(teamCode);
+      expect(rejoined.generation).toBe(1);
+      await leaderboard.upsert(teamCode, rejoined.snapshot, rejoined.generation);
+      // 世代をrevisionより先に見るので、revision 0でもstage1の行を置き換えられる。
+      await expect(leaderboardEntry(teamCode)).resolves.toMatchObject({
+        stage: "prologue",
+        generation: 1,
+      });
+
+      // 遅れて届いた帯のリセット。消すのは古い世代の行だけなので、載り直した行は残る。
+      await leaderboard.resetTeam(teamCode, 1);
+      await expect(leaderboardEntry(teamCode)).resolves.toMatchObject({
+        stage: "prologue",
+        generation: 1,
+      });
     });
   });
 

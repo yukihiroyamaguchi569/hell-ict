@@ -30,10 +30,38 @@ const storedLeaderboardSchema = z.object({
 /** フェンスの行。壊れていたら0として扱い、配信も更新も止めない。 */
 const storedFenceSchema = z.object({ generation: resetGenerationSchema });
 
+/**
+ * upsertが「採るか捨てるか」を決めるために読む既存行。世代をrevisionより先に見るので、
+ * そこも読み出して検証する。壊れていれば行が無かったものとして扱い、上書きで直す。
+ */
+const storedEntryStateSchema = z.object({
+  team_revision: revisionSchema,
+  generation: resetGenerationSchema,
+});
+
 type StoredLeaderboard = z.infer<typeof storedLeaderboardSchema>;
 
 /** meta.revisionも同じ理由で、壊れていたら0として扱い配信は続ける。 */
 const storedRevisionSchema = z.object({ revision: revisionSchema });
+
+/**
+ * 既存行に対して、このupsertを捨てるべきか。世代をrevisionより先に見る——リセットで
+ * revisionは0へ戻るので、順序を逆にすると入り直したチームのupsertが古い行の大きい
+ * revisionに負けて捨てられ、次の遷移まで帯から消える。
+ *
+ * - 保存済みより古い世代: revisionに関わらず捨てる。
+ * - 新しい世代: revisionに関わらず上書きする（リセットで0へ戻っているため）。
+ * - 同じ世代: 従来どおりrevisionの単調性で判断する。
+ */
+const supersededByExisting = (
+  existing: z.infer<typeof storedEntryStateSchema> | null,
+  generation: number,
+  revision: number,
+): boolean => {
+  if (existing === null) return false;
+  if (generation !== existing.generation) return generation < existing.generation;
+  return existing.team_revision >= revision;
+};
 
 export class RaceLeaderboard extends DurableObject<Env> {
   constructor(ctx: DurableObjectState, env: Env) {
@@ -83,13 +111,13 @@ export class RaceLeaderboard extends DurableObject<Env> {
     const existing =
       this.ctx.storage.sql
         .exec(
-          "SELECT team_code, team_revision, stage FROM leaderboard_entries WHERE team_code = ?",
+          "SELECT team_revision, generation FROM leaderboard_entries WHERE team_code = ?",
           teamCode,
         )
         .toArray()
-        .map((row) => storedLeaderboardSchema.safeParse(row).data)
+        .map((row) => storedEntryStateSchema.safeParse(row).data)
         .filter((row) => row !== undefined)[0] ?? null;
-    if (existing !== null && existing.team_revision >= snapshot.revision)
+    if (supersededByExisting(existing, generation, snapshot.revision))
       return this.snapshotFor(teamCode);
     this.ctx.storage.sql.exec(
       "INSERT INTO leaderboard_entries (team_code, team_revision, stage, generation) VALUES (?, ?, ?, ?) ON CONFLICT(team_code) DO UPDATE SET team_revision = excluded.team_revision, stage = excluded.stage, generation = excluded.generation",
@@ -124,7 +152,14 @@ export class RaceLeaderboard extends DurableObject<Env> {
     // 帯に載ったチームが、遅れて届いた古いリセットで消えてしまう。何もせずに戻る。
     if (generation < this.fenceFor(teamCode)) return { ok: true };
     this.ctx.storage.transactionSync(() => {
-      this.ctx.storage.sql.exec("DELETE FROM leaderboard_entries WHERE team_code = ?", teamCode);
+      // 消すのは古い世代の行だけ。リーダーボードのリセットが届くより先に、入り直した
+      // チームが新しい世代で載っていることがある——それまで消すと、次の遷移まで
+      // そのチームが帯から消える。
+      this.ctx.storage.sql.exec(
+        "DELETE FROM leaderboard_entries WHERE team_code = ? AND generation < ?",
+        teamCode,
+        generation,
+      );
       // フェンスは単調に上げる。古いリセットの再送で下げると、いったん弾いた
       // 遅れたupsertがもう一度通る窓が開く。
       this.ctx.storage.sql.exec(
