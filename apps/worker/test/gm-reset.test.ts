@@ -1,6 +1,6 @@
 import { env, exports } from "cloudflare:workers";
 import { listDurableObjectIds, runInDurableObject } from "cloudflare:test";
-import { publicTeamId } from "@hell-ict/domain";
+import { leaderboardSnapshotSchema, publicTeamId } from "@hell-ict/domain";
 import { beforeEach, describe, expect, it } from "vitest";
 import { z } from "zod";
 
@@ -684,6 +684,74 @@ describe("GMリセット: Reactクライアントが送る形", () => {
       });
       // AIはテスト環境で呼べないので、世代で弾かれていない（409でない）ことだけ見る。
       expect(sent.status).not.toBe(409);
+    });
+  });
+});
+
+describe("GMリセット: リーダーボードのフェンス", () => {
+  /** 帯に載っているそのチームの段階。行が無ければnull。 */
+  const stageOf = async (teamCode: string): Promise<string | null> => {
+    const snapshot = leaderboardSnapshotSchema.parse(
+      await env.RACE_LEADERBOARD.getByName("global").upsert(
+        teamCode,
+        (await env.TEAM_ROOM.getByName(teamCode).join(teamCode)).snapshot,
+        // 読むためだけの呼び出しなので、現在の世代で通す。
+        (await env.TEAM_ROOM.getByName(teamCode).join(teamCode)).generation,
+      ),
+    );
+    return snapshot.entries.find((entry) => entry.isSelf)?.stage ?? null;
+  };
+
+  it("リセット後、古い世代のupsertは無視され、新しい世代は反映される", async () => {
+    await withEnv({ ADMIN_TOKEN }, async () => {
+      const teamCode = "370001";
+      const leaderboard = env.RACE_LEADERBOARD.getByName("global");
+      const { snapshot, generation } = await env.TEAM_ROOM.getByName(teamCode).join(teamCode);
+      await leaderboard.upsert(teamCode, snapshot, generation);
+      expect((await enterStage1(teamCode, "00000000-0000-4000-8000-000000001101", 0)).status).toBe(
+        200,
+      );
+      await expect(stageOf(teamCode)).resolves.toBe("stage1");
+
+      expect((await resetByCode(teamCode)).status).toBe(200);
+
+      // リセット直前にsnapshotを読んだ入室の、遅れて届いたupsert。世代が古いので
+      // 無視する——ここを通すと、消したはずのstage1の行が作り直される。
+      const staleSnapshot = {
+        ...snapshot,
+        revision: 1,
+        state: { ...snapshot.state, stage: "stage1" },
+      };
+      const ignored = leaderboardSnapshotSchema.parse(
+        await leaderboard.upsert(teamCode, staleSnapshot, generation),
+      );
+      expect(ignored.entries.some((entry) => entry.isSelf)).toBe(false);
+
+      // 新しい世代の入室は普通に載り、prologueから始まる。
+      const rejoined = await env.TEAM_ROOM.getByName(teamCode).join(teamCode);
+      expect(rejoined.generation).toBe(1);
+      const fresh = leaderboardSnapshotSchema.parse(
+        await leaderboard.upsert(teamCode, rejoined.snapshot, rejoined.generation),
+      );
+      expect(fresh.entries.find((entry) => entry.isSelf)?.stage).toBe("prologue");
+    });
+  });
+
+  it("フェンスは単調で、古いリセットの再送で下がらない", async () => {
+    await withEnv({ ADMIN_TOKEN }, async () => {
+      const teamCode = "370002";
+      const leaderboard = env.RACE_LEADERBOARD.getByName("global");
+      await session(teamCode);
+      expect((await resetByCode(teamCode)).status).toBe(200);
+      expect((await resetByCode(teamCode)).status).toBe(200);
+
+      // 世代1でのリセットが遅れて再送されても、フェンスは2のまま。
+      await leaderboard.resetTeam(teamCode, 1);
+      const { snapshot } = await env.TEAM_ROOM.getByName(teamCode).join(teamCode);
+      const ignored = leaderboardSnapshotSchema.parse(
+        await leaderboard.upsert(teamCode, snapshot, 1),
+      );
+      expect(ignored.entries.some((entry) => entry.isSelf)).toBe(false);
     });
   });
 });

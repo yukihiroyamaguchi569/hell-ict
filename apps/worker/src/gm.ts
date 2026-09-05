@@ -115,7 +115,7 @@ const resetTeam = async (env: Env, teamCode: TeamCode): Promise<Response> => {
     // リセット後の世代。進捗イベントのreset行へ入れると、これが以後の集計の下限になる
     // ——照合を通った後に積まれた古い世代の行を、行の列だけで見分けられる。
     generation = await room.resetGeneration(teamCode);
-    await env.RACE_LEADERBOARD.getByName("global").resetTeam(teamCode);
+    await env.RACE_LEADERBOARD.getByName("global").resetTeam(teamCode, generation);
   } catch {
     return error("チーム状態のリセットに失敗しました。時間を置いて再試行してください。", 503);
   }

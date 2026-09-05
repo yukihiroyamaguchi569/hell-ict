@@ -95,7 +95,9 @@ const handleSession = async (request: Request, env: Env): Promise<Response> => {
     // snapshotと世代は1回のRPCで受け取る。2回に分けると、その間にリセットが入った
     // ときに食い違う組をクライアントへ渡すことになる（DO側のjoinの注記）。
     const { snapshot, generation } = await env.TEAM_ROOM.getByName(teamCode).join(teamCode);
-    await env.RACE_LEADERBOARD.getByName("global").upsert(teamCode, snapshot);
+    // 帯にも世代を渡す。joinが返したのと同じ値なので、リセットを挟んだ入室の
+    // 遅れたupsertが古い段階を再挿入することはない（race-leaderboard.tsのフェンス）。
+    await env.RACE_LEADERBOARD.getByName("global").upsert(teamCode, snapshot, generation);
     // リセット世代はsnapshotの外に足す——teamSnapshotSchemaはWebSocket配信でも
     // そのまま使うstrictな形で、ここだけのために項目を増やすと配信側まで巻き込む。
     // クライアントはこの値を保持し、以後のすべての書き込みへ添える。

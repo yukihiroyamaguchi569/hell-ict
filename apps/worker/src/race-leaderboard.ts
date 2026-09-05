@@ -1,6 +1,7 @@
 import {
   leaderboardEntrySchema,
   leaderboardSnapshotSchema,
+  resetGenerationSchema,
   revisionSchema,
   teamCodeSchema,
   teamSnapshotSchema,
@@ -25,6 +26,9 @@ const storedLeaderboardSchema = z.object({
   stage: leaderboardEntrySchema.shape.stage,
 });
 
+/** フェンスの行。壊れていたら0として扱い、配信も更新も止めない。 */
+const storedFenceSchema = z.object({ generation: resetGenerationSchema });
+
 type StoredLeaderboard = z.infer<typeof storedLeaderboardSchema>;
 
 /** meta.revisionも同じ理由で、壊れていたら0として扱い配信は続ける。 */
@@ -39,15 +43,37 @@ export class RaceLeaderboard extends DurableObject<Env> {
     this.ctx.storage.sql.exec(
       "CREATE TABLE IF NOT EXISTS leaderboard_meta (key TEXT PRIMARY KEY, value INTEGER NOT NULL)",
     );
+    // リセットのフェンス。行を消しても残す——消してしまうと、リセット直前に
+    // snapshotを読んだ入室の遅れたupsertが、古い段階の行を作り直せてしまう。
+    this.ctx.storage.sql.exec(
+      "CREATE TABLE IF NOT EXISTS leaderboard_fences (team_code TEXT PRIMARY KEY, generation INTEGER NOT NULL)",
+    );
+    // 既にテーブルを持つDOには列を後から足す。2度目以降は「列が既にある」で
+    // 失敗するだけなので握りつぶす（team-room.tsと同じ流儀）。
+    try {
+      this.ctx.storage.sql.exec(
+        "ALTER TABLE leaderboard_entries ADD COLUMN generation INTEGER NOT NULL DEFAULT 0",
+      );
+    } catch {
+      // 列が既に存在する。
+    }
     this.ctx.storage.sql.exec(
       "INSERT OR IGNORE INTO leaderboard_meta (key, value) VALUES ('revision', 0)",
     );
   }
 
-  async upsert(teamCodeInput: unknown, snapshotInput: unknown): Promise<LeaderboardSnapshot> {
+  async upsert(
+    teamCodeInput: unknown,
+    snapshotInput: unknown,
+    generationInput: unknown,
+  ): Promise<LeaderboardSnapshot> {
     const teamCode = teamCodeSchema.parse(teamCodeInput);
     const snapshot = teamSnapshotSchema.parse(snapshotInput);
+    const generation = resetGenerationSchema.parse(generationInput);
     if (teamCode !== snapshot.teamCode) throw new Error("チームコードが一致しません。");
+    // リセットより前に読まれたsnapshotの、遅れて届いたupsert。行を作り直させない
+    // ——revisionの比較では守れない（行が消えているので、どんな古い値も「新しい」）。
+    if (generation < this.fenceFor(teamCode)) return this.snapshotFor(teamCode);
     // 既存行も読み出し時に検証する。型指定だけで信用すると、壊れた巨大な
     // team_revisionが入っていた場合に以後の正常な更新がすべて「古い」と判定され、
     // そのチームの帯が二度と進まなくなる。壊れていれば行が無かったものとして
@@ -64,10 +90,11 @@ export class RaceLeaderboard extends DurableObject<Env> {
     if (existing !== null && existing.team_revision >= snapshot.revision)
       return this.snapshotFor(teamCode);
     this.ctx.storage.sql.exec(
-      "INSERT INTO leaderboard_entries (team_code, team_revision, stage) VALUES (?, ?, ?) ON CONFLICT(team_code) DO UPDATE SET team_revision = excluded.team_revision, stage = excluded.stage",
+      "INSERT INTO leaderboard_entries (team_code, team_revision, stage, generation) VALUES (?, ?, ?, ?) ON CONFLICT(team_code) DO UPDATE SET team_revision = excluded.team_revision, stage = excluded.stage, generation = excluded.generation",
       teamCode,
       snapshot.revision,
       snapshot.state.stage,
+      generation,
     );
     this.ctx.storage.sql.exec(
       "UPDATE leaderboard_meta SET value = value + 1 WHERE key = 'revision'",
@@ -84,14 +111,39 @@ export class RaceLeaderboard extends DurableObject<Env> {
    * revisionを進めて配信し直すのは、既に帯を購読している端末から、消した行が
    * 消えたことが見えるようにするためである。
    */
-  async resetTeam(teamCodeInput: unknown): Promise<{ readonly ok: true }> {
+  async resetTeam(
+    teamCodeInput: unknown,
+    generationInput: unknown,
+  ): Promise<{ readonly ok: true }> {
     const teamCode = teamCodeSchema.parse(teamCodeInput);
-    this.ctx.storage.sql.exec("DELETE FROM leaderboard_entries WHERE team_code = ?", teamCode);
-    this.ctx.storage.sql.exec(
-      "UPDATE leaderboard_meta SET value = value + 1 WHERE key = 'revision'",
-    );
+    const generation = resetGenerationSchema.parse(generationInput);
+    this.ctx.storage.transactionSync(() => {
+      this.ctx.storage.sql.exec("DELETE FROM leaderboard_entries WHERE team_code = ?", teamCode);
+      // フェンスは単調に上げる。古いリセットの再送で下げると、いったん弾いた
+      // 遅れたupsertがもう一度通る窓が開く。
+      this.ctx.storage.sql.exec(
+        "INSERT INTO leaderboard_fences (team_code, generation) VALUES (?, ?) ON CONFLICT(team_code) DO UPDATE SET generation = MAX(generation, excluded.generation)",
+        teamCode,
+        generation,
+      );
+      this.ctx.storage.sql.exec(
+        "UPDATE leaderboard_meta SET value = value + 1 WHERE key = 'revision'",
+      );
+    });
     this.broadcast();
     return { ok: true };
+  }
+
+  /**
+   * そのチームの下限世代。リセットしていなければ0（＝どのupsertも通る）。
+   * 行が壊れていたら0として扱い、配信ごと止めない（storedLeaderboardSchemaと同じ方針）。
+   */
+  private fenceFor(teamCode: TeamCode): number {
+    const row =
+      this.ctx.storage.sql
+        .exec("SELECT generation FROM leaderboard_fences WHERE team_code = ?", teamCode)
+        .toArray()[0] ?? null;
+    return row === null ? 0 : (storedFenceSchema.safeParse(row).data?.generation ?? 0);
   }
 
   override async fetch(request: Request): Promise<Response> {

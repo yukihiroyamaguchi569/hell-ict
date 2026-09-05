@@ -1215,6 +1215,7 @@ export class TeamRoom extends DurableObject<Env> {
         await this.env.RACE_LEADERBOARD.getByName("global").upsert(
           result.snapshot.teamCode,
           result.snapshot,
+          this.readGeneration(),
         );
       } catch {
         return result;
