@@ -208,6 +208,8 @@ const eventRowSchema = z.object({
  *   INSERTは別の操作なので、その隙にリセットが入ると、古い行がreset行より後の
  *   idで積まれる——「idが後か」では守れない。行に世代を持たせて列で判定する。
  * - teamName: 空文字で送られてくることがあるため、最新の「非空」の名前を採る。
+ *   位置と同じく世代で絞る——絞らないと、照合の後に積まれた古い世代の行の名前が、
+ *   リセット後のチーム名として表示され続ける。
  * - updatedAt: 生存確認なので復帰を含む全イベントの最新時刻を使う。
  */
 /**
@@ -259,7 +261,7 @@ const teamsSql = (filter: string): string => `SELECT
   e.team_code AS teamCode,
   COALESCE((
     SELECT i.team_name FROM progress_events i
-    WHERE i.team_code = e.team_code AND i.team_name <> ''
+    WHERE i.team_code = e.team_code AND i.team_name <> '' AND ${currentGeneration("i")}
     ORDER BY i.id DESC LIMIT 1
   ), '') AS teamName,
   COALESCE(MAX(CASE WHEN e.kind NOT IN ('jump', 'resume', 'reset') THEN e.pos END), 0) AS pos,

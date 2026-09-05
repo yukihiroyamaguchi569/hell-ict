@@ -782,3 +782,35 @@ describe("GMリセット: PIIゲートの世代", () => {
     });
   });
 });
+
+describe("GMリセット: 表示名の世代", () => {
+  it("照合の後に積まれた古い世代の名前は、リセット後のチーム名にしない", async () => {
+    await withEnv({ ADMIN_TOKEN }, async () => {
+      const teamCode = "390001";
+      await session(teamCode);
+      await postJson("/api/progress", progressEvent(teamCode, { teamName: "リセット前の名前" }));
+      expect((await resetByCode(teamCode)).status).toBe(200);
+
+      // 入り直したチームが名乗り直す。
+      await postJson(
+        "/api/progress",
+        progressEvent(teamCode, { teamName: "新チーム", pos: 1, view: "s1", generation: 1 }),
+      );
+
+      // 照合を通った直後にリセットが走った古いタブの行が、後から積まれる。
+      await env.PROGRESS_DB.prepare(
+        `INSERT INTO progress_events (team_code, team_name, pos, view, kind, generation, client_at)
+         VALUES (?, '古いタブの名前', 5, 's5', 'clear', 0, '')`,
+      )
+        .bind(teamCode)
+        .run();
+
+      // 名前も位置も、新しい世代のものだけを採る。絞らないと、id順で最後に来る
+      // 「古いタブの名前」が、リセット後のチーム名として表示され続ける。
+      const publicId = await publicTeamId(teamCode);
+      const row = (await summary()).teams.find((team) => team.publicId === publicId);
+      expect(row?.teamName).toBe("新チーム");
+      expect(row?.pos).toBe(1);
+    });
+  });
+});
