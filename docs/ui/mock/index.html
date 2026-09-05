@@ -3608,8 +3608,13 @@
   const PENALTY_STATES = ["none", "in-progress", "done"];
   /* 罰の進行は3値。知らない値を採ると、復帰時に罰を出すか出さないかの判断が狂う。 */
   const isPenaltyState = (v) => v === undefined || PENALTY_STATES.indexOf(v) >= 0;
+  /* Stage 3.5 の要約提出済みは2値。知らない値を採ると、対話を差し込むか
+     どうかの判断が狂う（罰の3値と同じ扱い）。 */
+  const S35_SUMMARY_STATES = ["none", "submitted"];
+  const isS35SummaryState = (v) => v === undefined || S35_SUMMARY_STATES.indexOf(v) >= 0;
   const isCheckpointData = (d) =>
-    !!d && typeof d === "object" && isPenaltyState(d.s3Penalty) && isPenaltyState(d.s4Penalty);
+    !!d && typeof d === "object" && isPenaltyState(d.s3Penalty) && isPenaltyState(d.s4Penalty) &&
+    isS35SummaryState(d.s35Summary);
   const isCheckpointBody = (b) =>
     !!b &&
     // view は go() が扱える画面idだけ。知らない画面を渡すと go() が STEPS[0] へ
@@ -3802,7 +3807,19 @@
     if (!server.data || serverDataRevision <= sentDataRevision) return false;
     if (server.data.s3Penalty) s3PenaltyState = server.data.s3Penalty;
     if (server.data.s4Penalty) s4PenaltyState = server.data.s4Penalty;
+    adoptS35SummaryState(server.data.s35Summary);
     return true;
+  }
+
+  /* 要約提出済みだけは、新しい世代の data を採るときも後退させない。
+     罰の2キーと違い、こちらは「提出した」という一方向の事実で、none へ戻すと
+     別タブで提出済みのチームが要約を書き直させられる（PR #90 codex 指摘）。
+     採った結果 Stage 3.5 を表示中なら、その場で院長の一往復を差し込む
+     ——本文は預けていないので、復帰と同じ restored の扱いにする。 */
+  function adoptS35SummaryState(incoming) {
+    if (incoming !== "submitted" || s35SummaryState === "submitted") return;
+    s35SummaryState = "submitted";
+    if (view === "s35") s35ShowDirectorTalk(true);
   }
 
   /* サーバへ1本ずつ送る。POSTを並行させると、先に投げた古いbodyが後から
