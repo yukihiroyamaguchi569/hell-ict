@@ -555,3 +555,78 @@ describe("dataRevisionの上限", () => {
     expect(withDataRevision(1.5).success).toBe(false);
   });
 });
+
+describe("罰の進行状態は合成で巻き戻らない", () => {
+  const penaltyBody = (
+    pos: number,
+    dataRevision: number,
+    data: Record<string, unknown>,
+  ): CheckpointBody => body({ view: "s3", pos, dataRevision, data });
+
+  it("posが先でもdataRevisionが古いflushは罰をnoneへ戻せない", () => {
+    // 罠を踏まずに先へ進んだ古いタブの離脱時flush。罰は時間で払う設計なので、
+    // ここで巻き戻せると2タブ持つだけで罰を飛ばせてしまう。
+    const current = penaltyBody(3, 5, { s3Penalty: "in-progress" });
+    const incoming = penaltyBody(5, 2, { s3Penalty: "none" });
+    const merged = mergeCheckpoint(current, incoming);
+    expect(merged.data).toEqual({ s3Penalty: "in-progress" });
+    expect(merged.pos).toBe(5);
+  });
+
+  it("done > in-progress > none の順で進んだ側が残る", () => {
+    expect(
+      mergeCheckpoint(
+        penaltyBody(3, 5, { s3Penalty: "in-progress" }),
+        penaltyBody(5, 2, { s3Penalty: "done" }),
+      ).data,
+    ).toEqual({ s3Penalty: "done" });
+
+    expect(
+      mergeCheckpoint(
+        penaltyBody(5, 9, { s3Penalty: "done" }),
+        penaltyBody(3, 1, { s3Penalty: "in-progress" }),
+      ).data,
+    ).toEqual({ s3Penalty: "done" });
+
+    expect(
+      mergeCheckpoint(
+        penaltyBody(3, 5, { s3Penalty: "none" }),
+        penaltyBody(5, 2, { s3Penalty: "in-progress" }),
+      ).data,
+    ).toEqual({ s3Penalty: "in-progress" });
+  });
+
+  it("s4Penaltyも同じく巻き戻らない", () => {
+    const merged = mergeCheckpoint(
+      penaltyBody(3, 5, { s4Penalty: "done" }),
+      penaltyBody(5, 2, { s4Penalty: "none" }),
+    );
+    expect(merged.data).toEqual({ s4Penalty: "done" });
+  });
+
+  it("片側にキーが無ければ、もう片側の既知の値が残る", () => {
+    expect(
+      mergeCheckpoint(penaltyBody(3, 5, { s3Penalty: "done" }), penaltyBody(5, 2, { other: 1 }))
+        .data,
+    ).toEqual({ other: 1, s3Penalty: "done" });
+
+    expect(
+      mergeCheckpoint(penaltyBody(5, 9, { other: 1 }), penaltyBody(3, 1, { s3Penalty: "done" }))
+        .data,
+    ).toEqual({ other: 1, s3Penalty: "done" });
+  });
+
+  it("未知の値は最小として扱い、既知の値が勝つ", () => {
+    expect(
+      mergeCheckpoint(
+        penaltyBody(3, 5, { s3Penalty: "in-progress" }),
+        penaltyBody(5, 2, { s3Penalty: "paid" }),
+      ).data,
+    ).toEqual({ s3Penalty: "in-progress" });
+  });
+
+  it("両側とも既知の値が無ければ罰のキーを足さない", () => {
+    const merged = mergeCheckpoint(penaltyBody(3, 5, { other: 1 }), penaltyBody(5, 2, {}));
+    expect(merged.data).toEqual({});
+  });
+});

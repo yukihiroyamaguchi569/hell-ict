@@ -49,8 +49,9 @@ const detectRegression = (
  *
  * 合成の向きは既存の後退拒否（detectRegression）と同じ——罠はOR、posとelapsedMsはmax。
  * どの項目も単調にしか動かないので、合成結果に対して後退検査を掛ける必要はない。
- * viewとdataは「その位置に居た側」を採る。posが同値なら受信側を新しいとみなす
- * （同じ停留所の中では後から届いた画面のほうが後の状態）。
+ * viewは「その位置に居た側」を採る。posが同値なら受信側を新しいとみなす
+ * （同じ停留所の中では後から届いた画面のほうが後の状態）。dataも土台は同じ側を採るが、
+ * 罰の進行状態だけは両側の進んだほうを残す（理由はmergePenalties）。
  */
 /**
  * view・dataをどちらから採るかを決める。まずposの大きい側、posが同じならdataRevision
@@ -65,6 +66,47 @@ const newerSide = (current: CheckpointBody, incoming: CheckpointBody): Checkpoin
   return incoming.dataRevision >= current.dataRevision ? incoming : current;
 };
 
+/**
+ * サーバーが中身を解釈する唯一の`data`キー。ここだけが「dataは不透明」の例外である。
+ * 罰は時間で払う設計（企画書§6）なので、罰の進行状態が巻き戻せると払わずに済ませられる
+ * ——posの大きい側のdataを丸ごと採ると、罠を踏まずに先へ進んだ古いタブ（dataRevisionが
+ * 低い）の離脱時flushが、もう一方のタブでin-progress/doneになっていた罰をnoneへ戻せる。
+ * 2キーだけをここで単調に合成し、それ以外のステージ状態は従来どおり不透明に扱う。
+ */
+const PENALTY_KEYS = ["s3Penalty", "s4Penalty"] as const;
+
+/** 罰の進行順。左ほど手前で、合成では常に右（進んだ側）が勝つ。 */
+const PENALTY_ORDER = ["none", "in-progress", "done"] as const;
+
+type PenaltyState = (typeof PENALTY_ORDER)[number];
+
+const isPenaltyState = (value: unknown): value is PenaltyState =>
+  typeof value === "string" && PENALTY_ORDER.some((state) => state === value);
+
+/** 未定義・未知の値は最小（none相当）として扱う。古いクライアントや細工を巻き戻しに使わせない。 */
+const penaltyRank = (value: unknown): number =>
+  isPenaltyState(value) ? PENALTY_ORDER.indexOf(value) : 0;
+
+/** 両側の進んだほうの罰の状態。どちらも既知の値でなければundefined（結果に書かない）。 */
+const strongerPenalty = (a: unknown, b: unknown): PenaltyState | undefined => {
+  const winner = penaltyRank(a) >= penaltyRank(b) ? a : b;
+  return isPenaltyState(winner) ? winner : undefined;
+};
+
+/** `source`のdataを土台に、罰の2キーだけ両側の進んだ値へ差し替える。 */
+const mergePenalties = (
+  current: CheckpointBody,
+  incoming: CheckpointBody,
+  source: CheckpointBody,
+): CheckpointBody["data"] => {
+  const data: CheckpointBody["data"] = { ...source.data };
+  for (const key of PENALTY_KEYS) {
+    const penalty = strongerPenalty(current.data[key], incoming.data[key]);
+    if (penalty !== undefined) data[key] = penalty;
+  }
+  return data;
+};
+
 export const mergeCheckpoint = (
   current: CheckpointBody,
   incoming: CheckpointBody,
@@ -72,7 +114,7 @@ export const mergeCheckpoint = (
   const source = newerSide(current, incoming);
   return {
     view: source.view,
-    data: source.data,
+    data: mergePenalties(current, incoming, source),
     pos: Math.max(current.pos, incoming.pos),
     elapsedMs: Math.max(current.elapsedMs, incoming.elapsedMs),
     dataRevision: Math.max(current.dataRevision, incoming.dataRevision),
