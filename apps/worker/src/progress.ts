@@ -187,10 +187,10 @@ const teamFilter = (
 ): { clause: string; params: (string | number)[] } => {
   if (rule.kind === "open") return { clause: "", params: [] };
   if (rule.kind === "invalid") return { clause: `WHERE 0`, params: [] };
-  // 長さも見る。INの列挙と違い、規則だけでは`0200015`のような桁違いの行が
-  // substrの結果で紛れ込みうる。
+  // 長さと下4桁の字種も見る。INの列挙と違い、規則だけでは`0200015`のような桁違いや
+  // `02001x`のような壊れた行が、substrとCASTの結果（`1x`→1）で紛れ込みうる。
   return {
-    clause: `WHERE length(${column}) = 6 AND substr(${column}, 1, 2) = ? AND CAST(substr(${column}, 3) AS INTEGER) BETWEEN 1 AND ?`,
+    clause: `WHERE length(${column}) = 6 AND substr(${column}, 1, 2) = ? AND substr(${column}, 3) GLOB '[0-9][0-9][0-9][0-9]' AND CAST(substr(${column}, 3) AS INTEGER) BETWEEN 1 AND ?`,
     params: [rule.eventNo, rule.teamMax],
   };
 };

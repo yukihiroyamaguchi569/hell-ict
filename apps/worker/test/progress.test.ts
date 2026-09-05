@@ -357,6 +357,27 @@ describe("進捗記録", () => {
     expect(all.events).toHaveLength(3);
   });
 
+  it("下4桁が数字でない壊れた行は、CASTで丸められてsummaryへ混ざらない", async () => {
+    // `02001x`はCAST(substr(...) AS INTEGER)が1になるため、字種を見ないと
+    // チーム1として並んでしまう。POST側のschemaが弾く値なので、D1へ直接入れる。
+    await env.PROGRESS_DB.prepare(
+      `INSERT INTO progress_events (team_code, team_name, pos, view, kind, client_at)
+       VALUES (?, '壊れた', 3, '', 'clear', '')`,
+    )
+      .bind("02001x")
+      .run();
+
+    const saved = { EVENT_NO: env.EVENT_NO, TEAM_MAX: env.TEAM_MAX };
+    try {
+      env.EVENT_NO = "02";
+      const result = await summary();
+      expect(result.teams).toEqual([]);
+      expect(result.events).toEqual([]);
+    } finally {
+      Object.assign(env, saved);
+    }
+  });
+
   it("未許可チームのイベントが多くても、許可チームの最新イベントは埋もれない", async () => {
     // 絞り込みがLIMIT 20の後だと、未登録チームの25件が枠を食い潰して許可チームの
     // イベントがダッシュボードから消える。「絞ってからLIMIT」であることを固定する。
