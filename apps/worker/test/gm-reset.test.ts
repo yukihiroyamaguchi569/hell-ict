@@ -141,6 +141,16 @@ const chatSnapshot = async (
     .parse(await response.json());
 };
 
+/** 帯に載っているそのチームの行数。0なら消えている。 */
+const leaderboardRows = (teamCode: string): Promise<number> =>
+  runInDurableObject(
+    env.RACE_LEADERBOARD.getByName("global"),
+    (_instance, state) =>
+      state.storage.sql
+        .exec("SELECT team_code FROM leaderboard_entries WHERE team_code = ?", teamCode)
+        .toArray().length,
+  );
+
 /** Durable Objectの台帳・レート制限の行数。拒否したときに1行も増えないことを見る。 */
 const ledgerRows = (teamCode: string, table: string): Promise<number> =>
   runInDurableObject(
@@ -734,6 +744,28 @@ describe("GMリセット: リーダーボードのフェンス", () => {
         await leaderboard.upsert(teamCode, rejoined.snapshot, rejoined.generation),
       );
       expect(fresh.entries.find((entry) => entry.isSelf)?.stage).toBe("prologue");
+    });
+  });
+
+  it("新しいリセットのあとに古い世代のresetTeamが届いても、載り直した行を消さない", async () => {
+    await withEnv({ ADMIN_TOKEN }, async () => {
+      const teamCode = "370003";
+      const leaderboard = env.RACE_LEADERBOARD.getByName("global");
+      await session(teamCode);
+      // 2回リセットしてフェンスを2まで上げ、そのあと入り直して帯へ載せる。
+      expect((await resetByCode(teamCode)).status).toBe(200);
+      expect((await resetByCode(teamCode)).status).toBe(200);
+      const rejoined = await env.TEAM_ROOM.getByName(teamCode).join(teamCode);
+      expect(rejoined.generation).toBe(2);
+      await leaderboard.upsert(teamCode, rejoined.snapshot, rejoined.generation);
+
+      await expect(leaderboardRows(teamCode)).resolves.toBe(1);
+
+      // 1回目のリセットが遅れて届く。フェンスは2のままだが、以前は行の削除と
+      // 配信を無条件に行っていたので、載り直したチームがここで消えていた。
+      // 行を直に数える——upsertで読み直すと、その呼び出し自体が行を作り直してしまう。
+      await leaderboard.resetTeam(teamCode, 1);
+      await expect(leaderboardRows(teamCode)).resolves.toBe(1);
     });
   });
 

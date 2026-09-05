@@ -119,6 +119,10 @@ export class RaceLeaderboard extends DurableObject<Env> {
   ): Promise<{ readonly ok: true }> {
     const teamCode = teamCodeSchema.parse(teamCodeInput);
     const generation = resetGenerationSchema.parse(generationInput);
+    // 重なった2つのリセットのうち、古い方が後から届いた。フェンスはMAXで単調なので
+    // 下がらないが、行の削除と配信は無条件だった——新しいリセットのあとに入り直して
+    // 帯に載ったチームが、遅れて届いた古いリセットで消えてしまう。何もせずに戻る。
+    if (generation < this.fenceFor(teamCode)) return { ok: true };
     this.ctx.storage.transactionSync(() => {
       this.ctx.storage.sql.exec("DELETE FROM leaderboard_entries WHERE team_code = ?", teamCode);
       // フェンスは単調に上げる。古いリセットの再送で下げると、いったん弾いた
