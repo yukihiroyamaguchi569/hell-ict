@@ -37,6 +37,7 @@ import type {
   CheckpointRejectionReason,
   CheckpointSnapshot,
   CommandResult,
+  CommandStatus,
   CreateThreadCommand,
   CreateThreadResult,
   SaveCheckpointCommand,
@@ -59,7 +60,7 @@ import {
   rateLimitCountSchema,
   rateLimitRetryAfterSeconds,
 } from "./guard.js";
-import { error, isWebSocketRequest } from "./http.js";
+import { CHAT_COMMAND_IDS_MAX, error, isWebSocketRequest } from "./http.js";
 
 type StoredCommand = { result: string };
 type StoredState = { snapshot: string };
@@ -186,6 +187,12 @@ const THREAD_LIMITS: Readonly<Record<ChatThreadKind, number>> = {
   manual: MAX_MANUAL_THREADS_PER_TEAM,
   stage: MAX_STAGE_THREADS_PER_TEAM,
 };
+
+/**
+ * chatSnapshotへ渡せる問い合わせ対象のID。RPCの境界なので、Worker側で検証済みでも
+ * ここでもう一度形と件数を見る（上限はhttp.tsのCHAT_COMMAND_IDS_MAXと揃える）。
+ */
+const chatCommandIdsSchema = z.array(commandIdSchema).max(CHAT_COMMAND_IDS_MAX);
 
 /** rate_limitの行。壊れた値でレート制限が黙って無効化されないよう実行時に検証する。 */
 const storedRateLimitSchema = z.object({ count: z.number().int().nonnegative() });
@@ -466,8 +473,36 @@ export class TeamRoom extends DurableObject<Env> {
     );
   }
 
-  async chatSnapshot(teamCodeInput: unknown): Promise<ChatSnapshot> {
-    return this.loadChatSnapshot(teamCodeSchema.parse(teamCodeInput));
+  /**
+   * チャットのsnapshotを返す。`commandIdsInput`を渡した呼び出しでは、そのIDが
+   * 冪等台帳のどこにあるかも添える。再入室したクライアントは、これで「手元の
+   * 未確定IDのうち、もう完了しているのはどれか」をID単位で確かめられる——
+   * 履歴の本文や並び順からは区別できない（同じ文面を打ち直したとき、そして
+   * 先に送った要求が後から完了したときに取り違える）。
+   */
+  async chatSnapshot(teamCodeInput: unknown, commandIdsInput?: unknown): Promise<ChatSnapshot> {
+    const snapshot = this.loadChatSnapshot(teamCodeSchema.parse(teamCodeInput));
+    if (commandIdsInput === undefined) return snapshot;
+    const commandIds = chatCommandIdsSchema.parse(commandIdsInput);
+    const commands: Record<string, CommandStatus> = {};
+    for (const commandId of commandIds) commands[commandId] = this.messageCommandStatus(commandId);
+    return { ...snapshot, commands };
+  }
+
+  /**
+   * 送信コマンドが台帳のどこにあるか。processedにあれば完了、pendingにあれば
+   * 処理中（または処理が落ちて再送待ち）、どちらにも無ければ届いていないか、
+   * 猶予期間を過ぎて掃除された。DOはチーム単位なので、他チームのIDはunknownになる。
+   */
+  private messageCommandStatus(commandId: string): CommandStatus {
+    const processed = this.ctx.storage.sql
+      .exec("SELECT 1 AS found FROM processed_message_commands WHERE command_id = ?", commandId)
+      .toArray();
+    if (processed.length > 0) return "processed";
+    const pending = this.ctx.storage.sql
+      .exec("SELECT 1 AS found FROM pending_message_commands WHERE command_id = ?", commandId)
+      .toArray();
+    return pending.length > 0 ? "pending" : "unknown";
   }
 
   async createThread(

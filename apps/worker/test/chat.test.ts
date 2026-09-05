@@ -1243,6 +1243,84 @@ describe("P1C チャット骨格", () => {
     expect((await ledgerResults("400037"))[0]).toContain("渡辺 三郎");
   });
 
+  it("commandIdsを渡すと、処理済み・処理中・未知がID単位で返る", async () => {
+    await session("400039");
+    const created = await createThread("400039", "00000000-0000-4000-8000-000000003901", "副");
+    const { snapshot } = createThreadResultSchema.parse(await created.json());
+    const threadId = snapshot.threads[0]?.threadId;
+    if (threadId === undefined) throw new Error("unexpected");
+
+    // 完了まで通したID（processed_message_commandsへ移る）。
+    const processedId = "00000000-0000-4000-8000-000000003902";
+    const gateway = new FakeAiGateway([{ kind: "success", response: "了解しました" }]);
+    const sent = await sendMessage(
+      "400039",
+      { commandId: processedId, threadId, text: "本文" },
+      gateway,
+    );
+    expect(sent.status).toBe(200);
+
+    // beginだけ通してcompleteしないID（pending_message_commandsに残る）。
+    const pendingId = "00000000-0000-4000-8000-000000003903";
+    await beginDirect("400039", { commandId: pendingId, threadId, text: "処理中の本文" });
+
+    const unknownId = "00000000-0000-4000-8000-000000003904";
+    const response = await get(
+      `/api/teams/400039/chat?commandIds=${processedId},${pendingId},${unknownId}`,
+    );
+    expect(response.status).toBe(200);
+    const body = chatSnapshotSchema.parse(await response.json());
+    expect(body.commands).toEqual({
+      [processedId]: "processed",
+      [pendingId]: "pending",
+      [unknownId]: "unknown",
+    });
+
+    // 同じIDを何度並べても、返るのは1件ぶんだけ（台帳を引く回数を増やせない）。
+    const deduped = chatSnapshotSchema.parse(
+      await (await get(`/api/teams/400039/chat?commandIds=${processedId},${processedId}`)).json(),
+    );
+    expect(deduped.commands).toEqual({ [processedId]: "processed" });
+
+    // commandIdsを渡さない従来の呼び出しにはcommands自体が付かない。
+    const plain = chatSnapshotSchema.parse(await (await get("/api/teams/400039/chat")).json());
+    expect(plain.commands).toBeUndefined();
+
+    // DOはチーム単位なので、他チームの処理済みIDは見えない。
+    await session("400040");
+    const other = chatSnapshotSchema.parse(
+      await (await get(`/api/teams/400040/chat?commandIds=${processedId}`)).json(),
+    );
+    expect(other.commands).toEqual({ [processedId]: "unknown" });
+  });
+
+  it("commandIdsが不正な形・上限超えなら400で、DOのcommandsも返らない", async () => {
+    await session("400041");
+    const valid = "00000000-0000-4000-8000-000000004101";
+    const tooMany = Array.from(
+      { length: 21 },
+      (_value, index) => `00000000-0000-4000-8000-${String(index).padStart(12, "0")}`,
+    ).join(",");
+    for (const query of [
+      "commandIds=not-a-uuid",
+      `commandIds=${valid},not-a-uuid`,
+      "commandIds=",
+      `commandIds=${tooMany}`,
+    ]) {
+      const response = await get(`/api/teams/400041/chat?${query}`);
+      expect(response.status).toBe(400);
+      expect(httpErrorSchema.parse(await response.json()).message.length).toBeGreaterThan(0);
+    }
+    // 上限ちょうど（20件）は通る。
+    const twenty = Array.from(
+      { length: 20 },
+      (_value, index) => `00000000-0000-4000-8000-${String(index).padStart(12, "0")}`,
+    );
+    const ok = await get(`/api/teams/400041/chat?commandIds=${twenty.join(",")}`);
+    expect(ok.status).toBe(200);
+    expect(Object.keys(chatSnapshotSchema.parse(await ok.json()).commands ?? {})).toHaveLength(20);
+  });
+
   it("スレッド台帳に残った平文PIIも再生時に伏せ字化されて保存し直される", async () => {
     await session("400036");
     const commandId = "00000000-0000-4000-8000-000000003601";

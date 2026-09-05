@@ -1,4 +1,4 @@
-import { teamCodeSchema } from "@hell-ict/domain";
+import { commandIdSchema, teamCodeSchema } from "@hell-ict/domain";
 import type { HttpErrorCode, TeamCode } from "@hell-ict/domain";
 
 /**
@@ -105,6 +105,35 @@ export const teamCodeFromPath = (
 ): TeamCode | null => {
   if (!pathname.startsWith(prefix) || !pathname.endsWith(suffix)) return null;
   return teamCodeSchema.safeParse(pathname.slice(prefix.length, -suffix.length)).data ?? null;
+};
+
+/**
+ * `GET /api/teams/:code/chat?commandIds=`で一度に問い合わせられるIDの数。
+ * クライアントが未確定として抱えるのは送信経路ごとに20件までで、そのうち
+ * 実際に未解決で残るのは通常0〜数件である。20あれば復帰時の照会には足り、
+ * 台帳への問い合わせ回数を無制限に増やされる余地も残さない。
+ */
+export const CHAT_COMMAND_IDS_MAX = 20;
+
+/**
+ * `?commandIds=<uuid>,<uuid>,…`を検証する。未指定はnull、1つでも形式が違うか
+ * 上限を超えていたら400のResponse。重複は1件へ畳む（同じIDを何度並べても
+ * 台帳を引く回数を増やせないようにする）。
+ */
+export const parseCommandIdsQuery = (url: URL): string[] | null | Response => {
+  const raw = url.searchParams.get("commandIds");
+  if (raw === null) return null;
+  const unique = [...new Set(raw.split(","))];
+  if (unique.length > CHAT_COMMAND_IDS_MAX) {
+    return error(`commandIdsは${String(CHAT_COMMAND_IDS_MAX)}件までです。`, 400);
+  }
+  const commandIds: string[] = [];
+  for (const value of unique) {
+    const parsed = commandIdSchema.safeParse(value);
+    if (!parsed.success) return error("commandIdsの形式が正しくありません。", 400);
+    commandIds.push(parsed.data);
+  }
+  return commandIds;
 };
 
 /**

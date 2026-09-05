@@ -3558,12 +3558,21 @@
     !!t && typeof t.threadId === "string" && typeof t.title === "string" &&
     (t.kind === undefined || t.kind === "stage" || t.kind === "manual") &&
     Array.isArray(t.messages) && t.messages.every(isChatMessage);
+  /* commands は commandIds を渡して問い合わせたときだけ付く。値は3種のいずれか
+     ——知らない値を「処理済み」と読んでしまうと、まだ処理中の commandId を捨てて
+     発言が二重に積まれるので、1つでも読めなければ snapshot ごと不正として弾く。 */
+  const COMMAND_STATUSES = ["pending", "processed", "unknown"];
+  const isCommandStatusMap = (v) =>
+    v === undefined ||
+    (!!v && typeof v === "object" && !Array.isArray(v) &&
+      Object.keys(v).every((k) => UUID_RE.test(k) && COMMAND_STATUSES.indexOf(v[k]) >= 0));
   /* スレッドは必ず1本以上ある（サーバが「メイン」を必ず作る）。空配列を通すと
      activeThreadId が undefined のまま送信へ進む。revision は「古いsnapshotで
      巻き戻さない」判断の土台なので、欠けていたら不正として扱う。 */
   const isChatSnapshot = (v) =>
     !!v && isTeamCode(v.teamCode) && Number.isInteger(v.revision) && v.revision >= 0 &&
-    Array.isArray(v.threads) && v.threads.length > 0 && v.threads.every(isChatThread);
+    Array.isArray(v.threads) && v.threads.length > 0 && v.threads.every(isChatThread) &&
+    isCommandStatusMap(v.commands);
   /* サーバは秒未満まで持つISO日時を返す。Date.parse だけだと "3" のような
      文字列も通るので、書式と解釈の両方を見る。 */
   const isIsoDateTime = (v) =>
@@ -4328,6 +4337,7 @@
       },
       forget(key) { pending.delete(key); persist(); },
       keys() { return Array.from(pending.keys()); },
+      idFrom(key) { return pending.get(key); },
 
       /* 入室時に、そのチームぶんの未確定IDを読み戻す。壊れていれば丸ごと捨てる
          ——半端に拾うより、次の送信で新しいIDを振る方が害が小さい。 */
@@ -4355,51 +4365,43 @@
     };
   }
 
-  /* 再入室したときの突き合わせ。未確定として持っているIDのうち、既に
-     「AIの応答まで終わっている」ものだけを捨てる。
+  /* 再入室したときの突き合わせ。未確定として持っているIDのうち、サーバが
+     「処理済み」と答えたものだけを捨てる。
 
-     📌 user 発言が入っているだけでは捨てない。サーバはAIを呼ぶ前に user 発言を
-     保存するので、AI処理中や失敗直後のリロードでは「user だけあって assistant が
-     無い」状態が普通に見える。ここで捨てると再送が新しいUUIDになり、サーバ側の
-     pending が別コマンドとして走って発言もOpenAI呼び出しも二重になる。
-     応答が揃っているときだけ完了とみなし、そうでなければIDを持ったまま
-     同じ commandId で送り直す（サーバは pending を再開してAIを呼び直す）。
+     判定はサーバへの commandId 単位の照会（GET /chat?commandIds=…）に任せる。
+     履歴の本文や並び順では原理的に区別できない——同じ文面を打ち直したときは
+     どの組が今の未確定分か分からず、サーバはチャットを直列化しないので
+     「A がタイムアウト → B を送信 → A が遅れて完了」で並びも件数も当てにならない。
+     取り違えた側の損は、処理中のIDを捨てて発言とOpenAI呼び出しが二重になることと、
+     完了したIDを持ち続けて同じ文面の2通目が冪等の再送として黙って捨てられること。
 
-     逆に完了したものを持ち続けると、参加者が同じ文面を打ち直したときに冪等の
-     再送と見なされ、本来送りたかった2通目が黙って捨てられる。 */
+     "pending"（処理中）と "unknown"（サーバが知らない）は保持する。同じIDで
+     送り直せば、サーバは pending を再開するか新規として処理するかを冪等に決める。
+     commands が付いていない応答（照会しなかった・古いサーバ）では何も捨てない。 */
   function reconcilePendingCommands(store, snapshot) {
-    if (!isChatSnapshot(snapshot)) return;
+    if (!isChatSnapshot(snapshot) || !snapshot.commands) return;
     store.keys().forEach((key) => {
-      const parsed = parsePendingKey(key);
-      if (!parsed) { store.forget(key); return; }
-      const thread = snapshot.threads.find((t) => t.threadId === parsed.threadId);
-      if (!thread) return;   // スレッドごと見えない。判断できないので残す
-      // 見るのは「同じ本文の user 発言のうち最後の1つ」。どれか一つでも
-      // assistant が続いていれば完了、としてはいけない——「要約して」のように
-      // 何度も打つ文面では、過去に完了した組が必ず見つかり、いま応答待ちの
-      // 分まで完了と誤判定して commandId を捨ててしまう。最後の1つが今の未確定分。
-      let last = -1;
-      for (let i = 0; i < thread.messages.length; i++) {
-        const m = thread.messages[i];
-        if (m && m.role === "user" && m.text === parsed.text) last = i;
-      }
-      if (last < 0) return;   // まだ届いていない。保持して同じIDで送り直す
-      // 隣に assistant が居るかでは判定しない。サーバはチャットを直列化しないので、
-      // A がタイムアウト → B を送信 → A が遅れて完了、で
-      // 「user A, user B, assistant B, assistant A」の並びが起こる。隣接判定だと
-      // A が永久に未確定のまま残り、同じ文面の2通目が冪等の再送として捨てられる。
-      // 代わりに数で見る——サーバは user 発言1つにつき assistant を高々1つ返し、
-      // 失敗時は assistant を作らない。よって last 以降で assistant の数が user の
-      // 数に追いついていれば、last の分の応答も出揃っている。
-      let users = 0, assistants = 0;
-      for (let i = last; i < thread.messages.length; i++) {
-        const m = thread.messages[i];
-        if (!m) continue;
-        if (m.role === "user") users++;
-        else if (m.role === "assistant") assistants++;
-      }
-      if (assistants >= users) store.forget(key);
+      // 指紋として読めないキーは、送信時のキー生成では作れない形（壊れた
+      // sessionStorage 由来）。同じIDが再利用されることはないので捨てる。
+      if (!parsePendingKey(key)) { store.forget(key); return; }
+      const id = store.idFrom(key);
+      if (id !== undefined && snapshot.commands[id] === "processed") store.forget(key);
     });
+  }
+
+  /* 再入室時にサーバへ状態を尋ねる commandId を集める。サーバは1回あたり
+     PENDING_COMMAND_QUERY_LIMIT 件までしか受けないので、超えたら古い方から落とす
+     ——落とした分は「捨てない」側に倒れるだけで、二重送信は起きない。 */
+  const PENDING_COMMAND_QUERY_LIMIT = 20;
+  function pendingCommandIdsFor(stores) {
+    const ids = [];
+    stores.forEach((store) => {
+      store.keys().forEach((key) => {
+        const id = store.idFrom(key);
+        if (typeof id === "string" && ids.indexOf(id) < 0) ids.push(id);
+      });
+    });
+    return ids.slice(-PENDING_COMMAND_QUERY_LIMIT);
   }
 
   const chatSendCommand = makePendingCommand("chat");
@@ -8588,7 +8590,14 @@
       showEntryError((sessionRes.body && sessionRes.body.message) || "入室に失敗しました。時間を置いて再試行してください。");
       return;
     }
-    const chatRes = await liveFetch("/api/teams/" + code + "/chat");
+    // 未確定の送信IDを先に読み戻し、GETと同時にサーバへ状態を尋ねる。捨ててよいのは
+    // 「サーバが処理済みと答えたID」だけで、履歴の本文や並びからは判定できない。
+    chatSendCommand.load(code);
+    s1DraftCommand.load(code);
+    const pendingIds = pendingCommandIdsFor([chatSendCommand, s1DraftCommand]);
+    const chatPath = "/api/teams/" + code + "/chat" +
+      (pendingIds.length > 0 ? "?commandIds=" + pendingIds.join(",") : "");
+    const chatRes = await liveFetch(chatPath);
     // 200でも中身が契約どおりとは限らない。読む前に形を確かめる
     // （空の threads を通すと activeThreadId が undefined のまま進む）。
     if (!chatRes.ok || !isChatSnapshot(chatRes.body)) {
@@ -8607,12 +8616,9 @@
       sentDataRevision: 0,
     };
     commitTeamName(code, name);
-    // 未確定の送信IDを読み戻し、サーバのスレッドと突き合わせる。「AI待ちの
-    // 最中にリロード」を挟んでも、同じ本文の送り直しが同じ commandId になる
-    // ——サーバでは先の要求が完了していることがあり、新しいIDで送ると発言も
-    // OpenAI呼び出しも二重になる。既に保存済みだと分かったぶんはここで捨てる。
-    chatSendCommand.load(code);
-    s1DraftCommand.load(code);
+    // 「AI待ちの最中にリロード」を挟んでも、同じ本文の送り直しが同じ commandId に
+    // なる——サーバでは先の要求が完了していることがあり、新しいIDで送ると発言も
+    // OpenAI呼び出しも二重になる。処理済みと分かったぶんだけここで捨てる。
     reconcilePendingCommands(chatSendCommand, chatRes.body);
     reconcilePendingCommands(s1DraftCommand, chatRes.body);
     // 保存済みのチェックポイントがあれば、そのステージへ戻す（進行台本 §5-1 の

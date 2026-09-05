@@ -35,11 +35,26 @@ export const chatThreadSchema = z
   })
   .strict();
 
+/**
+ * 送信コマンドの状態。台帳に残っている位置がそのまま状態になる——
+ * processed_message_commandsにあれば完了、pending_message_commandsにあれば処理中、
+ * どちらにも無ければサーバが知らない（届いていない・猶予期間を過ぎて掃除された）。
+ */
+export const commandStatusSchema = z.enum(["pending", "processed", "unknown"]);
+
 export const chatSnapshotSchema = z
   .object({
     teamCode: teamCodeSchema,
     revision: revisionSchema,
     threads: z.array(chatThreadSchema).min(1),
+    /**
+     * 問い合わせたcommandIdの状態。再入室したクライアントが「未確定として持っている
+     * IDのうち、もう完了しているのはどれか」をID単位で確かめるための枠であり、
+     * 履歴の本文や並びからは原理的に区別できない（同じ文面を打ち直したときや、
+     * 先に送った要求が後から完了したときに取り違える）。問い合わせなかった呼び出しでは
+     * このキー自体を持たない。DOのchat_stateへ保存する対象ではない。
+     */
+    commands: z.record(commandIdSchema, commandStatusSchema).optional(),
   })
   .strict();
 
@@ -93,6 +108,7 @@ export type ChatMessage = z.infer<typeof chatMessageSchema>;
 export type ChatThread = z.infer<typeof chatThreadSchema>;
 export type ChatThreadKind = z.infer<typeof chatThreadKindSchema>;
 export type ChatSnapshot = z.infer<typeof chatSnapshotSchema>;
+export type CommandStatus = z.infer<typeof commandStatusSchema>;
 export type CreateThreadCommand = z.infer<typeof createThreadCommandSchema>;
 export type SendMessageCommand = z.infer<typeof sendMessageCommandSchema>;
 export type ChatCommand = z.infer<typeof chatCommandSchema>;

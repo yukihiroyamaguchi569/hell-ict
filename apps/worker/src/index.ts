@@ -43,6 +43,7 @@ import {
   errorWithHeaders,
   isWebSocketRequest,
   json,
+  parseCommandIdsQuery,
   parseJson,
   PayloadTooLargeError,
   teamCodeFromApiPath,
@@ -536,9 +537,20 @@ const handlePost = (request: Request, scope: RequestScope, url: URL): Promise<Re
     : handleCommand(request, env, commandTeamCode);
 };
 
-const handleChatSnapshot = async (env: Env, teamCode: TeamCode): Promise<Response> => {
+/**
+ * チャットのsnapshotを返す。`?commandIds=`を伴う呼び出しでは、そのIDが台帳の
+ * どこにあるか（処理済み・処理中・未知）も一緒に返す——再入室したクライアントが、
+ * 手元の未確定IDを本文や並び順ではなくID単位で突き合わせられるようにする。
+ */
+const handleChatSnapshot = async (env: Env, teamCode: TeamCode, url: URL): Promise<Response> => {
+  const commandIds = parseCommandIdsQuery(url);
+  if (commandIds instanceof Response) return commandIds;
   try {
-    const snapshot = await env.TEAM_ROOM.getByName(teamCode).chatSnapshot(teamCode);
+    const room = env.TEAM_ROOM.getByName(teamCode);
+    const snapshot =
+      commandIds === null
+        ? await room.chatSnapshot(teamCode)
+        : await room.chatSnapshot(teamCode, commandIds);
     return json(snapshot);
   } catch {
     return error("チャット状態の取得に失敗しました。時間を置いて再試行してください。", 503);
@@ -550,7 +562,7 @@ const handleGet = (request: Request, env: Env, url: URL): Promise<Response> => {
   const teamCode = teamCodeFromPath(url.pathname, "/api/teams/", "/sync");
   if (teamCode !== null) return handleTeamSync(request, env, teamCode);
   const chatTeamCode = teamCodeFromPath(url.pathname, "/api/teams/", "/chat");
-  if (chatTeamCode !== null) return handleChatSnapshot(env, chatTeamCode);
+  if (chatTeamCode !== null) return handleChatSnapshot(env, chatTeamCode, url);
   const checkpointTeamCode = teamCodeFromPath(url.pathname, "/api/teams/", "/checkpoint");
   if (checkpointTeamCode !== null) return handleCheckpointState(env, checkpointTeamCode);
   return url.pathname === "/api/leaderboard/sync"
