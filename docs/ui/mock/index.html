@@ -991,6 +991,9 @@
 .viewer .cols button:hover { background: #e3e5df; }
 .viewer .sheet { overflow: auto; padding: 14px; }
 .viewer pre { margin: 0; font-family: var(--font-legacy); font-size: calc(13px * var(--fs-scale)); line-height: 1.95; white-space: pre; }
+/* メール本文のように「行」に意味が無い文章だけ折り返す（VIEWERS[*].wrap）。
+   タブ区切りの表（Excel系）は列がずれるので従来どおり折り返さない。 */
+.viewer pre.wrap { white-space: pre-wrap; word-break: break-word; }
 
 /* Final：振り返りボード（2026-08-22 全面改修。旧4欄フォーム＋ルールベース
    判定は廃止し、判定そのものが無い「レース後」の唯一のステージにした。
@@ -6183,7 +6186,7 @@
        それまでは後続ステージで押しても何も起きない死んだ行だった）。
        伏線（夜勤師長メールの「原因不明の発熱」）を後から読み返せることは、
        このステージの設計意図そのものなので、一覧から消すのではなく読ませる。 */
-    ...Object.fromEntries(MAILS.map((m, i) => ["p" + i, { name: m.subj, text: m.body.join("\n\n") }])),
+    ...Object.fromEntries(MAILS.map((m, i) => ["p" + i, { name: m.subj, text: m.body.join("\n\n"), wrap: true }])),
     main: { name: MAIL_S1.attach, text: SHEET },
     add: { name: MAIL_S1_ADD.attach, text: SHEET_ADD },
     s3manual: { name: "院内感染対策マニュアル.pdf", text: S3_MANUAL_TEXT },
@@ -6191,7 +6194,7 @@
     // 検査科メールには添付が無い。Stage 2/3 の中央ペインはワークスペース専用で
     // メール本文を出す場所が無いため、添付が無いメールもこのビューアで読ませる
     // （本来の .reader 書式ではなく viewer の白紙書式になる簡略化・モック限定）。
-    s3lab: { name: MAIL_S3_LAB.subj, text: MAIL_S3_LAB.body.join("\n\n") },
+    s3lab: { name: MAIL_S3_LAB.subj, text: MAIL_S3_LAB.body.join("\n\n"), wrap: true },
     // 3B病棟看護師長：添え状（本文）と患者サマリ（添付）を同じビューアにまとめて表示する
     // ——s5notice/fpress と同じ簡略化（本文と添付を分ける器が無いモック限定の措置）。
     s3patients: {
@@ -6211,28 +6214,33 @@
       table: S4_FEVER_TABLE
     },
     // 事務長メールも添付が無いので同じ簡略化を踏襲する。
-    s5jimu: { name: MAIL_S5_JIMU.subj, text: MAIL_S5_JIMU.body.join("\n\n") },
+    s5jimu: { name: MAIL_S5_JIMU.subj, text: MAIL_S5_JIMU.body.join("\n\n"), wrap: true },
     // 近藤さんの本文（多言語対応の依頼）は、添付（去年の悪い実例）と同じビューアに
     // まとめて表示する——モック限定の簡略化。この教材は罠ではないので、
     // 本文と添付を分ける必要が無い（docs/materials/stage5_notice_old.md 実装メモ）。
     s5notice: {
       name: MAIL_S5_SOUDAN.attach,
-      text: MAIL_S5_SOUDAN.body.join("\n\n") + "\n\n---\n\n📎 " + MAIL_S5_SOUDAN.attach + "\n\n" + S5_NOTICE_OLD_TEXT
+      text: MAIL_S5_SOUDAN.body.join("\n\n") + "\n\n---\n\n📎 " + MAIL_S5_SOUDAN.attach + "\n\n" + S5_NOTICE_OLD_TEXT,
+      wrap: true
     },
     // 事務長メールも添付が無いので同じ簡略化を踏襲する。
-    fjimu: { name: MAIL_F_JIMU.subj, text: MAIL_F_JIMU.body.join("\n\n") },
+    fjimu: { name: MAIL_F_JIMU.subj, text: MAIL_F_JIMU.body.join("\n\n"), wrap: true },
     // 広報課の本文（記者クラブからの申し送り）は、添付（記者クラブ事前質問）と同じ
     // ビューアにまとめて表示する——s5notice と同じ簡略化。ただし [コピー] は置く
     // （docs/ui/07_Final.md §1「質問リストを AI へ貼って下書きさせる動線は正当」）。
     fpress: {
       name: MAIL_F_KOHO.attach,
-      text: MAIL_F_KOHO.body.join("\n\n") + "\n\n---\n\n📎 " + MAIL_F_KOHO.attach + "\n\n" + F_PRESS_Q_TEXT
+      text: MAIL_F_KOHO.body.join("\n\n") + "\n\n---\n\n📎 " + MAIL_F_KOHO.attach + "\n\n" + F_PRESS_Q_TEXT,
+      wrap: true
     }
   };
   function openViewer(which) {
     const v = VIEWERS[which];
     $("viewer-name").textContent = v.name;
     $("sheet").textContent = v.text;
+    // 文章（メール本文・掲示物）は折り返す。タブ区切りの表は折り返すと列が
+    // ずれて読めなくなるので、wrap を立てた項目だけを対象にする。
+    $("sheet").classList.toggle("wrap", !!v.wrap);
     // [作業エリアに追加] は追加分の添付にだけ置く。最初の添付は既にグリッドに
     // 入っているので不要だし、押せると二重取り込みが起きる。
     $("btn-take").classList.toggle("hide", !(which === "add") || s2AddTaken);
