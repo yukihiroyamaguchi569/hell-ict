@@ -66,3 +66,48 @@ test("復元の応答が遅れている間に別チームで入室すると、�
   await expect(page.getByRole("heading", { name: "Stage 1: 平常運転" })).toBeVisible();
   await expect(page.getByText("この端末の状態は古くなっています。")).toHaveCount(0);
 });
+
+/**
+ * 追い越された復元が失敗（503）で終わったとき。以前は例外がそのまま呼び出し元の
+ * 失敗処理へ届き、成功した入室の画面に「復元に失敗しました」が出ていた。
+ * 追い越されたことのほうが先に決まるので、失敗として扱ってはいけない。
+ */
+test("追い越された復元が503で落ちても、成功した入室の表示を上書きしない", async ({ page }) => {
+  const restored = uniqueTeamCode();
+  const entered = uniqueTeamCode();
+
+  await page.addInitScript(
+    ({ key, code }) => {
+      localStorage.setItem(key, code);
+    },
+    { key: savedTeamCodeKey, code: restored },
+  );
+
+  // 復元のsessionだけを遅らせたうえで503にする。あとから始まる入室のほうが先に返る。
+  await page.route("**/api/session", async (route) => {
+    const body: unknown = route.request().postDataJSON();
+    const target =
+      typeof body === "object" && body !== null && "teamCode" in body ? body.teamCode : null;
+    if (target !== restored) {
+      await route.continue();
+      return;
+    }
+    await new Promise((resolve) => setTimeout(resolve, 3000));
+    await route.fulfill({
+      status: 503,
+      contentType: "application/json",
+      body: JSON.stringify({ message: "チーム状態の処理に失敗しました。" }),
+    });
+  });
+
+  await page.goto("/");
+  await page.getByLabel("チームコード").fill(entered);
+  await page.getByRole("button", { name: "入室する" }).click();
+  await expect(page.getByRole("heading", { name: "Prologue: 着任" })).toBeVisible();
+
+  // 遅れていた復元が503で返っても、成功した側の画面に失敗の案内を出さない。
+  await page.waitForTimeout(4000);
+  await expect(page.getByRole("heading", { name: "Prologue: 着任" })).toBeVisible();
+  await expect(page.getByText("復元に失敗しました。")).toHaveCount(0);
+  await expect(page.getByRole("button", { name: "再試行" })).toHaveCount(0);
+});

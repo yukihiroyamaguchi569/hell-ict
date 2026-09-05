@@ -306,13 +306,19 @@ export const App = () => {
 
   const openSession = useCallback(async (code: string): Promise<SessionOutcome> => {
     const seq = ++sessionSeq.current;
-    const parsed = sessionResultSchema.safeParse(
-      await postJson("/api/session", { teamCode: code }),
+    // 失敗（通信断・503）もここで受け止める。例外のまま投げ返すと、追い越された
+    // 呼び出しの失敗が seq の確認を通らずに呼び出し元の失敗処理へ届き、成功した
+    // 後続セッションの表示を「復元に失敗しました」で上書きしてしまう。
+    const received = await postJson("/api/session", { teamCode: code }).then(
+      (value: unknown) => ({ ok: true as const, value }),
+      () => ({ ok: false as const, value: undefined }),
     );
     // 待っている間に別の入室が始まっていたら、この応答は捨てる。保存済みコードからの
     // 復元が遅れている最中にフォームから別のチームで入ると、遅い応答があとから
     // 世代とsnapshotを上書きし、「表示は別チーム・世代は前のチーム」になる。
     if (seq !== sessionSeq.current) return "superseded";
+    if (!received.ok) return "failed";
+    const parsed = sessionResultSchema.safeParse(received.value);
     if (!parsed.success) return "failed";
     openedCode.current = code;
     setRestoreFailed(false);
