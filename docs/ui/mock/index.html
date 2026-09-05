@@ -3713,7 +3713,11 @@
       try { body = await res.json(); } catch {}
       // 429 のときだけ意味を持つ待ち秒数。headers を丸ごと露出させず、必要な1つだけ
       // 数値へ落として返す（読めなければ null＝「何秒待てとは言えない」）。
-      return { ok: res.ok, status: res.status, body, retryAfter: retryAfterSeconds(res) };
+      const normalized = { ok: res.ok, status: res.status, body, retryAfter: retryAfterSeconds(res) };
+      // 世代切れの検知はここ1か所に置く。呼び出し側ごとに書くと、経路が増えたときに
+      // 付け忘れて「拒否されているのに気づかないまま操作を続ける」画面が残る。
+      noteStaleGeneration(normalized);
+      return normalized;
     } catch {
       return { ok: false, status: 0, body: null, retryAfter: null };
     } finally {
@@ -3767,7 +3771,7 @@
         generation: liveState.generation,
         clientAt: new Date().toISOString(),
       }),
-    }).then((res) => { if (res.status === 409) noteStaleGeneration(res); });
+    });
   }
 
   /* ------------------------------------------------------------------ */
@@ -4256,6 +4260,7 @@
         commandId: threadCreateCommand.idFor(title, "stage", ""),
         title,
         kind: "stage",
+        generation: liveState.generation,
       }),
     });
     stageThreadCreating.delete(title);
@@ -4530,6 +4535,7 @@
         threadId: sentThreadId,
         text,
         promptProfile: chatProfile,
+        generation: liveState.generation,
       }),
     });
     aiSending = false;
@@ -5571,6 +5577,7 @@
         threadId: sentThreadId,
         text,
         promptProfile: "s1",
+        generation: liveState.generation,
       }),
     });
     s1DraftBusy = false;

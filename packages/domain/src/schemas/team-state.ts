@@ -53,6 +53,9 @@ export const teamCommandSchema = z
     type: z.literal("enter-stage1"),
     commandId: commandIdSchema,
     expectedRevision: revisionSchema,
+    // 入室時に受け取ったリセット世代。リセット済みのチームへ古いタブが
+    // ステージ遷移を送り、チーム状態と会話を作り直すのを止める。
+    generation: resetGenerationSchema,
   })
   .strict();
 

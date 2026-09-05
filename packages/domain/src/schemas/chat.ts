@@ -1,6 +1,11 @@
 import { z } from "zod";
 
-import { commandIdSchema, revisionSchema, teamCodeSchema } from "./team-state.js";
+import {
+  commandIdSchema,
+  resetGenerationSchema,
+  revisionSchema,
+  teamCodeSchema,
+} from "./team-state.js";
 
 export const chatThreadIdSchema = z.uuid();
 export const chatMessageIdSchema = z.uuid();
@@ -65,6 +70,9 @@ export const createThreadCommandSchema = z
     title: z.string().trim().min(1).max(40),
     // 既存クライアントはkindを送らない。参加者の手動追加として扱う。
     kind: chatThreadKindSchema.default("manual"),
+    // 入室時に受け取ったリセット世代。リセット済みのチームへ古いタブが
+    // スレッドを作り直すのを止める（指紋には含めない。domain/fingerprint.ts）。
+    generation: resetGenerationSchema,
   })
   .strict();
 
@@ -79,6 +87,8 @@ export const sendMessageCommandSchema = z
     threadId: chatThreadIdSchema,
     text: z.string().trim().min(1).max(4000),
     promptProfile: promptProfileSchema.optional(),
+    // 入室時に受け取ったリセット世代（指紋には含めない）。
+    generation: resetGenerationSchema,
   })
   .strict();
 
