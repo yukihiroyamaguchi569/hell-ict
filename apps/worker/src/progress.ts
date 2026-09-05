@@ -4,6 +4,7 @@ import {
   PII_REDACTION,
   publicTeamId,
   redactPii,
+  resetGenerationSchema,
   teamCodeSchema,
   viewIdSchema,
 } from "@hell-ict/domain";
@@ -144,6 +145,8 @@ const progressEventSchema = z.object({
   // 既知の画面idだけを受ける（checkpoint・活動ログと同じenum）。
   view: viewIdSchema,
   kind: z.enum(["entry", "clear", "jump", "resume"]),
+  // 入室時に受け取ったリセット世代。未指定は0（リセットを持たない古いクライアント）。
+  generation: resetGenerationSchema,
   // 活動ログと同じくISO 8601で厳密に検証する。自由文字列のままだと、表示用の列に
   // 何でも入れられる経路が1つ残る（モックはtoISOString()を送るので互換性は保たれる）。
   clientAt: z.iso.datetime(),
@@ -239,6 +242,21 @@ export const handleProgressPost = async (request: Request, env: Env): Promise<Re
   // （規則に合わないチームの行をダッシュボードへ混ぜない）。応答は存在を明かさない404に揃える。
   if (!isTeamCodeAllowed(event.teamCode, parseTeamCodeRule(env))) {
     return new Response("Not found", { status: 404 });
+  }
+
+  // ゲームマスターのリセットより前に入室した端末からの記録を弾く。リセット後に
+  // 遅れて届いた位置イベントをそのまま積むと、初期へ戻したはずの帯が復活する。
+  // D1へ触れる前に確かめ、拒否したときは1行も書かない。
+  const fresh = await env.TEAM_ROOM.getByName(event.teamCode)
+    .matchesResetGeneration(event.teamCode, event.generation)
+    .catch(() => null);
+  if (fresh === null) return error("進捗の記録に失敗しました。", 503);
+  if (!fresh) {
+    return error(
+      "この端末の状態は古くなっています。ページを再読み込みしてください。",
+      409,
+      "stale-generation",
+    );
   }
 
   try {

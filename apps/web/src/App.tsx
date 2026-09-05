@@ -4,7 +4,7 @@ import {
   createThreadResultSchema,
   leaderboardSnapshotSchema,
   teamCodeSchema,
-  teamSnapshotSchema,
+  sessionResultSchema,
   teamSyncMessageSchema,
 } from "@hell-ict/domain";
 import type {
@@ -171,7 +171,7 @@ export const App = () => {
       return;
     }
     try {
-      const parsed = teamSnapshotSchema.safeParse(await postJson("/api/session", { teamCode }));
+      const parsed = sessionResultSchema.safeParse(await postJson("/api/session", { teamCode }));
       if (!parsed.success) throw new Error();
       localStorage.setItem(savedTeamCodeKey, teamCode);
       setJoinedCode(teamCode);

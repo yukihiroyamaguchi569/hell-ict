@@ -10,6 +10,7 @@ import {
   saveCheckpointCommandSchema,
   saveCheckpointResultSchema,
   sendMessageCommandSchema,
+  sessionResultSchema,
   teamCodeSchema,
   teamCommandSchema,
 } from "@hell-ict/domain";
@@ -79,9 +80,15 @@ const handleSession = async (request: Request, env: Env): Promise<Response> => {
     return new Response("Not found", { status: 404 });
   }
   try {
-    const snapshot = await env.TEAM_ROOM.getByName(teamCode).join(teamCode);
+    const room = env.TEAM_ROOM.getByName(teamCode);
+    const snapshot = await room.join(teamCode);
     await env.RACE_LEADERBOARD.getByName("global").upsert(teamCode, snapshot);
-    return json(snapshot);
+    // リセット世代はsnapshotの外に足す——teamSnapshotSchemaはWebSocket配信でも
+    // そのまま使うstrictな形で、ここだけのために項目を増やすと配信側まで巻き込む。
+    // クライアントはこの値を保持し、以後の進捗記録とチェックポイント保存へ添える。
+    return json(
+      sessionResultSchema.parse({ ...snapshot, generation: await room.resetGeneration(teamCode) }),
+    );
   } catch {
     return error("チーム状態の処理に失敗しました。時間を置いて再試行してください。", 503);
   }
@@ -403,6 +410,7 @@ const CHECKPOINT_REJECTION_MESSAGES = {
   "elapsed-regression": "経過時間を巻き戻すチェックポイントは保存できません。",
   "pos-regression": "進行位置を巻き戻すチェックポイントは保存できません。",
   "data-regression": "古い内容でチェックポイントを上書きすることはできません。",
+  "stale-generation": "この端末の状態は古くなっています。ページを再読み込みしてください。",
 } as const satisfies Record<CheckpointRejectionReason, string>;
 
 /**

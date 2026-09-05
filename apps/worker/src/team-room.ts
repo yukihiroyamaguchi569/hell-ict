@@ -19,6 +19,7 @@ import {
   redactChatMessageResultPii,
   redactPii,
   redactSnapshotPii,
+  resetGenerationSchema,
   saveCheckpointCommandSchema,
   sendMessageCommandSchema,
   teamCodeSchema,
@@ -264,6 +265,12 @@ const assistantTextOf = (outcome: CompleteChatMessageOutcome): string | null => 
 };
 
 /**
+ * リセット世代の行。SQLiteは列の型を強制しないので読み出しも検証する。壊れていたら
+ * 例外にする——0へ倒すと、リセット済みのチームで古い端末の書き込みが復活しうる。
+ */
+const storedGenerationSchema = z.object({ value: z.number().int().nonnegative() });
+
+/**
  * ゲームマスターのリセットで空にするテーブル。DDLで作っているもののうち`migrations`以外
  * すべてを列挙する。テーブルを足したらここへも足す——消し忘れると、リセットしたつもりの
  * チームに古い状態が残る。
@@ -330,6 +337,12 @@ export class TeamRoom extends DurableObject<Env> {
     this.ctx.storage.sql.exec(
       "CREATE TABLE IF NOT EXISTS rate_limit (bucket TEXT PRIMARY KEY, count INTEGER NOT NULL)",
     );
+    // リセット世代。RESET_TABLESに含めない——リセットのたびに消してしまうと、
+    // 「何回リセットしたか」が失われて古い端末を見分けられなくなる。
+    this.ctx.storage.sql.exec(
+      "CREATE TABLE IF NOT EXISTS reset_generation (id INTEGER PRIMARY KEY CHECK (id = 1), value INTEGER NOT NULL)",
+    );
+    this.ctx.storage.sql.exec("INSERT OR IGNORE INTO reset_generation (id, value) VALUES (1, 0)");
     this.ctx.storage.sql.exec("CREATE TABLE IF NOT EXISTS migrations (name TEXT PRIMARY KEY)");
   }
 
@@ -353,8 +366,36 @@ export class TeamRoom extends DurableObject<Env> {
       for (const table of RESET_TABLES) {
         this.ctx.storage.sql.exec(`DELETE FROM ${table}`);
       }
+      // 世代を進めるのも同じトランザクションで。行を消したのに世代が据え置かれると、
+      // リロードしていない端末の保存が「初回保存」として通り、状態が戻ってしまう。
+      this.ctx.storage.sql.exec("UPDATE reset_generation SET value = value + 1 WHERE id = 1");
     });
     return { ok: true };
+  }
+
+  /**
+   * 現在のリセット世代。入室（POST /api/session）の応答へ載せてクライアントへ渡す。
+   */
+  async resetGeneration(teamCodeInput: unknown): Promise<number> {
+    teamCodeSchema.parse(teamCodeInput);
+    return this.readGeneration();
+  }
+
+  /**
+   * 進捗記録（POST /api/progress）が、この端末の世代で書いてよいかを問う。
+   * チェックポイントと違いD1直書きなので、DOへ照合だけを尋ねる形にする。
+   */
+  async matchesResetGeneration(teamCodeInput: unknown, generationInput: unknown): Promise<boolean> {
+    teamCodeSchema.parse(teamCodeInput);
+    return resetGenerationSchema.parse(generationInput) === this.readGeneration();
+  }
+
+  private readGeneration(): number {
+    const row =
+      this.ctx.storage.sql.exec("SELECT value FROM reset_generation WHERE id = 1").toArray()[0] ??
+      null;
+    // 行が無いのはこのDOの初期化前だけで、その状態では世代0が正しい。
+    return row === null ? 0 : storedGenerationSchema.parse(row).value;
   }
 
   async join(teamCodeInput: unknown): Promise<TeamSnapshot> {
@@ -1018,9 +1059,13 @@ export class TeamRoom extends DurableObject<Env> {
    */
   private replayCheckpoint(
     current: CheckpointSnapshot | null,
-    appliedRevision: number,
+    saved: z.infer<typeof storedCheckpointCommandSchema>,
+    fingerprint: string,
   ): CheckpointSnapshot | CheckpointRejection {
-    return current !== null && current.revision === appliedRevision
+    // 同じcommandIdで別のbodyを送る取り違えは冪等再送ではない。元の結果を返すと、
+    // クライアントは保存したつもりの状態が入っていないことに気づけない。
+    if (mismatchesFingerprint(saved.fingerprint, fingerprint)) return { rejected: "conflict" };
+    return current !== null && current.revision === saved.revision
       ? current
       : { rejected: "conflict" };
   }
@@ -1039,6 +1084,11 @@ export class TeamRoom extends DurableObject<Env> {
     const teamCode = teamCodeSchema.parse(teamCodeInput);
     const command: SaveCheckpointCommand = saveCheckpointCommandSchema.parse(commandInput);
     const now = checkpointSnapshotSchema.shape.savedAt.parse(nowIsoInput);
+    // 世代の照合はいちばん先に置く。冪等台帳の参照よりも前に弾かないと、リセット前の
+    // commandIdが「処理済み」として現在のsnapshotを返してしまう（台帳は消えているので
+    // 実際には通らないが、判定の順序として世代を最優先に固定しておく）。
+    // flushも同じ扱いにする——CASを外す経路だからこそ、持ち主の確認は外せない。
+    if (command.generation !== this.readGeneration()) return { rejected: "stale-generation" };
     const savedRow =
       this.ctx.storage.sql
         .exec(
@@ -1051,12 +1101,7 @@ export class TeamRoom extends DurableObject<Env> {
     // 台帳の行も検証してから使う。壊れた行を「台帳に無い」と読み替えると、適用済みの
     // commandIdが未処理に見えて古いbodyを再適用してしまう。不整合は黙って通さず、
     // 例外にしてWorkerの503（時間を置いて再試行）へ倒す。
-    if (saved !== null) {
-      // 同じcommandIdで別のbodyを送る取り違えは冪等再送ではない。元の結果を返すと、
-      // クライアントは保存したつもりの状態が入っていないことに気づけない。
-      if (mismatchesFingerprint(saved.fingerprint, fingerprint)) return { rejected: "conflict" };
-      return this.replayCheckpoint(current, saved.revision);
-    }
+    if (saved !== null) return this.replayCheckpoint(current, saved, fingerprint);
 
     const applied = applyCheckpoint(current, command, { teamCode, now });
     if (!applied.ok) return { rejected: applied.reason };
