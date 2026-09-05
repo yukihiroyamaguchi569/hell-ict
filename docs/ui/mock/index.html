@@ -815,11 +815,14 @@
 .lock .note { font-size: 13px; color: var(--fg); padding: 0 2px; }
 .lock .stat { font-size: 12px; color: var(--fg-muted); padding: 6px 2px 0; font-variant-numeric: tabular-nums; }
 /* 全部詰め終わってから出る掲示。最初から棚に貼ってあったもの——
-   読まずに手を動かした、が Stage 3 の縮小再演になる（docs/ui/04_Stage3.md §罰ゲーム）。 */
+   読まずに手を動かした、が Stage 3 の縮小再演になる（docs/ui/04_Stage3.md §罰ゲーム）。
+   見落としていたことが効くよう、院内掲示物らしい太枠・太字・大きめで出す
+   （2026-09-05。文言そのものは変えていない）。 */
 .lock .notice {
-  border: 1px solid var(--warn); color: var(--warn); background: rgba(217,154,31,.07);
-  font-family: var(--font-legacy); font-size: 14px; line-height: 1.9;
-  white-space: pre; padding: 14px 18px; margin: 4px 0 2px;
+  border: 3px solid var(--warn); color: var(--warn); background: rgba(217,154,31,.12);
+  font-family: var(--font-legacy); font-size: 19px; font-weight: 700; line-height: 1.8;
+  letter-spacing: .03em; text-align: center;
+  white-space: pre; padding: 18px 22px; margin: 8px 0 4px;
 }
 .lock .shicho { font-family: var(--font-legacy); font-size: 13px; color: var(--fg); padding: 2px; }
 .lock .discard { font-size: 13px; color: var(--fg-muted); padding: 2px; }
@@ -1700,7 +1703,7 @@
              （unlockSequence() 系と同じ理由。docs/ui/mock/README.md 既知の設計負債）。
              #penalty-host は空のまま持ち、startPenalty()/startS4Penalty() が中身を注入する。 -->
         <div class="veil lock hide" id="ov-lock">
-          <div class="hd" id="lock-hd">拡大対応業務：消毒液ボトルの補充</div>
+          <div class="hd" id="lock-hd">拡大対応業務：🧴 消毒液ボトルの補充</div>
           <!-- 2026-08-22改修：残り時間のカウントダウンをやめ、この業務に実際に
                費やしている時間を数え上げる（startPenaltyClock）。罰は作業を
                終えたときに終わるのであって、秒数で解放されるわけではない。 -->
@@ -6736,6 +6739,8 @@
     for (let i = 0; i < S3_BOTTLES_5A; i++) s3Bottles.push({ ward: "5A", state: "todo" });
     s3BottlesExtraAdded = false;
 
+    // 見出しは Stage 4 の罰（startS4Penalty）が同じ器を書き換えるので、毎回セットし直す。
+    $("lock-hd").textContent = "拡大対応業務：🧴 消毒液ボトルの補充";
     $("penalty-host").innerHTML =
       '<div class="note">5A病棟の消毒液ボトルを補充してください。</div>' +
       '<div class="bottles" id="bottles"></div>' +
