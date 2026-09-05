@@ -891,6 +891,27 @@
 .s35-clear-t { font-size: 22px; font-weight: 700; color: var(--ok); letter-spacing: .03em; }
 .s35-clear-s { font-size: 15px; color: var(--fg-muted); max-width: 46ch; line-height: 1.8; }
 
+/* Stage 3.5：院長の一往復。2026-09-05（Issue #88）にポップアップ（旧
+   #ov-s35-kanbu）から中央ペインへ移した器——モーダルだと要約と論文を見返せず、
+   対話から抜けられなかった（2026-08-23テストプレイ課題12）。
+   AIチャットの吹き出しとは共用しない（00_共通シェルと通奏低音.md §6）。
+   書式は「病院から届くもの」＝2003年風：緑のタイトルバー（--phs）・白背景・
+   角丸なし。中の .box/.submit-area はテーマ追従の色を持つので、白い紙の上で
+   読めるよう固定色へ上書きする（§9「ファイル」はテーマに追従させない）。
+   下マージンは、常駐する院内連絡先（.phs＝中央ペインの右下に浮いている）を
+   避けるため——これが無いと、.work をいちばん下まで送ったときに［送信する］
+   ［確認した（次へ）］が .phs のバーの下へ潜って押せなくなる。 */
+.s35-talk { font-family: var(--font-legacy); border: 1px solid var(--phs); background: #fff; color: #16181a; margin-bottom: 62px; }
+.s35-talk > .tb { background: var(--phs); color: #fff; padding: 9px 12px; font-size: 13px; }
+.s35-talk > .bd { padding: 16px 18px; display: flex; flex-direction: column; gap: 11px; }
+.s35-talk .say { font-size: 15px; line-height: 1.8; }
+.s35-talk .box { background: #fff; border-color: #cfd6d1; }
+.s35-talk .box.warn { border-color: var(--warn); }
+.s35-talk .box > .hd { color: #6b736e; border-bottom-color: #cfd6d1; }
+.s35-talk .submit-area { color: #16181a; }
+.s35-talk .submit-area::placeholder { color: #9aa0a6; }
+.s35-talk .verdict .lead { color: #4a514c; }
+
 /* 教材ビューア：見た目を整えない。汚いまま出す。
    これはアプリの画面ではなく病院から届いた「ファイル」なので、
    テーマに追従させず白い紙として固定する。 */
@@ -1847,36 +1868,12 @@
           </div>
         </div>
 
-        <!-- Stage 3.5：院長との一往復。常駐する「院内連絡先」（#phs・苅部さん専用）
-             とは別の、この場面限りの専用ウィンドウ（docs/character/00_お助けキャラの
-             原則.md §0「窓口は一つ、中の人は増えてよい」の枠を破らないよう、#phs 自体は
-             触らず新設する）。.sysdlg callin は #ov-s4call と同じ器を借りる。id は
-             ov-s35-kanbu のまま据え置く（話者を幹部→院長へ差し替えただけで配線は不変）。
-             肖像は付けない——院長の肖像は開始演出（#ov-s35-director）側に置くので、
-             この一往復は簡潔な文字だけにして同じ画像の重複掲載を避ける。 -->
-        <div class="veil sysdlg callin hide" id="ov-s35-kanbu">
-          <div class="win">
-            <div class="tb">
-              <span class="grow">院内連絡先 ── 院長</span>
-              <span class="ctl">□ ✕</span>
-            </div>
-            <div class="bd">
-              <div class="main">
-                <div class="say">〔院長〕要約は読んだ。</div>
-                <!-- 2026-08-22 ユーザー指示で追加。論文の眼痛を院内の「発熱14名」へ
-                     結び付けるのは院長の口から言わせる——参加者が次に踏む行動提案
-                     （発熱より前の人に先回りする）の足場になる。 -->
-                <div class="say">〔院長〕うちの発熱患者もこれかもしれないな。</div>
-                <div class="say">〔院長〕それで、これからどうする？</div>
-                <div class="box" id="s35-action-box">
-                  <textarea class="submit-area" id="s35-action" style="min-height:90px"></textarea>
-                </div>
-                <div id="s35-action-verdict"></div>
-              </div>
-            </div>
-            <div class="ft"><button class="btn" id="btn-s35-action-submit">送信する</button></div>
-          </div>
-        </div>
+        <!-- Stage 3.5：院長との一往復（旧 #ov-s35-kanbu）は 2026-09-05（Issue #88）に
+             ポップアップを廃止し、中央ペインへ差し込む形へ移した（s35ShowDirectorTalk()）。
+             モーダルのままだと要約と論文を見返せず、対話から抜けられなかった
+             （2026-08-23テストプレイ課題12）。常駐する「院内連絡先」（#phs・苅部さん専用）
+             を増やさない意図は変わらない——#phs は触らず、書式（緑のタイトルバー・白背景・
+             2003年風）だけを .s35-talk で借りる。 -->
 
       </div>
       <!-- =============== 製品の画面 ここまで =============== -->
@@ -2367,8 +2364,9 @@
   /* stage3_5_foreign_report.md。罠・罰は無く、判定は「差し戻しのみ」      */
   /* （Stage 5 と同じ構造）。alarm/lock/blackout は一度も出さない。        */
   /* 院長との一往復は、常駐する「院内連絡先」（苅部さん専用の #phs）とは    */
-  /* 別に、専用のオーバーレイ（#ov-s35-kanbu）で一回だけ行う——窓口を       */
+  /* 別に、中央ペインへ差し込む一回きりの器（.s35-talk）で行う——窓口を     */
   /* 増やさないため（docs/character/00_お助けキャラの原則.md §0）。        */
+  /* 2026-09-05（Issue #88）にポップアップ（#ov-s35-kanbu）から移した。    */
   /* Stage 3 クリアからの接続配線・リーダーボードの停留所追加は別作業      */
   /* （S3.5 は S3 の停留所を共有する。このブロックでは TEAMS を動かさない）。*/
   /* 2026-08-22 ユーザー修正：登場人物を「幹部」から「院長」へ差し替え、    */
@@ -2458,6 +2456,17 @@
   const S35_REQUIRED_SUMMARY =
     /眼痛|羞明|[眼目](の奥|球)?[のがをに]?[^頭腹胸咽喉背腰関節筋腕脚。、\n]{0,3}痛|光[^。、\n]{0,5}(過敏|敏感)|まぶし|眩し/;
   const S35_SUMMARY_REJECT = "〔院長〕要約をもう一度見た。今後の確認に使えそうな、発熱より前の情報はないか。";
+
+  /* 要約通過後の院長の問い（docs/ui/04_Stage3_5_新情報の解釈.md §2）。
+     2026-09-05（Issue #88）にオーバーレイの静的HTMLからここへ移した——文言は不変。
+     2行目は 2026-08-22 ユーザー指示で追加したもので、論文の眼痛を院内の「発熱14名」へ
+     結び付けるのは院長の口から言わせる——参加者が次に踏む行動提案（発熱より前の人に
+     先回りする）の足場になる。 */
+  const S35_QUESTION_LINES = [
+    "〔院長〕要約は読んだ。",
+    "〔院長〕うちの発熱患者もこれかもしれないな。",
+    "〔院長〕それで、これからどうする？"
+  ];
 
   /* 判定2（行動提案）。対象語と内容語の両方が要る——どちらか片方だけでは
      「誰に、何を確認したいのか」が伝わらない、という差し戻し理由と一致させる。 */
@@ -3395,7 +3404,7 @@
   let view = "entry";
 
   function hideOverlays() {
-    ["ov-entry", "ov-brief", "ov-viewer", "ov-unlock", "ov-goal", "ov-s1res", "ov-blackout", "ov-s3notice", "ov-alarm", "ov-s4scold", "ov-lock", "ov-s4call", "ov-s35-director", "ov-s35-report", "ov-s35-kanbu", "ov-s5jimu-task", "ov-f-relay", "ov-f-handover", "ov-lightbox"].forEach((id) => $(id).classList.add("hide"));
+    ["ov-entry", "ov-brief", "ov-viewer", "ov-unlock", "ov-goal", "ov-s1res", "ov-blackout", "ov-s3notice", "ov-alarm", "ov-s4scold", "ov-lock", "ov-s4call", "ov-s35-director", "ov-s35-report", "ov-s5jimu-task", "ov-f-relay", "ov-f-handover", "ov-lightbox"].forEach((id) => $(id).classList.add("hide"));
     // #ov-lock の中身（拡大対応業務のボトル棚／インシデント報告書）は
     // startPenalty()/startS4Penalty() が動的に注入したもの。.hide を付けるだけでは
     // DOM とリスナーが残り続けるので、シーンを離れるたびに必ず空にする
@@ -3694,10 +3703,14 @@
      罠は1回で発動済みになるのに罰のUIはリロードで消えるので、これが無いと
      「罠を踏んだ直後にリロードすれば罰だけ踏み倒せる」——罰は時間で払う設計
      （企画書§6）なので、払わずに済む抜け道は塞ぐ。
+     Stage 3.5 の要約提出済みフラグ（s35Summary）もここに置く（Issue #88）。
+     院長の一往復を中央ペインへ差し込む形にしたので、これが無いと要約提出後に
+     リロードしたチームだけ対話が消え、要約をもう一度書かされる。預けるのは
+     "none" | "submitted" の一語だけで、要約の本文は入れない。
      data は平坦なオブジェクトで、個人情報は一切入れない（サーバはdata内のPIIを
      422で拒否する）。 */
   function checkpointData() {
-    return { s3Penalty: s3PenaltyState, s4Penalty: s4PenaltyState };
+    return { s3Penalty: s3PenaltyState, s4Penalty: s4PenaltyState, s35Summary: s35SummaryState };
   }
 
   function checkpointBody() {
@@ -6832,6 +6845,11 @@
   /* ------------------------------------------------------------------ */
   let s35Verdicting = false;
   let s35ActionVerdicting = false;
+  /* 要約が通ったかどうか（"none" | "submitted"）。チェックポイントの data へ
+     預け、リロード後の再入室で院長の一往復を差し戻すために使う（Issue #88）。
+     要約の本文そのものは預けない——data に個人情報を入れない規約（checkpointData()
+     のコメント）を守り、参加者が書いた自由記述をサーバへ増やさないため。 */
+  let s35SummaryState = "none";
 
   /* 罠も罰も無いので、他ステージの xStop() のように止めるタイマーは本来無い
      （later() は clearLater() が回収する）。go() からの呼び出し規約
@@ -6858,7 +6876,7 @@
   function renderStage35() {
     hideOverlays();
     paneL.classList.remove("hide"); paneR.classList.remove("hide");
-    s35Verdicting = false; s35ActionVerdicting = false;
+    s35Verdicting = false; s35ActionVerdicting = false; s35SummaryState = "none";
 
     // 院長室からの転送メール。renderMails()/MAILS を経由しない自己完結の1通
     // （#mails は空の共有コンテナとして直接書き込むだけで、共有関数は呼ばない）。
@@ -6933,20 +6951,62 @@
     d.className = "done"; d.textContent = "院長へ送信しました。";
     box.appendChild(d);
     s35Verdicting = false;
-    later(s35ShowKanbuQuestion, 700);
+    s35SummaryState = "submitted";
+    saveCheckpoint("s35-summary");   // 再入室で院長の一往復を戻すため（Issue #88）
+    later(() => s35ShowDirectorTalk(false), 700);
   }
 
-  /* 院長の一往復。常駐する相談窓口（#phs・苅部さん）は増やさず、専用の
-     オーバーレイ（#ov-s35-kanbu）で一回だけ応答する
-     （docs/ui/04_Stage3_5_新情報の解釈.md §2）。台詞は静的HTMLに書いてあるので、
-     ここでは入力欄と判定表示のリセットだけを行う。 */
-  function s35ShowKanbuQuestion() {
+  /* 院長の一往復。常駐する相談窓口（#phs・苅部さん）は増やさず、中央ペインの
+     要約提出の下へ一回だけ差し込む（docs/ui/04_Stage3_5_新情報の解釈.md §2）。
+     2026-09-05（Issue #88）にポップアップ（#ov-s35-kanbu）から移した——モーダルだと
+     論文と自分の要約を見返せず、対話から抜けられなかった（テストプレイ課題12）。
+     ID（s35-action / s35-action-box / s35-action-verdict / btn-s35-action-submit）は
+     旧オーバーレイのものをそのまま使い、runS35ActionVerdict() 側は変えていない。
+
+     restored=true は再入室からの差し戻し（要約の本文は預けていないので戻せない）。 */
+  function s35ShowDirectorTalk(restored) {
     if (view !== "s35") return;
-    $("s35-action").value = "";
-    $("s35-action-box").classList.remove("hide", "warn");
-    $("btn-s35-action-submit").classList.remove("hide");
-    $("s35-action-verdict").innerHTML = "";
-    $("ov-s35-kanbu").classList.remove("hide");
+    if ($("s35-talk")) return;   // 二重挿入を防ぐ
+
+    // 提出欄は消さずに読み取り専用で残す——対話中に自分の要約を見返せるようにする。
+    const summary = $("s35-summary");
+    if (summary) {
+      summary.readOnly = true;
+      if (restored) summary.placeholder = "（提出済み。本文は再入室では戻りません）";
+    }
+    const submitBtn = $("btn-s35-submit");
+    if (submitBtn) submitBtn.disabled = true;
+
+    const talk = document.createElement("div");
+    talk.className = "s35-talk";
+    talk.id = "s35-talk";
+    talk.innerHTML =
+      '<div class="tb">📞 院内連絡先 ── 院長</div>' +
+      '<div class="bd">' +
+        S35_QUESTION_LINES.map((t) => '<div class="say">' + esc(t) + "</div>").join("") +
+        '<div class="box" id="s35-action-box">' +
+          '<textarea class="submit-area" id="s35-action" style="min-height:90px"></textarea>' +
+        "</div>" +
+        '<div class="row-end"><button class="btn" id="btn-s35-action-submit">送信する</button></div>' +
+        '<div id="s35-action-verdict"></div>' +
+      "</div>";
+    // 差し込み先は要約の判定表示（#s35-verdict）の直後＝要約提出の「下」。
+    const anchor = $("s35-verdict");
+    if (!anchor) return;
+    anchor.insertAdjacentElement("afterend", talk);
+    // paneC のたびに作り直される要素なので、静的オーバーレイの流儀（一度だけ配線）
+    // ではなく生成のたびに配線する。
+    $("btn-s35-action-submit").addEventListener("click", runS35ActionVerdict);
+    s35ScrollTalkIntoView();
+  }
+
+  /* 差し込んだ位置まで送る——.work はスクロールするので、下に足しただけでは
+     画面外に出て「送信したのに何も起きない」に見える。要素の scrollIntoView
+     ではなく .work を最下部まで送る：.s35-talk の下マージン（.phs 避け）ごと
+     出さないと、ボタンが院内連絡先のバーの下に残る。 */
+  function s35ScrollTalkIntoView() {
+    const work = paneC.querySelector(".work");
+    if (work) work.scrollTo({ top: work.scrollHeight, behavior: "smooth" });
   }
 
   async function runS35ActionVerdict() {
@@ -6973,6 +7033,7 @@
       d.textContent = toPatients ? S35_ACTION_PATIENT_REJECT : S35_ACTION_REJECT;
       box.appendChild(d);
       s35ActionVerdicting = false;
+      s35ScrollTalkIntoView();   // 差し戻しは対話の下端に出るので、そこまで送る
       return;
     }
 
@@ -6989,6 +7050,7 @@
       '<div class="row-end" style="margin-top:14px"><button class="btn" id="s35-result-ok">確認した（次へ）</button></div>' +
       "</div>";
     s35ActionVerdicting = false;
+    s35ScrollTalkIntoView();   // 結果報告と［確認した（次へ）］を画面内へ
     // { once: true } で二重登録を防ぎ、押した瞬間に disabled にして連打も止める
     // （s1ShowResultWin・s35ShowClearCard と同じ流儀）。押す前に devbar・JUMP で
     // 他シーンへ飛んだ場合に備えて view も見る（判断C）。
@@ -6996,7 +7058,8 @@
     resOkBtn.addEventListener("click", () => {
       resOkBtn.disabled = true;
       if (view !== "s35") return;
-      $("ov-s35-kanbu").classList.add("hide");
+      // 差し込んだ .s35-talk は paneC ごと作り直されて消える（Issue #88 以前は
+      // オーバーレイを閉じていた箇所）。
       s35ShowClearCard();
     }, { once: true });
   }
@@ -7053,15 +7116,15 @@
     go("s4");
   }
 
-  // 静的オーバーレイ（#ov-s35-director・#ov-s35-kanbu・#ov-s35-report）の中のボタンは
+  // 静的オーバーレイ（#ov-s35-director・#ov-s35-report）の中のボタンは
   // renderStage35() のたびに再生成されないため、Stage 1〜4 の btn-viewer-close 等と
-  // 同じく一度だけ配線する。
+  // 同じく一度だけ配線する。院長の一往復の［送信する］は中央ペインへ都度差し込む
+  // 要素なので、ここではなく s35ShowDirectorTalk() の中で配線する（Issue #88）。
   $("btn-s35director-close").addEventListener("click", () => {
     $("ov-s35-director").classList.add("hide");
     // ここでAIを出したり通常画面を再構築したりしない——中身（メール・提出フォーム）
     // は renderStage35() で既に揃っている（Stage 3 の btn-s3notice-close と同じ流儀）。
   });
-  $("btn-s35-action-submit").addEventListener("click", runS35ActionVerdict);
   $("btn-s35-report-close").addEventListener("click", () => {
     $("ov-s35-report").classList.add("hide");
   });
@@ -8347,7 +8410,7 @@
     { id: "s2",      label: "⑤ Stage 2 火の手",   mode: "alert", note: "直前に急変（赤帯・転調）が入る。ここで初めて「5A病棟でMRSA疑い」が明かされ、器の色が peace から alert へ落ちる。メールを片付けて一息ついた瞬間に世界が変わる——段階を追って追い詰めるための順序。課題は師長から届く汚いExcelのラインリスト整形。右のAIチャットパネルはここが初出現——Stage 1で苅部さんが渡すのは中央ペインの下書きボタンだけ。Stage 2開始からS2_KARUBE_DELAY秒後、苅部さんが皮肉2行→「送りました」で解禁する。「添付を開く」→［コピー］→AIへ貼り付け→提出、そこから先は自分で言語化させる。AIチャットはこのステージだけLIVE時も実APIを呼ばず、必ず整形済みTSV（s2ScriptedTable）を返す（2026-08-22ユーザー決定。実GPTの出力形が安定せず貼り戻せない事故を避けるため）。整形対象に MRSA陰性なのに発熱ありの3名（005/6/008）が紛れており、Stage 3 で回収される。" },
     { id: "unlock",  label: "⑥ 解錠",       mode: "alert", note: "報酬は師長の承認だけ。スコアも星も出さない。同時に「発熱」が 3→5 に静かに変わる——解錠の喜びの陰で、誰も見ていない数字が増える。" },
     { id: "s3",      label: "⑦ Stage 3 方針", mode: "crisis", note: "本研修の心臓部（設計ドキュメント上の呼称は「嘘」だが、参加者に見える名は「方針」（旧称: 暫定。2026-08-22 ユーザー決定で改称）——ネタバレを避けるため）。器が alert から crisis へ落ち、院内状況インジケータが「発熱9」でクレッシェンド表示になる（他の平時指標が消える）。開始直後、看護部長の砕けた一報（オーバーレイ：「病棟に疥癬が出ているらしいわよ」）が入り、閉じると3B病棟看護師長のメール（治療完了済みの転院患者3名T-101〜103のサマリ添付）が届いている——これが本題。検査科メールは既知検査すべて陰性を確定通知し、Stage 2 の伏線3名（005/6/008）を患者IDで名指しして回収する謎の発熱の種で、疥癬とは無関係のまま残す。カワイさんのメールに汚染教材（疥癬対応早見表＝角化型向けの過剰対応を一律に適用する内容）が添付され、AIチャットも同じ4つの嘘（個室隔離・予防衣手袋常時着用・殺虫剤処理または熱処理・解除は当面継続、架空の出典）を返す。3欄（PPE・隔離／接触予防策の解除基準／環境整備・リネン）に提出し、罠キーワードのみで正解語（不要・標準予防策・治療完了・24時間）が伴わないと blackout→皮膚科医の叱責（ここで初めて「通常型」と病型が明かされる）→lock（罰ゲーム：消毒液ボトルの補充）へ。正典マニュアル（第5章・疥癬）は Prologue から左ペイン下部の「共有フォルダ」に常設済み——カワイさんが早見表を拾ったのと同じ棚に正典も入っている。気づいて先に読んだチームが報われる設計。" },
-    { id: "s35",     label: "⑧ Stage 4 解釈", mode: "crisis", note: "参加者に見える名は「新情報の解釈」（Stage 3.5は設計上の呼称。docs/scenario/04_Stage3_5_新情報の解釈.md）。Stage 3 解錠直後、ヘッダーの発熱表示が9→14へ急増する一報（自前の軽い演出。共有 transition() は使わない）に続けて、院長が肖像付きのタスク付与オーバーレイ（Stage 3 の #ov-s3notice と同じ流儀）で速報論文の要約を命じ、閉じると通常画面（院長室からの転送メール添付＝東陵国の速報論文・英語）が現れる。中央ペインは要約の自由記述欄と［院長へ報告］だけで、抽出すべき症状はヒントとして出さない。判定1は要約に発熱へ先行する眼の症状が含まれるかだけを見る（含まなければ差し戻し、正解語は示さない）。2026-08-22、医学用語の完全一致から自然な言い換えまで拾うよう拡大した——実GPTが返す「眼の痛み」「光への過敏症」「まぶしさ」が落ちていたため（他部位の痛みは誤検知しないよう除いてある。S35_REQUIRED_SUMMARY のコメント参照）。通過すると院長が院内連絡先とは別の専用ウィンドウで一度だけ問い返し（「要約は読んだ」→「うちの発熱患者もこれかもしれないな」→「それで、これからどうする？」）、対象（夜勤者等）と内容（眼痛の確認等）の両方が書けた行動提案で通過する（判定2）。判定2の差し戻しは2種類——眼症状は掴めていて相手だけが患者へ向いている提案には専用の一言（S35_ACTION_PATIENT_REJECT）で方向だけを指し、それ以外は従来の汎用の差し戻しを返す。どちらも正解語（夜勤者）は示さない。クリアすると院長が応援看護師の眼痛を発見した結果を告げ、中央ペインに小さな緑のクリアカード（配置線の作り替え図）を出す。クリア後の送りは二段のボタン待ちにしてある——院長の結果報告の［確認した（次へ）］でクリアカードが出て、カードの［確認した（次へ）］で次ステージ（表示上の Stage 5・内部IDは s4）が解錠される（2026-08-22、それぞれ2.2秒・2.6秒の自動タイマーから参加者の操作へ変更——演出を読み切る前に画面が変わるという指摘への対応）——罠・罰・alarm/lock/blackoutは一度も使わない（Stage 5・Finalと同じ構造）。リーダーボードの停留所は、2026-08-22の表示番号振り直しでS4として独立させた（旧実装はS3の停留所を共有していた。帯は Prologue/S1/S2/S3/S4/S5/S6/Final の8停留所）。台本AI応答は無く、判定は提出文字列に対するルールベースのみなのでAIチャット無しでも #s35 単体で通せる。Stage 3クリアで解錠され自動遷移する（s3→s35）。s35→s4 はクリアカードのボタン待ち。devbar・URLハッシュからの単体起動も可。" },
+    { id: "s35",     label: "⑧ Stage 4 解釈", mode: "crisis", note: "参加者に見える名は「新情報の解釈」（Stage 3.5は設計上の呼称。docs/scenario/04_Stage3_5_新情報の解釈.md）。Stage 3 解錠直後、ヘッダーの発熱表示が9→14へ急増する一報（自前の軽い演出。共有 transition() は使わない）に続けて、院長が肖像付きのタスク付与オーバーレイ（Stage 3 の #ov-s3notice と同じ流儀）で速報論文の要約を命じ、閉じると通常画面（院長室からの転送メール添付＝東陵国の速報論文・英語）が現れる。中央ペインは要約の自由記述欄と［院長へ報告］だけで、抽出すべき症状はヒントとして出さない。判定1は要約に発熱へ先行する眼の症状が含まれるかだけを見る（含まなければ差し戻し、正解語は示さない）。2026-08-22、医学用語の完全一致から自然な言い換えまで拾うよう拡大した——実GPTが返す「眼の痛み」「光への過敏症」「まぶしさ」が落ちていたため（他部位の痛みは誤検知しないよう除いてある。S35_REQUIRED_SUMMARY のコメント参照）。通過すると院長が中央ペインの要約提出の下で一度だけ問い返し（「要約は読んだ」→「うちの発熱患者もこれかもしれないな」→「それで、これからどうする？」。2026-09-05・Issue #88でポップアップから中央ペインへ移した——モーダルだと対話から抜けられず要約と論文を見返せなかった）、対象（夜勤者等）と内容（眼痛の確認等）の両方が書けた行動提案で通過する（判定2）。判定2の差し戻しは2種類——眼症状は掴めていて相手だけが患者へ向いている提案には専用の一言（S35_ACTION_PATIENT_REJECT）で方向だけを指し、それ以外は従来の汎用の差し戻しを返す。どちらも正解語（夜勤者）は示さない。クリアすると院長が応援看護師の眼痛を発見した結果を告げ、中央ペインに小さな緑のクリアカード（配置線の作り替え図）を出す。クリア後の送りは二段のボタン待ちにしてある——院長の結果報告の［確認した（次へ）］でクリアカードが出て、カードの［確認した（次へ）］で次ステージ（表示上の Stage 5・内部IDは s4）が解錠される（2026-08-22、それぞれ2.2秒・2.6秒の自動タイマーから参加者の操作へ変更——演出を読み切る前に画面が変わるという指摘への対応）——罠・罰・alarm/lock/blackoutは一度も使わない（Stage 5・Finalと同じ構造）。リーダーボードの停留所は、2026-08-22の表示番号振り直しでS4として独立させた（旧実装はS3の停留所を共有していた。帯は Prologue/S1/S2/S3/S4/S5/S6/Final の8停留所）。台本AI応答は無く、判定は提出文字列に対するルールベースのみなのでAIチャット無しでも #s35 単体で通せる。Stage 3クリアで解錠され自動遷移する（s3→s35）。s35→s4 はクリアカードのボタン待ち。devbar・URLハッシュからの単体起動も可。" },
     { id: "s4",      label: "⑨ Stage 5 報告", mode: "crisis", note: "参加者に見える名は「報告」（旧「回答」から変更。設計上の呼称「情報漏洩」は罠を予告するので出さない）。2026-08-22、「家族への返信文作成」から「保健所への発熱患者一覧の提出」へ再設計した——Stage 2のラインリスト（氏名列を削除して丸ごとAIに貼ってよい教材）とちょうど対句で、Stage 4のこちらは氏名列を残したまま「丸ごと貼ると個人名が外部AIへ流出する」罠にしてある。発熱インジケータは Stage 3.5 解錠時の14のまま動かない——この14人が今回の一覧の内訳そのもの（S4_FEVER_ROWS、Stage 2の患者005を含む、5A中心に3B/5B/6Aへ分散する14名。病棟はdocs/materials/stage4_fever_linelist.tsvとの整合確認でStage 2実データに合わせて5名を5Aへ調整済み）。開始演出は赤帯「保健所より連絡あり」（#s4-redband・2026-08-22追加）のみで、Stage 3のような追加の一報オーバーレイは挟まない。退場すると事務長が単一のメールで保健所からの依頼を転送し、日付・体温・備考の表記が汚い一覧（氏名列つき）を添付する。罠はStage 3と違い提出フォームではなく送信前ゲート（AIチャットの手前）にあり、一覧を丸ごと送信すると alarm→事務長の叱責（#ov-s4scold・2026-08-22追加。正論で行為の重大性を指すのみで人格攻撃はしない）→lock（罰ゲーム：インシデント報告書の黒塗り）へ。塗るべき氏名と塗ってはいけないID・病棟名が混在し、判断がいる罰にしてある。AIチャットは罰ゲーム中だけ入力不可（Stage 3の罰との差）。正解経路は氏名列を除いてAI（または手）で整形し、IDベースの一覧として提出すること——提出判定は14名分のIDが揃っているかだけを見る（氏名が残っていてもブロックしない。過剰な整形チェックはしない）。提出期限超過は、旧デザインの患者相談窓口・近藤さんの着信から、依頼主である事務長自身の督促（内線）に差し替えた——近藤さんはStage 4に登場せず、Stage 5で初登場する。**苅部さんはこのステージに登場しない**（2026-08-22 ユーザー決定。旧実装は入場12秒後の着信と罰ゲーム明けの追いヒントを持っていたが、S4_KARUBE_* ・phsS4Pending・s4NudgeKarube() 一式ごと削除した）。" },
     { id: "s5",      label: "⑩ Stage 6 掲示", mode: "crisis", note: "参加者に見える名は「掲示」。設計上の呼称「ポスター工房」は罠が無いので出しても支障は無いが、Stage 3・4 の呼称の流儀（方針／回答）に揃える。罠疲れの後のご褒美ステージで、alarm/lock/blackoutを一度も使わない最初の本編ステージ（Final も同様）。発熱インジケータ・crisisモードは Stage 4 から継続。開始演出は肖像付きタスク付与オーバーレイ（#ov-s5jimu-task・2026-08-22追加）のみで赤帯は無い——ご褒美ステージなので緊迫演出を入れない、という設計と揃える。事務長が面会制限を正式なルールにする旨と、正式な掲示物の用意を口頭で依頼し（詳細要望は近藤からと予告）、閉じると同じ内容のメール（MAIL_S5_JIMU）が受信トレイにある通常画面へ進む。患者相談窓口 近藤（本編初登場。2026-08-22のStage 4再設計で「Stage 4と同一人物の再登場」設定は解消——Stage 4は保健所への発熱患者一覧提出へ作り替わり、近藤は登場しなくなったため）が多言語対応の理由と去年の悪い実例（字だらけで不評だった掲示物）を添えて登場する。AIチャットが初めて画像を返す——モックはAPIを呼ばず、プロンプトのタグ一致で事前生成した候補画像を出し分ける（S5_POSTERS）。生成回数には上限があり（従量課金という体で苅部さんが告げる）、上限後も生成済みの候補はいつでも提出できるので詰まない。提出時は差し戻しのみ・罠なし・罰なし・回数無制限の判定を行う——候補の種類（文章中心／未選択の標準案は無条件で差し戻し）→プロンプト文字列（マスク着用・面会時間の言及の有無）の順に見て、引っかかれば近藤さんの台詞で何が足りないかを具体的に告げる（checkStage5）。品質そのものはDebriefの「ポスター大賞」に譲る。苅部さんは門外漢で、観点だけ示しデザインの良し悪しは言わない。返信遅延はStage4だけの短縮を終え通常値に戻る。通過すると「解錠」ではなくgoalSequence（#ov-goal）でレース終了を示す——2026-08-22のFinal全面改修（判定なし振り返りボード化）に伴い「Finalは保留中」の扱いは終わり、#ov-goalに追加した「振り返りへ進む」ボタンを押すとgo(\"final\")でFinalの振り返りボードへ進む（devbarからのFinal単独起動の経路も残る）。" },
     { id: "final",   label: "⑪ Final 振り返り",  mode: "crisis", note: "2026-08-22 全面改修（ユーザー決定）。参加者に見える名は「会見」から「振り返り」へ改称した——旧実装は記者会見資料を作って提出する4欄フォームだったが、レースのゴールが Stage 5 クリアへ移ったことで「会見資料を作る」という前提のタスクではなくなったため、「振り返り」の方が画面の中身（対応の全体図＋一言）と一致する。旧4欄判定（checkFinal/F_ORDER/F_WRONG/F_REQUIRED、誤り→不足・Stage 3 と同じ順序）は削除した——判定そのものが無い。発熱インジケータ・crisisモードは Stage 4・5 から継続で14のまま動かさない。事務長・広報課からのメール2通は「資料を4点作れ」ではなく「振り返って一言を残せ」の前振りに書き換えた（聖クロノス熱（仮）の爆誕・記者クラブ事前質問は文言のみ調整して維持）。中央ペインは振り返りボード——この研修で作った成果物のタイル6枚（S1メール対応／S2火の手・発熱の芽／S3疥癬の方針／S3.5眼痛の手がかり／S4保健所報告14名／S5面会制限ポスター）が0.4秒間隔（F_BOARD_LIGHT_MS）で順に点灯し（fLightTiles）、全点灯後に中央下の空白ピース「引き継ぎ」が開く（2026-08-22再設計・親裁定済み：当初の「記者会見」ラベル／「明日の記者会見で最初に伝える一言」だとICTの振り返りという主題からズレたため、Stage 1 の前任ICNの引き継ぎメモと対をなす「引き継ぎメモ」型に変更した）。ピースには「次にこの病院へ来るICTに引き継ぎをしましょう。次のチームに伝えたい一言をチームで相談して入力してください。」の入力欄（placeholder例「AIに渡す前に、名前を消す。」）と［記す］ボタンのみ——判定は空欄拒否（fSubmitLine）だけで内容は一切見ない。記すとボード全体が一拍点灯し（.fboard.done）、締めのメッセージ（F_CLOSE_LINES＝「あなたたちも、引き継ぐ側になった。」で始まる、前任ICNのメモに始まりチーム自身のメモで終わる円環を示す文言）を出す。記した一言は画面に残り続け、再訪時もアニメーションを再生せず完成状態を直接描く（fLine が re-render をまたいで保持される）——ファシリテーターが各チームのPCから読み上げるため。苅部さんは登場しない（2026-08-22 ユーザー決定）——旧実装は入場40秒後にPHSを鳴らして「私も呼ばれてます。で、どこまで公表するんですか。」と言わせていたが、公表を前提にした旧・記者会見設計の台詞であり、判定なしの振り返りとなった現Finalと文脈が噛み合わないため、F_KARUBE_LINE・F_KARUBE_DELAY・phsFPending 一式ごと削除した（旧2段目＝最終セーフティは、それ以前に判定廃止で削除済み）。AIチャットに Final 専用の台本応答はもう無い（2026-08-22 ユーザー決定）——旧実装は F_REQUEST_TRIGGER→F_AI_REPLY で「承知しました。会見用の文案です。」と返していたが、記者会見の資料を作らせる旧設計の応答なので定数と sendAI() の Final 分岐ごと削除し、scripted 時は他ステージのトリガー不一致と同じ既定応答（「（このモックでは応答しません）」）へ合流させた（LIVE時は従来どおり sendAiLive()）。振り返りボード自体はAIチャットに依存しない。ゴール演出は Stage 5 側（stage5GoalSequence）に移った——#ov-goal に追加した「振り返りへ進む」ボタンを押すと go(\"final\") でここへ来る。Final 自身はもう #ov-goal を開かない（goalSequence() は Stage 5 専用の共有関数として残した）。ボード完成の後にエンディングが続く（2026-08-22追加）：①幹部の労いリレー（#ov-f-relay。院長→看護部長→事務長を F_RELAY から1人ずつ、［次へ］ボタンと背景クリックの早送りだけで送る。自動タイマーは無い）→②感謝状（#ov-f-handover。同日ユーザー決定で「引き継ぎ書」から改稿——病院からチームへの謝意と、記した一言を次のICTチームへ必ず申し送るという約束を賞状の体裁で見せる。宛名はチーム名、一言は esc() を通して引用枠へ入る）。感謝状はゲームの最終状態で閉じる導線を持たず、fEnded が立った後は #final 再入場のたびに renderFinal() が直接復元する。devbar・URLハッシュからの単体起動は従来どおり可能。" }
@@ -8772,8 +8835,11 @@
     const data = body.data || {};
     s3PenaltyState = data.s3Penalty || "none";
     s4PenaltyState = data.s4Penalty || "none";
+    // Stage 3.5 の要約提出済みも同じく go() の後（renderStage35 が "none" へ戻すため）。
+    s35SummaryState = data.s35Summary || "none";
     syncSentData();   // いま持っている data はサーバ由来。次の保存で新世代を名乗らせない
     resumePenalty(target);
+    resumeS35Talk(target);
 
     reportProgress(TEAMS[2].pos, "resume");
     logActivity("resume", undefined, {
@@ -8809,6 +8875,20 @@
         startS4Penalty();
       }, RESUME_PENALTY_DELAY_MS);
     }
+  }
+
+  /* Stage 3.5 の要約提出後にリロードされていたら、院長の一往復を差し戻す
+     （Issue #88）。要約の本文は預けていないので提出欄は空のままだが、対話ごと
+     消えて要約を書き直させるよりはよい。罰ゲームと同じく、開始演出（赤帯→院長の
+     タスク付与オーバーレイ）が終わってから差し込む。 */
+  function resumeS35Talk(target) {
+    if (target !== "s35" || s35SummaryState !== "submitted") return;
+    later(() => {
+      if (view !== "s35") return;   // 判断C
+      // 要約はもう出したので、要約を命じる一報は畳む（resumePenalty と同じ理由）。
+      $("ov-s35-director").classList.add("hide");
+      s35ShowDirectorTalk(true);
+    }, RESUME_PENALTY_DELAY_MS);
   }
   $("btn-brief").addEventListener("click", s1Begin);
   // 段落待ちの早送り。[了解しました] 自身は s1Begin へ抜けるので拾わない。
