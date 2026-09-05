@@ -664,7 +664,7 @@
 /* 下地は不透明のまま——ヘッダーの時計もリーダーボードも見せない。
    ウィンドウはその上に載る（レイアウトは .sysdlg が持つ）。 */
 .briefing { background: var(--bg); transition: background-color .78s ease; }
-.briefing .say { font-size: 17px; line-height: 1.8; }
+.briefing .say { font-size: calc(17px * var(--fs-scale)); line-height: 1.8; }
 /* 「1分」の一句だけ橙にする。赤は使い減りする資源で、赤帯と罠に取ってある。
    ウィンドウ内は器のテーマから独立した固定色なので、var(--warn) ではなく
    固定の橙を使う（テーマが暗くなっても、この窓の中だけは変わらない）。 */
@@ -674,21 +674,21 @@
    「チュートリアルを置かない」方針との折り合い。 */
 .briefing .notice {
   border: 1px solid #c8ccc4; background: #f4f5f0;
-  font-family: var(--font-legacy); font-size: 13px; line-height: 1.75;
+  font-family: var(--font-legacy); font-size: calc(13px * var(--fs-scale)); line-height: 1.75;
   color: #4a524c; padding: 11px 13px; white-space: pre-wrap;
 }
 
 /* 処理結果のウィンドウ。下地は半透明——片付けた受信トレイが透けて見える。 */
 .s1res { background: rgba(8,9,10,.55); }
 .s1res .win { max-width: 720px; }
-.s1res .hd2 { font-size: 17px; font-weight: 700; }
-.s1res .sum { font-size: 15px; line-height: 1.85; color: #3a413c; }
+.s1res .hd2 { font-size: calc(17px * var(--fs-scale)); font-weight: 700; }
+.s1res .sum { font-size: calc(15px * var(--fs-scale)); line-height: 1.85; color: #3a413c; }
 /* 事務長の台詞。地の文（サマリ）と区別するため左に罫を立てる。 */
-.s1res .said { font-size: 16px; line-height: 1.9; border-left: 3px solid #b3b8b0; padding-left: 13px; }
+.s1res .said { font-size: calc(16px * var(--fs-scale)); line-height: 1.9; border-left: 3px solid #b3b8b0; padding-left: 13px; }
 /* 各部署から返ってきた声。2003年の等幅で、通達と同じ書式に見せる。 */
 .s1res .voices {
   border: 1px solid #c8ccc4; background: #f4f5f0; padding: 12px 14px;
-  font-family: var(--font-legacy); font-size: 13px; line-height: 1.95; color: #4a524c;
+  font-family: var(--font-legacy); font-size: calc(13px * var(--fs-scale)); line-height: 1.95; color: #4a524c;
 }
 .s1res .voices div + div { margin-top: 5px; }
 /* 手動クリア時、事務長の一言に続けて苅部さんのオチを添える行。同じ .said でも
@@ -701,11 +701,11 @@
 .s1res .thread-item { border: 1px solid #c8ccc4; background: #fff; }
 .s1res .thread-item > div { padding: 9px 13px; }
 .s1res .thread-item > div + div { border-top: 1px dashed #c8ccc4; }
-.s1res .t-lbl { font-size: 11px; font-weight: 700; letter-spacing: .06em; color: #8a908a; margin-bottom: 3px; }
-.s1res .t-body { font-family: var(--font-legacy); font-size: 13.5px; line-height: 1.8; color: #3a413c; }
+.s1res .t-lbl { font-size: calc(11px * var(--fs-scale)); font-weight: 700; letter-spacing: .06em; color: #8a908a; margin-bottom: 3px; }
+.s1res .t-body { font-family: var(--font-legacy); font-size: calc(13.5px * var(--fs-scale)); line-height: 1.8; color: #3a413c; }
 /* sum の直下（一覧より前）に置く（s1ThreadRestLine）。thread-item と同じ余白感に
    揃えるため上下マージンを持たせる。 */
-.s1res .thread-rest { font-size: 13px; color: #6f6559; margin: 6px 0 2px; }
+.s1res .thread-rest { font-size: calc(13px * var(--fs-scale)); color: #6f6559; margin: 6px 0 2px; }
 /* 段落は順に現れる。既存の .msg と同じ持ち上げ量に揃えてある。
    prefers-reduced-motion では transition も later() も 0 になるので、
    結果として全部が最初から出ている状態になる（意図通り）。 */
@@ -897,7 +897,7 @@
    一方向ポップアップとも共用する汎用スタイルで、Stage 4 専用ではない。
    肖像は production art（stage1-administrative-director.png）を使う。 */
 .callin { background: rgba(8,9,10,.6); }
-.callin .say { font-size: 17px; line-height: 1.8; }
+.callin .say { font-size: calc(17px * var(--fs-scale)); line-height: 1.8; }
 .callin .say + .say { margin-top: 10px; }
 .callin .por .frame { font-size: 56px; }
 
@@ -2036,7 +2036,7 @@
 
   // 段階を変えたらAI入力欄の実測高も取り直す（CSSのheightをJSが上書きして
   // いるので、ここで再計算しないと文字だけ大きくなって枠が追いつかない）。
-  const changeFontStep = (step) => { applyFontStep(step); autoGrowAiInput(); };
+  const changeFontStep = (step) => { applyFontStep(step); syncAiInputToFontStep(); };
   $("btn-fs-dec").addEventListener("click", () => changeFontStep(fsStep - 1));
   $("btn-fs-inc").addEventListener("click", () => changeFontStep(fsStep + 1));
   try { applyFontStep(Number(localStorage.getItem(FS_KEY))); } catch { applyFontStep(1); }
@@ -4603,8 +4603,11 @@
   // 1行ぶんの基準高。CSSの height/min-height と同じ 44px を文字サイズ段階で
   // 倍する——ここを固定値のままにすると、特大で文字だけ大きくなって枠から溢れる。
   const aiInputBaseHeight = () => Math.round(44 * fsScale());
-  let aiInputManualMin = 44;
+  let aiInputManualMin = aiInputBaseHeight();
   let aiInputMouseDownHeight = null;
+  // 手でドラッグして高さを変えたかどうか。段階を下げたときに基準へ戻してよいかの
+  // 判断に使う——これが無いと、特大で保存した下限が段階を下げても勝ち続ける。
+  let aiInputResized = false;
   function capAiInputHeight() {
     const ta = $("ai-input");
     // ペイン高の約40%を上限にする。#fitはtransform: scale()で見た目だけ縮小するため、
@@ -4621,7 +4624,20 @@
   }
   function resetAiInputHeight() {
     aiInputManualMin = aiInputBaseHeight();
+    aiInputResized = false;
     $("ai-input").style.height = aiInputBaseHeight() + "px";
+  }
+  // 文字サイズの段階が変わったときの追従。手で広げてあるときだけその高さを
+  // 下限として残し、そうでなければ新しい段階の基準を取り直す。
+  // 空のときに autoGrowAiInput() を通さないのは、height:auto の scrollHeight が
+  // textarea 既定の2行ぶんを返すため——空欄が段階を変えるたびに2行へ育ってしまう。
+  function syncAiInputToFontStep() {
+    capAiInputHeight();
+    if (aiInputResized) return;
+    aiInputManualMin = aiInputBaseHeight();
+    const ta = $("ai-input");
+    if (ta.value) autoGrowAiInput();
+    else ta.style.height = aiInputBaseHeight() + "px";
   }
 
   /* Stage 3・4 だけ台本応答を返すAIチャット。Stage 1/2 は入力しても何も起きない
@@ -4817,6 +4833,7 @@
     const ta = $("ai-input");
     if (aiInputMouseDownHeight !== null && ta.offsetHeight !== aiInputMouseDownHeight) {
       aiInputManualMin = ta.offsetHeight;
+      aiInputResized = true;
     }
     aiInputMouseDownHeight = null;
   });
