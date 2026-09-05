@@ -250,6 +250,29 @@ export const fingerprintSchema = z.string().regex(/^[0-9a-f]{64}$/);
 /** クレームの世代番号。1から始まる正の整数。 */
 export const claimGenerationSchema = z.number().int().positive();
 
+/**
+ * AI応答を書き戻すための完了用トークン（fencing token）。beginChatMessageが発行し、
+ * completeChatMessageが両方の一致を確かめてから書く。
+ *
+ * - `claimGeneration`: 同じcommandIdのクレームを取り直すたびに進む。前のクレームで
+ *   走っていたAI呼び出しが後から戻ってきても弾ける。
+ * - `resetGeneration`: ゲームマスターのリセットで進む。リセットを挟むとpending行は
+ *   消えるが、同じcommandIdで作り直された新世代の行にclaimGenerationだけが一致し、
+ *   リセット前の応答が新しい会話へ積まれうる（UUIDなので実際にはほぼ起きないが、
+ *   起きたときに気づけない種類の壊れ方なのでフェンスとして塞ぐ）。
+ */
+export const chatClaimTokenSchema = z
+  .object({
+    claimGeneration: claimGenerationSchema,
+    // クライアント入力ではなくbeginChatMessageが発行する値なので、既定へ倒さず
+    // 欠けていたら弾く（resetGenerationSchemaの`.default(0)`は古いクライアントとの
+    // 後方互換のためのもので、ここで効かせると壊れたトークンが世代0として通る）。
+    resetGeneration: z.number().int().nonnegative(),
+  })
+  .strict();
+
+export type ChatClaimToken = z.infer<typeof chatClaimTokenSchema>;
+
 export const beginChatGateSchema = z
   .object({ nowMs: nowMsSchema, limit: rateLimitCountSchema, fingerprint: fingerprintSchema })
   .strict();

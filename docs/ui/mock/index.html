@@ -1689,6 +1689,26 @@
           </div>
         </div>
 
+        <!-- LIVE時のみ。ゲームマスターがこのチームを初期状態へ戻した後、リロード
+             していない端末で出す。以後の保存はサーバに拒否されるので、進めさせずに
+             再読み込みへ誘導する（閉じるボタンは置かない——閉じても書き込みは
+             通らないので、閉じられる案内は嘘になる）。 -->
+        <div class="veil sysdlg callin hide" id="ov-stale">
+          <div class="win">
+            <div class="tb">
+              <span class="grow">システム通知</span>
+              <span class="ctl">□ ✕</span>
+            </div>
+            <div class="bd">
+              <div class="main">
+                <p>この端末の状態は古くなっています。ページを再読み込みしてください。</p>
+                <p>対策本部がこのチームの進行を初期状態へ戻しました。再読み込みすると、最初から開始できます。</p>
+              </div>
+            </div>
+            <div class="ft"><button class="btn" id="btn-stale-reload">再読み込みする</button></div>
+          </div>
+        </div>
+
         <!-- Stage 3・4：罰ゲームの器。主役は残り時間の数字。
              見出しに「罰ゲーム」と書かない——罰も業務として出す（企画書 §6）。
              見出しは #penalty-host と同じく「毎回明示的にセットし直す」流儀にする
@@ -3693,7 +3713,11 @@
       try { body = await res.json(); } catch {}
       // 429 のときだけ意味を持つ待ち秒数。headers を丸ごと露出させず、必要な1つだけ
       // 数値へ落として返す（読めなければ null＝「何秒待てとは言えない」）。
-      return { ok: res.ok, status: res.status, body, retryAfter: retryAfterSeconds(res) };
+      const normalized = { ok: res.ok, status: res.status, body, retryAfter: retryAfterSeconds(res) };
+      // 世代切れの検知はここ1か所に置く。呼び出し側ごとに書くと、経路が増えたときに
+      // 付け忘れて「拒否されているのに気づかないまま操作を続ける」画面が残る。
+      noteStaleGeneration(normalized);
+      return normalized;
     } catch {
       return { ok: false, status: 0, body: null, retryAfter: null };
     } finally {
@@ -3701,12 +3725,40 @@
     }
   }
 
+  /* ------------------------------------------------------------------ */
+  /* リセット世代（LIVE時のみ）                                           */
+  /*                                                                    */
+  /* ゲームマスターがこのチームを初期状態へ戻すと、サーバ側の世代が1つ進む。 */
+  /* リロードしていない端末は古い世代を持ったままなので、進捗記録と          */
+  /* チェックポイント保存が 409 stale-generation で拒否される。放置すると    */
+  /* 「操作はできるが何も保存されない」画面になるので、最初の拒否で以後の     */
+  /* 送信をすべて止め、再読み込みを促す全画面表示へ倒す。                   */
+  /* ------------------------------------------------------------------ */
+  let staleGeneration = false;
+
+  function isStaleGenerationResponse(res) {
+    return !!res && res.status === 409 &&
+      !!res.body && res.body.code === "stale-generation";
+  }
+
+  function noteStaleGeneration(res) {
+    if (!isStaleGenerationResponse(res) || staleGeneration) return;
+    staleGeneration = true;
+    // 保存待ちのタイマーも落とす。残っていると、止めたはずの送信が1回だけ走る。
+    if (checkpointTimer !== null) clearTimeout(checkpointTimer);
+    checkpointTimer = null;
+    checkpointDirty = false;
+    $("ov-stale").classList.remove("hide");
+  }
+
+  $("btn-stale-reload").addEventListener("click", () => location.reload());
+
   /* ステージ進行をサーバへ通知する。fire-and-forget——await せず結果も見ない。
      liveFetch は例外を投げない（失敗は status:0）ので、送信が失敗しても
      ゲームの進行は止まらない。scripted時（LIVE=false）と未入室時
      （liveState=null）は何も送らない。 */
   function reportProgress(pos, kind) {
-    if (!LIVE || !liveState || !liveState.teamCode) return;
+    if (!LIVE || !liveState || !liveState.teamCode || staleGeneration) return;
     liveFetch("/api/progress", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
@@ -3716,6 +3768,7 @@
         pos: pos,
         view: view,
         kind: kind,
+        generation: liveState.generation,
         clientAt: new Date().toISOString(),
       }),
     });
@@ -3874,7 +3927,7 @@
   let checkpointChain = Promise.resolve();
 
   async function postCheckpoint(retried) {
-    if (!LIVE || !liveState || !liveState.teamCode) return;
+    if (!LIVE || !liveState || !liveState.teamCode || staleGeneration) return;
     const teamCode = liveState.teamCode;
     const sentRevision = liveState.checkpointRevision;
     // 送る直前に組む。キュー待ちの間に進んだ状態があれば、それごと送る。
@@ -3887,6 +3940,7 @@
         type: "save-checkpoint",
         commandId: crypto.randomUUID(),
         expectedRevision: sentRevision,
+        generation: liveState.generation,
         body: body,
       }),
     }, LIVE_RESTORE_TIMEOUT_MS);
@@ -3906,6 +3960,9 @@
       }
       return;
     }
+    // リセットで世代が変わった。取り直しても再送しても通らないので、GETへ進まず
+    // ここで打ち切り、再読み込みを促す表示へ倒す。
+    if (isStaleGenerationResponse(res)) { noteStaleGeneration(res); return; }
     // 409 以外（通信断・503・404）はそのまま諦める。次の保存でまた送られる。
     if (res.status !== 409) return;
 
@@ -3975,7 +4032,7 @@
     if (!checkpointDirty) return;
     if (checkpointTimer !== null) clearTimeout(checkpointTimer);
     checkpointTimer = null;
-    if (!LIVE || !liveState || !liveState.teamCode) return;
+    if (!LIVE || !liveState || !liveState.teamCode || staleGeneration) return;
     try {
       fetch(LIVE_API_BASE + "/api/teams/" + liveState.teamCode + "/checkpoint", {
         method: "POST",
@@ -3984,6 +4041,7 @@
           type: "save-checkpoint",
           commandId: crypto.randomUUID(),
           expectedRevision: liveState.checkpointRevision,
+          generation: liveState.generation,
           body: checkpointBody(),
           flush: true,
         }),
@@ -4038,11 +4096,12 @@
   const ACTIVITY_TEXT_MAX = 20000;
 
   function logActivity(kind, text, meta) {
-    if (!LIVE || !liveState || !liveState.teamCode) return;
+    if (!LIVE || !liveState || !liveState.teamCode || staleGeneration) return;
     const payload = {
       commandId: crypto.randomUUID(),
       kind: kind,
       view: view,
+      generation: liveState.generation,
       clientAt: new Date().toISOString(),
     };
     if (typeof text === "string") payload.text = text.slice(0, ACTIVITY_TEXT_MAX);
@@ -4202,6 +4261,7 @@
         commandId: threadCreateCommand.idFor(title, "stage", ""),
         title,
         kind: "stage",
+        generation: liveState.generation,
       }),
     });
     stageThreadCreating.delete(title);
@@ -4476,6 +4536,7 @@
         threadId: sentThreadId,
         text,
         promptProfile: chatProfile,
+        generation: liveState.generation,
       }),
     });
     aiSending = false;
@@ -5517,6 +5578,7 @@
         threadId: sentThreadId,
         text,
         promptProfile: "s1",
+        generation: liveState.generation,
       }),
     });
     s1DraftBusy = false;
@@ -8673,6 +8735,11 @@
       teamCode: code,
       threads: chatRes.body.threads,
       activeThreadId: chatRes.body.threads[0].threadId,
+      // リセット世代。ゲームマスターがこのチームを初期化するたびにサーバ側で進む。
+      // 以後の進捗記録とチェックポイント保存へ添え、古くなった端末の書き込みを
+      // サーバに弾いてもらう（数値でなければ0＝載せる前のサーバとして扱う）。
+      generation: typeof (sessionRes.body && sessionRes.body.generation) === "number"
+        ? sessionRes.body.generation : 0,
       checkpointRevision: 0,
       chatRevision: chatRes.body.revision || 0,   // 古いsnapshotで巻き戻さないための世代番号
       serverDataRevision: 0,   // GET直後に adoptDataRevision で埋める

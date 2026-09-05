@@ -1,6 +1,11 @@
 import { z } from "zod";
 
-import { commandIdSchema, revisionSchema, teamCodeSchema } from "./team-state.js";
+import {
+  commandIdSchema,
+  resetGenerationSchema,
+  revisionSchema,
+  teamCodeSchema,
+} from "./team-state.js";
 import { viewIdSchema } from "./view.js";
 
 /**
@@ -76,6 +81,10 @@ export const CHECKPOINT_REJECTION_REASONS = [
   "elapsed-regression",
   "pos-regression",
   "data-regression",
+  // ゲームマスターのリセットより前に入室した端末からの保存。CASや単調マージでは
+  // 止められない——リセットで状態が空になった後は、どんな古いbodyも「初回保存」として
+  // 通ってしまう。世代番号で持ち主ごと弾く。
+  "stale-generation",
 ] as const;
 
 export const checkpointRejectionReasonSchema = z.enum(CHECKPOINT_REJECTION_REASONS);
@@ -137,6 +146,9 @@ export const saveCheckpointCommandSchema = z
     type: z.literal("save-checkpoint"),
     commandId: commandIdSchema,
     expectedRevision: revisionSchema,
+    // 入室時に受け取ったリセット世代。commandの外側に置き、bodyには含めない
+    // ——bodyは指紋を取って保存する正典データで、世代は「誰の保存か」を見る封筒である。
+    generation: resetGenerationSchema,
     body: checkpointBodySchema,
     // 離脱時のkeepalive送信であることの印。応答を待てない経路なので、revisionの
     // CASで弾かず単調マージで確定させる（domain/checkpoint.tsのmergeCheckpoint）。

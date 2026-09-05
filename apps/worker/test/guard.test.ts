@@ -399,7 +399,10 @@ describe("CORS", () => {
       expect(response.headers.get("Access-Control-Allow-Origin")).toBe(OTHER_ORIGIN);
       expect(response.headers.get("Vary")).toBe("Origin");
       expect(response.headers.get("Access-Control-Allow-Methods")).toBe("GET, POST");
-      expect(response.headers.get("Access-Control-Allow-Headers")).toBe("Content-Type");
+      // AuthorizationはGM系（POST /api/gm/...）のトークン用。
+      expect(response.headers.get("Access-Control-Allow-Headers")).toBe(
+        "Content-Type, Authorization",
+      );
       expect(response.headers.get("Access-Control-Max-Age")).toBe("86400");
     });
   });
@@ -1165,9 +1168,9 @@ describe("リーダーボードの配信範囲", () => {
   it("壊れた既存行はupsertで正常な行に置き換わる", async () => {
     // team_revisionに巨大な値が残ると、以後の正常なrevisionはすべて「古い」と
     // 判定され、そのチームの帯が二度と進まなくなる。壊れた行は無かった扱いにする。
-    const snapshot = await env.TEAM_ROOM.getByName("500068").join("500068");
+    const { snapshot } = await env.TEAM_ROOM.getByName("500068").join("500068");
     const leaderboard = env.RACE_LEADERBOARD.getByName("global");
-    await leaderboard.upsert("500068", snapshot);
+    await leaderboard.upsert("500068", snapshot, 0);
 
     await runInDurableObject(env.RACE_LEADERBOARD.getByName("global"), (_instance, state) => {
       state.storage.sql.exec(
@@ -1177,7 +1180,7 @@ describe("リーダーボードの配信範囲", () => {
       );
     });
 
-    const result = leaderboardSnapshotSchema.parse(await leaderboard.upsert("500068", snapshot));
+    const result = leaderboardSnapshotSchema.parse(await leaderboard.upsert("500068", snapshot, 0));
     const entry = result.entries.find((row) => row.isSelf);
     expect(entry?.teamRevision).toBe(snapshot.revision);
   });
@@ -1193,12 +1196,14 @@ describe("リーダーボードの配信範囲", () => {
   });
 
   it("EVENT_NOが不正なら何も配信しない（fail-closed）", async () => {
-    const snapshot = await env.TEAM_ROOM.getByName("500062").join("500062");
+    const { snapshot } = await env.TEAM_ROOM.getByName("500062").join("500062");
     const leaderboard = env.RACE_LEADERBOARD.getByName("global");
 
     await withEnv({ EVENT_NO: "invalid" }, async () => {
       // upsertの戻りも配信と同じsnapshot経路を通る。invalidは空になる。
-      const result = leaderboardSnapshotSchema.parse(await leaderboard.upsert("500062", snapshot));
+      const result = leaderboardSnapshotSchema.parse(
+        await leaderboard.upsert("500062", snapshot, 0),
+      );
       expect(result.entries).toHaveLength(0);
 
       // 入口ガードもinvalidで全404にするので、購読自体が届かない。

@@ -1,9 +1,17 @@
-import { containsPii, detectPii, viewIdSchema } from "@hell-ict/domain";
+import { containsPii, detectPii, resetGenerationSchema, viewIdSchema } from "@hell-ict/domain";
 import { z } from "zod";
 
 import { ACTIVITY_RATE_LIMIT_PER_MINUTE } from "./guard.js";
-import { error, errorWithHeaders, json, parseJson, PayloadTooLargeError } from "./http.js";
+import {
+  error,
+  errorWithHeaders,
+  json,
+  parseJson,
+  PayloadTooLargeError,
+  staleGenerationResponse,
+} from "./http.js";
 import type { RequestScope } from "./http.js";
+import type { RateLimitVerdict, StaleGenerationReply } from "./team-room.js";
 
 /**
  * 研修1回分の活動ログ。チームごとのAIとのやり取り・提出物・判定結果を
@@ -141,6 +149,17 @@ const insertActivity = async (env: Env, input: ActivityEvent): Promise<void> => 
 };
 
 /**
+ * ゲームマスターのリセットを1行残す。他のサーバ記録（logActivity）と違い`waitUntil`へ
+ * 逃がさず待つ——1回の手動操作なので、記録できたかどうかを応答で返せるほうがよい。
+ *
+ * 過去の行は消さない。何が起きたかの記録はリセットしても残す、が設計の前提である
+ * （消えるのはDurable Objectのチーム状態だけ）。
+ */
+export const recordGmReset = async (env: Env, teamCode: string): Promise<void> => {
+  await insertActivity(env, { teamCode, kind: "gm.reset", text: "", meta: { by: "gm" } });
+};
+
+/**
  * サーバ側の自動記録。記録はゲーム進行より優先度が低いので、応答を待たせず
  * `waitUntil`へ逃がし、失敗しても握り潰す（ログのためにチャットが落ちる方が害が大きい）。
  */
@@ -212,6 +231,8 @@ const clientActivitySchema = z.object({
   // （実際に電話番号がそのまま保存できてしまう）。書式を固定して抜け道を塞ぐ。
   // クライアントは`new Date().toISOString()`を送るので、これで足りる。
   clientAt: z.iso.datetime(),
+  // 入室時に受け取ったリセット世代。未指定は0（リセットを持たない古いクライアント）。
+  generation: resetGenerationSchema,
 });
 
 /**
@@ -219,6 +240,23 @@ const clientActivitySchema = z.object({
  * 打ち切るための粗い関門（schemaの検証は展開後にしか効かない）。
  */
 const ACTIVITY_BODY_MAX_BYTES = 64 * 1024;
+
+/**
+ * 枠の消費結果をHTTP応答へ畳む。通してよいときだけnullを返す。handleActivityPostの
+ * 複雑度を下げるための切り出し。
+ */
+const respondToActivityGate = (
+  verdict: RateLimitVerdict | StaleGenerationReply | null,
+): Response | null => {
+  if (verdict === null) return error("活動ログの記録に失敗しました。", 503);
+  // 世代切れは枠を消費する前に決まる。D1にも1行も書かない。
+  if ("staleGeneration" in verdict) return staleGenerationResponse();
+  if (!verdict.allowed)
+    return errorWithHeaders("活動ログの記録が多すぎます。少し待ってください。", 429, {
+      "Retry-After": String(verdict.retryAfterSeconds),
+    });
+  return null;
+};
 
 export const handleActivityPost = async (
   request: Request,
@@ -239,17 +277,17 @@ export const handleActivityPost = async (
 
   // 回数制限。無いと1チームがD1のactivity_eventsを無制限に増やせる。チャットとは
   // 別枠で数えるので、ログが詰まってもゲーム操作は止まらない（その逆も同じ）。
-  const verdict = await env.TEAM_ROOM.getByName(teamCode)
-    .consumeActivityAttempt(nowMs, ACTIVITY_RATE_LIMIT_PER_MINUTE)
-    .catch(() => null);
-  if (verdict === null) return error("活動ログの記録に失敗しました。", 503);
-  if (!verdict.allowed)
-    return errorWithHeaders("活動ログの記録が多すぎます。少し待ってください。", 429, {
-      "Retry-After": String(verdict.retryAfterSeconds),
-    });
+  const blocked = respondToActivityGate(
+    await env.TEAM_ROOM.getByName(teamCode)
+      .consumeActivityAttempt(nowMs, ACTIVITY_RATE_LIMIT_PER_MINUTE, parsed.data.generation)
+      .catch(() => null),
+  );
+  if (blocked !== null) return blocked;
 
   try {
-    await insertActivity(env, { ...parsed.data, teamCode });
+    // generationは枠の照合にだけ使う。activity_eventsに列は無いので保存しない。
+    const { commandId, kind, view, text, meta, clientAt } = parsed.data;
+    await insertActivity(env, { teamCode, commandId, kind, view, text, meta, clientAt });
     return json({ ok: true });
   } catch {
     return error("活動ログの記録に失敗しました。", 503);

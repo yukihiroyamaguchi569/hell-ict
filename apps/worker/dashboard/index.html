@@ -124,6 +124,63 @@
         line-height: 1.9;
       }
 
+      /* GMモード（URLハッシュ #gm）でだけ出す操作列。通常表示では一切描画しない。 */
+      .gmbar {
+        display: flex;
+        align-items: center;
+        gap: 0.7em;
+        padding: 0.5em 1.2em;
+        border-bottom: 2px solid var(--panel-edge);
+        background: #171008;
+        color: var(--warn);
+        font-size: 0.95em;
+      }
+      /* display:flexは[hidden]の display:none より強い。明示的に消す。 */
+      .gmbar[hidden] {
+        display: none;
+      }
+      .gmbar input {
+        flex: 1;
+        max-width: 26em;
+        padding: 0.35em 0.6em;
+        border-radius: 6px;
+        border: 1px solid var(--panel-edge);
+        background: var(--panel);
+        color: var(--ink);
+        font: inherit;
+      }
+      .gmbar button,
+      .gm button {
+        padding: 0.35em 0.9em;
+        border-radius: 6px;
+        border: 1px solid var(--alert);
+        background: rgba(255, 107, 94, 0.15);
+        color: var(--alert);
+        font: inherit;
+        font-weight: 700;
+        cursor: pointer;
+      }
+      .gmbar button {
+        border-color: var(--warn);
+        background: rgba(245, 185, 66, 0.15);
+        color: var(--warn);
+      }
+      .gm button[disabled] {
+        opacity: 0.5;
+        cursor: default;
+      }
+      .gm {
+        display: flex;
+        align-items: center;
+        gap: 0.6em;
+        min-width: 12em;
+        justify-content: flex-end;
+      }
+      .gm .note {
+        font-size: 0.85em;
+        color: var(--ink-dim);
+      }
+
       .team {
         display: grid;
         grid-template-columns: minmax(9em, 15em) 1fr auto;
@@ -138,6 +195,9 @@
       .team.stale {
         opacity: 0.55;
         border-left-color: var(--warn);
+      }
+      .team.gm {
+        grid-template-columns: minmax(9em, 15em) 1fr auto auto;
       }
       .team.goal {
         border-left-color: var(--done-ink);
@@ -245,6 +305,13 @@
       </div>
     </header>
 
+    <div class="gmbar" id="gmbar" hidden>
+      <label for="gm-token">GMトークン</label>
+      <input id="gm-token" type="password" autocomplete="off" placeholder="ADMIN_TOKEN" />
+      <button type="button" id="gm-save">保存</button>
+      <span id="gm-status"></span>
+    </div>
+
     <main id="board">
       <p class="empty" id="empty">
         まだどのチームも入室していません。<br />
@@ -271,6 +338,50 @@
         const ticker = document.getElementById("ticker");
         const link = document.getElementById("link");
         const clock = document.getElementById("clock");
+        const gmbar = document.getElementById("gmbar");
+        const gmToken = document.getElementById("gm-token");
+        const gmSave = document.getElementById("gm-save");
+        const gmStatus = document.getElementById("gm-status");
+
+        /**
+         * GMモード。URLハッシュが #gm のときだけ、トークン欄と各行のリセットボタンを出す。
+         * 会場前面へ映すのは通常表示なので、ハッシュが無ければ何も描画しない。
+         *
+         * トークン（ADMIN_TOKEN）はこのブラウザの localStorage にだけ置く。プライベート
+         * ウィンドウやストレージ禁止の設定では例外が飛ぶので、読み書きとも握りつぶして
+         * 「入力はできるが覚えない」状態へ倒す（盤面そのものは動き続ける）。
+         */
+        const GM_HASH = "#gm";
+        const TOKEN_KEY = "hellIctAdminToken";
+        const RESET_TIMEOUT_MS = 8000;
+        const NOTE_MS = 20000;
+
+        const readToken = () => {
+          try {
+            return localStorage.getItem(TOKEN_KEY) || "";
+          } catch {
+            return "";
+          }
+        };
+        const persistToken = (value) => {
+          try {
+            localStorage.setItem(TOKEN_KEY, value);
+            return true;
+          } catch {
+            return false;
+          }
+        };
+
+        // 実際に送るのはこの変数。localStorageへ保存できない環境でも、開いている間は使える。
+        let adminToken = readToken();
+        let gmMode = location.hash === GM_HASH;
+        let lastSummary = { teams: [], events: [] };
+        // publicId -> { text, at }。3秒ごとの再描画で消えないよう、結果はここへ残す。
+        const resetNotes = new Map();
+        // 実行中の publicId。行ノードではなくここで持つ——3秒ごとのポーリングが行を
+        // 作り直すので、ボタンのdisabledをノードに預けると再描画で押せる状態に戻り、
+        // 同じチームを二重にリセットできてしまう。
+        const resetInFlight = new Set();
 
         /**
          * D1の created_at は datetime('now') ＝ UTCの "YYYY-MM-DD HH:MM:SS"。
@@ -312,7 +423,10 @@
           const updated = parseUtc(team.updatedAt);
           const stale = updated !== null && now - updated >= STALE_MS;
 
-          const row = el("div", "team" + (stale ? " stale" : "") + (pos >= 7 ? " goal" : ""));
+          const row = el(
+            "div",
+            "team" + (stale ? " stale" : "") + (pos >= 7 ? " goal" : "") + (gmMode ? " gm" : ""),
+          );
 
           const name = el("div", "name", teamLabel(team));
           name.appendChild(el("span", "code", "No." + String(team.publicId || "--------")));
@@ -326,12 +440,16 @@
           row.appendChild(track);
 
           row.appendChild(el("div", "since" + (stale ? " stale" : ""), sinceText(updated, now)));
+          if (gmMode) row.appendChild(gmCell(team));
           return row;
         };
 
         const KIND_TEXT = { clear: "を突破", entry: "に到着", jump: "へ移動", resume: "へ復帰" };
 
         const eventText = (event) => {
+          // resetはチームが動いた記録ではなくGMの操作なので、停留所の文型に載せない
+          // （そのまま流すと pos 0 の行が「Prologue を通過」と読めてしまう）。
+          if (event.kind === "reset") return teamLabel(event) + " 〔GM〕初期状態に戻しました";
           const pos = Math.min(STOPS.length - 1, Math.max(0, Number(event.pos) || 0));
           const verb = KIND_TEXT[event.kind] || "を通過";
           return teamLabel(event) + " が " + STOPS[pos] + " " + verb;
@@ -346,7 +464,80 @@
           );
         };
 
+        /**
+         * リセットAPIを叩く。ダッシュボードはチームコードを表示しない設計なので、
+         * 対象は publicId（サマリーが返すハッシュの先頭8桁）で指す。
+         *
+         * ポーリングと同じく、ネットワークエラー（try/catch）とHTTPエラー（!ok）の
+         * 両方を落ちたものとして扱い、AbortControllerでタイムアウトも切る。
+         * 404は「トークンが違う」と「そのチームは居ない」を区別しない応答なので、
+         * 現場でまず疑うべきトークン側の案内へ寄せる。
+         */
+        const requestReset = async (publicId) => {
+          const controller = new AbortController();
+          const timer = setTimeout(() => {
+            controller.abort();
+          }, RESET_TIMEOUT_MS);
+          try {
+            const response = await fetch(
+              "/api/gm/teams/by-public-id/" + encodeURIComponent(publicId) + "/reset",
+              {
+                method: "POST",
+                signal: controller.signal,
+                headers: { Authorization: "Bearer " + adminToken },
+              },
+            );
+            if (response.status === 404) return "トークンを確認してください";
+            if (!response.ok) return "失敗（HTTP " + String(response.status) + "）";
+            return "リセットしました";
+          } catch {
+            return "通信に失敗しました";
+          } finally {
+            clearTimeout(timer);
+          }
+        };
+
+        const noteFor = (publicId) => {
+          const note = resetNotes.get(publicId);
+          if (note === undefined) return "";
+          if (Date.now() - note.at > NOTE_MS) {
+            resetNotes.delete(publicId);
+            return "";
+          }
+          return note.text;
+        };
+
+        const gmCell = (team) => {
+          const publicId = String(team.publicId || "");
+          const running = resetInFlight.has(publicId);
+          const cell = el("div", "gm");
+          const button = el("button", null, "リセット");
+          button.type = "button";
+          // 再描画で作り直された行にも、実行中なら最初からdisabledで描く。
+          button.disabled = running;
+          const note = el("span", "note", running ? "実行中…" : noteFor(publicId));
+          button.addEventListener("click", () => {
+            if (resetInFlight.has(publicId)) return;
+            if (!confirm("チーム " + teamLabel(team) + " を初期状態に戻します。よろしいですか？"))
+              return;
+            resetInFlight.add(publicId);
+            button.disabled = true;
+            note.textContent = "実行中…";
+            void requestReset(publicId).then((text) => {
+              // 成否によらず必ず外す。残すと以後そのチームを二度と押せなくなる。
+              resetInFlight.delete(publicId);
+              resetNotes.set(publicId, { text, at: Date.now() });
+              note.textContent = text;
+              button.disabled = false;
+            });
+          });
+          cell.appendChild(button);
+          cell.appendChild(note);
+          return cell;
+        };
+
         const render = (summary) => {
+          lastSummary = summary;
           const now = Date.now();
           const teams = Array.isArray(summary.teams) ? summary.teams : [];
           const events = Array.isArray(summary.events) ? summary.events : [];
@@ -411,6 +602,23 @@
             .join(":");
         };
 
+        const applyGmMode = () => {
+          gmMode = location.hash === GM_HASH;
+          gmbar.hidden = !gmMode;
+          if (gmMode) gmToken.value = adminToken;
+          gmStatus.textContent = "";
+          render(lastSummary);
+        };
+
+        gmSave.addEventListener("click", () => {
+          adminToken = gmToken.value.trim();
+          gmStatus.textContent = persistToken(adminToken)
+            ? "保存しました"
+            : "このブラウザには保存できません（このタブを閉じるまで有効）";
+        });
+        window.addEventListener("hashchange", applyGmMode);
+
+        applyGmMode();
         tickClock();
         setInterval(tickClock, 1000);
         void poll();

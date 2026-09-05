@@ -4,7 +4,7 @@ import {
   createThreadResultSchema,
   leaderboardSnapshotSchema,
   teamCodeSchema,
-  teamSnapshotSchema,
+  sessionResultSchema,
   teamSyncMessageSchema,
 } from "@hell-ict/domain";
 import type {
@@ -16,19 +16,37 @@ import type {
 import { useCallback, useEffect, useRef, useState } from "react";
 
 import { ChatPane } from "./chat-pane.js";
-import { postJson } from "./http-client.js";
+import { HttpRequestError, postJson } from "./http-client.js";
+
+/**
+ * ゲームマスターのリセットより前に入室した端末からの書き込みか。サーバは進捗・
+ * チェックポイント・会話・コマンドのどの経路でも同じcodeで返すので、判定は1か所で足りる。
+ */
+const isStaleGeneration = (caught: unknown): boolean =>
+  caught instanceof HttpRequestError && caught.code === "stale-generation";
+
+/**
+ * 入室手続きの結末。`superseded`は「あとから始まった入室に追い越された」で、
+ * 失敗ではない——エラー表示を出すと、成功した側の画面に無関係な警告が残る。
+ */
+type SessionOutcome = "ok" | "failed" | "superseded";
 
 const savedTeamCodeKey = "hell-ict-team-code";
 const isTeamCode = (value: string): boolean => teamCodeSchema.safeParse(value).success;
 const socketUrl = (path: string): string =>
   `${location.protocol === "https:" ? "wss" : "ws"}://${location.host}${path}`;
 
-const submitStage1 = async (snapshot: TeamSnapshot, commandId: string): Promise<CommandResult> => {
+const submitStage1 = async (
+  snapshot: TeamSnapshot,
+  commandId: string,
+  generation: number,
+): Promise<CommandResult> => {
   const parsed = commandResultSchema.safeParse(
     await postJson(`/api/teams/${snapshot.teamCode}/commands`, {
       type: "enter-stage1",
       commandId,
       expectedRevision: snapshot.revision,
+      generation,
     }),
   );
   if (!parsed.success) throw new Error();
@@ -39,34 +57,125 @@ const submitCreateThread = async (
   teamCode: string,
   commandId: string,
   title: string,
+  generation: number,
 ): Promise<ChatSnapshot> => {
   const parsed = createThreadResultSchema.safeParse(
     await postJson(`/api/teams/${teamCode}/chat/threads`, {
       type: "create-thread",
       commandId,
       title,
+      generation,
     }),
   );
   if (!parsed.success) throw new Error();
   return parsed.data.snapshot;
 };
 
+/**
+ * 送信の宛先と内容、そしてリセット世代。max-params（4）に収めるため1つにまとめる。
+ */
+type ChatMessageRequest = {
+  readonly commandId: string;
+  readonly threadId: string;
+  readonly text: string;
+  readonly generation: number;
+};
+
 const submitChatMessage = async (
   teamCode: string,
-  commandId: string,
-  threadId: string,
-  text: string,
+  request: ChatMessageRequest,
 ): Promise<ChatSnapshot> => {
   const parsed = chatMessageResultSchema.safeParse(
     await postJson(`/api/teams/${teamCode}/chat/messages`, {
       type: "send-message",
-      commandId,
-      threadId,
-      text,
+      ...request,
     }),
   );
   if (!parsed.success) throw new Error();
   return parsed.data.snapshot;
+};
+
+type EntryScreenProps = {
+  teamCode: string;
+  message: string;
+  canRetry: boolean;
+  onTeamCodeChange: (value: string) => void;
+  onJoin: () => void;
+  onRetry: () => void;
+};
+
+/**
+ * 入室欄。保存済みコードからの復元に失敗したときは［再試行］も出す——失敗した時点で
+ * WebSocketも開かないので、この画面から先へは進めない。App本体の分岐を増やさない
+ * ための切り出しでもある。
+ */
+const EntryScreen = ({
+  teamCode,
+  message,
+  canRetry,
+  onTeamCodeChange,
+  onJoin,
+  onRetry,
+}: EntryScreenProps) => (
+  <main>
+    <p className="eyebrow">聖クロノス総合病院 / ICT研修</p>
+    <h1>地獄のICT</h1>
+    <label htmlFor="team-code">チームコード</label>
+    <input
+      id="team-code"
+      inputMode="numeric"
+      maxLength={6}
+      value={teamCode}
+      onChange={(event) => {
+        onTeamCodeChange(event.target.value);
+      }}
+    />
+    <button type="button" onClick={onJoin}>
+      入室する
+    </button>
+    {canRetry && (
+      <button type="button" onClick={onRetry}>
+        再試行
+      </button>
+    )}
+    <p role="status">{message}</p>
+  </main>
+);
+
+/** 帯の表示だけを持つ。App本体の分岐を増やさないための切り出し。 */
+const LeaderboardPane = ({ snapshot }: { snapshot: LeaderboardSnapshot | null }) => (
+  <aside>
+    <h2>リーダーボード</h2>
+    {snapshot?.entries.map((entry) => (
+      <p key={entry.marker}>
+        {entry.marker}
+        {entry.isSelf ? "（自チーム）" : ""}: {entry.stage}
+      </p>
+    ))}
+  </aside>
+);
+
+/**
+ * リロードでの復帰。以前は保存済みコードからWebSocketだけを開き直していたため、
+ * 世代を持たないまま操作できてしまい、リセット後は書き込みが全部409になった。
+ * 復帰でも`/api/session`を呼び直し、最新のsnapshotと世代を取り直す。
+ *
+ * Appの外へ出すのは、コンポーネント本体の分岐を増やさないため（複雑度の上限）。
+ */
+const useRestoredSession = (
+  joinedCode: string | null,
+  openedCode: { current: string | null },
+  openSession: (code: string) => Promise<SessionOutcome>,
+  onFailure: () => void,
+): void => {
+  useEffect(() => {
+    if (joinedCode === null || openedCode.current === joinedCode) return;
+    // 追い越された（superseded）ときは何も言わない。フォームから入り直した側が
+    // 成功しているので、そこへ「取得できません」を出すと嘘になる。
+    void openSession(joinedCode).then((outcome) => {
+      if (outcome === "failed") onFailure();
+    }, onFailure);
+  }, [joinedCode, onFailure, openSession, openedCode]);
 };
 
 export const App = () => {
@@ -83,6 +192,18 @@ export const App = () => {
   const commandId = useRef<string | null>(null);
   const teamGeneration = useRef(0);
   const leaderboardGeneration = useRef(0);
+  /**
+   * サーバのリセット世代。入室応答でしか手に入らないので、取れるまで（null）は
+   * 書き込みを一切送らない——0を仮置きすると、リセット済みのチームへ古い世代で
+   * 書きに行くことになる。WebSocket接続名の世代（teamGeneration）とは別物。
+   */
+  const [resetGeneration, setResetGeneration] = useState<number | null>(null);
+  /** ゲームマスターのリセットより前に入室していた端末。以後の書き込みは通らない。 */
+  const [stale, setStale] = useState(false);
+  /** どのコードで入室手続きを済ませたか。リロード復帰の二重実行を防ぐ。 */
+  const openedCode = useRef<string | null>(null);
+  /** 入室手続きの連番。並走したときに、最後に始めたものの応答だけを採る。 */
+  const sessionSeq = useRef(0);
 
   const acceptTeamSnapshot = useCallback((next: TeamSnapshot) => {
     setSnapshot((current) =>
@@ -160,10 +281,56 @@ export const App = () => {
     [acceptTeamSyncMessage],
   );
 
+  /**
+   * WebSocketは入室（`/api/session`）が成功してからだけ開く。並行して開くと、
+   * sessionが失敗しても socket の snapshot だけで操作できる画面が出てしまい、
+   * 世代がnullのまま書き込みが黙って落ちる。世代が入っていること自体が
+   * 「入室が成立した」の印なので、それを接続の条件にする。
+   */
   useEffect(() => {
-    if (joinedCode === null) return;
+    if (joinedCode === null || resetGeneration === null) return;
     return connect(joinedCode);
-  }, [connect, joinedCode]);
+  }, [connect, joinedCode, resetGeneration]);
+
+  /**
+   * 入室手続き。snapshotと世代は`/api/session`が1回のやり取りで返すので、必ずここを
+   * 通す。手で入室したときも、保存済みコードからの復帰でも同じ経路にする。
+   */
+  /** 保存済みコードからの復元に失敗したか。入室欄に［再試行］を出すために持つ。 */
+  const [restoreFailed, setRestoreFailed] = useState(false);
+
+  const reportRestoreFailure = useCallback(() => {
+    setRestoreFailed(true);
+    setMessage("復元に失敗しました。接続を確認して再試行してください。");
+  }, []);
+
+  const openSession = useCallback(async (code: string): Promise<SessionOutcome> => {
+    const seq = ++sessionSeq.current;
+    // 失敗（通信断・503）もここで受け止める。例外のまま投げ返すと、追い越された
+    // 呼び出しの失敗が seq の確認を通らずに呼び出し元の失敗処理へ届き、成功した
+    // 後続セッションの表示を「復元に失敗しました」で上書きしてしまう。
+    const received = await postJson("/api/session", { teamCode: code }).then(
+      (value: unknown) => ({ ok: true as const, value }),
+      () => ({ ok: false as const, value: undefined }),
+    );
+    // 待っている間に別の入室が始まっていたら、この応答は捨てる。保存済みコードからの
+    // 復元が遅れている最中にフォームから別のチームで入ると、遅い応答があとから
+    // 世代とsnapshotを上書きし、「表示は別チーム・世代は前のチーム」になる。
+    if (seq !== sessionSeq.current) return "superseded";
+    if (!received.ok) return "failed";
+    const parsed = sessionResultSchema.safeParse(received.value);
+    if (!parsed.success) return "failed";
+    openedCode.current = code;
+    setRestoreFailed(false);
+    setResetGeneration(parsed.data.generation);
+    // 入室応答はその時点のサーバ正で、世代と組で受け取っている。revisionの単調性
+    // （acceptTeamSnapshot）は通さずそのまま採る——別チームへ入り直したときや、
+    // リセットでrevisionが0へ戻ったときに、手元の大きいrevisionが勝ってしまう。
+    setSnapshot(parsed.data);
+    return "ok";
+  }, []);
+
+  useRestoredSession(joinedCode, openedCode, openSession, reportRestoreFailure);
 
   const join = async (): Promise<void> => {
     if (!isTeamCode(teamCode)) {
@@ -171,22 +338,31 @@ export const App = () => {
       return;
     }
     try {
-      const parsed = teamSnapshotSchema.safeParse(await postJson("/api/session", { teamCode }));
-      if (!parsed.success) throw new Error();
+      const outcome = await openSession(teamCode);
+      if (outcome === "superseded") return;
+      if (outcome === "failed") throw new Error();
       localStorage.setItem(savedTeamCodeKey, teamCode);
       setJoinedCode(teamCode);
-      acceptTeamSnapshot(parsed.data);
       setMessage("おかえりなさい。チーム状態を復元しました。");
     } catch {
       setMessage("入室できませんでした。接続を確認して再試行してください。");
     }
   };
 
+  /** 復元に失敗したときの再試行。保存済みコードでもう一度入室手続きから通す。 */
+  const retryRestore = (): void => {
+    if (joinedCode === null) return;
+    setMessage("復元しています…");
+    void openSession(joinedCode).then((outcome) => {
+      if (outcome === "failed") reportRestoreFailure();
+    }, reportRestoreFailure);
+  };
+
   const enterStage1 = async (): Promise<void> => {
-    if (snapshot === null) return;
+    if (snapshot === null || resetGeneration === null) return;
     commandId.current ??= crypto.randomUUID();
     try {
-      const result = await submitStage1(snapshot, commandId.current);
+      const result = await submitStage1(snapshot, commandId.current, resetGeneration);
       acceptTeamSnapshot(result.snapshot);
       setLeaderboardPending(result.leaderboardPending);
       if (!result.leaderboardPending) commandId.current = null;
@@ -195,14 +371,31 @@ export const App = () => {
           ? "リーダーボードの同期が未完了です。再試行してください。"
           : "Stage 1へ進みました。",
       );
-    } catch {
+    } catch (caught) {
+      if (isStaleGeneration(caught)) {
+        setStale(true);
+        return;
+      }
       setMessage("結果を確認できません。もう一度押すと同じ操作を安全に再試行します。");
     }
   };
 
+  /**
+   * 世代切れを拾って全画面表示へ倒す。呼び出し側の再試行やpending保持は
+   * そのまま動かしたいので、握りつぶさず投げ直す。
+   */
+  const markStaleAndRethrow = (caught: unknown): never => {
+    if (isStaleGeneration(caught)) setStale(true);
+    throw caught;
+  };
+
   const createThread = async (threadCommandId: string, title: string): Promise<void> => {
-    if (joinedCode === null) throw new Error();
-    acceptChatSnapshot(await submitCreateThread(joinedCode, threadCommandId, title));
+    if (joinedCode === null || resetGeneration === null) throw new Error();
+    acceptChatSnapshot(
+      await submitCreateThread(joinedCode, threadCommandId, title, resetGeneration).catch(
+        markStaleAndRethrow,
+      ),
+    );
   };
 
   const sendChatMessage = async (
@@ -210,35 +403,48 @@ export const App = () => {
     threadId: string,
     text: string,
   ): Promise<void> => {
-    if (joinedCode === null) throw new Error();
-    acceptChatSnapshot(await submitChatMessage(joinedCode, messageCommandId, threadId, text));
+    if (joinedCode === null || resetGeneration === null) throw new Error();
+    acceptChatSnapshot(
+      await submitChatMessage(joinedCode, {
+        commandId: messageCommandId,
+        threadId,
+        text,
+        generation: resetGeneration,
+      }).catch(markStaleAndRethrow),
+    );
   };
 
-  if (snapshot === null)
+  // 以後どの書き込みも通らないので、操作できる画面を出さない。案内は再読み込みだけ
+  // ——モックの #ov-stale と同じ扱いで、閉じられる案内は嘘になる。
+  if (stale)
     return (
       <main>
         <p className="eyebrow">聖クロノス総合病院 / ICT研修</p>
         <h1>地獄のICT</h1>
-        <label htmlFor="team-code">チームコード</label>
-        <input
-          id="team-code"
-          inputMode="numeric"
-          maxLength={6}
-          value={teamCode}
-          onChange={(event) => {
-            setTeamCode(event.target.value);
-          }}
-        />
+        <p role="status">この端末の状態は古くなっています。ページを再読み込みしてください。</p>
         <button
           type="button"
           onClick={() => {
-            void join();
+            location.reload();
           }}
         >
-          入室する
+          再読み込みする
         </button>
-        <p role="status">{message}</p>
       </main>
+    );
+
+  if (snapshot === null)
+    return (
+      <EntryScreen
+        teamCode={teamCode}
+        message={message}
+        canRetry={restoreFailed}
+        onTeamCodeChange={setTeamCode}
+        onJoin={() => {
+          void join();
+        }}
+        onRetry={retryRestore}
+      />
     );
 
   return (
@@ -277,15 +483,7 @@ export const App = () => {
         )}
         <p role="status">{message}</p>
       </section>
-      <aside>
-        <h2>リーダーボード</h2>
-        {leaderboard?.entries.map((entry) => (
-          <p key={entry.marker}>
-            {entry.marker}
-            {entry.isSelf ? "（自チーム）" : ""}: {entry.stage}
-          </p>
-        ))}
-      </aside>
+      <LeaderboardPane snapshot={leaderboard} />
       <ChatPane
         snapshot={chatSnapshot}
         onCreateThread={createThread}

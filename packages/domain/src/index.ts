@@ -5,7 +5,9 @@ export {
   commandResultSchema,
   leaderboardEntrySchema,
   leaderboardSnapshotSchema,
+  resetGenerationSchema,
   revisionSchema,
+  sessionResultSchema,
   teamCodeSchema,
   teamCommandSchema,
   teamSnapshotSchema,
@@ -13,6 +15,7 @@ export {
 export type {
   CommandResult,
   LeaderboardSnapshot,
+  SessionResult,
   TeamCode,
   TeamCommand,
   TeamSnapshot,
