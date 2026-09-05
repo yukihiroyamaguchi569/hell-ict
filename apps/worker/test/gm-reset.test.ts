@@ -814,3 +814,57 @@ describe("GMリセット: 表示名の世代", () => {
     });
   });
 });
+
+describe("GMリセット: チェックポイントのPIIゲートと世代", () => {
+  it("古い世代でPII入りのチェックポイントを送ると、422ではなく409で何も書かない", async () => {
+    await withEnv({ ADMIN_TOKEN }, async () => {
+      const teamCode = "400001";
+      const generation = await joinGeneration(teamCode);
+      expect((await resetByCode(teamCode)).status).toBe(200);
+
+      const stale = await postJson(`/api/teams/${teamCode}/checkpoint`, {
+        type: "save-checkpoint",
+        commandId: "00000000-0000-4000-8000-000000001301",
+        expectedRevision: 0,
+        generation,
+        body: {
+          view: "s4",
+          pos: 4,
+          elapsedMs: 60_000,
+          trap: { s3Used: false, s4Used: false },
+          dataRevision: 0,
+          data: { memo: "渡辺三郎さん 090-1234-5678" },
+        },
+      });
+      // PIIより世代が先に決まる。422のままだと、古いタブが再読み込みの案内へ行けない。
+      expect(stale.status).toBe(409);
+      await expect(stale.json()).resolves.toMatchObject({ code: "stale-generation" });
+      expect(await checkpointOf(teamCode)).toBeNull();
+      await expect(ledgerRows(teamCode, "processed_checkpoint_commands")).resolves.toBe(0);
+    });
+  });
+
+  it("世代が合っていればPIIは今までどおり422で弾く", async () => {
+    await withEnv({ ADMIN_TOKEN }, async () => {
+      const teamCode = "400002";
+      const generation = await joinGeneration(teamCode);
+      const blocked = await postJson(`/api/teams/${teamCode}/checkpoint`, {
+        type: "save-checkpoint",
+        commandId: "00000000-0000-4000-8000-000000001302",
+        expectedRevision: 0,
+        generation,
+        body: {
+          view: "s4",
+          pos: 4,
+          elapsedMs: 60_000,
+          trap: { s3Used: false, s4Used: false },
+          dataRevision: 0,
+          data: { memo: "渡辺三郎さん 090-1234-5678" },
+        },
+      });
+      expect(blocked.status).toBe(422);
+      await expect(blocked.json()).resolves.toMatchObject({ code: "pii_blocked" });
+      expect(await checkpointOf(teamCode)).toBeNull();
+    });
+  });
+});

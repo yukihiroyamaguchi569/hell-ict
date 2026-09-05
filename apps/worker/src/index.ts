@@ -473,6 +473,27 @@ const failedToReadBody = (caught: unknown): ParsedCheckpointCommand => ({
 });
 
 /**
+ * PIIを見つけたチェックポイント保存への応答。世代切れのほうが先に決まるので、
+ * 422を返す前にここでだけDOへ問い合わせる。handleSaveCheckpointの複雑度を
+ * 下げるための切り出し。
+ */
+const respondToCheckpointPii = async (
+  room: DurableObjectStub<TeamRoom>,
+  teamCode: TeamCode,
+  generation: number,
+): Promise<Response> => {
+  const fresh = await room.matchesResetGeneration(teamCode, generation).catch(() => null);
+  if (fresh === null)
+    return error("チェックポイントの保存に失敗しました。時間を置いて再試行してください。", 503);
+  if (!fresh) return staleGenerationResponse();
+  return error(
+    "個人情報を検知したため、チェックポイントの保存をブロックしました。",
+    422,
+    "pii_blocked",
+  );
+};
+
+/**
  * ステージ内状態のチェックポイントを保存する。`nowIso`はここで採る——DOはテストから
  * Clockを差し替えられないため、時刻の境界をWorker側のhandlerに置いている。
  */
@@ -494,20 +515,22 @@ export const handleSaveCheckpoint = async (
       ? error("チェックポイントのデータが大きすぎます。", 400)
       : error("checkpointの形式が不正です。", 400);
   }
+  const room = env.TEAM_ROOM.getByName(teamCode);
   // 送信前PIIゲート（企画書§7）。深さと大きさの検査（schema）を通した後、DOへ触れる
   // 前に置く。チェックポイントのdataは復帰時にそのまま画面へ戻す正典データなので、
   // 活動ログのようにredactionで潰すと復帰そのものが壊れる。ここは拒否へ倒し、
   // クライアントに書き直させる（チャットの送信前ゲートと同じ"pii_blocked"）。
   // 何も保存しないので、DOにもチェックポイントにも台帳にも1行も書かない。
-  if (containsPii(parsed.command.body.data)) {
-    return error(
-      "個人情報を検知したため、チェックポイントの保存をブロックしました。",
-      422,
-      "pii_blocked",
-    );
-  }
+  //
+  // ただし世代切れのほうが先に決まる。422を返すと、リセットより前に入室した端末は
+  // 409を受けられず、再読み込みの案内へ行けないまま操作を続けることになる。
+  // 世代の照合はPIIを見つけたときにだけ問い合わせる——保存は頻繁に走るので、
+  // 通常の経路へDOの往復をもう1回足さない（PIIの無い保存はsaveCheckpointが
+  // その中で世代を見る）。応答の優先順位は「世代を先に見る」のと同じになる。
+  if (containsPii(parsed.command.body.data))
+    return respondToCheckpointPii(room, teamCode, parsed.command.generation);
   try {
-    const result = await env.TEAM_ROOM.getByName(teamCode).saveCheckpoint(
+    const result = await room.saveCheckpoint(
       teamCode,
       parsed.command,
       nowIso,
