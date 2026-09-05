@@ -50,9 +50,10 @@ import type {
 import { DurableObject } from "cloudflare:workers";
 import { z } from "zod";
 
+import type { ChatClaimToken } from "./guard.js";
 import {
   beginChatGateSchema,
-  claimGenerationSchema,
+  chatClaimTokenSchema,
   completeChatOutcomeSchema,
   fingerprintSchema,
   nowMsSchema,
@@ -145,7 +146,7 @@ export type ThreadLimitReply = { threadLimit: true; max: number; kind: ChatThrea
 
 export type BeginChatMessageOutcome =
   | { kind: "already-processed"; result: ChatMessageResult }
-  | { kind: "pending"; history: AiMessage[]; claimGeneration: number }
+  | { kind: "pending"; history: AiMessage[]; token: ChatClaimToken }
   | { kind: "in-progress" }
   | { kind: "rate-limited"; retryAfterSeconds: number }
   // 同じcommandIdが別のスレッド／別のpromptProfileで使い回された。冪等再送ではなく
@@ -907,7 +908,7 @@ export class TeamRoom extends DurableObject<Env> {
     return {
       kind: "pending",
       history: this.historyFor(appended.snapshot, command.threadId),
-      claimGeneration: 1,
+      token: { claimGeneration: 1, resetGeneration: this.readGeneration() },
     };
   }
 
@@ -965,7 +966,7 @@ export class TeamRoom extends DurableObject<Env> {
     return {
       kind: "pending",
       history: this.historyFor(snapshot, pending.thread_id),
-      claimGeneration,
+      token: { claimGeneration, resetGeneration: this.readGeneration() },
     };
   }
 
@@ -981,20 +982,23 @@ export class TeamRoom extends DurableObject<Env> {
   async completeChatMessage(
     commandIdInput: unknown,
     outcomeInput: unknown,
-    claimGenerationInput: unknown,
+    tokenInput: unknown,
   ): Promise<ChatMessageResult | { retry: true } | { stale: true }> {
     // 他のRPCと同じく、補助入力も実行時に検証する。壊れた値で台帳やクレームを
     // 触らせない（弾いた入力は例外になり、Worker側のcatchが503へ倒す）。
     const commandId = commandIdSchema.parse(commandIdInput);
     const outcome: CompleteChatMessageOutcome = completeChatOutcomeSchema.parse(outcomeInput);
-    const claimGeneration = claimGenerationSchema.parse(claimGenerationInput);
+    const token = chatClaimTokenSchema.parse(tokenInput);
+    // リセットを挟んだ応答は、クレームの世代が偶然一致しても書かない。何も書かずに
+    // 捨てる——古いタブの再送はbeginChatMessageが世代切れで弾くので、そちらへ回る。
+    if (token.resetGeneration !== this.readGeneration()) return { stale: true };
     // 伏せ字化と行の保存し直しを含む読み出しをここでも通す（beginと同じ）。
     const processed = this.readProcessedMessage(commandId);
     if (processed !== null) return processed.result;
 
     const pending = this.readPending(commandId);
     if (pending === null) throw new Error("該当する送信途中のメッセージがありません。");
-    if ((pending.claim_generation ?? 0) !== claimGeneration) return { stale: true };
+    if ((pending.claim_generation ?? 0) !== token.claimGeneration) return { stale: true };
 
     const text = assistantTextOf(outcome);
     if (text === null) {

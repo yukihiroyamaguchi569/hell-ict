@@ -1,6 +1,6 @@
 import { env, exports } from "cloudflare:workers";
 import { listDurableObjectIds, runInDurableObject } from "cloudflare:test";
-import { leaderboardSnapshotSchema, publicTeamId } from "@hell-ict/domain";
+import { chatCommandFingerprint, leaderboardSnapshotSchema, publicTeamId } from "@hell-ict/domain";
 import { beforeEach, describe, expect, it } from "vitest";
 import { z } from "zod";
 
@@ -131,13 +131,21 @@ const createThread = (teamCode: string, commandId: string, generation: number): 
     generation,
   });
 
-const chatSnapshot = async (
-  teamCode: string,
-): Promise<{ threads: { title: string; threadId: string }[] }> => {
+type ChatThreadRow = { title: string; threadId: string; messages: { text: string }[] };
+
+const chatSnapshot = async (teamCode: string): Promise<{ threads: ChatThreadRow[] }> => {
   const response = await get(`/api/teams/${teamCode}/chat`);
   expect(response.status).toBe(200);
   return z
-    .object({ threads: z.array(z.object({ title: z.string(), threadId: z.string() })) })
+    .object({
+      threads: z.array(
+        z.object({
+          title: z.string(),
+          threadId: z.string(),
+          messages: z.array(z.object({ text: z.string() })),
+        }),
+      ),
+    })
     .parse(await response.json());
 };
 
@@ -943,6 +951,64 @@ describe("GMリセット: 活動ログの世代", () => {
         (await activity(teamCode, "00000000-0000-4000-8000-000000001403", generation)).status,
       ).toBe(200);
       await expect(activityKinds(teamCode)).resolves.toEqual(["gm.reset", "submit.s3"]);
+    });
+  });
+});
+
+describe("GMリセット: AI応答の書き戻し", () => {
+  it("リセットを挟んだ応答は、同じcommandIdの新しいクレームへ積まれない", async () => {
+    await withEnv({ ADMIN_TOKEN }, async () => {
+      const teamCode = "420001";
+      const commandId = "00000000-0000-4000-8000-000000001501";
+      const room = env.TEAM_ROOM.getByName(teamCode);
+      const threadId = (await chatSnapshot(teamCode)).threads[0]?.threadId ?? "";
+      const gate = {
+        nowMs: 1_756_400_000_000,
+        limit: 20,
+        fingerprint: await chatCommandFingerprint({
+          threadId,
+          text: "本文",
+          promptProfile: undefined,
+        }),
+      };
+      const message = { type: "send-message", commandId, threadId, text: "本文", generation: 0 };
+
+      // AI呼び出しの最中にリセットが入る。pending行は消えるが、トークンは手元に残る。
+      const begun = await room.beginChatMessage(teamCode, message, gate);
+      expect(begun).toMatchObject({ kind: "pending", token: { resetGeneration: 0 } });
+      if (!("token" in begun)) throw new Error("unexpected");
+      const staleToken = begun.token;
+      expect((await resetByCode(teamCode)).status).toBe(200);
+
+      // 入り直したチームが、たまたま同じcommandIdで送り直す（UUIDなのでほぼ起きないが、
+      // 起きたときに気づけない壊れ方なのでフェンスとして塞ぐ）。
+      const freshThreadId = (await chatSnapshot(teamCode)).threads[0]?.threadId ?? "";
+      const fresh = await room.beginChatMessage(
+        teamCode,
+        { ...message, threadId: freshThreadId, generation: 1 },
+        {
+          ...gate,
+          fingerprint: await chatCommandFingerprint({
+            threadId: freshThreadId,
+            text: "本文",
+            promptProfile: undefined,
+          }),
+        },
+      );
+      expect(fresh).toMatchObject({ kind: "pending", token: { resetGeneration: 1 } });
+
+      // リセット前のAI呼び出しが遅れて戻る。claim_generationは新しい行と同じ1だが、
+      // リセット世代が違うので何も書かない。
+      const applied = await room.completeChatMessage(
+        commandId,
+        { kind: "success", text: "リセット前の応答" },
+        staleToken,
+      );
+      expect(applied).toEqual({ stale: true });
+      const after = await chatSnapshot(teamCode);
+      expect(after.threads.flatMap((thread) => thread.messages).map((m) => m.text)).not.toContain(
+        "リセット前の応答",
+      );
     });
   });
 });

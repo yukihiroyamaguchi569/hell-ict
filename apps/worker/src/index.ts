@@ -38,7 +38,7 @@ import {
   parseTeamCodeRule,
   teamCodeRuleStatus,
 } from "./guard.js";
-import type { CorsHeaders } from "./guard.js";
+import type { ChatClaimToken, CorsHeaders } from "./guard.js";
 import {
   bodyErrorResponse,
   error,
@@ -221,11 +221,11 @@ const blockHistoryPii = async (
   room: DurableObjectStub<TeamRoom>,
   commandId: string,
   history: readonly AiMessage[],
-  claimGeneration: number,
+  token: ChatClaimToken,
 ): Promise<Response | null> => {
   if (!history.some((message) => detectPii(message.text) !== null)) return null;
   const blocked = await room
-    .completeChatMessage(commandId, { kind: "failure" }, claimGeneration)
+    .completeChatMessage(commandId, { kind: "failure" }, token)
     .catch(() => null);
   return blocked === null
     ? error("メッセージの処理に失敗しました。時間を置いて再試行してください。", 503)
@@ -294,7 +294,7 @@ const beginOrRespond = async (
   command: SendMessageCommand,
   gate: ChatGate,
 ): Promise<
-  { readonly history: readonly AiMessage[]; readonly claimGeneration: number } | Response
+  { readonly history: readonly AiMessage[]; readonly token: ChatClaimToken } | Response
 > => {
   const begin = await room.beginChatMessage(teamCode, command, gate).catch(() => null);
   if (begin === null)
@@ -310,7 +310,7 @@ const beginOrRespond = async (
     return error("同じ内容が既に送信処理中です。少し待って再試行してください。", 409);
   if (begin.kind === "conflict")
     return error("同じ送信IDが別の内容で使われています。", 409, "conflict");
-  return { history: begin.history, claimGeneration: begin.claimGeneration };
+  return { history: begin.history, token: begin.token };
 };
 
 /**
@@ -390,12 +390,7 @@ export const handleChatMessage = async (
   // 同じcommandIdの再試行はINSERT OR IGNOREで潰れる）。
   log("chat.user", { role: "user", text: command.text });
 
-  const historyBlock = await blockHistoryPii(
-    room,
-    command.commandId,
-    begun.history,
-    begun.claimGeneration,
-  );
+  const historyBlock = await blockHistoryPii(room, command.commandId, begun.history, begun.token);
   if (historyBlock !== null) {
     log("chat.history_pii");
     return historyBlock;
@@ -409,7 +404,7 @@ export const handleChatMessage = async (
   ];
   const { outcome, refusal } = await runAiCompletion(aiGateway, historyWithSystemPrompt);
   const result = await room
-    .completeChatMessage(command.commandId, outcome, begun.claimGeneration)
+    .completeChatMessage(command.commandId, outcome, begun.token)
     .catch(() => null);
   logChatOutcome(log, result, refusal);
   return respondToCompletion(result, refusal);

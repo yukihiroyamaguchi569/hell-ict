@@ -56,6 +56,15 @@ const sendMessage = async (
  * 指紋も渡す（省略すると実行時にNaN・undefinedが渡り、制限や取り違え検出が効かない
  * 状態でテストが通ってしまう）。
  */
+/**
+ * completeChatMessageへ渡す完了用トークン。リセットを挟まないテストでは
+ * リセット世代は常に0なので、クレームの世代だけを指定できるようにする。
+ */
+const token = (claimGeneration: number): { claimGeneration: number; resetGeneration: number } => ({
+  claimGeneration,
+  resetGeneration: 0,
+});
+
 const beginDirect = async (
   teamCode: string,
   command: { commandId: string; threadId: string; text: string; promptProfile?: PromptProfile },
@@ -968,18 +977,18 @@ describe("P1C チャット骨格", () => {
     const room = env.TEAM_ROOM.getByName("400028");
     // generation 1 でクレームを取る。
     const first = await beginDirect("400028", { commandId, threadId, text: "本文" });
-    expect(first).toMatchObject({ kind: "pending", claimGeneration: 1 });
+    expect(first).toMatchObject({ kind: "pending", token: { claimGeneration: 1 } });
 
     // AIが失敗してクレームが解放され、再送が generation 2 で取り直す。
-    await room.completeChatMessage(commandId, { kind: "failure" }, 1);
+    await room.completeChatMessage(commandId, { kind: "failure" }, token(1));
     const second = await beginDirect("400028", { commandId, threadId, text: "本文" });
-    expect(second).toMatchObject({ kind: "pending", claimGeneration: 2 });
+    expect(second).toMatchObject({ kind: "pending", token: { claimGeneration: 2 } });
 
     // 遅れて戻ってきた generation 1 の応答は捨てる。
     const stale = await room.completeChatMessage(
       commandId,
       { kind: "success", text: "古い応答" },
-      1,
+      token(1),
     );
     expect(stale).toEqual({ stale: true });
     const afterStale = await chatSnapshotOf("400028");
@@ -991,7 +1000,7 @@ describe("P1C チャット骨格", () => {
     const applied = await room.completeChatMessage(
       commandId,
       { kind: "success", text: "新しい応答" },
-      2,
+      token(2),
     );
     expect(applied).toMatchObject({ assistant: { text: "新しい応答" } });
   });
@@ -1005,14 +1014,16 @@ describe("P1C チャット骨格", () => {
     const commandId = "00000000-0000-4000-8000-000000003102";
     const room = env.TEAM_ROOM.getByName("400031");
     const begun = await beginDirect("400031", { commandId, threadId, text: "本文" });
-    expect(begun).toMatchObject({ kind: "pending", claimGeneration: 1 });
+    expect(begun).toMatchObject({ kind: "pending", token: { claimGeneration: 1 } });
 
     const before = await chatSnapshotOf("400031");
     // 壊れたoutcome・壊れたcommandIdはDOで弾かれ、Worker側のcatchが503へ倒す。
     for (const call of [
-      () => room.completeChatMessage(commandId, { kind: "unknown" }, 1),
-      () => room.completeChatMessage(commandId, { kind: "success" }, 1),
-      () => room.completeChatMessage("not-a-uuid", { kind: "failure" }, 1),
+      () => room.completeChatMessage(commandId, { kind: "unknown" }, token(1)),
+      () => room.completeChatMessage(commandId, { kind: "success" }, token(1)),
+      () => room.completeChatMessage("not-a-uuid", { kind: "failure" }, token(1)),
+      // 壊れたトークン（リセット世代が欠けている）も同じく弾く。
+      () => room.completeChatMessage(commandId, { kind: "failure" }, { claimGeneration: 1 }),
     ]) {
       let threw = false;
       try {
