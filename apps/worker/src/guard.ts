@@ -2,7 +2,7 @@ import { teamCodeSchema } from "@hell-ict/domain";
 import { z } from "zod";
 
 /**
- * 公開Worker APIの入口ガード（Origin検証・チームコード許可リスト・チーム単位の
+ * 公開Worker APIの入口ガード（Origin検証・チームコードの規則判定・チーム単位の
  * レート制限）。判定はすべて副作用のないPure Functionとして置き、index.tsの
  * fetch入口とTeamRoomからは「決めた結果」だけを使う。
  *
@@ -14,7 +14,7 @@ import { z } from "zod";
  * クライアント（curl、スクリプト）は自由に詐称できる。ここで防げるのは
  * 「参加者のブラウザが、他サイトに置かれたページや埋め込みからAPIを叩かされる」
  * 経路——CSRFと他サイトからの読み取り——であって、攻撃者が自分の手元から直接
- * 叩くことではない。後者はTEAM_CODESの許可リスト（配布した6桁を知らないと入れない）と
+ * 叩くことではない。後者はチームコードの規則判定（配布した6桁を知らないと入れない）と
  * レート制限で被害を抑える。推測不能なセッション資格情報の導入は本実装フェーズの課題とする。
  */
 
@@ -103,61 +103,88 @@ export const corsHeadersFor = (
 };
 
 /**
- * `TEAM_CODES`の解析結果。
+ * チームコードの判定規則。コードは`[開催回2桁][チーム番号4桁]`で、許可リストを
+ * 持たずに規則だけで判定する（予備チームは「次の番号」を配れば済み、事前登録が要らない）。
  *
- * - `unset`: 環境変数そのものが無い。許可リスト無し＝何でも通す。ローカル開発とE2Eを
- *   壊さないための意図的なfail-openで、この既定は維持する（設定漏れは
- *   `GET /api/health`のguardsで検知する）。
- * - `invalid`: 設定されているが、6桁数字でない要素が1つでも混ざっている。すべて拒否する
- *   （fail-closed）——一部だけ通すと、当日「入れるチームと入れないチームがある」という
- *   いちばん切り分けにくい形で壊れる。
- * - `list`: 検証を通ったコードの集合。空集合（`","`だけ等）もここで、全て拒否になる。
+ * - `open`: `EVENT_NO`が未設定。6桁なら何でも通す。ローカル開発とE2Eを壊さないための
+ *   意図的なfail-openで、この既定は維持する（設定漏れは`GET /api/health`のguardsで検知する）。
+ * - `rule`: 上2桁が`eventNo`と一致し、下4桁が1〜`teamMax`のコードだけを通す。
+ * - `invalid`: 設定されているが値が壊れている。すべて拒否する（fail-closed）——一部だけ
+ *   通すと、当日「入れるチームと入れないチームがある」といういちばん切り分けにくい形で壊れる。
+ *   どちらの変数が壊れているかはhealthで見分けられるようにする。
  */
-export type TeamCodeAllowlist =
-  | { readonly kind: "unset" }
-  | { readonly kind: "invalid" }
-  | { readonly kind: "list"; readonly codes: ReadonlySet<string> };
+export type TeamCodeRule =
+  | { readonly kind: "open" }
+  | { readonly kind: "rule"; readonly eventNo: string; readonly teamMax: number }
+  | { readonly kind: "invalid"; readonly reason: "eventNo" }
+  | { readonly kind: "invalid"; readonly reason: "teamMax"; readonly eventNo: string };
+
+/** `TEAM_MAX`未設定時のチーム番号の上限。企画上の最大（10チーム）に対して十分広く取る。 */
+export const DEFAULT_TEAM_MAX = 100;
+
+/** チーム番号は4桁なので、上限もそこで頭打ちにする。 */
+export const MAX_TEAM_MAX = 9999;
+
+/** 開催回は2桁数字ちょうど（`02`のように0埋めして書く）。 */
+const EVENT_NO_PATTERN = /^\d{2}$/;
 
 /**
- * 区切り文字。半角カンマに加えて全角カンマ「，」と読点「、」も受ける——当日の配布表から
- * 手で貼る運用で、日本語入力のまま打った区切りが混ざるのは十分ありうる。ここで
- * 弾いても得るものはなく、invalidにして入室できなくなるほうが損が大きい。
+ * `TEAM_MAX`を上限値へ。未設定は既定へ倒すが、設定されていて正の整数（1〜9999）でない
+ * ものはnullを返してfail-closedにする——ここを既定へ倒すと、書き損じたまま
+ * 「設定したつもりの上限」と違う範囲で当日が動く。
+ *
+ * 数字だけの表記に限る。`Number`任せにすると`1e2`や`0x10`が黙って通り、
+ * 書いた値と効いている上限がずれる。
  */
-const TEAM_CODE_SEPARATORS = /[,，、]/;
+const parseTeamMax = (raw: string | undefined): number | null => {
+  if (raw === undefined) return DEFAULT_TEAM_MAX;
+  const trimmed = raw.trim();
+  if (!/^\d+$/.test(trimmed)) return null;
+  const parsed = Number(trimmed);
+  return parsed >= 1 && parsed <= MAX_TEAM_MAX ? parsed : null;
+};
 
 /**
- * カンマ区切りの`TEAM_CODES`を解析する。要素ごとに6桁数字を検証し、1つでも不正なら
- * `invalid`にする——検証しないと`100001,100002x`のような値でもhealthが「設定済み」を
- * 返し、本番前確認を通過した後で当日入室できない、という順序で気づくことになる。
- * 重複は除去する（同じコードを2度書いても件数の期待値がずれないようにする）。
+ * `EVENT_NO`と`TEAM_MAX`から判定規則を組み立てる。`EVENT_NO`を先に見るのは、未設定なら
+ * 規則そのものが効かず`TEAM_MAX`を読む意味が無いためで、healthの表示もそれに従う。
  */
-export const parseTeamCodes = (raw: string | undefined): TeamCodeAllowlist => {
-  if (raw === undefined) return { kind: "unset" };
-  // 空要素（`100001,,100002`や末尾カンマ）も不正として扱う。落として済ませると、
-  // 区切りの打ち間違いに気づけないまま件数だけが合わなくなる——teamCodesCountを
-  // 配布数と突き合わせる運用が、いちばん効いてほしい場面で効かなくなる。
-  // 全体が空白だけ（""や",")のときは、従来どおり「設定し損ねた空リスト」として扱う。
-  const entries = raw.split(TEAM_CODE_SEPARATORS).map((code) => code.trim());
-  if (entries.every((code) => code.length === 0)) return { kind: "list", codes: new Set() };
-  if (entries.some((code) => !teamCodeSchema.safeParse(code).success)) return { kind: "invalid" };
-  return { kind: "list", codes: new Set(entries) };
+export const parseTeamCodeRule = (env: Pick<Env, "EVENT_NO" | "TEAM_MAX">): TeamCodeRule => {
+  if (env.EVENT_NO === undefined) return { kind: "open" };
+  const eventNo = env.EVENT_NO.trim();
+  if (!EVENT_NO_PATTERN.test(eventNo)) return { kind: "invalid", reason: "eventNo" };
+  const teamMax = parseTeamMax(env.TEAM_MAX);
+  if (teamMax === null) return { kind: "invalid", reason: "teamMax", eventNo };
+  return { kind: "rule", eventNo, teamMax };
 };
 
-/** 許可リストが無ければ（＝TEAM_CODES未設定なら）何でも通す。 */
-export const isTeamCodeAllowed = (code: string, allowlist: TeamCodeAllowlist): boolean => {
-  if (allowlist.kind === "unset") return true;
-  if (allowlist.kind === "invalid") return false;
-  return allowlist.codes.has(code);
+/** 規則が無ければ（＝EVENT_NO未設定なら）6桁は何でも通す。 */
+export const isTeamCodeAllowed = (code: string, rule: TeamCodeRule): boolean => {
+  if (rule.kind === "invalid") return false;
+  if (!teamCodeSchema.safeParse(code).success) return false;
+  if (rule.kind === "open") return true;
+  if (code.slice(0, 2) !== rule.eventNo) return false;
+  const teamNo = Number(code.slice(2));
+  return teamNo >= 1 && teamNo <= rule.teamMax;
 };
 
-/** `GET /api/health`のguardsへ載せる表示。値そのものは出さず、状態と件数だけを返す。 */
-export const teamCodesStatus = (
-  allowlist: TeamCodeAllowlist,
-): { teamCodes: boolean | "invalid"; teamCodesCount: number } => {
-  if (allowlist.kind === "unset") return { teamCodes: false, teamCodesCount: 0 };
-  if (allowlist.kind === "invalid") return { teamCodes: "invalid", teamCodesCount: 0 };
-  return { teamCodes: true, teamCodesCount: allowlist.codes.size };
+/**
+ * `GET /api/health`のguardsへ載せる表示。healthはOrigin不問で誰でも読めるので、
+ * `eventNo`は値を出さず設定の有無だけを返す——開催回が分かると、通るコードの範囲が
+ * 6桁全体から1万通りへ狭まる。`teamMax`は数値のまま出す（当日の運用者が効いている
+ * 上限を確認できないと、配布数を増やしたときの取りこぼしに気付けない）。
+ * 規則が効いていない項目は`false`を返す。
+ */
+export const teamCodeRuleStatus = (
+  rule: TeamCodeRule,
+): { eventNo: boolean | "invalid"; teamMax: number | "invalid" | false } => {
+  if (rule.kind === "open") return { eventNo: false, teamMax: false };
+  if (rule.kind === "rule") return { eventNo: true, teamMax: rule.teamMax };
+  // EVENT_NOが壊れているときはTEAM_MAXを読んでいないので、teamMaxはfalseのまま出す。
+  return rule.reason === "eventNo"
+    ? { eventNo: "invalid", teamMax: false }
+    : { eventNo: true, teamMax: "invalid" };
 };
+
 export const RATE_LIMIT_WINDOW_MS = 60_000;
 
 /** 既定の上限。研修中の1チームが1分に20通を超えるのは操作ミスか暴走とみなす。 */

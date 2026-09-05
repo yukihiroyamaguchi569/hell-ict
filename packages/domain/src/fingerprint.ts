@@ -59,7 +59,7 @@ export const checkpointFingerprint = (body: unknown): Promise<string> =>
  *
  * 総当たりで元のコードへ戻せる長さではあるが、ここで守りたいのは「画面に映った他チームの
  * コードをそのまま使われる」ことであって、秘密の保持ではない。入室そのものの防御は
- * TEAM_CODESの許可リストが担う。
+ * チームコードの規則判定が担う。
  */
 export const publicTeamId = async (teamCode: string): Promise<string> =>
   (await sha256Hex(teamCode)).slice(0, 8);

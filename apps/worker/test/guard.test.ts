@@ -17,20 +17,22 @@ import {
   completeChatOutcomeSchema,
   corsHeadersFor,
   DEFAULT_CHAT_RATE_LIMIT,
+  DEFAULT_TEAM_MAX,
   isOriginAllowed,
   isOriginlessRequestAllowed,
   fingerprintSchema,
   isTeamCodeAllowed,
   MAX_CHAT_RATE_LIMIT,
+  MAX_TEAM_MAX,
   MIN_CHAT_RATE_LIMIT,
   nowMsSchema,
   parseAllowedOrigins,
   parseChatRateLimit,
-  parseTeamCodes,
+  parseTeamCodeRule,
   RATE_LIMIT_WINDOW_MS,
   rateLimitBucket,
   rateLimitCountSchema,
-  teamCodesStatus,
+  teamCodeRuleStatus,
   rateLimitRetryAfterSeconds,
 } from "../src/guard.js";
 import { handleChatMessage } from "../src/index.js";
@@ -57,10 +59,14 @@ const fetchWithHeaders = (
  * 「未設定なら既定」というパーサの挙動をそのまま検証するための土台。
  */
 const withEnv = async <T>(
-  overrides: Partial<Pick<Env, "ALLOWED_ORIGINS" | "TEAM_CODES">>,
+  overrides: Partial<Pick<Env, "ALLOWED_ORIGINS" | "EVENT_NO" | "TEAM_MAX">>,
   run: () => Promise<T>,
 ): Promise<T> => {
-  const saved = { ALLOWED_ORIGINS: env.ALLOWED_ORIGINS, TEAM_CODES: env.TEAM_CODES };
+  const saved = {
+    ALLOWED_ORIGINS: env.ALLOWED_ORIGINS,
+    EVENT_NO: env.EVENT_NO,
+    TEAM_MAX: env.TEAM_MAX,
+  };
   Object.assign(env, overrides);
   try {
     return await run();
@@ -166,83 +172,78 @@ describe("Origin判定（Pure Function）", () => {
   });
 });
 
-describe("チームコード許可リスト（Pure Function）", () => {
-  it("未設定だけがunset（＝何でも通す）", () => {
-    const allowlist = parseTeamCodes(undefined);
-    expect(allowlist).toEqual({ kind: "unset" });
-    expect(isTeamCodeAllowed("999999", allowlist)).toBe(true);
-    expect(teamCodesStatus(allowlist)).toEqual({ teamCodes: false, teamCodesCount: 0 });
+describe("チームコードの規則判定（Pure Function）", () => {
+  it("EVENT_NO未設定だけがopen（＝6桁なら何でも通す）", () => {
+    const rule = parseTeamCodeRule({});
+    expect(rule).toEqual({ kind: "open" });
+    expect(isTeamCodeAllowed("999999", rule)).toBe(true);
+    expect(isTeamCodeAllowed("020001", rule)).toBe(true);
+    // openでも6桁数字でないものは通さない。
+    expect(isTeamCodeAllowed("12345", rule)).toBe(false);
+    expect(teamCodeRuleStatus(rule)).toEqual({ eventNo: false, teamMax: false });
   });
 
-  it("設定されているが空なら、fail-closedで全コードを拒否する", () => {
-    // 「許可リストを効かせるつもりで値を間違えた」ケース。fail-openへ倒すと、
-    // 設定したつもりのまま誰でも入れる状態を無言で作ってしまう。
-    for (const raw of ["", "   ", ",", " , "]) {
-      const allowlist = parseTeamCodes(raw);
-      expect(allowlist, raw).toEqual({ kind: "list", codes: new Set() });
-      expect(isTeamCodeAllowed("100001", allowlist), raw).toBe(false);
-      expect(teamCodesStatus(allowlist), raw).toEqual({ teamCodes: true, teamCodesCount: 0 });
+  it("EVENT_NOだけを設定すればTEAM_MAXは既定の100になる", () => {
+    const rule = parseTeamCodeRule({ EVENT_NO: "02" });
+    expect(rule).toEqual({ kind: "rule", eventNo: "02", teamMax: DEFAULT_TEAM_MAX });
+    expect(DEFAULT_TEAM_MAX).toBe(100);
+    expect(teamCodeRuleStatus(rule)).toEqual({ eventNo: true, teamMax: 100 });
+  });
+
+  it("上2桁が開催回と一致し、下4桁が1〜TEAM_MAXのコードだけを通す", () => {
+    const rule = parseTeamCodeRule({ EVENT_NO: "02" });
+    // 境界。1と100は通り、0と101は落ちる。
+    expect(isTeamCodeAllowed("020001", rule)).toBe(true);
+    expect(isTeamCodeAllowed("020100", rule)).toBe(true);
+    expect(isTeamCodeAllowed("020101", rule)).toBe(false);
+    expect(isTeamCodeAllowed("020000", rule)).toBe(false);
+    // 別の開催回は落ちる（前回開催・リハーサルのコードが当日通らないこと）。
+    expect(isTeamCodeAllowed("010001", rule)).toBe(false);
+    expect(isTeamCodeAllowed("990001", rule)).toBe(false);
+    // 6桁数字でないものも落ちる。
+    expect(isTeamCodeAllowed("02001", rule)).toBe(false);
+    expect(isTeamCodeAllowed("0200011", rule)).toBe(false);
+    expect(isTeamCodeAllowed("02000a", rule)).toBe(false);
+    expect(isTeamCodeAllowed("０２０００１", rule)).toBe(false);
+  });
+
+  it("TEAM_MAXを設定するとその値が上限になる", () => {
+    const rule = parseTeamCodeRule({ EVENT_NO: "02", TEAM_MAX: "6" });
+    expect(rule).toEqual({ kind: "rule", eventNo: "02", teamMax: 6 });
+    expect(isTeamCodeAllowed("020006", rule)).toBe(true);
+    expect(isTeamCodeAllowed("020007", rule)).toBe(false);
+    expect(teamCodeRuleStatus(rule)).toEqual({ eventNo: true, teamMax: 6 });
+  });
+
+  it("EVENT_NOが2桁数字でなければinvalidで全拒否（fail-closed）", () => {
+    // 一部だけ通すのは、当日いちばん切り分けにくい壊れ方なので採らない。
+    for (const raw of ["", " ", "2", "020", "aa", "0a", "１２", "-1", "2.0"]) {
+      const rule = parseTeamCodeRule({ EVENT_NO: raw });
+      expect(rule, raw).toEqual({ kind: "invalid", reason: "eventNo" });
+      expect(isTeamCodeAllowed("020001", rule), raw).toBe(false);
+      expect(teamCodeRuleStatus(rule), raw).toEqual({ eventNo: "invalid", teamMax: false });
     }
   });
 
-  it("設定した6桁だけを通す（空白は無視する）", () => {
-    const allowlist = parseTeamCodes(" 100001, 100002 ");
-    expect(isTeamCodeAllowed("100001", allowlist)).toBe(true);
-    expect(isTeamCodeAllowed("100002", allowlist)).toBe(true);
-    expect(isTeamCodeAllowed("100003", allowlist)).toBe(false);
-    expect(teamCodesStatus(allowlist)).toEqual({ teamCodes: true, teamCodesCount: 2 });
-  });
-
-  it("空要素が混ざればinvalid（区切りの打ち間違いを見逃さない）", () => {
-    // 落として済ませると、teamCodesCountを配布数と突き合わせる運用が
-    // いちばん効いてほしい場面で効かなくなる。
-    for (const raw of ["100001,,100002", "100001,", ",100001", "100001, ,100002"]) {
-      const allowlist = parseTeamCodes(raw);
-      expect(allowlist, raw).toEqual({ kind: "invalid" });
-      expect(teamCodesStatus(allowlist), raw).toEqual({
-        teamCodes: "invalid",
-        teamCodesCount: 0,
-      });
+  it("TEAM_MAXが正の整数でなければinvalidで全拒否（fail-closed）", () => {
+    for (const raw of ["", " ", "0", "-1", "abc", "1.5", "1e2", String(MAX_TEAM_MAX + 1)]) {
+      const rule = parseTeamCodeRule({ EVENT_NO: "02", TEAM_MAX: raw });
+      expect(rule, raw).toEqual({ kind: "invalid", reason: "teamMax", eventNo: "02" });
+      expect(isTeamCodeAllowed("020001", rule), raw).toBe(false);
+      // EVENT_NO側は壊れていないので、どちらの書き損じかがhealthで見分けられる。
+      expect(teamCodeRuleStatus(rule), raw).toEqual({ eventNo: true, teamMax: "invalid" });
     }
   });
 
-  it("6桁数字でない要素が1つでも混ざればinvalidで全拒否", () => {
-    // 検証しないと、healthが「設定済み」を返して本番前確認を通過した後、当日
-    // 入室できないという順序で気づくことになる。一部だけ通すのは、いちばん
-    // 切り分けにくい壊れ方なので採らない。
-    for (const raw of [
-      "100001,100002x",
-      "100001, 10001",
-      "100001,１２３４５６",
-      "100001,abcdef",
-      "100001,1000012",
-    ]) {
-      const allowlist = parseTeamCodes(raw);
-      expect(allowlist, raw).toEqual({ kind: "invalid" });
-      expect(isTeamCodeAllowed("100001", allowlist), raw).toBe(false);
-      expect(teamCodesStatus(allowlist), raw).toEqual({
-        teamCodes: "invalid",
-        teamCodesCount: 0,
-      });
-    }
+  it("TEAM_MAXの上限（9999）はそのまま受ける", () => {
+    const rule = parseTeamCodeRule({ EVENT_NO: "99", TEAM_MAX: String(MAX_TEAM_MAX) });
+    expect(rule).toEqual({ kind: "rule", eventNo: "99", teamMax: MAX_TEAM_MAX });
+    expect(isTeamCodeAllowed("999999", rule)).toBe(true);
   });
 
-  it("全角カンマと読点も区切りとして受ける（手入力運用のため）", () => {
-    for (const raw of ["100001，100002", "100001、100002", "100001，100002、100003"]) {
-      const allowlist = parseTeamCodes(raw);
-      expect(isTeamCodeAllowed("100001", allowlist), raw).toBe(true);
-      expect(isTeamCodeAllowed("100002", allowlist), raw).toBe(true);
-    }
-    expect(teamCodesStatus(parseTeamCodes("100001，100002"))).toEqual({
-      teamCodes: true,
-      teamCodesCount: 2,
-    });
-  });
-
-  it("重複は除去して数える", () => {
-    const allowlist = parseTeamCodes("100001,100002,100001");
-    expect(isTeamCodeAllowed("100001", allowlist)).toBe(true);
-    expect(teamCodesStatus(allowlist)).toEqual({ teamCodes: true, teamCodesCount: 2 });
+  it("前後の空白は無視する（配布表から貼る運用のため）", () => {
+    const rule = parseTeamCodeRule({ EVENT_NO: " 02 ", TEAM_MAX: " 6 " });
+    expect(rule).toEqual({ kind: "rule", eventNo: "02", teamMax: 6 });
   });
 });
 
@@ -465,16 +466,16 @@ describe("ヘルスチェックのguards（レート制限の実効値）", () =
   });
 });
 
-describe("入口ガード（チームコード許可リスト）", () => {
-  it("TEAM_CODES未設定なら任意の6桁が通る", async () => {
+describe("入口ガード（チームコードの規則）", () => {
+  it("EVENT_NO未設定なら任意の6桁が通る", async () => {
     const response = await session("512345");
     expect(response.status).toBe(200);
   });
 
-  it("TEAM_CODES設定時、未登録コードの入室は404でDOを作らない", async () => {
-    await withEnv({ TEAM_CODES: " 500006 , 500007 " }, async () => {
+  it("EVENT_NO設定時、別開催回のコードの入室は404でDOを作らない", async () => {
+    await withEnv({ EVENT_NO: "50" }, async () => {
       const before = await listDurableObjectIds(env.TEAM_ROOM);
-      const rejected = await session("500008");
+      const rejected = await session("510008");
       expect(rejected.status).toBe(404);
       await expect(listDurableObjectIds(env.TEAM_ROOM)).resolves.toEqual(before);
 
@@ -483,12 +484,21 @@ describe("入口ガード（チームコード許可リスト）", () => {
     });
   });
 
-  it("TEAM_CODES設定時、未登録コードの/api/teams/*も404でDOを作らない", async () => {
-    await withEnv({ TEAM_CODES: "500009" }, async () => {
+  it("EVENT_NO設定時、TEAM_MAXを超えるチーム番号の入室は404でDOを作らない", async () => {
+    await withEnv({ EVENT_NO: "50", TEAM_MAX: "6" }, async () => {
       const before = await listDurableObjectIds(env.TEAM_ROOM);
-      const chat = await get("/api/teams/500010/chat");
+      expect((await session("500007")).status).toBe(404);
+      expect((await session("500000")).status).toBe(404);
+      await expect(listDurableObjectIds(env.TEAM_ROOM)).resolves.toEqual(before);
+    });
+  });
+
+  it("EVENT_NO設定時、規則外コードの/api/teams/*も404でDOを作らない", async () => {
+    await withEnv({ EVENT_NO: "50" }, async () => {
+      const before = await listDurableObjectIds(env.TEAM_ROOM);
+      const chat = await get("/api/teams/510010/chat");
       expect(chat.status).toBe(404);
-      const command = await postJson("/api/teams/500010/commands", {
+      const command = await postJson("/api/teams/510010/commands", {
         type: "enter-stage1",
         commandId: messageCommandId(3),
         expectedRevision: 0,
@@ -500,11 +510,11 @@ describe("入口ガード（チームコード許可リスト）", () => {
 });
 
 describe("入口ガード（リーダーボード）", () => {
-  it("TEAM_CODES設定時、未登録コードのリーダーボード購読は404でDOを作らない", async () => {
-    await withEnv({ TEAM_CODES: "500030" }, async () => {
+  it("EVENT_NO設定時、規則外コードのリーダーボード購読は404でDOを作らない", async () => {
+    await withEnv({ EVENT_NO: "50" }, async () => {
       const before = await listDurableObjectIds(env.RACE_LEADERBOARD);
       const rejected = await exports.default.fetch(
-        new Request(`${TEST_ORIGIN}/api/leaderboard/sync?teamCode=500031`, {
+        new Request(`${TEST_ORIGIN}/api/leaderboard/sync?teamCode=510031`, {
           headers: { Upgrade: "websocket", Origin: TEST_ORIGIN },
         }),
       );
@@ -514,8 +524,8 @@ describe("入口ガード（リーダーボード）", () => {
     });
   });
 
-  it("TEAM_CODES設定時、登録済みコードのリーダーボード購読は通る", async () => {
-    await withEnv({ TEAM_CODES: "500032" }, async () => {
+  it("EVENT_NO設定時、規則に合うコードのリーダーボード購読は通る", async () => {
+    await withEnv({ EVENT_NO: "50" }, async () => {
       await session("500032");
       const response = await upgrade("/api/leaderboard/sync?teamCode=500032");
       expect(response.status).toBe(101);
@@ -526,55 +536,66 @@ describe("入口ガード（リーダーボード）", () => {
 });
 
 describe("ヘルスチェックのguards", () => {
-  it("運用値の設定状況を返し、値そのものは伏せる", async () => {
-    await withEnv({ TEAM_CODES: "100001,100002", ALLOWED_ORIGINS: OTHER_ORIGIN }, async () => {
+  it("運用値の設定状況を返し、開催回と許可オリジンの値は伏せる", async () => {
+    // healthはOrigin不問で誰でも読める。開催回が漏れると、通るコードの範囲が
+    // 6桁全体から1万通りへ狭まるので、値そのものは出さない。
+    await withEnv({ EVENT_NO: "07", TEAM_MAX: "6", ALLOWED_ORIGINS: OTHER_ORIGIN }, async () => {
       const response = await get("/api/health");
       const body = await response.json();
       expect(body).toEqual({
         status: "ok",
         guards: {
-          teamCodes: true,
-          teamCodesCount: 2,
+          eventNo: true,
+          teamMax: 6,
           allowedOrigins: true,
           chatRateLimitPerMinute: 20,
         },
       });
-      expect(JSON.stringify(body)).not.toContain("100001");
+      expect(JSON.stringify(body)).not.toContain("07");
       expect(JSON.stringify(body)).not.toContain(OTHER_ORIGIN);
     });
   });
 
-  it('TEAM_CODESが壊れているとteamCodesが"invalid"になり、全チームが入室できない', async () => {
+  it("EVENT_NO未設定ならeventNo・teamMaxともfalseで出る", async () => {
+    const response = await get("/api/health");
+    await expect(response.json()).resolves.toMatchObject({
+      guards: { eventNo: false, teamMax: false },
+    });
+  });
+
+  it("TEAM_MAX未設定なら既定の100がguardsに出る", async () => {
+    await withEnv({ EVENT_NO: "50" }, async () => {
+      await expect((await get("/api/health")).json()).resolves.toMatchObject({
+        guards: { eventNo: true, teamMax: 100 },
+      });
+    });
+  });
+
+  it('EVENT_NOが壊れているとeventNoが"invalid"になり、全チームが入室できない', async () => {
     // healthが「設定済み」を返して本番前確認を通過した後、当日入室できない、という
     // 順序で気づくのを避ける。壊れた設定はここで見える。
-    await withEnv({ TEAM_CODES: "100001,100002x" }, async () => {
+    await withEnv({ EVENT_NO: "5" }, async () => {
       const response = await get("/api/health");
       await expect(response.json()).resolves.toMatchObject({
-        guards: { teamCodes: "invalid", teamCodesCount: 0 },
+        guards: { eventNo: "invalid", teamMax: false },
       });
 
       const before = await listDurableObjectIds(env.TEAM_ROOM);
-      expect((await session("100001")).status).toBe(404);
-      expect((await session("100002")).status).toBe(404);
+      expect((await session("500001")).status).toBe(404);
+      expect((await session("050001")).status).toBe(404);
       await expect(listDurableObjectIds(env.TEAM_ROOM)).resolves.toEqual(before);
     });
   });
 
-  it("全角カンマ区切りでも正しく数え、入室できる", async () => {
-    await withEnv({ TEAM_CODES: "500050，500051" }, async () => {
+  it('TEAM_MAXが壊れているとteamMaxが"invalid"になり、全チームが入室できない', async () => {
+    await withEnv({ EVENT_NO: "50", TEAM_MAX: "0" }, async () => {
       await expect((await get("/api/health")).json()).resolves.toMatchObject({
-        guards: { teamCodes: true, teamCodesCount: 2 },
+        guards: { eventNo: true, teamMax: "invalid" },
       });
-      expect((await session("500050")).status).toBe(200);
-      expect((await session("500052")).status).toBe(404);
-    });
-  });
 
-  it("重複を書いてもteamCodesCountは一意の件数を返す", async () => {
-    await withEnv({ TEAM_CODES: "500053,500054,500053" }, async () => {
-      await expect((await get("/api/health")).json()).resolves.toMatchObject({
-        guards: { teamCodes: true, teamCodesCount: 2 },
-      });
+      const before = await listDurableObjectIds(env.TEAM_ROOM);
+      expect((await session("500001")).status).toBe(404);
+      await expect(listDurableObjectIds(env.TEAM_ROOM)).resolves.toEqual(before);
     });
   });
 });
@@ -1104,22 +1125,23 @@ describe("リーダーボードの配信範囲", () => {
     return snapshot.entries.length;
   };
 
-  it("TEAM_CODES設定後は、設定前に入った未許可コードを配信しない", async () => {
+  it("EVENT_NO設定後は、設定前に入った規則外コードを配信しない", async () => {
     // 設定前の試験コードや前回開催のチームがleaderboard_entriesに残っていると、
     // 当日の帯にゴーストとして並ぶ。行は消さず、配信時に絞る。
     // RaceLeaderboardは"global"の単一DOで、テスト間で行が持ち越されるため、
     // 件数は絶対値ではなく「絞る前後の差」で見る。
-    await session("500060");
-    await session("500061");
-    const unfiltered = await leaderboardEntries("500060");
+    // 開催回77はこのファイルの他のテストが使っておらず、絞り込み後の件数を1に固定できる。
+    await session("770001");
+    await session("780001");
+    const unfiltered = await leaderboardEntries("770001");
     expect(unfiltered).toBeGreaterThanOrEqual(2);
 
-    await withEnv({ TEAM_CODES: "500060" }, async () => {
-      await expect(leaderboardEntries("500060")).resolves.toBe(1);
+    await withEnv({ EVENT_NO: "77" }, async () => {
+      await expect(leaderboardEntries("770001")).resolves.toBe(1);
     });
 
     // 設定を外せばまた見える（行そのものは消していない）。
-    await expect(leaderboardEntries("500060")).resolves.toBe(unfiltered);
+    await expect(leaderboardEntries("770001")).resolves.toBe(unfiltered);
   });
 
   it("壊れた行があっても他チームの配信は止まらない", async () => {
@@ -1170,11 +1192,11 @@ describe("リーダーボードの配信範囲", () => {
     await expect(leaderboardEntries("500066")).resolves.toBeGreaterThanOrEqual(1);
   });
 
-  it("TEAM_CODESが不正なら何も配信しない（fail-closed）", async () => {
+  it("EVENT_NOが不正なら何も配信しない（fail-closed）", async () => {
     const snapshot = await env.TEAM_ROOM.getByName("500062").join("500062");
     const leaderboard = env.RACE_LEADERBOARD.getByName("global");
 
-    await withEnv({ TEAM_CODES: "500062,invalid" }, async () => {
+    await withEnv({ EVENT_NO: "invalid" }, async () => {
       // upsertの戻りも配信と同じsnapshot経路を通る。invalidは空になる。
       const result = leaderboardSnapshotSchema.parse(await leaderboard.upsert("500062", snapshot));
       expect(result.entries).toHaveLength(0);

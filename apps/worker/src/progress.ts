@@ -8,8 +8,8 @@ import {
   viewIdSchema,
 } from "@hell-ict/domain";
 
-import { isTeamCodeAllowed, parseTeamCodes } from "./guard.js";
-import type { TeamCodeAllowlist } from "./guard.js";
+import { isTeamCodeAllowed, parseTeamCodeRule } from "./guard.js";
+import type { TeamCodeRule } from "./guard.js";
 import { bodyErrorResponse, error, json, parseJson } from "./http.js";
 
 /**
@@ -78,8 +78,8 @@ const progressTextPairSchema = z.object({ team_name: z.string(), view: z.string(
  * 主キー1行の参照はサマリー1回あたりの負荷として無視できる。
  *
  * 伏せ字化にはredactPiiだけを使い、6桁コードの伏せ字化（redactDisplayText）は掛けない
- * ——あちらは現在のTEAM_CODESに依存する判定で、設定が入る前にこの移行が走ると
- * 「そのとき知らなかったコード」を取りこぼしたまま完了印が付く。コードの伏せ字化は
+ * ——あちらは現在のEVENT_NOに依存する判定で、設定が入る前にこの移行が走ると
+ * 「そのとき対象外だったコード」を取りこぼしたまま完了印が付く。コードの伏せ字化は
  * 読み出し側が毎回やり直すので、行の移行はPIIだけに絞るのが安全側になる。
  *
  * 失敗しても握りつぶし、次のリクエストでやり直す。移行が転けたせいで当日の
@@ -174,23 +174,25 @@ const eventRowSchema = z.object({
  * - updatedAt: 生存確認なので復帰を含む全イベントの最新時刻を使う。
  */
 /**
- * 許可リストの絞り込みはSQLへ入れる。取得後に落とすと、eventsのLIMIT 20を
- * 未登録チームの行が食い潰し、許可チームの最新イベントがダッシュボードから
- * 消える——「絞ってからLIMIT」でなければ意味がない。
+ * 規則の絞り込みはSQLへ入れる。取得後に落とすと、eventsのLIMIT 20を対象外チームの
+ * 行が食い潰し、対象チームの最新イベントがダッシュボードから消える——「絞ってから
+ * LIMIT」でなければ意味がない。
  *
- * 未設定（null）なら条件を付けず全件を返す。プレースホルダは許可コードの数だけ
- * 動的に組む（当日の配布数は多くても数十）。
+ * 規則が無い（open）なら条件を付けず全件を返す。不正な設定はfail-closedで、
+ * 常に偽の条件を置く。
  */
 const teamFilter = (
-  allowlist: TeamCodeAllowlist,
+  rule: TeamCodeRule,
   column: string,
-): { clause: string; params: string[] } => {
-  if (allowlist.kind === "unset") return { clause: "", params: [] };
-  const codes = allowlist.kind === "list" ? [...allowlist.codes] : [];
-  // 空の許可リスト（設定し損ね）と不正な設定はfail-closed。IN ()は書けないので
-  // 常に偽の条件を置く。
-  if (codes.length === 0) return { clause: `WHERE 0`, params: [] };
-  return { clause: `WHERE ${column} IN (${codes.map(() => "?").join(", ")})`, params: codes };
+): { clause: string; params: (string | number)[] } => {
+  if (rule.kind === "open") return { clause: "", params: [] };
+  if (rule.kind === "invalid") return { clause: `WHERE 0`, params: [] };
+  // 長さと下4桁の字種も見る。INの列挙と違い、規則だけでは`0200015`のような桁違いや
+  // `02001x`のような壊れた行が、substrとCASTの結果（`1x`→1）で紛れ込みうる。
+  return {
+    clause: `WHERE length(${column}) = 6 AND substr(${column}, 1, 2) = ? AND substr(${column}, 3) GLOB '[0-9][0-9][0-9][0-9]' AND CAST(substr(${column}, 3) AS INTEGER) BETWEEN 1 AND ?`,
+    params: [rule.eventNo, rule.teamMax],
+  };
 };
 
 const teamsSql = (filter: string): string => `SELECT
@@ -231,8 +233,8 @@ export const handleProgressPost = async (request: Request, env: Env): Promise<Re
 
   const event = parsed.data;
   // チームコードは本文にあるため入口ガードでは見られない。D1へ書く前にここで当てる
-  // （未登録チームの行をダッシュボードへ混ぜない）。応答は存在を明かさない404に揃える。
-  if (!isTeamCodeAllowed(event.teamCode, parseTeamCodes(env.TEAM_CODES))) {
+  // （規則に合わないチームの行をダッシュボードへ混ぜない）。応答は存在を明かさない404に揃える。
+  if (!isTeamCodeAllowed(event.teamCode, parseTeamCodeRule(env))) {
     return new Response("Not found", { status: 404 });
   }
 
@@ -249,7 +251,7 @@ export const handleProgressPost = async (request: Request, env: Env): Promise<Re
         // 進捗記録が落ちるとダッシュボードからそのチームが消えて当日の進行が
         // 見えなくなるため。記録は残し、危ないものだけを落とす。
         // viewはschemaで既知の画面idに固定済みなので、そのまま入れてよい。
-        redactDisplayText(event.teamName, parseTeamCodes(env.TEAM_CODES)),
+        redactDisplayText(event.teamName, parseTeamCodeRule(env)),
         event.pos,
         event.view,
         event.kind,
@@ -263,7 +265,7 @@ export const handleProgressPost = async (request: Request, env: Env): Promise<Re
 };
 
 /**
- * 会場前面のダッシュボードが読む集計。POST側でも許可リストを当てているが、当日の
+ * 会場前面のダッシュボードが読む集計。POST側でも規則を当てているが、当日の
  * 設定が途中で入った場合や、設定前に積まれた行が残っている場合に、知らないチームが
  * 並ぶのを防ぐため、読み出し側でも絞る。
  */
@@ -275,22 +277,23 @@ const SIX_DIGITS = /(?<!\d)\d{6}(?!\d)/g;
  * コードを入れられると、公開サマリー経由で他チームの端末へそのまま渡り、publicIdで
  * 隠した意味が無くなる（コードが唯一の入室資格）。
  *
- * 許可リストがあるときは、そこに載っているコードだけを伏せる（無関係な6桁の数字を
- * むやみに潰さない）。未設定・不正・空のときは配布コードが分からないので、6桁の連続
- * 数字を一律で伏せる。
+ * 規則があるときは、規則に合うコードだけを伏せる（無関係な6桁の数字をむやみに
+ * 潰さない）。未設定・不正のときは配布コードが分からないので、6桁の連続数字を
+ * 一律で伏せる。
  *
  * 保存時と読み出し時の両方で通す。読み出し側にも掛けるのは、この伏せ字化を入れる前に
  * 積まれた行が既にD1へ残っているため——保存時だけでは過去の行が公開され続ける。
  */
-const redactDisplayText = (text: string, allowlist: TeamCodeAllowlist): string => {
+const redactDisplayText = (text: string, rule: TeamCodeRule): string => {
   const withoutPii = redactPii(text);
-  const known = allowlist.kind === "list" && allowlist.codes.size > 0 ? allowlist.codes : null;
-  return known === null
-    ? withoutPii.replace(SIX_DIGITS, PII_REDACTION)
-    : withoutPii.replace(SIX_DIGITS, (code) => (known.has(code) ? PII_REDACTION : code));
+  return rule.kind === "rule"
+    ? withoutPii.replace(SIX_DIGITS, (code) =>
+        isTeamCodeAllowed(code, rule) ? PII_REDACTION : code,
+      )
+    : withoutPii.replace(SIX_DIGITS, PII_REDACTION);
 };
 
-type PublicRowContext = { selfCode: string | null; allowlist: TeamCodeAllowlist };
+type PublicRowContext = { selfCode: string | null; rule: TeamCodeRule };
 
 /**
  * 行のteamCodeを公開用IDへ差し替え、表示用テキストを伏せ字化する。生のチームコードは
@@ -303,7 +306,7 @@ const toPublicRow = async <Row extends { teamCode: string; teamName: string }>(
 ): Promise<Omit<Row, "teamCode"> & { publicId: string; isSelf?: true }> => {
   const { teamCode, ...rest } = row;
   const publicId = await publicTeamId(teamCode);
-  const base = { ...rest, teamName: redactDisplayText(row.teamName, context.allowlist) };
+  const base = { ...rest, teamName: redactDisplayText(row.teamName, context.rule) };
   return context.selfCode !== null && teamCode === context.selfCode
     ? { ...base, publicId, isSelf: true }
     : { ...base, publicId };
@@ -315,27 +318,27 @@ const toPublicEventRow = async (
   context: PublicRowContext,
 ): Promise<Omit<z.infer<typeof eventRowSchema>, "teamCode"> & { publicId: string }> => {
   const publicRow = await toPublicRow(row, context);
-  return { ...publicRow, view: redactDisplayText(row.view, context.allowlist) };
+  return { ...publicRow, view: redactDisplayText(row.view, context.rule) };
 };
 
 /**
- * `?teamCode=`で自分の行を指定できる。許可リストを通らないコードは無視する
- * （未登録のコードで他チームの行へisSelfを立てさせない）。
+ * `?teamCode=`で自分の行を指定できる。規則を通らないコードは無視する
+ * （対象外のコードで他チームの行へisSelfを立てさせない）。
  */
-const selfTeamCode = (url: URL, allowlist: TeamCodeAllowlist): string | null => {
+const selfTeamCode = (url: URL, rule: TeamCodeRule): string | null => {
   const parsed = teamCodeSchema.safeParse(url.searchParams.get("teamCode"));
   if (!parsed.success) return null;
-  return isTeamCodeAllowed(parsed.data, allowlist) ? parsed.data : null;
+  return isTeamCodeAllowed(parsed.data, rule) ? parsed.data : null;
 };
 
 export const handleProgressSummary = async (env: Env, url: URL): Promise<Response> => {
   try {
     await ensureSchema(env.PROGRESS_DB);
     await migrateProgressPii(env.PROGRESS_DB);
-    const allowlist = parseTeamCodes(env.TEAM_CODES);
-    const selfCode = selfTeamCode(url, allowlist);
-    const teamsFilter = teamFilter(allowlist, "e.team_code");
-    const eventsFilter = teamFilter(allowlist, "team_code");
+    const rule = parseTeamCodeRule(env);
+    const selfCode = selfTeamCode(url, rule);
+    const teamsFilter = teamFilter(rule, "e.team_code");
+    const eventsFilter = teamFilter(rule, "team_code");
     const [teams, events] = await Promise.all([
       env.PROGRESS_DB.prepare(teamsSql(teamsFilter.clause))
         .bind(...teamsFilter.params)
@@ -344,7 +347,7 @@ export const handleProgressSummary = async (env: Env, url: URL): Promise<Respons
         .bind(...eventsFilter.params)
         .all(),
     ]);
-    const context: PublicRowContext = { selfCode, allowlist };
+    const context: PublicRowContext = { selfCode, rule };
     return json({
       teams: await Promise.all(
         z

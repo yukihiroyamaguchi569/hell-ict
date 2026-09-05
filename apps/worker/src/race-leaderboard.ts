@@ -9,7 +9,7 @@ import type { LeaderboardSnapshot, TeamCode } from "@hell-ict/domain";
 import { DurableObject } from "cloudflare:workers";
 import { z } from "zod";
 
-import { isTeamCodeAllowed, parseTeamCodes } from "./guard.js";
+import { isTeamCodeAllowed, parseTeamCodeRule } from "./guard.js";
 import { error, isWebSocketRequest } from "./http.js";
 
 /**
@@ -98,19 +98,19 @@ export class RaceLeaderboard extends DurableObject<Env> {
   }
 
   /**
-   * 配信する行を読む。TEAM_CODESを設定したら、許可リストに無いチームは配信から外す
+   * 配信する行を読む。EVENT_NOを設定したら、規則に合わないチームは配信から外す
    * ——設定前に試験で入れたコードや前回開催のチームがleaderboard_entriesに残っており、
    * そのままだと当日の帯にゴーストとして並ぶ。行そのものは消さない（設定を戻せば
    * また見える。掃除は運用の判断に委ねる）。
    *
-   * 許可リストが不正（invalid）なら空を配信する。他のガードと同じくfail-closedへ倒し、
+   * 設定が不正（invalid）なら空を配信する。他のガードと同じくfail-closedへ倒し、
    * 「設定したつもりで全部見えている」を作らない。
    */
   private readEntries(): { revision: number; rows: StoredLeaderboard[] } {
     const meta = this.ctx.storage.sql
       .exec("SELECT value AS revision FROM leaderboard_meta WHERE key = 'revision'")
       .toArray()[0];
-    const allowlist = parseTeamCodes(this.env.TEAM_CODES);
+    const rule = parseTeamCodeRule(this.env);
     const rows = this.ctx.storage.sql
       .exec(
         "SELECT team_code, team_revision, stage FROM leaderboard_entries ORDER BY team_revision DESC, team_code ASC",
@@ -118,7 +118,7 @@ export class RaceLeaderboard extends DurableObject<Env> {
       .toArray()
       .map((row) => storedLeaderboardSchema.safeParse(row).data)
       .filter((row) => row !== undefined)
-      .filter((row) => isTeamCodeAllowed(row.team_code, allowlist));
+      .filter((row) => isTeamCodeAllowed(row.team_code, rule));
     return { revision: storedRevisionSchema.safeParse(meta).data?.revision ?? 0, rows };
   }
 
