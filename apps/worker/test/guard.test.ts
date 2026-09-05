@@ -399,7 +399,10 @@ describe("CORS", () => {
       expect(response.headers.get("Access-Control-Allow-Origin")).toBe(OTHER_ORIGIN);
       expect(response.headers.get("Vary")).toBe("Origin");
       expect(response.headers.get("Access-Control-Allow-Methods")).toBe("GET, POST");
-      expect(response.headers.get("Access-Control-Allow-Headers")).toBe("Content-Type");
+      // AuthorizationはGM系（POST /api/gm/...）のトークン用。
+      expect(response.headers.get("Access-Control-Allow-Headers")).toBe(
+        "Content-Type, Authorization",
+      );
       expect(response.headers.get("Access-Control-Max-Age")).toBe("86400");
     });
   });
