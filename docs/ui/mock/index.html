@@ -291,7 +291,11 @@
 .reader p:last-child { margin-bottom: 0; }
 
 /* --- ワークスペース ---------------------------------------------------- */
-.work { flex: 1; overflow-y: auto; padding: 22px 28px; display: flex; flex-direction: column; gap: 18px; }
+/* 下パディングを厚くしてあるのは、常駐する院内連絡先（.phs＝中央ペインの右下に
+   浮いている、高さ44pxのバー）を避けるため。これが無いと、最下段の［提出する］
+   ［確認した（次へ）］がバーの下へ潜って押せなくなる（Issue #93）。
+   22px（他辺と同じ余白）＋62px（バーの高さ＋余白）。 */
+.work { flex: 1; overflow-y: auto; padding: 22px 28px 84px; display: flex; flex-direction: column; gap: 18px; }
 .stage-title { font-size: calc(20px * var(--fs-scale)); font-weight: 700; display: flex; align-items: center; gap: 9px; }
 .stage-title::before { content: "▸"; color: var(--accent); }
 .brief { font-size: calc(18px * var(--fs-scale)); line-height: 1.75; max-width: 60ch; }
@@ -894,10 +898,9 @@
    書式は「病院から届くもの」＝2003年風：緑のタイトルバー（--phs）・白背景・
    角丸なし。中の .box/.submit-area はテーマ追従の色を持つので、白い紙の上で
    読めるよう固定色へ上書きする（§9「ファイル」はテーマに追従させない）。
-   下マージンは、常駐する院内連絡先（.phs＝中央ペインの右下に浮いている）を
-   避けるため——これが無いと、.work をいちばん下まで送ったときに［送信する］
-   ［確認した（次へ）］が .phs のバーの下へ潜って押せなくなる。 */
-.s35-talk { font-family: var(--font-legacy); border: 1px solid var(--phs); background: #fff; color: #16181a; margin-bottom: 62px; }
+   院内連絡先（.phs）を避ける下余白は .work のパディングへ移した（Issue #93。
+   どのステージの最下段ボタンも同じ理由で潜るため、個別マージンをやめた）。 */
+.s35-talk { font-family: var(--font-legacy); border: 1px solid var(--phs); background: #fff; color: #16181a; }
 .s35-talk > .tb { background: var(--phs); color: #fff; padding: 9px 12px; font-size: 13px; }
 .s35-talk > .bd { padding: 16px 18px; display: flex; flex-direction: column; gap: 11px; }
 .s35-talk .say { font-size: 15px; line-height: 1.8; }
@@ -6998,7 +7001,7 @@
 
   /* 差し込んだ位置まで送る——.work はスクロールするので、下に足しただけでは
      画面外に出て「送信したのに何も起きない」に見える。要素の scrollIntoView
-     ではなく .work を最下部まで送る：.s35-talk の下マージン（.phs 避け）ごと
+     ではなく .work を最下部まで送る：.work の下パディング（.phs 避け）ごと
      出さないと、ボタンが院内連絡先のバーの下に残る。 */
   function s35ScrollTalkIntoView() {
     const work = paneC.querySelector(".work");
