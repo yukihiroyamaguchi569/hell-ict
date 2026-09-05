@@ -4362,7 +4362,7 @@
      保存するので、AI処理中や失敗直後のリロードでは「user だけあって assistant が
      無い」状態が普通に見える。ここで捨てると再送が新しいUUIDになり、サーバ側の
      pending が別コマンドとして走って発言もOpenAI呼び出しも二重になる。
-     assistant が続いているときだけ完了とみなし、そうでなければIDを持ったまま
+     応答が揃っているときだけ完了とみなし、そうでなければIDを持ったまま
      同じ commandId で送り直す（サーバは pending を再開してAIを呼び直す）。
 
      逆に完了したものを持ち続けると、参加者が同じ文面を打ち直したときに冪等の
@@ -4377,16 +4377,28 @@
       // 見るのは「同じ本文の user 発言のうち最後の1つ」。どれか一つでも
       // assistant が続いていれば完了、としてはいけない——「要約して」のように
       // 何度も打つ文面では、過去に完了した組が必ず見つかり、いま応答待ちの
-      // 分まで完了と誤判定して commandId を捨ててしまう。最後の1つが末尾で
-      // 未応答なら、それが今の未確定分。
+      // 分まで完了と誤判定して commandId を捨ててしまう。最後の1つが今の未確定分。
       let last = -1;
       for (let i = 0; i < thread.messages.length; i++) {
         const m = thread.messages[i];
         if (m && m.role === "user" && m.text === parsed.text) last = i;
       }
       if (last < 0) return;   // まだ届いていない。保持して同じIDで送り直す
-      const next = thread.messages[last + 1];
-      if (next && next.role === "assistant") store.forget(key);
+      // 隣に assistant が居るかでは判定しない。サーバはチャットを直列化しないので、
+      // A がタイムアウト → B を送信 → A が遅れて完了、で
+      // 「user A, user B, assistant B, assistant A」の並びが起こる。隣接判定だと
+      // A が永久に未確定のまま残り、同じ文面の2通目が冪等の再送として捨てられる。
+      // 代わりに数で見る——サーバは user 発言1つにつき assistant を高々1つ返し、
+      // 失敗時は assistant を作らない。よって last 以降で assistant の数が user の
+      // 数に追いついていれば、last の分の応答も出揃っている。
+      let users = 0, assistants = 0;
+      for (let i = last; i < thread.messages.length; i++) {
+        const m = thread.messages[i];
+        if (!m) continue;
+        if (m.role === "user") users++;
+        else if (m.role === "assistant") assistants++;
+      }
+      if (assistants >= users) store.forget(key);
     });
   }
 
