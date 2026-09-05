@@ -8,7 +8,7 @@ P1Cは、アプリ内AIチャットをWorkers経由でOpenAIへ中継し、チ�
 
 ## コマンドと冪等性
 
-- `POST /api/teams/:teamCode/chat/threads` `{type:"create-thread", commandId, title}` — 新しいスレッドを作成する。スレッドIDはサーバー側で生成する（企画書§7「タスクごとに文脈を分離」を可能にする器）。
+- `POST /api/teams/:teamCode/chat/threads` `{type:"create-thread", commandId, title}` — 新しいスレッドを作成する。スレッドIDはサーバー側で生成する（企画書§7「AIチャットは今のステージの1本だけ」を、ステージごとに会話の文脈を分けて支える器。参加者がスレッドを操作する導線は画面に無い）。
 - `POST /api/teams/:teamCode/chat/messages` `{type:"send-message", commandId, threadId, text}` — 既存スレッドへメッセージを送り、AIの応答を1往復させる。
 
 いずれもUUIDの`commandId`で冪等。`send-message`は2段階で処理する。

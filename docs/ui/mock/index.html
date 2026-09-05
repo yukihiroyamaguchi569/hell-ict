@@ -164,8 +164,8 @@
 .pane-c { flex: 1; min-width: 0; display: flex; flex-direction: column; min-height: 0; }
 /* min-width:0 を明示する。flex要素の既定は min-width:auto ＝「中身の
    min-content より狭くならない」で、これが flex-basis の 380px を上書きして
-   ペインを勝手に広げる（スレッドタブが増えた Stage 5 で実際に起きた。
-   .ai .tabs のコメント参照）。幅はこの1か所で決まり切るようにしておく。 */
+   ペインを勝手に広げる（かつてAIペインにタブ列を置いていた頃、Stage 5 で
+   実際に起きた）。幅はこの1か所で決まり切るようにしておく。 */
 .pane-r { flex: 0 0 380px; min-width: 0; max-width: 380px; border-left: 1px solid var(--rule); display: flex; flex-direction: column; min-height: 0; }
 .pane-l { transition: border-color .78s ease; }
 /* AIペインは畳んだ状態から右へ逃がしておく。出現は右から滑り込む。 */
@@ -430,28 +430,6 @@
 
 /* --- AIチャット：暗い病院の中で、ここだけが白い ------------------------ */
 .ai { background: var(--ai-surface); color: var(--ai-fg); display: flex; flex-direction: column; min-height: 0; }
-/* タブは横スクロールで受ける。ステージ入場ごとにスレッドが増える設計
-   （STAGE_THREAD_TITLES）なので、Stage 5 では「メイン＋5ステージ」の6枚になり、
-   放っておくとタブの min-content 幅が右ペインを 380px より広く押し広げる
-   （flex要素の既定 min-width:auto が flex-basis より優先されるため）。
-   実害は見た目だけに留まらない——ペインの左端が左へせり出すと、右端から
-   400px の位置に置いてある院内連絡先（.phs）がAIの入力欄に重なり、
-   「AIチャットの上には重ねない」（.phs のコメント）が破れる。
-   2026-08-22、実プレイで Stage 5 の連絡先がずれて見えるとして報告された不具合。 */
-.ai .tabs {
-  display: flex; align-items: stretch; border-bottom: 1px solid var(--ai-rule);
-  background: var(--ai-surface-2); overflow-x: auto; overflow-y: hidden;
-  scrollbar-width: thin;
-}
-.ai .tab {
-  background: var(--ai-surface); border: 0; border-right: 1px solid var(--ai-rule);
-  padding: 9px 18px; font-size: 14px; font-weight: 600; color: var(--ai-fg);
-  flex: 0 0 auto; white-space: nowrap;
-}
-.ai .tab.add { background: transparent; color: var(--ai-muted); font-size: 17px; padding: 9px 14px; }
-/* LIVE時、liveState.threadsから描画したタブのうちアクティブな1つに付く
-   （scripted時は静的な「メイン」「＋」のままなので使われない）。 */
-.ai .tab.current { background: var(--ai-surface-2); box-shadow: inset 0 -2px 0 var(--ai-fg); }
 .ai .log { flex: 1; overflow-y: auto; padding: 18px 16px; display: flex; flex-direction: column; gap: 14px; }
 /* :not(.bubble)としているのは、AIの挨拶（空状態）を灰色の案内文ではなく
    aiBubbleと同じ体裁の吹き出しにしたため——「.emptyがあれば消してから
@@ -1305,10 +1283,6 @@
 
           <!-- 右：AIチャット -->
           <div class="pane-r ai hide" id="pane-r">
-            <div class="tabs" id="ai-tabs">
-              <button class="tab">メイン</button>
-              <button class="tab add" id="ai-tab-add" title="スレッドを追加">＋</button>
-            </div>
             <!-- 初期値はgo()（AI_GREETING_HTML）が起動直後に必ず上書きするので、ここは
                  JS実行前の一瞬だけ見える保険。文言はJS側と揃えてある。 -->
             <div class="log" id="ai-log">
@@ -3980,35 +3954,6 @@
     });
   }
 
-  /* AIペインのタブを liveState.threads から描画する。scripted時
-     （liveState===null）は静的マークアップ（「メイン」＋「＋」）のまま
-     何もしない。 */
-  function renderAiTabs() {
-    if (!liveState) return;
-    const box = $("ai-tabs");
-    box.innerHTML = "";
-    liveState.threads.forEach((t) => {
-      const b = document.createElement("button");
-      b.className = "tab" + (t.threadId === liveState.activeThreadId ? " current" : "");
-      b.textContent = t.title;
-      b.addEventListener("click", () => {
-        if (liveState.activeThreadId === t.threadId) return;
-        liveState.activeThreadId = t.threadId;
-        renderAiTabs();
-        renderAiLogFromThread(t.threadId);
-      });
-      box.appendChild(b);
-    });
-    const add = document.createElement("button");
-    add.className = "tab add";
-    add.title = "スレッドを追加";
-    add.textContent = "＋";
-    add.addEventListener("click", createLiveThread);
-    box.appendChild(add);
-    // タブは作り直されるので、＋の disabled もここで付け直す。
-    updateAiInputLock();
-  }
-
   /* #ai-log を liveState のスレッド履歴から再描画する。role: user→「あなた」/mine、
      assistant→「AI」。本文は esc() してから改行を <br> へ変換する。 */
   function renderAiLogFromThread(threadId) {
@@ -4025,12 +3970,11 @@
   }
 
   /* LIVE時、revealAI() から呼ぶ。#ai-log は go() が毎回空にするため、
-     パネルが表示されるたび liveState から復元し直す——会話はステージを
-     またいで継続する（新しいthread/messageはsendAiLive/createLiveThreadが
-     liveStateへ書き戻す）。 */
+     パネルが表示されるたび liveState から復元し直す——描くのは今いる
+     ステージのスレッドだけ（新しいthread/messageはsendAiLive/
+     activateStageThread が liveStateへ書き戻す）。 */
   function restoreLiveAiPane() {
     if (!liveState) return;
-    renderAiTabs();
     renderAiLogFromThread(liveState.activeThreadId);
   }
 
@@ -4040,10 +3984,12 @@
   /* ステージが変わったらAIの会話を仕切り直す。前のステージの文脈を引きずっ */
   /* たまま次の課題を投げると、AIが前の話に引っ張られる。ただし履歴は消さ  */
   /* ない——サーバ保存は予備PCからの復帰の柱（進行台本§5-2）なので、削除で */
-  /* はなく「スレッドを分ける」で実現する。古いタブは残るので見返せる。    */
+  /* はなく「スレッドを分ける」で実現する。                                */
+  /* 画面に出すのは今いるステージのスレッド1本だけ（2026-09-05ユーザー決定）*/
+  /* ——前のステージの会話はサーバに残るが、UIからは辿れない。             */
   /*                                                                    */
   /* 同名スレッドが既にあれば作らず切り替えるだけにする——devbarのジャンプ  */
-  /* やリロード復帰のたびに「Stage 2」が増殖してタブが埋まるのを防ぐ。     */
+  /* やリロード復帰のたびに「Stage 2」が増殖してサーバの上限を食うのを防ぐ。*/
   /* Stage 1 は右のAIパネルを持たない（下書きボタンだけ）ので対象外で、    */
   /* 入室時の「メイン」スレッドがそのまま使われる。                        */
   /* ------------------------------------------------------------------ */
@@ -4057,9 +4003,9 @@
   const stageThreadCreating = new Set();
 
   let aiSending = false;
-  /* スレッド作成の飛行中カウント。ステージ入場の自動スレッド（activateStageThread）と
-     ＋ボタン（createLiveThread）が同時に走りうるので、真偽値ではなく数で持つ
-     ——片方の完了でもう片方の分までロックを外さないため。 */
+  /* スレッド作成の飛行中カウント。ステージ入場の自動スレッド（activateStageThread）は
+     連続したジャンプで重なりうるので、真偽値ではなく数で持つ——片方の完了で
+     もう片方の分までロックを外さないため。 */
   let aiThreadPending = 0;
 
   /* 入力欄と送信ボタンのロックを1箇所で決める。送信中（aiSending）に加えて
@@ -4076,10 +4022,6 @@
       // 送信中は従来どおり文言を足さない（吹き出しで「入力中…」が出ている）。
       input.placeholder = !aiSending && aiThreadPending > 0 ? "スレッドを準備しています…" : "";
     }
-    // ＋ボタンも作成中は塞ぐ。連打すると同じ名前のスレッドが何本も生まれ、
-    // さらに応答の到着順が入れ替わると古いsnapshotで手元のタブが巻き戻る。
-    const add = document.querySelector("#ai-tabs .tab.add");
-    if (add) add.disabled = aiThreadPending > 0;
   }
 
   /* サーバのチャットsnapshotを取り込む。今持っている revision より古い応答は捨てる
@@ -4139,7 +4081,6 @@
     const existing = liveState.threads.find((t) => t.title === title);
     if (existing) {
       liveState.activeThreadId = existing.threadId;
-      renderAiTabs();
       renderAiLogFromThread(existing.threadId);
       return;
     }
@@ -4154,8 +4095,8 @@
       method: "POST",
       headers: { "Content-Type": "application/json" },
       // kind:"stage" はステージ入場で自動に作られる枠。サーバは stage(8件)と
-      // manual(25件)を独立に数えるので、参加者が＋で足したスレッドの数に関係なく、
-      // ステージぶんは必ず作れる。
+      // manual(25件)を独立に数えるので、manual枠の本数に関係なくステージぶんは
+      // 必ず作れる（UIから manual を作る導線は 2026-09-05 に廃止した）。
       body: JSON.stringify({
         type: "create-thread",
         commandId: threadCreateCommand.idFor(title, "stage", ""),
@@ -4173,44 +4114,7 @@
     // 待っている間に別ステージへ移っていたら、そちらの切り替えを上書きしない。
     if (!created || view !== id) return;
     liveState.activeThreadId = created.threadId;
-    renderAiTabs();
     renderAiLogFromThread(created.threadId);
-  }
-
-  async function createLiveThread() {
-    if (!liveState) return;
-    const title = "スレッド" + (liveState.threads.length + 1);
-    // ＋ボタンにも同じ穴がある——作成前に送ると、切り替わる前のスレッドへ入る。
-    aiThreadPending++;
-    updateAiInputLock();
-    const res = await liveFetch("/api/teams/" + liveState.teamCode + "/chat/threads", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      // kind:"manual" は参加者が＋で足す枠（上限25件）。省略時もmanual扱いだが、
-      // stage側と対で読めるよう明示する。
-      body: JSON.stringify({
-        type: "create-thread",
-        commandId: threadCreateCommand.idFor(title, "manual", ""),
-        title,
-        kind: "manual",
-      }),
-    });
-    aiThreadPending--;
-    updateAiInputLock();   // 成功・失敗のどちらでも必ず解除する
-    if (res.status === 409) {
-      // 上限に当たった。黙って何も起きないと「＋が壊れている」ように見えるので、
-      // 理由だけは告げる（進行は止めない——今のスレッドでそのまま会話できる）。
-      aiBubble("システム", esc((res.body && res.body.message) || "スレッドは 25 件までです。"));
-      return;
-    }
-    if (!liveState) return;
-    if (!(await settleThreadCreate(res, title, "manual"))) return;
-    const created = liveState.threads.find((t) => t.title === title);
-    liveState.activeThreadId = created
-      ? created.threadId
-      : liveState.threads[liveState.threads.length - 1].threadId;
-    renderAiTabs();
-    renderAiLogFromThread(liveState.activeThreadId);
   }
 
   function aiPlaceholderBubble() {
@@ -4284,7 +4188,7 @@
      （2026-08-22 修正）。
 
      キーは threadId・promptProfile・本文の3つを繋いだもの。本文だけを見ていた頃は、
-     別スレッド（Stage 2 のタブと Stage 3 のタブ）や別ステージ（promptProfile が
+     別スレッド（Stage 2 のスレッドと Stage 3 のスレッド）や別ステージ（promptProfile が
      "default" と "s3"）へ同じ文面を送ると同じ commandId が再利用され、2通目が
      「処理済みの再送」と見なされて片方が消えていた。同じ宛先へ同じ文面を送り直した
      ときだけIDを再利用する、が正しい単位。
@@ -4295,8 +4199,8 @@
 
      未確定の試行は1件ではなくMapで持つ。1枠だけだと、スレッドAで失敗したあと
      スレッドBへ送った時点でAのIDが上書きされ、Aの原文を送り直しても別コマンドに
-     なって発言が二重に積まれる。参加者は詰まったスレッドを放って別の話題を
-     始めるので、これは普通に起きる。上限を超えたら古い順に捨てる——20件あれば
+     なって発言が二重に積まれる。詰まったまま次のステージへ進めばスレッドも
+     変わるので、これは普通に起きる。上限を超えたら古い順に捨てる——20件あれば
      1ステージ分の試行錯誤には足り、際限なく抱えても意味が無い。 */
   const PENDING_COMMAND_LIMIT = 20;
 
@@ -4451,7 +4355,6 @@
     if (!liveState.threads.some((t) => t.threadId === liveState.activeThreadId)) {
       liveState.activeThreadId = liveState.threads[0].threadId;
     }
-    renderAiTabs();
     renderAiLogFromThread(liveState.activeThreadId);
   }
 
@@ -4460,8 +4363,8 @@
     updateAiInputLock();
     // 再送用IDのキーにも入るので、送信本文と同じ一箇所から決める。
     const chatProfile = view === "s3" ? "s3" : "default";
-    // 応答が返る頃にはタブが切り替わっているかもしれないので、宛先は送信時点で
-    // 固定する（このキーで解決済みのIDを消す）。
+    // 応答が返る頃には別ステージのスレッドへ切り替わっているかもしれないので、
+    // 宛先は送信時点で固定する（このキーで解決済みのIDを消す）。
     const sentThreadId = liveState.activeThreadId;
     const placeholder = aiPlaceholderBubble();
     const res = await liveFetch("/api/teams/" + liveState.teamCode + "/chat/messages", {
@@ -4484,7 +4387,6 @@
       chatSendCommand.clear(sentThreadId, chatProfile, text);   // 確定したので破棄
       applyChatSnapshot(res.body.snapshot);
       placeholder.querySelector(".body").innerHTML = esc(res.body.assistant.text).replace(/\n/g, "<br>");
-      renderAiTabs();
       return;
     }
     placeholder.remove();   // プレースホルダは残留させない（差し替え or 削除のどちらか必ず）
@@ -4636,7 +4538,7 @@
     // （s2ScriptedTable）へ落とす——理由は S2_SCRIPTED_LEAD 直上のコメント。
     // ステージ別スレッド（activateStageThread）は s2 でも従来どおり作るが、
     // 実APIを叩かなくなったぶん Stage 2 の会話はサーバへ保存されず、リロード
-    // すると Stage 2 タブの履歴は空に戻る。台本応答は何度でも同じものが出る
+    // すると Stage 2 のスレッドの履歴は空に戻る。台本応答は何度でも同じものが出る
     // ので復帰に支障はない（s5 の画像フローと同じ扱い）。
     // final も入っていない（2026-08-22）——右ペインごと畳むので、そもそも
     // ここへ来る導線が無い。ガードに残すと「Finalでも送れる」と読める。
@@ -5474,10 +5376,9 @@
   const s1DraftCommand = makePendingCommand("s1draft");
 
   // s1Draftの実Worker経路。メインスレッド（liveState.activeThreadId）をそのまま
-  // 使う——Stage1専用のスレッドは作らない。Stage2以降のチャットUIに下書き依頼の
-  // 履歴が残ることになるが、「チームのAI契約は1つ、同じAIと会話している」という
-  // 世界観の範囲内として許容する（判断に迷った点。専用スレッドを切ると、逆に
-  // Stage2でcreateLiveThreadと役割が被り、どちらが「メイン」か分かりにくくなる）。
+  // 使う——Stage1専用のスレッドは作らない。Stage2以降はそのステージのスレッドだけ
+  // を映すので、下書き依頼の履歴はチャットUIには現れないが、サーバには残る
+  // （復帰の柱＝進行台本§5-2）。
   async function s1DraftLive(it, hasCtx) {
     if (s1DraftBusy) return;
     s1DraftBusy = true;
