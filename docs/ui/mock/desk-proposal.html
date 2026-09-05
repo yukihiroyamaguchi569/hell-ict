@@ -276,7 +276,6 @@ html[data-fs="3"] .case-row.unread::before, html[data-ai="wide"] .case-row.unrea
 const S2_COLS = ["患者ID", "病棟", "採取日", "MRSA結果", "発熱", "備考"];
 const S2_HEAD_DIRTY = ["患者ＩＤ", "びょうとう", "採取日", "MRSA", "発熱", "メモ"];
 const S2_SHEET_ROWS = [
-  ["※このファイルは5A病棟師長が個人的につけている記録です。正式なものではありません。", "", "", "", "", ""],
   ["5A病棟の状況　7月分", "", "", "", "", ""],
   ["００１", "5A病棟", "7/3", "陽性", "あり", "個室へ"],
   ["id-2", "", "7月3日", "(+)", "38.2℃", ""],
@@ -544,7 +543,7 @@ function renderLog() {
 }
 function tableReply() {
   const table = `<table><thead><tr>${S2_COLS.map((h) => `<th>${h}</th>`).join("")}</tr></thead><tbody>${S2_CLEAN.map((r) => `<tr>${r.map((v) => `<td>${esc(v)}</td>`).join("")}</tr>`).join("")}</tbody></table>`;
-  return { rows: S2_CLEAN, html: `整形しました。日付はISO形式、結果は陽性/陰性、注釈行と空行は除きました（20行）。<div class="send-to"><button data-send-grid>回答欄へ送る</button><small>「至急！！MRSAのやつまとめて」のグリッドに流し込みます</small></div><div class="tbl">` + table + `</div>` };
+  return { rows: S2_CLEAN, html: `整形しました。日付はISO形式、結果は陽性/陰性、タイトル行と空行は除きました（20行）。<div class="send-to"><button data-send-grid>回答欄へ送る</button><small>「至急！！MRSAのやつまとめて」のグリッドに流し込みます</small></div><div class="tbl">` + table + `</div>` };
 }
 function latestTable() {
   for (let i = state.log.length - 1; i >= 0; i--) if (state.log[i].rows) return state.log[i].rows;
