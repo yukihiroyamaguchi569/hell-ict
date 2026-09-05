@@ -339,6 +339,15 @@
    橙のまま——感嘆符もアイコンも音も付けない。「直せ」であって「間違えた」ではない。 */
 .grid td.hot { background: color-mix(in srgb, var(--warn) 22%, transparent); }
 .grid td.hot input { font-weight: 700; }
+/* ［グリッドへ送る］で流し込んだ直後の一瞬だけ光らせる。判定NGの .hot（橙）
+   は流用しない——あれは「直せ」の色で、取り込んだ全セルを橙にすると全部が
+   間違いに見える。--ok の緑で「ここに入った」だけを指す（accent は alert 時に
+   赤なので、成功の合図に使うと失敗に見える）。 */
+@keyframes gridLanded {
+  from { background: color-mix(in srgb, var(--ok) 24%, transparent); }
+  to   { background: transparent; }
+}
+.grid.landed { animation: gridLanded .9s ease-out; }
 .grid .n { width: 1%; white-space: nowrap; background: var(--surface-2); }
 .grid .n button {
   background: transparent; border: 0; color: var(--fg-muted);
@@ -474,6 +483,14 @@
   margin: 8px 0 0; padding: 9px 10px; background: var(--ai-surface-2);
   font-family: var(--font-num); font-size: 13px; line-height: 1.75;
   white-space: pre; overflow-x: auto; tab-size: 10; -moz-tab-size: 10;
+}
+/* 返答の表をそのままグリッドへ流し込むボタン。導入文の直後＝表の上に置く
+   ——表が20〜30行あるので末尾に置くと吹き出しの下へ隠れて見つからない。
+   nowrap は、横並びになる吹き出しの中でボタンが縦書きに潰れないため。 */
+.bubble .to-grid {
+  display: block; margin: 9px 0 0; border: 0; background: var(--ai-fg); color: #fff;
+  font-family: var(--font-ui); font-size: 14px; font-weight: 700; padding: 9px 15px;
+  white-space: nowrap;
 }
 .fold {
   font-family: var(--font-num); font-size: 13px; color: var(--ai-muted);
@@ -4568,10 +4585,10 @@
      行数の基準は expectedRows() と同じ s2AddLanded（「取り込んだか」ではなく
      「着弾したか」）に揃える。ここを s2AddTaken にすると、締切超過後にAIへ
      頼んだチームだけ20行の表を受け取り、30行を期待する判定と食い違う。
-     代わりに、着弾済みで未取り込みのチームはこの表を貼るだけで［作業エリアに
+     代わりに、着弾済みで未取り込みのチームはこの表を送る（貼る）だけで［作業エリアに
      追加］を踏まずに行数が揃う——締切超過の罰が薄まるが、当日の詰まりを
      避けるほうを優先した（罰の本体は、遅れたぶん整形対象が10行増えること）。 */
-  const S2_SCRIPTED_LEAD = "整形しました。以下をコピーして、グリッドに貼り付けてください。";
+  const S2_SCRIPTED_LEAD = "整形しました。「グリッドへ送る」で作業エリアに入ります。コピーして貼り付けることもできます。";
   function s2ScriptedTable() {
     const src = S2_SHEET_ROWS.concat(s2AddLanded ? S2_ADDENDUM_ROWS : []);
     return [S2_COLS].concat(normalizeRows(src)).map((r) => r.join("\t")).join("\n");
@@ -4663,7 +4680,12 @@
         // 同じ整形結果を返す。当日、依頼の書き方で応答が出ないほうが事故なので、
         // 発動条件は付けない。<pre class="tsv"> はタブと改行を保つための器で、
         // これが無いとコピーしてもグリッドが表として読めない（CSS側コメント）。
-        aiBubble("AI", esc(S2_SCRIPTED_LEAD)
+        // ボタンは導入文と同じ塊に入れて表より先へ置く。吹き出しの .body は
+        // レイアウト用の .body（display:flex）と同じ規則を拾って横並びになるので、
+        // 素で足すと表の隣に細長い3列目ができる。表の後ろへ回すと、20〜30行の
+        // 表の下へ流れて見つからない。
+        aiBubble("AI", "<div>" + esc(S2_SCRIPTED_LEAD)
+          + '<button class="to-grid" type="button">グリッドへ送る</button></div>'
           + '<pre class="tsv">' + esc(s2ScriptedTable()) + "</pre>");
       } else if (view === "s3") {
         if (S3_TRAP_TRIGGER.test(text)) {
@@ -4686,6 +4708,16 @@
     }, 1100);
   }
   $("ai-send").addEventListener("click", sendAI);
+  // ［グリッドへ送る］はイベント委譲で拾う。吹き出しは aiBubble が innerHTML で
+  // 作るので、生成側へリスナー配線を持ち込まずに済む。
+  $("ai-log").addEventListener("click", (e) => {
+    const btn = e.target.closest(".to-grid");
+    if (!btn) return;
+    // 他ステージへ移った後にログを遡って押されても、そこにグリッドは無い。
+    if (view !== "s2") return;
+    const pre = btn.closest(".body").querySelector(".tsv");
+    if (pre) s2SendTableToGrid(pre.textContent);
+  });
   $("ai-input").addEventListener("keydown", (e) => {
     if (imeComposing(e)) return;   // 変換確定のEnterで送信しない（imeComposing のコメント）
     if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); sendAI(); }
@@ -5895,6 +5927,32 @@
     if ($("paste-bar")) $("paste-bar").classList.add("hide");
     if ($("paste-bar")) $("paste-bar").classList.remove("err");
     if ($("btn-paste-go")) $("btn-paste-go").classList.remove("hide");
+  }
+
+  /* AIの返答の表を［グリッドへ送る］で流し込む。コピー＆貼り戻しの工程を省く
+     だけで、読み取りは parseTable()、確認は貼り付け用の確認バーをそのまま使う
+     ——別のパーサや別の確認UIを作らない。 */
+  function s2SendTableToGrid(text) {
+    const parsed = parseTable(text);
+    if (!parsed || parsed.error) return;   // 台本の表は必ず読めるので、ここは保険
+    const g = $("grid");
+    if (!g) return;
+    g.scrollIntoView({ block: "nearest", behavior: "smooth" });
+    // 全セルが空＝失うものが無いときだけ即時反映。1文字でも手が入っていれば確認させる。
+    if (s2Grid.every((row) => row.every((v) => v.trim() === ""))) {
+      s2Grid = parsed.rows;
+      s2Hot = [];
+      drawGrid();
+      g.classList.remove("landed");
+      void g.offsetWidth;   // 連続で送ったときもアニメーションを頭から再生させる
+      g.classList.add("landed");
+      return;
+    }
+    pendingPaste = parsed.rows;
+    $("paste-t").textContent = "AIの表 " + parsed.rows.length + "行 × " + S2_COLS.length + "列 で置き換えます";
+    $("paste-bar").classList.remove("err");
+    $("btn-paste-go").classList.remove("hide");
+    $("paste-bar").classList.remove("hide");
   }
 
   /* --- グリッドの描画 ------------------------------------------------- */
