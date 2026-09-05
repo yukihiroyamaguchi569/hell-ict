@@ -4602,6 +4602,14 @@
     d.innerHTML = '<div class="who">' + who + '</div><div class="body">' + html + "</div>";
     log.appendChild(d);
     log.scrollTop = log.scrollHeight;
+    return d;
+  }
+  /* 末尾ではなく、その吹き出しの先頭が見える位置へログを送る。Stage 2 の返答は
+     20〜30行の表で右ペインより高く、末尾へ送ると先頭に置いた［グリッドへ送る］と
+     導入文が上へ隠れる（＝ボタンを見つけられない）。padding ぶん少し上に余白を残す。 */
+  function scrollBubbleToTop(bubble) {
+    const log = $("ai-log");
+    log.scrollTop += bubble.getBoundingClientRect().top - log.getBoundingClientRect().top - 12;
   }
   function sendAI() {
     // Stage 1/2 では送信ボタン・textarea に何のリスナーも無かった（完全な
@@ -4684,9 +4692,9 @@
         // レイアウト用の .body（display:flex）と同じ規則を拾って横並びになるので、
         // 素で足すと表の隣に細長い3列目ができる。表の後ろへ回すと、20〜30行の
         // 表の下へ流れて見つからない。
-        aiBubble("AI", "<div>" + esc(S2_SCRIPTED_LEAD)
+        scrollBubbleToTop(aiBubble("AI", "<div>" + esc(S2_SCRIPTED_LEAD)
           + '<button class="to-grid" type="button">グリッドへ送る</button></div>'
-          + '<pre class="tsv">' + esc(s2ScriptedTable()) + "</pre>");
+          + '<pre class="tsv">' + esc(s2ScriptedTable()) + "</pre>"));
       } else if (view === "s3") {
         if (S3_TRAP_TRIGGER.test(text)) {
           aiBubble("AI", S3_TRAP_LIE.map(esc).join("<br>"));
