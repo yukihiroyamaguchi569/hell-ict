@@ -45,6 +45,13 @@ const resetByCode = (teamCode: string, token: string | null = ADMIN_TOKEN): Prom
 const resetByPublicId = (publicId: string, token: string | null = ADMIN_TOKEN): Promise<Response> =>
   gmReset(`/api/gm/teams/by-public-id/${publicId}/reset`, token);
 
+/** 入室応答のリセット世代。クライアントはこれを保持して以後の書き込みへ添える。 */
+const joinGeneration = async (teamCode: string): Promise<number> => {
+  const response = await session(teamCode);
+  expect(response.status).toBe(200);
+  return z.object({ generation: z.number() }).parse(await response.json()).generation;
+};
+
 const progressEvent = (teamCode: string, overrides: Record<string, unknown> = {}): unknown => ({
   teamCode,
   teamName: "感染対策室",
@@ -105,12 +112,14 @@ const progressKinds = async (teamCode: string): Promise<string[]> => {
 const saveCheckpoint = (
   teamCode: string,
   commandId: string,
-  expectedRevision = 0,
+  options: { expectedRevision?: number; generation?: number; flush?: boolean } = {},
 ): Promise<Response> =>
   postJson(`/api/teams/${teamCode}/checkpoint`, {
     type: "save-checkpoint",
     commandId,
-    expectedRevision,
+    expectedRevision: options.expectedRevision ?? 0,
+    ...(options.generation === undefined ? {} : { generation: options.generation }),
+    ...(options.flush === undefined ? {} : { flush: options.flush }),
     body: {
       view: "s3",
       pos: 3,
@@ -280,8 +289,9 @@ describe("GMリセット: リセットの中身", () => {
       expect((await saveCheckpoint(teamCode, commandId)).status).toBe(200);
       expect((await resetByCode(teamCode)).status).toBe(200);
 
-      // 台帳が空なので、同じcommandIdの保存が「適用済み」扱いにならず新規で通る。
-      expect((await saveCheckpoint(teamCode, commandId)).status).toBe(200);
+      // 台帳が空なので、同じcommandIdの保存が「適用済み」扱いにならず新規で通る
+      // （リセットで世代が1つ進むので、入り直した端末の世代を添える）。
+      expect((await saveCheckpoint(teamCode, commandId, { generation: 1 })).status).toBe(200);
       expect(await checkpointOf(teamCode)).toMatchObject({ revision: 1, body: { pos: 3 } });
     });
   });
@@ -336,7 +346,10 @@ describe("GMリセット: リセットの中身", () => {
       await session(teamCode);
       await postJson("/api/progress", progressEvent(teamCode));
       expect((await resetByCode(teamCode)).status).toBe(200);
-      await postJson("/api/progress", progressEvent(teamCode, { pos: 1, view: "s1" }));
+      await postJson(
+        "/api/progress",
+        progressEvent(teamCode, { pos: 1, view: "s1", generation: 1 }),
+      );
       await expect(posOf(teamCode)).resolves.toBe(1);
     });
   });
@@ -380,6 +393,119 @@ describe("GMリセット: publicId版", () => {
         expect((await resetByPublicId(publicId)).status).toBe(404);
       });
       await expect(progressKinds("320002")).resolves.toEqual(["clear"]);
+    });
+  });
+});
+
+describe("GMリセット: リセット世代", () => {
+  it("入室応答に世代が載り、リセットのたびに1つ進む", async () => {
+    await withEnv({ ADMIN_TOKEN }, async () => {
+      const teamCode = "330001";
+      await expect(joinGeneration(teamCode)).resolves.toBe(0);
+      expect((await resetByCode(teamCode)).status).toBe(200);
+      await expect(joinGeneration(teamCode)).resolves.toBe(1);
+      expect((await resetByCode(teamCode)).status).toBe(200);
+      await expect(joinGeneration(teamCode)).resolves.toBe(2);
+    });
+  });
+
+  it("リセット前の世代で送った進捗は409で拒否され、D1に1行も増えない", async () => {
+    await withEnv({ ADMIN_TOKEN }, async () => {
+      const teamCode = "330002";
+      const generation = await joinGeneration(teamCode);
+      await postJson("/api/progress", progressEvent(teamCode, { generation }));
+      expect((await resetByCode(teamCode)).status).toBe(200);
+
+      // リロードしていない古いタブからの、遅れて届いた位置イベント。
+      const stale = await postJson("/api/progress", progressEvent(teamCode, { generation }));
+      expect(stale.status).toBe(409);
+      await expect(stale.json()).resolves.toMatchObject({ code: "stale-generation" });
+      await expect(progressKinds(teamCode)).resolves.toEqual(["clear", "reset"]);
+      // 帯の位置も戻ったまま——これが復活するのが元の不具合だった。
+      await expect(posOf(teamCode)).resolves.toBe(0);
+    });
+  });
+
+  it("世代を省いた進捗は0として扱われ、リセット後は拒否される", async () => {
+    await withEnv({ ADMIN_TOKEN }, async () => {
+      const teamCode = "330003";
+      // リセット前（世代0）は省略しても通る。古いクライアントとの後方互換。
+      expect((await postJson("/api/progress", progressEvent(teamCode))).status).toBe(200);
+      expect((await resetByCode(teamCode)).status).toBe(200);
+      const stale = await postJson("/api/progress", progressEvent(teamCode));
+      expect(stale.status).toBe(409);
+      await expect(progressKinds(teamCode)).resolves.toEqual(["clear", "reset"]);
+    });
+  });
+
+  it("リセット前の世代のチェックポイント保存は、通常もflushも409で何も書かない", async () => {
+    await withEnv({ ADMIN_TOKEN }, async () => {
+      const teamCode = "330004";
+      const generation = await joinGeneration(teamCode);
+      expect(
+        (await saveCheckpoint(teamCode, "00000000-0000-4000-8000-000000000401", { generation }))
+          .status,
+      ).toBe(200);
+      expect((await resetByCode(teamCode)).status).toBe(200);
+
+      const stale = await saveCheckpoint(teamCode, "00000000-0000-4000-8000-000000000402", {
+        generation,
+      });
+      expect(stale.status).toBe(409);
+      await expect(stale.json()).resolves.toMatchObject({ code: "stale-generation" });
+
+      // CASを外すflushも同じく弾く。ここを通すと、古いbodyが「初回保存」として蘇る。
+      const staleFlush = await saveCheckpoint(teamCode, "00000000-0000-4000-8000-000000000403", {
+        generation,
+        flush: true,
+      });
+      expect(staleFlush.status).toBe(409);
+      await expect(staleFlush.json()).resolves.toMatchObject({ code: "stale-generation" });
+
+      // どちらもDurable Objectへ1行も書いていない。
+      expect(await checkpointOf(teamCode)).toBeNull();
+    });
+  });
+
+  it("リセット前の世代のcommandIdを再送しても、台帳の再生で状態が戻らない", async () => {
+    await withEnv({ ADMIN_TOKEN }, async () => {
+      const teamCode = "330005";
+      const commandId = "00000000-0000-4000-8000-000000000501";
+      const generation = await joinGeneration(teamCode);
+      expect((await saveCheckpoint(teamCode, commandId, { generation })).status).toBe(200);
+      expect((await resetByCode(teamCode)).status).toBe(200);
+      expect((await saveCheckpoint(teamCode, commandId, { generation })).status).toBe(409);
+      expect(await checkpointOf(teamCode)).toBeNull();
+    });
+  });
+
+  it("入り直して新しい世代を使えば、進捗もチェックポイントも通る", async () => {
+    await withEnv({ ADMIN_TOKEN }, async () => {
+      const teamCode = "330006";
+      await session(teamCode);
+      expect((await resetByCode(teamCode)).status).toBe(200);
+
+      const generation = await joinGeneration(teamCode);
+      expect(generation).toBe(1);
+      expect(
+        (await postJson("/api/progress", progressEvent(teamCode, { pos: 2, generation }))).status,
+      ).toBe(200);
+      expect(
+        (await saveCheckpoint(teamCode, "00000000-0000-4000-8000-000000000601", { generation }))
+          .status,
+      ).toBe(200);
+      await expect(posOf(teamCode)).resolves.toBe(2);
+      expect(await checkpointOf(teamCode)).not.toBeNull();
+    });
+  });
+
+  it("先の世代を騙っても通らない（照合は一致のみ）", async () => {
+    await withEnv({ ADMIN_TOKEN }, async () => {
+      const teamCode = "330007";
+      await session(teamCode);
+      const ahead = await postJson("/api/progress", progressEvent(teamCode, { generation: 9 }));
+      expect(ahead.status).toBe(409);
+      await expect(progressKinds(teamCode)).resolves.toEqual([]);
     });
   });
 });
