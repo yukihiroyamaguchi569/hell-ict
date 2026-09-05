@@ -128,7 +128,7 @@ type ConflictReply = { conflict: true };
  * 同じく、何も書かずに拒否する——ここを通すと、古いタブのステージ遷移やスレッド作成が
  * 初期化したはずのチーム状態と会話を作り直してしまう。冪等台帳にも触れない。
  */
-type StaleGenerationReply = { staleGeneration: true };
+export type StaleGenerationReply = { staleGeneration: true };
 type UnknownThreadReply = { unknownThread: true };
 
 /** チェックポイント保存の拒否理由。Workerが理由ごとに409の文言を分ける。 */
@@ -748,7 +748,15 @@ export class TeamRoom extends DurableObject<Env> {
    * 無く、1チームがD1のactivity_eventsを無制限に増やせた。チャットとは別の枠で
    * 数える（同じテーブル・同じ固定窓、接頭辞だけ違う）。
    */
-  async consumeActivityAttempt(nowMs: unknown, limit: unknown): Promise<RateLimitVerdict> {
+  async consumeActivityAttempt(
+    nowMs: unknown,
+    limit: unknown,
+    generationInput: unknown,
+  ): Promise<RateLimitVerdict | StaleGenerationReply> {
+    // 枠を減らす前に世代を見る。リセット前のタブが記録を積み続けると、入り直した
+    // チームの活動ログの枠を食い潰す（D1の行も増える）。
+    if (resetGenerationSchema.parse(generationInput) !== this.readGeneration())
+      return { staleGeneration: true };
     const retryAfterSeconds = this.consumeRateLimit(
       "activity",
       nowMsSchema.parse(nowMs),

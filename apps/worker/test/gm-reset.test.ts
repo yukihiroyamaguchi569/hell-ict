@@ -868,3 +868,49 @@ describe("GMリセット: チェックポイントのPIIゲートと世代", () 
     });
   });
 });
+
+describe("GMリセット: 活動ログの世代", () => {
+  const activity = (teamCode: string, commandId: string, generation: number): Promise<Response> =>
+    postJson(`/api/teams/${teamCode}/activity`, {
+      commandId,
+      kind: "submit.s3",
+      view: "s3",
+      text: "提出しました",
+      generation,
+      clientAt: "2026-09-06T02:05:00.000Z",
+    });
+
+  it("古い世代の活動ログは409で、D1にも枠にも触れない", async () => {
+    await withEnv({ ADMIN_TOKEN }, async () => {
+      const teamCode = "410001";
+      const generation = await joinGeneration(teamCode);
+      expect(
+        (await activity(teamCode, "00000000-0000-4000-8000-000000001401", generation)).status,
+      ).toBe(200);
+      expect((await resetByCode(teamCode)).status).toBe(200);
+
+      const stale = await activity(teamCode, "00000000-0000-4000-8000-000000001402", generation);
+      expect(stale.status).toBe(409);
+      await expect(stale.json()).resolves.toMatchObject({ code: "stale-generation" });
+
+      // 過去の行は残り、gm.resetが増えただけ。古いタブの記録は積まれていない。
+      await expect(activityKinds(teamCode)).resolves.toEqual(["submit.s3", "gm.reset"]);
+      // 枠も消費しない。連投で入り直したチームの記録の枠を削れない。
+      await expect(ledgerRows(teamCode, "rate_limit")).resolves.toBe(0);
+    });
+  });
+
+  it("入り直した世代の活動ログは通る", async () => {
+    await withEnv({ ADMIN_TOKEN }, async () => {
+      const teamCode = "410002";
+      await session(teamCode);
+      expect((await resetByCode(teamCode)).status).toBe(200);
+      const generation = await joinGeneration(teamCode);
+      expect(generation).toBe(1);
+      expect(
+        (await activity(teamCode, "00000000-0000-4000-8000-000000001403", generation)).status,
+      ).toBe(200);
+      await expect(activityKinds(teamCode)).resolves.toEqual(["gm.reset", "submit.s3"]);
+    });
+  });
+});

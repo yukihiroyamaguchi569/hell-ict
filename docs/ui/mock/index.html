@@ -4101,6 +4101,7 @@
       commandId: crypto.randomUUID(),
       kind: kind,
       view: view,
+      generation: liveState.generation,
       clientAt: new Date().toISOString(),
     };
     if (typeof text === "string") payload.text = text.slice(0, ACTIVITY_TEXT_MAX);

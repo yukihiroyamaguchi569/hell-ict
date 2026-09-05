@@ -48,6 +48,7 @@ import {
   parseCommandIdsQuery,
   parseJson,
   PayloadTooLargeError,
+  staleGenerationResponse,
   teamCodeFromApiPath,
   teamCodeFromPath,
 } from "./http.js";
@@ -61,18 +62,6 @@ import { TeamRoom } from "./team-room.js";
 export { RaceLeaderboard, TeamRoom };
 
 const CHAT_TIMEOUT_MS = 20_000;
-
-/**
- * ゲームマスターのリセットより前に入室した端末からの書き込みへの応答。文言と
- * codeはチェックポイント（stale-generation）と揃える——クライアントはどの経路で
- * 受けても同じ扱い（保存を止めて再読み込みを促す）へ倒せばよい。
- */
-const staleGenerationResponse = (): Response =>
-  error(
-    "この端末の状態は古くなっています。ページを再読み込みしてください。",
-    409,
-    "stale-generation",
-  );
 
 const handleSession = async (request: Request, env: Env): Promise<Response> => {
   let teamCode: TeamCode;
