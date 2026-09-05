@@ -21,6 +21,18 @@ export const errorWithHeaders = (
     status,
     headers: { "content-type": "application/json", ...headers },
   });
+/**
+ * ゲームマスターのリセットより前に入室した端末からの書き込みへの応答。進捗・
+ * チェックポイント・会話・コマンド・活動ログのどの経路でも同じ文言とcodeで返す
+ * ——クライアントはどこで受けても同じ扱い（保存を止めて再読み込みを促す）へ倒せばよい。
+ */
+export const staleGenerationResponse = (): Response =>
+  error(
+    "この端末の状態は古くなっています。ページを再読み込みしてください。",
+    409,
+    "stale-generation",
+  );
+
 /** 本文が上限を超えたときにparseJsonが投げる。413へ変換するため他の失敗と区別する。 */
 export class PayloadTooLargeError extends Error {}
 

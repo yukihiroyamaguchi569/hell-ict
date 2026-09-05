@@ -19,6 +19,7 @@ import {
   redactChatMessageResultPii,
   redactPii,
   redactSnapshotPii,
+  resetGenerationSchema,
   saveCheckpointCommandSchema,
   sendMessageCommandSchema,
   teamCodeSchema,
@@ -49,9 +50,10 @@ import type {
 import { DurableObject } from "cloudflare:workers";
 import { z } from "zod";
 
+import type { ChatClaimToken } from "./guard.js";
 import {
   beginChatGateSchema,
-  claimGenerationSchema,
+  chatClaimTokenSchema,
   completeChatOutcomeSchema,
   fingerprintSchema,
   nowMsSchema,
@@ -122,6 +124,12 @@ export type CreateThreadOutcome =
   | { snapshot: ChatSnapshot; created: true; threadId: ChatThreadId };
 
 type ConflictReply = { conflict: true };
+/**
+ * ゲームマスターのリセットより前に入室した端末からの書き込み。進捗・チェックポイントと
+ * 同じく、何も書かずに拒否する——ここを通すと、古いタブのステージ遷移やスレッド作成が
+ * 初期化したはずのチーム状態と会話を作り直してしまう。冪等台帳にも触れない。
+ */
+export type StaleGenerationReply = { staleGeneration: true };
 type UnknownThreadReply = { unknownThread: true };
 
 /** チェックポイント保存の拒否理由。Workerが理由ごとに409の文言を分ける。 */
@@ -138,7 +146,7 @@ export type ThreadLimitReply = { threadLimit: true; max: number; kind: ChatThrea
 
 export type BeginChatMessageOutcome =
   | { kind: "already-processed"; result: ChatMessageResult }
-  | { kind: "pending"; history: AiMessage[]; claimGeneration: number }
+  | { kind: "pending"; history: AiMessage[]; token: ChatClaimToken }
   | { kind: "in-progress" }
   | { kind: "rate-limited"; retryAfterSeconds: number }
   // 同じcommandIdが別のスレッド／別のpromptProfileで使い回された。冪等再送ではなく
@@ -263,6 +271,32 @@ const assistantTextOf = (outcome: CompleteChatMessageOutcome): string | null => 
   return normalizeAssistantText(redactPii(normalized));
 };
 
+/**
+ * リセット世代の行。SQLiteは列の型を強制しないので読み出しも検証する。壊れていたら
+ * 例外にする——0へ倒すと、リセット済みのチームで古い端末の書き込みが復活しうる。
+ */
+const storedGenerationSchema = z.object({ value: z.number().int().nonnegative() });
+
+/**
+ * ゲームマスターのリセットで空にするテーブル。DDLで作っているもののうち`migrations`以外
+ * すべてを列挙する。テーブルを足したらここへも足す——消し忘れると、リセットしたつもりの
+ * チームに古い状態が残る。
+ *
+ * `migrations`だけ残すのは、完了印が指す移行が「台帳に残った平文PIIを潰す」ものであり、
+ * 行ごと消した後にもう一度走らせる意味が無いためである。
+ */
+const RESET_TABLES = [
+  "team_state",
+  "processed_commands",
+  "chat_state",
+  "processed_thread_commands",
+  "processed_message_commands",
+  "pending_message_commands",
+  "checkpoint_state",
+  "processed_checkpoint_commands",
+  "rate_limit",
+] as const;
+
 export class TeamRoom extends DurableObject<Env> {
   constructor(ctx: DurableObjectState, env: Env) {
     super(ctx, env);
@@ -310,13 +344,83 @@ export class TeamRoom extends DurableObject<Env> {
     this.ctx.storage.sql.exec(
       "CREATE TABLE IF NOT EXISTS rate_limit (bucket TEXT PRIMARY KEY, count INTEGER NOT NULL)",
     );
+    // リセット世代。RESET_TABLESに含めない——リセットのたびに消してしまうと、
+    // 「何回リセットしたか」が失われて古い端末を見分けられなくなる。
+    this.ctx.storage.sql.exec(
+      "CREATE TABLE IF NOT EXISTS reset_generation (id INTEGER PRIMARY KEY CHECK (id = 1), value INTEGER NOT NULL)",
+    );
+    this.ctx.storage.sql.exec("INSERT OR IGNORE INTO reset_generation (id, value) VALUES (1, 0)");
     this.ctx.storage.sql.exec("CREATE TABLE IF NOT EXISTS migrations (name TEXT PRIMARY KEY)");
   }
 
   // ---- チーム状態（P1Bから継続） ----
 
-  async join(teamCodeInput: unknown): Promise<TeamSnapshot> {
+  /**
+   * チーム状態をまるごと初期化する（ゲームマスター用。`POST /api/gm/teams/.../reset`）。
+   * テーブルは残して行だけ消すので、次の入室でjoinが初期snapshotを作り直し、
+   * 冪等台帳が空でもチャット送信・チェックポイント保存はそのまま通る。
+   *
+   * WebSocketのattachment（`serializeAttachment`）はソケットごとの値でSQLには無く、
+   * 次の接続で作り直される。開いたままの接続は古い画面を持ち続けるので、リセット後は
+   * 参加者にリロードさせる運用にする（docs/development-harness.md）。
+   *
+   * 削除は1つのトランザクションにまとめる。途中で落ちて「会話だけ消えて
+   * チェックポイントが残る」という中途半端な状態を作らない。
+   */
+  async resetTeam(teamCodeInput: unknown): Promise<{ readonly ok: true }> {
+    teamCodeSchema.parse(teamCodeInput);
+    this.ctx.storage.transactionSync(() => {
+      for (const table of RESET_TABLES) {
+        this.ctx.storage.sql.exec(`DELETE FROM ${table}`);
+      }
+      // 世代を進めるのも同じトランザクションで。行を消したのに世代が据え置かれると、
+      // リロードしていない端末の保存が「初回保存」として通り、状態が戻ってしまう。
+      this.ctx.storage.sql.exec("UPDATE reset_generation SET value = value + 1 WHERE id = 1");
+    });
+    return { ok: true };
+  }
+
+  /**
+   * 現在のリセット世代。入室（POST /api/session）の応答へ載せてクライアントへ渡す。
+   */
+  async resetGeneration(teamCodeInput: unknown): Promise<number> {
+    teamCodeSchema.parse(teamCodeInput);
+    return this.readGeneration();
+  }
+
+  /**
+   * 進捗記録（POST /api/progress）が、この端末の世代で書いてよいかを問う。
+   * チェックポイントと違いD1直書きなので、DOへ照合だけを尋ねる形にする。
+   */
+  async matchesResetGeneration(teamCodeInput: unknown, generationInput: unknown): Promise<boolean> {
+    teamCodeSchema.parse(teamCodeInput);
+    return resetGenerationSchema.parse(generationInput) === this.readGeneration();
+  }
+
+  private readGeneration(): number {
+    const row =
+      this.ctx.storage.sql.exec("SELECT value FROM reset_generation WHERE id = 1").toArray()[0] ??
+      null;
+    // 行が無いのはこのDOの初期化前だけで、その状態では世代0が正しい。
+    return row === null ? 0 : storedGenerationSchema.parse(row).value;
+  }
+
+  /**
+   * 入室。snapshotと世代を1回のRPCで返す——別々に呼ぶと、その2回の間にリセットが
+   * 入ったときに「リセット前のsnapshotとリセット後の世代」という、どちらとも
+   * 食い違う組をクライアントへ渡してしまう。DOは操作を直列に実行するので、
+   * 同じ同期区間で両方を読めばその隙間は生まれない。
+   */
+  async join(teamCodeInput: unknown): Promise<{ snapshot: TeamSnapshot; generation: number }> {
     const teamCode = teamCodeSchema.parse(teamCodeInput);
+    return { snapshot: this.joinSnapshot(teamCode), generation: this.readGeneration() };
+  }
+
+  /**
+   * チーム状態を読み、無ければ初期状態を作る。DO内から呼ぶ同期版で、世代は返さない
+   * ——`command()`とWebSocket配信が必要とするのはsnapshotだけである。
+   */
+  private joinSnapshot(teamCode: TeamCode): TeamSnapshot {
     const stored =
       this.ctx.storage.sql
         .exec<StoredState>("SELECT snapshot FROM team_state WHERE id = 1")
@@ -333,9 +437,12 @@ export class TeamRoom extends DurableObject<Env> {
   async command(
     teamCodeInput: unknown,
     commandInput: unknown,
-  ): Promise<CommandResult | ConflictReply> {
+  ): Promise<CommandResult | ConflictReply | StaleGenerationReply> {
     const teamCode = teamCodeSchema.parse(teamCodeInput);
     const command = teamCommandSchema.parse(commandInput);
+    // 世代の照合は冪等台帳より前。台帳を先に引くと、リセット前のcommandIdが
+    // 「処理済み」として古いsnapshotを返しうる。
+    if (command.generation !== this.readGeneration()) return { staleGeneration: true };
     const saved =
       this.ctx.storage.sql
         .exec<StoredCommand>(
@@ -348,7 +455,7 @@ export class TeamRoom extends DurableObject<Env> {
         commandResultSchema.parse(JSON.parse(saved.result) as unknown),
         command.commandId,
       );
-    const transition = transitionTeam(await this.join(teamCode), command);
+    const transition = transitionTeam(this.joinSnapshot(teamCode), command);
     if (!transition.ok) return { conflict: true };
     const pending = commandResultSchema.parse({
       snapshot: transition.snapshot,
@@ -509,10 +616,12 @@ export class TeamRoom extends DurableObject<Env> {
     teamCodeInput: unknown,
     commandInput: unknown,
     fingerprintInput: unknown,
-  ): Promise<CreateThreadOutcome | ThreadLimitReply | ConflictReply> {
+  ): Promise<CreateThreadOutcome | ThreadLimitReply | ConflictReply | StaleGenerationReply> {
     const fingerprint = fingerprintSchema.parse(fingerprintInput);
     const teamCode = teamCodeSchema.parse(teamCodeInput);
     const command: CreateThreadCommand = createThreadCommandSchema.parse(commandInput);
+    // 世代の照合は冪等台帳より前（command()と同じ理由）。
+    if (command.generation !== this.readGeneration()) return { staleGeneration: true };
     const saved = this.readProcessedThread(command.commandId);
     if (saved !== null) {
       // 同じcommandIdで別のタイトル・別のkindを送る取り違えは冪等再送ではない。
@@ -618,7 +727,15 @@ export class TeamRoom extends DurableObject<Env> {
    * 同じテーブル・同じ窓を使い、二重計上にならないよう「PII拒否経路はこれだけ、
    * 通常経路はbeginChatMessageだけ」が枠を消費する分担にする。
    */
-  async consumeChatAttempt(nowMs: unknown, limit: unknown): Promise<RateLimitVerdict> {
+  async consumeChatAttempt(
+    nowMs: unknown,
+    limit: unknown,
+    generationInput: unknown,
+  ): Promise<RateLimitVerdict | StaleGenerationReply> {
+    // 世代の照合は枠を減らす前。ここを通すと、リセット前のタブがPII入りの本文を
+    // 連投するだけで、入り直したチームの送信枠と活動ログを削れてしまう。
+    if (resetGenerationSchema.parse(generationInput) !== this.readGeneration())
+      return { staleGeneration: true };
     const retryAfterSeconds = this.consumeRateLimit(
       "chat",
       nowMsSchema.parse(nowMs),
@@ -632,7 +749,15 @@ export class TeamRoom extends DurableObject<Env> {
    * 無く、1チームがD1のactivity_eventsを無制限に増やせた。チャットとは別の枠で
    * 数える（同じテーブル・同じ固定窓、接頭辞だけ違う）。
    */
-  async consumeActivityAttempt(nowMs: unknown, limit: unknown): Promise<RateLimitVerdict> {
+  async consumeActivityAttempt(
+    nowMs: unknown,
+    limit: unknown,
+    generationInput: unknown,
+  ): Promise<RateLimitVerdict | StaleGenerationReply> {
+    // 枠を減らす前に世代を見る。リセット前のタブが記録を積み続けると、入り直した
+    // チームの活動ログの枠を食い潰す（D1の行も増える）。
+    if (resetGenerationSchema.parse(generationInput) !== this.readGeneration())
+      return { staleGeneration: true };
     const retryAfterSeconds = this.consumeRateLimit(
       "activity",
       nowMsSchema.parse(nowMs),
@@ -732,11 +857,13 @@ export class TeamRoom extends DurableObject<Env> {
     teamCodeInput: unknown,
     commandInput: unknown,
     gate: unknown,
-  ): Promise<BeginChatMessageOutcome | UnknownThreadReply> {
+  ): Promise<BeginChatMessageOutcome | UnknownThreadReply | StaleGenerationReply> {
     const teamCode = teamCodeSchema.parse(teamCodeInput);
     const command: SendMessageCommand = sendMessageCommandSchema.parse(commandInput);
     const validated = beginChatGateSchema.parse(gate);
     const { nowMs, limit, fingerprint } = validated;
+    // 世代の照合は台帳の参照とレート制限の消費より前。古いタブの送信で枠を減らさない。
+    if (command.generation !== this.readGeneration()) return { staleGeneration: true };
     this.expirePendingMessages();
     const processed = this.readProcessedMessage(command.commandId);
     if (processed !== null) return replayProcessed(processed, fingerprint);
@@ -781,7 +908,7 @@ export class TeamRoom extends DurableObject<Env> {
     return {
       kind: "pending",
       history: this.historyFor(appended.snapshot, command.threadId),
-      claimGeneration: 1,
+      token: { claimGeneration: 1, resetGeneration: this.readGeneration() },
     };
   }
 
@@ -839,7 +966,7 @@ export class TeamRoom extends DurableObject<Env> {
     return {
       kind: "pending",
       history: this.historyFor(snapshot, pending.thread_id),
-      claimGeneration,
+      token: { claimGeneration, resetGeneration: this.readGeneration() },
     };
   }
 
@@ -855,20 +982,23 @@ export class TeamRoom extends DurableObject<Env> {
   async completeChatMessage(
     commandIdInput: unknown,
     outcomeInput: unknown,
-    claimGenerationInput: unknown,
+    tokenInput: unknown,
   ): Promise<ChatMessageResult | { retry: true } | { stale: true }> {
     // 他のRPCと同じく、補助入力も実行時に検証する。壊れた値で台帳やクレームを
     // 触らせない（弾いた入力は例外になり、Worker側のcatchが503へ倒す）。
     const commandId = commandIdSchema.parse(commandIdInput);
     const outcome: CompleteChatMessageOutcome = completeChatOutcomeSchema.parse(outcomeInput);
-    const claimGeneration = claimGenerationSchema.parse(claimGenerationInput);
+    const token = chatClaimTokenSchema.parse(tokenInput);
+    // リセットを挟んだ応答は、クレームの世代が偶然一致しても書かない。何も書かずに
+    // 捨てる——古いタブの再送はbeginChatMessageが世代切れで弾くので、そちらへ回る。
+    if (token.resetGeneration !== this.readGeneration()) return { stale: true };
     // 伏せ字化と行の保存し直しを含む読み出しをここでも通す（beginと同じ）。
     const processed = this.readProcessedMessage(commandId);
     if (processed !== null) return processed.result;
 
     const pending = this.readPending(commandId);
     if (pending === null) throw new Error("該当する送信途中のメッセージがありません。");
-    if ((pending.claim_generation ?? 0) !== claimGeneration) return { stale: true };
+    if ((pending.claim_generation ?? 0) !== token.claimGeneration) return { stale: true };
 
     const text = assistantTextOf(outcome);
     if (text === null) {
@@ -976,9 +1106,13 @@ export class TeamRoom extends DurableObject<Env> {
    */
   private replayCheckpoint(
     current: CheckpointSnapshot | null,
-    appliedRevision: number,
+    saved: z.infer<typeof storedCheckpointCommandSchema>,
+    fingerprint: string,
   ): CheckpointSnapshot | CheckpointRejection {
-    return current !== null && current.revision === appliedRevision
+    // 同じcommandIdで別のbodyを送る取り違えは冪等再送ではない。元の結果を返すと、
+    // クライアントは保存したつもりの状態が入っていないことに気づけない。
+    if (mismatchesFingerprint(saved.fingerprint, fingerprint)) return { rejected: "conflict" };
+    return current !== null && current.revision === saved.revision
       ? current
       : { rejected: "conflict" };
   }
@@ -997,6 +1131,11 @@ export class TeamRoom extends DurableObject<Env> {
     const teamCode = teamCodeSchema.parse(teamCodeInput);
     const command: SaveCheckpointCommand = saveCheckpointCommandSchema.parse(commandInput);
     const now = checkpointSnapshotSchema.shape.savedAt.parse(nowIsoInput);
+    // 世代の照合はいちばん先に置く。冪等台帳の参照よりも前に弾かないと、リセット前の
+    // commandIdが「処理済み」として現在のsnapshotを返してしまう（台帳は消えているので
+    // 実際には通らないが、判定の順序として世代を最優先に固定しておく）。
+    // flushも同じ扱いにする——CASを外す経路だからこそ、持ち主の確認は外せない。
+    if (command.generation !== this.readGeneration()) return { rejected: "stale-generation" };
     const savedRow =
       this.ctx.storage.sql
         .exec(
@@ -1009,12 +1148,7 @@ export class TeamRoom extends DurableObject<Env> {
     // 台帳の行も検証してから使う。壊れた行を「台帳に無い」と読み替えると、適用済みの
     // commandIdが未処理に見えて古いbodyを再適用してしまう。不整合は黙って通さず、
     // 例外にしてWorkerの503（時間を置いて再試行）へ倒す。
-    if (saved !== null) {
-      // 同じcommandIdで別のbodyを送る取り違えは冪等再送ではない。元の結果を返すと、
-      // クライアントは保存したつもりの状態が入っていないことに気づけない。
-      if (mismatchesFingerprint(saved.fingerprint, fingerprint)) return { rejected: "conflict" };
-      return this.replayCheckpoint(current, saved.revision);
-    }
+    if (saved !== null) return this.replayCheckpoint(current, saved, fingerprint);
 
     const applied = applyCheckpoint(current, command, { teamCode, now });
     if (!applied.ok) return { rejected: applied.reason };
@@ -1079,7 +1213,7 @@ export class TeamRoom extends DurableObject<Env> {
     const server = pair[1];
     server.serializeAttachment({ kind: "team", teamCode: parsed.data });
     this.ctx.acceptWebSocket(server);
-    this.sendEnvelope(server, { kind: "team", snapshot: await this.join(parsed.data) });
+    this.sendEnvelope(server, { kind: "team", snapshot: this.joinSnapshot(parsed.data) });
     this.sendEnvelope(server, { kind: "chat", snapshot: this.loadChatSnapshot(parsed.data) });
     return new Response(null, { status: 101, webSocket: client });
   }
@@ -1101,6 +1235,7 @@ export class TeamRoom extends DurableObject<Env> {
         await this.env.RACE_LEADERBOARD.getByName("global").upsert(
           result.snapshot.teamCode,
           result.snapshot,
+          this.readGeneration(),
         );
       } catch {
         return result;

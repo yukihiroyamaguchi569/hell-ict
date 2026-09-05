@@ -80,8 +80,14 @@ describe("チャットschemaの境界", () => {
     const createThread = { type: "create-thread", commandId, title: "副" };
     const sendMessage = { type: "send-message", commandId, threadId, text: "本文" };
     // kindを送らない既存クライアントはmanualとして解釈される（既定値）。
-    expect(chatCommandSchema.parse(createThread)).toEqual({ ...createThread, kind: "manual" });
-    expect(chatCommandSchema.parse(sendMessage)).toEqual(sendMessage);
+    // generationも同じく既定0——リセットを持たない古いクライアントとの後方互換で、
+    // 一度もリセットしていないチーム（世代0）ではそのまま通る。
+    expect(chatCommandSchema.parse(createThread)).toEqual({
+      ...createThread,
+      kind: "manual",
+      generation: 0,
+    });
+    expect(chatCommandSchema.parse(sendMessage)).toEqual({ ...sendMessage, generation: 0 });
     for (const input of [
       { type: "delete-thread", commandId, threadId },
       { type: "create-thread", commandId, threadId },
@@ -93,7 +99,7 @@ describe("チャットschemaの境界", () => {
   });
 
   it("send-messageはpromptProfileを省略でき、既知の値を受理し未知の値を拒否する", () => {
-    const base = { type: "send-message", commandId, threadId, text: "本文" };
+    const base = { type: "send-message", commandId, threadId, text: "本文", generation: 0 };
     expect(chatCommandSchema.parse(base)).toEqual(base);
     for (const promptProfile of ["default", "s1", "s3"] as const) {
       const withProfile = { ...base, promptProfile };

@@ -10,6 +10,7 @@ import {
   saveCheckpointCommandSchema,
   saveCheckpointResultSchema,
   sendMessageCommandSchema,
+  sessionResultSchema,
   teamCodeSchema,
   teamCommandSchema,
 } from "@hell-ict/domain";
@@ -27,6 +28,7 @@ import type {
 
 import { handleActivityPost, logActivity } from "./activity-log.js";
 import type { ActivityEvent } from "./activity-log.js";
+import { handleGmReset } from "./gm.js";
 import {
   corsHeadersFor,
   isApiRequestAllowed,
@@ -36,7 +38,7 @@ import {
   parseTeamCodeRule,
   teamCodeRuleStatus,
 } from "./guard.js";
-import type { CorsHeaders } from "./guard.js";
+import type { ChatClaimToken, CorsHeaders } from "./guard.js";
 import {
   bodyErrorResponse,
   error,
@@ -46,6 +48,7 @@ import {
   parseCommandIdsQuery,
   parseJson,
   PayloadTooLargeError,
+  staleGenerationResponse,
   teamCodeFromApiPath,
   teamCodeFromPath,
 } from "./http.js";
@@ -78,9 +81,16 @@ const handleSession = async (request: Request, env: Env): Promise<Response> => {
     return new Response("Not found", { status: 404 });
   }
   try {
-    const snapshot = await env.TEAM_ROOM.getByName(teamCode).join(teamCode);
-    await env.RACE_LEADERBOARD.getByName("global").upsert(teamCode, snapshot);
-    return json(snapshot);
+    // snapshotと世代は1回のRPCで受け取る。2回に分けると、その間にリセットが入った
+    // ときに食い違う組をクライアントへ渡すことになる（DO側のjoinの注記）。
+    const { snapshot, generation } = await env.TEAM_ROOM.getByName(teamCode).join(teamCode);
+    // 帯にも世代を渡す。joinが返したのと同じ値なので、リセットを挟んだ入室の
+    // 遅れたupsertが古い段階を再挿入することはない（race-leaderboard.tsのフェンス）。
+    await env.RACE_LEADERBOARD.getByName("global").upsert(teamCode, snapshot, generation);
+    // リセット世代はsnapshotの外に足す——teamSnapshotSchemaはWebSocket配信でも
+    // そのまま使うstrictな形で、ここだけのために項目を増やすと配信側まで巻き込む。
+    // クライアントはこの値を保持し、以後のすべての書き込みへ添える。
+    return json(sessionResultSchema.parse({ ...snapshot, generation }));
   } catch {
     return error("チーム状態の処理に失敗しました。時間を置いて再試行してください。", 503);
   }
@@ -95,6 +105,7 @@ const handleCommand = async (request: Request, env: Env, teamCode: TeamCode): Pr
   }
   try {
     const result = await env.TEAM_ROOM.getByName(teamCode).command(teamCode, command);
+    if ("staleGeneration" in result) return staleGenerationResponse();
     if ("conflict" in result) return error("状態の競合または許可されない遷移です。", 409);
     return json(result, result.leaderboardPending ? 503 : 200);
   } catch {
@@ -123,6 +134,7 @@ export const handleCreateThread = async (
       command,
       await createThreadFingerprint(command),
     );
+    if ("staleGeneration" in result) return staleGenerationResponse();
     // 同じcommandIdを別のタイトル・kindで使い回した取り違え。何も作られていない。
     if ("conflict" in result)
       return error("同じ送信IDが別の内容で使われています。", 409, "conflict");
@@ -209,11 +221,11 @@ const blockHistoryPii = async (
   room: DurableObjectStub<TeamRoom>,
   commandId: string,
   history: readonly AiMessage[],
-  claimGeneration: number,
+  token: ChatClaimToken,
 ): Promise<Response | null> => {
   if (!history.some((message) => detectPii(message.text) !== null)) return null;
   const blocked = await room
-    .completeChatMessage(commandId, { kind: "failure" }, claimGeneration)
+    .completeChatMessage(commandId, { kind: "failure" }, token)
     .catch(() => null);
   return blocked === null
     ? error("メッセージの処理に失敗しました。時間を置いて再試行してください。", 503)
@@ -282,11 +294,12 @@ const beginOrRespond = async (
   command: SendMessageCommand,
   gate: ChatGate,
 ): Promise<
-  { readonly history: readonly AiMessage[]; readonly claimGeneration: number } | Response
+  { readonly history: readonly AiMessage[]; readonly token: ChatClaimToken } | Response
 > => {
   const begin = await room.beginChatMessage(teamCode, command, gate).catch(() => null);
   if (begin === null)
     return error("メッセージの処理に失敗しました。時間を置いて再試行してください。", 503);
+  if ("staleGeneration" in begin) return staleGenerationResponse();
   if ("unknownThread" in begin) return error("指定されたスレッドが見つかりません。", 404);
   if (begin.kind === "rate-limited")
     return errorWithHeaders("送信が多すぎます。少し待ってから再試行してください。", 429, {
@@ -297,7 +310,7 @@ const beginOrRespond = async (
     return error("同じ内容が既に送信処理中です。少し待って再試行してください。", 409);
   if (begin.kind === "conflict")
     return error("同じ送信IDが別の内容で使われています。", 409, "conflict");
-  return { history: begin.history, claimGeneration: begin.claimGeneration };
+  return { history: begin.history, token: begin.token };
 };
 
 /**
@@ -310,7 +323,10 @@ export type ChatMessageDeps = {
 };
 
 /**
- * 送信前PIIゲートで拒否するときの応答。拒否もレート制限の枠を1つ消費する——この経路は
+ * 送信前PIIゲートで拒否するときの応答。枠を消費する前に世代を照合するので、
+ * リセットより前に入室した端末はここでも422ではなく409で止まる（枠も記録も動かない）。
+ *
+ * 拒否もレート制限の枠を1つ消費する——この経路は
  * beginChatMessageへ進まないので通常の枠消費を通らず、PII入りの本文を連投するだけで
  * 活動ログを無限に増やせてしまう。超過なら429で、ログも書かない。
  *
@@ -324,9 +340,13 @@ const respondToPiiBlock = async (
   log: ChatLogger,
   command: SendMessageCommand,
 ): Promise<Response> => {
-  const verdict = await room.consumeChatAttempt(gate.nowMs, gate.limit).catch(() => null);
+  const verdict = await room
+    .consumeChatAttempt(gate.nowMs, gate.limit, command.generation)
+    .catch(() => null);
   if (verdict === null)
     return error("メッセージの処理に失敗しました。時間を置いて再試行してください。", 503);
+  // 世代切れはPII判定より優先する。枠も活動ログも動かさずに返す。
+  if ("staleGeneration" in verdict) return staleGenerationResponse();
   if (!verdict.allowed)
     return errorWithHeaders("送信が多すぎます。少し待ってから再試行してください。", 429, {
       "Retry-After": String(verdict.retryAfterSeconds),
@@ -370,12 +390,7 @@ export const handleChatMessage = async (
   // 同じcommandIdの再試行はINSERT OR IGNOREで潰れる）。
   log("chat.user", { role: "user", text: command.text });
 
-  const historyBlock = await blockHistoryPii(
-    room,
-    command.commandId,
-    begun.history,
-    begun.claimGeneration,
-  );
+  const historyBlock = await blockHistoryPii(room, command.commandId, begun.history, begun.token);
   if (historyBlock !== null) {
     log("chat.history_pii");
     return historyBlock;
@@ -389,7 +404,7 @@ export const handleChatMessage = async (
   ];
   const { outcome, refusal } = await runAiCompletion(aiGateway, historyWithSystemPrompt);
   const result = await room
-    .completeChatMessage(command.commandId, outcome, begun.claimGeneration)
+    .completeChatMessage(command.commandId, outcome, begun.token)
     .catch(() => null);
   logChatOutcome(log, result, refusal);
   return respondToCompletion(result, refusal);
@@ -402,6 +417,7 @@ const CHECKPOINT_REJECTION_MESSAGES = {
   "elapsed-regression": "経過時間を巻き戻すチェックポイントは保存できません。",
   "pos-regression": "進行位置を巻き戻すチェックポイントは保存できません。",
   "data-regression": "古い内容でチェックポイントを上書きすることはできません。",
+  "stale-generation": "この端末の状態は古くなっています。ページを再読み込みしてください。",
 } as const satisfies Record<CheckpointRejectionReason, string>;
 
 /**
@@ -441,6 +457,27 @@ const failedToReadBody = (caught: unknown): ParsedCheckpointCommand => ({
 });
 
 /**
+ * PIIを見つけたチェックポイント保存への応答。世代切れのほうが先に決まるので、
+ * 422を返す前にここでだけDOへ問い合わせる。handleSaveCheckpointの複雑度を
+ * 下げるための切り出し。
+ */
+const respondToCheckpointPii = async (
+  room: DurableObjectStub<TeamRoom>,
+  teamCode: TeamCode,
+  generation: number,
+): Promise<Response> => {
+  const fresh = await room.matchesResetGeneration(teamCode, generation).catch(() => null);
+  if (fresh === null)
+    return error("チェックポイントの保存に失敗しました。時間を置いて再試行してください。", 503);
+  if (!fresh) return staleGenerationResponse();
+  return error(
+    "個人情報を検知したため、チェックポイントの保存をブロックしました。",
+    422,
+    "pii_blocked",
+  );
+};
+
+/**
  * ステージ内状態のチェックポイントを保存する。`nowIso`はここで採る——DOはテストから
  * Clockを差し替えられないため、時刻の境界をWorker側のhandlerに置いている。
  */
@@ -462,20 +499,22 @@ export const handleSaveCheckpoint = async (
       ? error("チェックポイントのデータが大きすぎます。", 400)
       : error("checkpointの形式が不正です。", 400);
   }
+  const room = env.TEAM_ROOM.getByName(teamCode);
   // 送信前PIIゲート（企画書§7）。深さと大きさの検査（schema）を通した後、DOへ触れる
   // 前に置く。チェックポイントのdataは復帰時にそのまま画面へ戻す正典データなので、
   // 活動ログのようにredactionで潰すと復帰そのものが壊れる。ここは拒否へ倒し、
   // クライアントに書き直させる（チャットの送信前ゲートと同じ"pii_blocked"）。
   // 何も保存しないので、DOにもチェックポイントにも台帳にも1行も書かない。
-  if (containsPii(parsed.command.body.data)) {
-    return error(
-      "個人情報を検知したため、チェックポイントの保存をブロックしました。",
-      422,
-      "pii_blocked",
-    );
-  }
+  //
+  // ただし世代切れのほうが先に決まる。422を返すと、リセットより前に入室した端末は
+  // 409を受けられず、再読み込みの案内へ行けないまま操作を続けることになる。
+  // 世代の照合はPIIを見つけたときにだけ問い合わせる——保存は頻繁に走るので、
+  // 通常の経路へDOの往復をもう1回足さない（PIIの無い保存はsaveCheckpointが
+  // その中で世代を見る）。応答の優先順位は「世代を先に見る」のと同じになる。
+  if (containsPii(parsed.command.body.data))
+    return respondToCheckpointPii(room, teamCode, parsed.command.generation);
   try {
-    const result = await env.TEAM_ROOM.getByName(teamCode).saveCheckpoint(
+    const result = await room.saveCheckpoint(
       teamCode,
       parsed.command,
       nowIso,
@@ -515,26 +554,39 @@ const handleLeaderboardSync = (request: Request, env: Env): Promise<Response> =>
     ? env.RACE_LEADERBOARD.getByName("global").fetch(request)
     : Promise.resolve(error("WebSocket接続が必要です。", 426));
 
-const handlePost = (request: Request, scope: RequestScope, url: URL): Promise<Response> => {
+/** `/api/teams/:code/*`のPOST。handlePostの複雑度を上限内に保つための切り出し。 */
+const handleTeamPost = (
+  request: Request,
+  scope: RequestScope,
+  pathname: string,
+): Promise<Response> => {
   const { env } = scope;
-  if (url.pathname === "/api/session") return handleSession(request, env);
-  if (url.pathname === "/api/progress") return handleProgressPost(request, env);
-  const activityTeamCode = teamCodeFromPath(url.pathname, "/api/teams/", "/activity");
+  const activityTeamCode = teamCodeFromPath(pathname, "/api/teams/", "/activity");
   if (activityTeamCode !== null) return handleActivityPost(request, env, activityTeamCode);
-  const threadsTeamCode = teamCodeFromPath(url.pathname, "/api/teams/", "/chat/threads");
+  const threadsTeamCode = teamCodeFromPath(pathname, "/api/teams/", "/chat/threads");
   if (threadsTeamCode !== null) return handleCreateThread(request, scope, threadsTeamCode);
-  const messagesTeamCode = teamCodeFromPath(url.pathname, "/api/teams/", "/chat/messages");
+  const messagesTeamCode = teamCodeFromPath(pathname, "/api/teams/", "/chat/messages");
   if (messagesTeamCode !== null)
     return handleChatMessage(request, scope, messagesTeamCode, {
       aiGateway: createAiGateway(env),
       nowMs: Date.now(),
     });
-  const checkpointTeamCode = teamCodeFromPath(url.pathname, "/api/teams/", "/checkpoint");
+  const checkpointTeamCode = teamCodeFromPath(pathname, "/api/teams/", "/checkpoint");
   if (checkpointTeamCode !== null) return handleSaveCheckpoint(request, env, checkpointTeamCode);
-  const commandTeamCode = teamCodeFromPath(url.pathname, "/api/teams/", "/commands");
+  const commandTeamCode = teamCodeFromPath(pathname, "/api/teams/", "/commands");
   return commandTeamCode === null
     ? Promise.resolve(new Response("Not found", { status: 404 }))
     : handleCommand(request, env, commandTeamCode);
+};
+
+const handlePost = (request: Request, scope: RequestScope, url: URL): Promise<Response> => {
+  const { env } = scope;
+  // GM系はまとめてhandleGmResetへ渡す。未知のパスもトークンを通していない相手には
+  // 404で、経路の有無を確かめられないようにする（gm.ts先頭の注記）。
+  if (url.pathname.startsWith("/api/gm/")) return handleGmReset(request, env, url);
+  if (url.pathname === "/api/session") return handleSession(request, env);
+  if (url.pathname === "/api/progress") return handleProgressPost(request, env);
+  return handleTeamPost(request, scope, url.pathname);
 };
 
 /**
@@ -633,7 +685,9 @@ const preflightResponse = (cors: CorsHeaders): Response =>
     headers: {
       ...cors,
       "Access-Control-Allow-Methods": "GET, POST",
-      "Access-Control-Allow-Headers": "Content-Type",
+      // AuthorizationはGM系（POST /api/gm/...）のトークン用。許可オリジンの判定は
+      // 変わらないので、別オリジン配信の開発時にpreflightだけで詰まらないようにする。
+      "Access-Control-Allow-Headers": "Content-Type, Authorization",
       "Access-Control-Max-Age": "86400",
     },
   });

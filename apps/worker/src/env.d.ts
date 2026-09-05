@@ -23,9 +23,16 @@ export {};
  * ダッシュボードまたは`wrangler deploy --var`で与える（未設定でも既定動作で動く）。
  * 未設定を型で表すため`string | undefined`とし、guard.tsのパーサが既定へ倒す。
  */
+/**
+ * ADMIN_TOKENは、ゲームマスター専用のリセットAPI（`POST /api/gm/teams/.../reset`）の
+ * 唯一の資格情報である。総当たりを現実的でなくするため32文字以上を推奨し、
+ * `wrangler secret put ADMIN_TOKEN`で与える。未設定ならGM系ルートは常に404を返し、
+ * 設定漏れのまま誰でもリセットできる状態にはならない（fail-closed）。
+ */
 declare global {
   interface HellIctVars {
     OPENAI_API_KEY: string;
+    ADMIN_TOKEN?: string;
     EVENT_ID?: string;
     EVENT_NO?: string;
     ALLOWED_ORIGINS?: string;

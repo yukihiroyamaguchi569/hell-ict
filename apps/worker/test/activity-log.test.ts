@@ -725,10 +725,10 @@ describe("活動ログ", () => {
       const room = env.TEAM_ROOM.getByName(teamCode);
       // チャット枠を使い切っても、活動ログは書ける。
       for (let index = 0; index < DEFAULT_CHAT_RATE_LIMIT; index += 1) {
-        await room.consumeChatAttempt(windowStartMs, DEFAULT_CHAT_RATE_LIMIT);
+        await room.consumeChatAttempt(windowStartMs, DEFAULT_CHAT_RATE_LIMIT, 0);
       }
       await expect(
-        room.consumeChatAttempt(windowStartMs, DEFAULT_CHAT_RATE_LIMIT),
+        room.consumeChatAttempt(windowStartMs, DEFAULT_CHAT_RATE_LIMIT, 0),
       ).resolves.toMatchObject({ allowed: false });
 
       const response = await handleActivityPost(
