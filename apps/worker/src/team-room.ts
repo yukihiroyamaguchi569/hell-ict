@@ -123,6 +123,12 @@ export type CreateThreadOutcome =
   | { snapshot: ChatSnapshot; created: true; threadId: ChatThreadId };
 
 type ConflictReply = { conflict: true };
+/**
+ * ゲームマスターのリセットより前に入室した端末からの書き込み。進捗・チェックポイントと
+ * 同じく、何も書かずに拒否する——ここを通すと、古いタブのステージ遷移やスレッド作成が
+ * 初期化したはずのチーム状態と会話を作り直してしまう。冪等台帳にも触れない。
+ */
+type StaleGenerationReply = { staleGeneration: true };
 type UnknownThreadReply = { unknownThread: true };
 
 /** チェックポイント保存の拒否理由。Workerが理由ごとに409の文言を分ける。 */
@@ -398,8 +404,22 @@ export class TeamRoom extends DurableObject<Env> {
     return row === null ? 0 : storedGenerationSchema.parse(row).value;
   }
 
-  async join(teamCodeInput: unknown): Promise<TeamSnapshot> {
+  /**
+   * 入室。snapshotと世代を1回のRPCで返す——別々に呼ぶと、その2回の間にリセットが
+   * 入ったときに「リセット前のsnapshotとリセット後の世代」という、どちらとも
+   * 食い違う組をクライアントへ渡してしまう。DOは操作を直列に実行するので、
+   * 同じ同期区間で両方を読めばその隙間は生まれない。
+   */
+  async join(teamCodeInput: unknown): Promise<{ snapshot: TeamSnapshot; generation: number }> {
     const teamCode = teamCodeSchema.parse(teamCodeInput);
+    return { snapshot: this.joinSnapshot(teamCode), generation: this.readGeneration() };
+  }
+
+  /**
+   * チーム状態を読み、無ければ初期状態を作る。DO内から呼ぶ同期版で、世代は返さない
+   * ——`command()`とWebSocket配信が必要とするのはsnapshotだけである。
+   */
+  private joinSnapshot(teamCode: TeamCode): TeamSnapshot {
     const stored =
       this.ctx.storage.sql
         .exec<StoredState>("SELECT snapshot FROM team_state WHERE id = 1")
@@ -416,9 +436,12 @@ export class TeamRoom extends DurableObject<Env> {
   async command(
     teamCodeInput: unknown,
     commandInput: unknown,
-  ): Promise<CommandResult | ConflictReply> {
+  ): Promise<CommandResult | ConflictReply | StaleGenerationReply> {
     const teamCode = teamCodeSchema.parse(teamCodeInput);
     const command = teamCommandSchema.parse(commandInput);
+    // 世代の照合は冪等台帳より前。台帳を先に引くと、リセット前のcommandIdが
+    // 「処理済み」として古いsnapshotを返しうる。
+    if (command.generation !== this.readGeneration()) return { staleGeneration: true };
     const saved =
       this.ctx.storage.sql
         .exec<StoredCommand>(
@@ -431,7 +454,7 @@ export class TeamRoom extends DurableObject<Env> {
         commandResultSchema.parse(JSON.parse(saved.result) as unknown),
         command.commandId,
       );
-    const transition = transitionTeam(await this.join(teamCode), command);
+    const transition = transitionTeam(this.joinSnapshot(teamCode), command);
     if (!transition.ok) return { conflict: true };
     const pending = commandResultSchema.parse({
       snapshot: transition.snapshot,
@@ -592,10 +615,12 @@ export class TeamRoom extends DurableObject<Env> {
     teamCodeInput: unknown,
     commandInput: unknown,
     fingerprintInput: unknown,
-  ): Promise<CreateThreadOutcome | ThreadLimitReply | ConflictReply> {
+  ): Promise<CreateThreadOutcome | ThreadLimitReply | ConflictReply | StaleGenerationReply> {
     const fingerprint = fingerprintSchema.parse(fingerprintInput);
     const teamCode = teamCodeSchema.parse(teamCodeInput);
     const command: CreateThreadCommand = createThreadCommandSchema.parse(commandInput);
+    // 世代の照合は冪等台帳より前（command()と同じ理由）。
+    if (command.generation !== this.readGeneration()) return { staleGeneration: true };
     const saved = this.readProcessedThread(command.commandId);
     if (saved !== null) {
       // 同じcommandIdで別のタイトル・別のkindを送る取り違えは冪等再送ではない。
@@ -815,11 +840,13 @@ export class TeamRoom extends DurableObject<Env> {
     teamCodeInput: unknown,
     commandInput: unknown,
     gate: unknown,
-  ): Promise<BeginChatMessageOutcome | UnknownThreadReply> {
+  ): Promise<BeginChatMessageOutcome | UnknownThreadReply | StaleGenerationReply> {
     const teamCode = teamCodeSchema.parse(teamCodeInput);
     const command: SendMessageCommand = sendMessageCommandSchema.parse(commandInput);
     const validated = beginChatGateSchema.parse(gate);
     const { nowMs, limit, fingerprint } = validated;
+    // 世代の照合は台帳の参照とレート制限の消費より前。古いタブの送信で枠を減らさない。
+    if (command.generation !== this.readGeneration()) return { staleGeneration: true };
     this.expirePendingMessages();
     const processed = this.readProcessedMessage(command.commandId);
     if (processed !== null) return replayProcessed(processed, fingerprint);
@@ -1166,7 +1193,7 @@ export class TeamRoom extends DurableObject<Env> {
     const server = pair[1];
     server.serializeAttachment({ kind: "team", teamCode: parsed.data });
     this.ctx.acceptWebSocket(server);
-    this.sendEnvelope(server, { kind: "team", snapshot: await this.join(parsed.data) });
+    this.sendEnvelope(server, { kind: "team", snapshot: this.joinSnapshot(parsed.data) });
     this.sendEnvelope(server, { kind: "chat", snapshot: this.loadChatSnapshot(parsed.data) });
     return new Response(null, { status: 101, webSocket: client });
   }

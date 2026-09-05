@@ -62,6 +62,18 @@ export { RaceLeaderboard, TeamRoom };
 
 const CHAT_TIMEOUT_MS = 20_000;
 
+/**
+ * ゲームマスターのリセットより前に入室した端末からの書き込みへの応答。文言と
+ * codeはチェックポイント（stale-generation）と揃える——クライアントはどの経路で
+ * 受けても同じ扱い（保存を止めて再読み込みを促す）へ倒せばよい。
+ */
+const staleGenerationResponse = (): Response =>
+  error(
+    "この端末の状態は古くなっています。ページを再読み込みしてください。",
+    409,
+    "stale-generation",
+  );
+
 const handleSession = async (request: Request, env: Env): Promise<Response> => {
   let teamCode: TeamCode;
   try {
@@ -80,15 +92,14 @@ const handleSession = async (request: Request, env: Env): Promise<Response> => {
     return new Response("Not found", { status: 404 });
   }
   try {
-    const room = env.TEAM_ROOM.getByName(teamCode);
-    const snapshot = await room.join(teamCode);
+    // snapshotと世代は1回のRPCで受け取る。2回に分けると、その間にリセットが入った
+    // ときに食い違う組をクライアントへ渡すことになる（DO側のjoinの注記）。
+    const { snapshot, generation } = await env.TEAM_ROOM.getByName(teamCode).join(teamCode);
     await env.RACE_LEADERBOARD.getByName("global").upsert(teamCode, snapshot);
     // リセット世代はsnapshotの外に足す——teamSnapshotSchemaはWebSocket配信でも
     // そのまま使うstrictな形で、ここだけのために項目を増やすと配信側まで巻き込む。
-    // クライアントはこの値を保持し、以後の進捗記録とチェックポイント保存へ添える。
-    return json(
-      sessionResultSchema.parse({ ...snapshot, generation: await room.resetGeneration(teamCode) }),
-    );
+    // クライアントはこの値を保持し、以後のすべての書き込みへ添える。
+    return json(sessionResultSchema.parse({ ...snapshot, generation }));
   } catch {
     return error("チーム状態の処理に失敗しました。時間を置いて再試行してください。", 503);
   }
@@ -103,6 +114,7 @@ const handleCommand = async (request: Request, env: Env, teamCode: TeamCode): Pr
   }
   try {
     const result = await env.TEAM_ROOM.getByName(teamCode).command(teamCode, command);
+    if ("staleGeneration" in result) return staleGenerationResponse();
     if ("conflict" in result) return error("状態の競合または許可されない遷移です。", 409);
     return json(result, result.leaderboardPending ? 503 : 200);
   } catch {
@@ -131,6 +143,7 @@ export const handleCreateThread = async (
       command,
       await createThreadFingerprint(command),
     );
+    if ("staleGeneration" in result) return staleGenerationResponse();
     // 同じcommandIdを別のタイトル・kindで使い回した取り違え。何も作られていない。
     if ("conflict" in result)
       return error("同じ送信IDが別の内容で使われています。", 409, "conflict");
@@ -295,6 +308,7 @@ const beginOrRespond = async (
   const begin = await room.beginChatMessage(teamCode, command, gate).catch(() => null);
   if (begin === null)
     return error("メッセージの処理に失敗しました。時間を置いて再試行してください。", 503);
+  if ("staleGeneration" in begin) return staleGenerationResponse();
   if ("unknownThread" in begin) return error("指定されたスレッドが見つかりません。", 404);
   if (begin.kind === "rate-limited")
     return errorWithHeaders("送信が多すぎます。少し待ってから再試行してください。", 429, {

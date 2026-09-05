@@ -1168,7 +1168,7 @@ describe("リーダーボードの配信範囲", () => {
   it("壊れた既存行はupsertで正常な行に置き換わる", async () => {
     // team_revisionに巨大な値が残ると、以後の正常なrevisionはすべて「古い」と
     // 判定され、そのチームの帯が二度と進まなくなる。壊れた行は無かった扱いにする。
-    const snapshot = await env.TEAM_ROOM.getByName("500068").join("500068");
+    const { snapshot } = await env.TEAM_ROOM.getByName("500068").join("500068");
     const leaderboard = env.RACE_LEADERBOARD.getByName("global");
     await leaderboard.upsert("500068", snapshot);
 
@@ -1196,7 +1196,7 @@ describe("リーダーボードの配信範囲", () => {
   });
 
   it("EVENT_NOが不正なら何も配信しない（fail-closed）", async () => {
-    const snapshot = await env.TEAM_ROOM.getByName("500062").join("500062");
+    const { snapshot } = await env.TEAM_ROOM.getByName("500062").join("500062");
     const leaderboard = env.RACE_LEADERBOARD.getByName("global");
 
     await withEnv({ EVENT_NO: "invalid" }, async () => {
