@@ -3,7 +3,8 @@ packages:
   - packages/*
 engineStrict: true
 overrides:
-  qs: 6.15.2
+  qs: ">=6.16.0"
+  fast-uri: "^3.1.6"
 allowBuilds:
   esbuild: true
   workerd: true
