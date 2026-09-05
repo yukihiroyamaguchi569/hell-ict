@@ -30,7 +30,7 @@ const summary = {
 };
 
 /** リセットAPIの応答を差し替えられるようにしつつ、呼ばれた回数も数える。 */
-type ResetStub = { status: number; calls: string[] };
+type ResetStub = { status: number; calls: string[]; delayMs?: number };
 
 const openDashboard = async (page: Page, hash: string, reset: ResetStub): Promise<void> => {
   await page.route(`${BASE}/**`, async (route) => {
@@ -45,6 +45,9 @@ const openDashboard = async (page: Page, hash: string, reset: ResetStub): Promis
     }
     if (url.pathname.startsWith("/api/gm/")) {
       reset.calls.push(route.request().headers()["authorization"] ?? "");
+      if (reset.delayMs !== undefined) {
+        await new Promise((resolve) => setTimeout(resolve, reset.delayMs));
+      }
       await route.fulfill({
         status: reset.status,
         contentType: "application/json",
@@ -101,4 +104,29 @@ test("404はトークンの確認を促す", async ({ page }) => {
   });
   await page.getByRole("button", { name: "リセット" }).click();
   await expect(page.getByText("トークンを確認してください")).toBeVisible();
+});
+
+test("実行中は3秒ごとの再描画を挟んでもボタンがdisabledのまま（二重実行しない）", async ({
+  page,
+}) => {
+  // ポーリング間隔（3秒）より長く応答を遅らせ、実行中に必ず再描画を挟ませる。
+  const reset: ResetStub = { status: 200, calls: [], delayMs: 6000 };
+  await openDashboard(page, "#gm", reset);
+  const button = page.getByRole("button", { name: "リセット" });
+
+  page.once("dialog", (dialog) => {
+    void dialog.accept();
+  });
+  await button.click();
+  await expect(button).toBeDisabled();
+
+  // 再描画（3秒）を跨いでも押せる状態に戻らない。戻ると同じチームを二重にリセットできる。
+  await page.waitForTimeout(3500);
+  await expect(button).toBeDisabled();
+  await expect(page.getByText("実行中…")).toBeVisible();
+
+  // 完了すれば解除され、以後はまた押せる。
+  await expect(page.getByText("リセットしました")).toBeVisible({ timeout: 10_000 });
+  await expect(button).toBeEnabled();
+  expect(reset.calls).toHaveLength(1);
 });
