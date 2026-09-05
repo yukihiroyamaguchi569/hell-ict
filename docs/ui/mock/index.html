@@ -1523,7 +1523,7 @@
 
         <div class="veil unlock hide" id="ov-unlock">
           <div class="bar"></div>
-          <div class="t">Stage 3 を解錠しました</div>
+          <div class="t">Stage 2 をクリアしました</div>
           <div class="s">方針 — 転院患者の対応</div>
         </div>
 
@@ -6440,7 +6440,7 @@
       s2Hot = [];
       s2StopDeadline();
       const d = document.createElement("div");
-      d.className = "done"; d.textContent = "Stage 3 を解錠しました";
+      d.className = "done"; d.textContent = "Stage 2 をクリアしました";
       box.appendChild(d);
       unlockSequence();
     } else {
@@ -6461,7 +6461,7 @@
     // 毎回明示的にセットし直す（どちらが先に使われても正しい文言になるように）。
     // 副題に罠の名前（「嘘」「ハルシネーション」）を書かない——次のステージに何が
     // 待っているかを予告した時点で罠が死ぬ（docs/ui/04_Stage3.md 冒頭の ⚠️）。
-    $("ov-unlock").querySelector(".t").textContent = "Stage 3 を解錠しました";
+    $("ov-unlock").querySelector(".t").textContent = "Stage 2 をクリアしました";
     $("ov-unlock").querySelector(".s").textContent = "方針 — 転院患者の対応";
     $("ov-unlock").classList.remove("hide");
     sfx("success1");   // 解錠
@@ -6658,9 +6658,11 @@
     }
 
     const d = document.createElement("div");
-    // 解錠されるのは「次の」ステージ。Stage 3 のクリア先は Stage 4 ではなく
-    // Stage 3.5「新情報の解釈」（stage3UnlockSequence() のオーバーレイ文言と必ず揃えること）。
-    d.className = "done"; d.textContent = "Stage 4 を解錠しました";
+    // 見出しは「今クリアしたステージ」を言う（Issue #79。解錠は次のステージが
+    // 開くという意味だが、参加者には自分が何を終えたのかを伝えるほうが分かりやすい）。
+    // 次に開くのは Stage 4 ではなく Stage 3.5「新情報の解釈」で、そちらは
+    // stage3UnlockSequence() の副題が言う。
+    d.className = "done"; d.textContent = "Stage 3 をクリアしました";
     box.appendChild(d);
     s3Verdicting = false;
     stage3UnlockSequence();
@@ -6669,7 +6671,7 @@
   async function stage3UnlockSequence() {
     // 参加者向け呼称は「新情報の解釈」（Stage 3.5 は設計上の番号。罠ステージでは
     // ないので番号を出しても予告の心配は無い）。
-    $("ov-unlock").querySelector(".t").textContent = "Stage 4 を解錠しました";
+    $("ov-unlock").querySelector(".t").textContent = "Stage 3 をクリアしました";
     $("ov-unlock").querySelector(".s").textContent = "新情報の解釈 — 海外速報";
     $("ov-unlock").classList.remove("hide");
     sfx("success1");   // 解錠
@@ -7100,7 +7102,7 @@
 
   async function stage35UnlockSequence() {
     if (view !== "s35") return;   // 判断C
-    $("ov-unlock").querySelector(".t").textContent = "Stage 5 を解錠しました";
+    $("ov-unlock").querySelector(".t").textContent = "Stage 4 をクリアしました";
     $("ov-unlock").querySelector(".s").textContent = "報告 — 保健所への発熱患者一覧";
     $("ov-unlock").classList.remove("hide");
     sfx("success1");   // 解錠
@@ -7301,9 +7303,9 @@
       box.appendChild(l);
     });
     const d = document.createElement("div");
-    // 解錠されるのは「次の」ステージ。Stage 4 をクリアしたので Stage 5 が開く
-    // （stage4UnlockSequence() のオーバーレイ文言と必ず揃えること）。
-    d.className = "done"; d.textContent = "Stage 6 を解錠しました";
+    // 見出しは「今クリアしたステージ」を言う（Issue #79）。次に開く Stage 6 は
+    // stage4UnlockSequence() の副題が言う。
+    d.className = "done"; d.textContent = "Stage 5 をクリアしました";
     box.appendChild(d);
     s4Verdicting = false;
     // 台詞を読む一拍を置いてから解錠オーバーレイへ。即座に覆うと、追加した
@@ -7313,7 +7315,7 @@
 
   async function stage4UnlockSequence() {
     s4StopDeadline();   // クリア済みなので回答期限は止める（罰は時間＝クリア後に事務長の督促を割り込ませない）
-    $("ov-unlock").querySelector(".t").textContent = "Stage 6 を解錠しました";
+    $("ov-unlock").querySelector(".t").textContent = "Stage 5 をクリアしました";
     $("ov-unlock").querySelector(".s").textContent = "掲示 — 面会制限のお知らせ";
     $("ov-unlock").classList.remove("hide");
     sfx("success1");   // 解錠
