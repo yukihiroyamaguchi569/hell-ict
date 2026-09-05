@@ -561,10 +561,13 @@ function sendToGrid() {
 function aiSend() {
   const inp = $("#ai-input"); const q = inp.value.trim(); if (!q) return;
   inp.value = "";
-  state.log.push({ role: "me", text: q }); renderLog();
+  // bind the reply to the stage/log it was asked in: a stage change replaces state.log
+  const log = state.log; const stageId = state.stageId;
+  log.push({ role: "me", text: q }); renderLog();
   setTimeout(() => {
-    const r = STAGES[state.stageId].ai(q);
-    state.log.push(typeof r === "string" ? { role: "ai", text: r } : { role: "ai", html: r.html, rows: r.rows });
+    if (state.log !== log) return;   // stage changed while waiting; the old conversation is gone
+    const r = STAGES[stageId].ai(q);
+    log.push(typeof r === "string" ? { role: "ai", text: r } : { role: "ai", html: r.html, rows: r.rows });
     renderLog();
     const open = state.cases.find((x) => x.id === state.open);
     if (open && open.answer === "grid") openCase(open.id);
