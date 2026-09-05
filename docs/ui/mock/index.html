@@ -8854,12 +8854,14 @@
     fAdvanceRelay();
   });
   $("btn-f-relay-next").addEventListener("click", fRelayNext);
-  // 感謝状の［最初に戻る］。LIVE はチェックポイントが Final なので、リロードすると
-  // 入室画面を経由して同じチームで Final へ戻る（次のチームは別のチームコードで
-  // 入室する）。scripted は預ける先が無いので入室画面へ戻すだけでよい。
+  // 感謝状の［最初に戻る］。go("entry") ではモジュール状態（fLine・fEnded・罠の
+  // フラグ等）が残り、次のチームが前のチームの進行を引き継いでしまうので、必ず
+  // リロードして作り直す。開発用のステージ指定ハッシュ（#final 等）は先に消す
+  // ——残っているとリロード後にそのステージへ直行してしまう。LIVE でリロード後に
+  // チェックポイントで Final へ戻るのは意図どおり（同じチームで戻れる）。
   $("btn-f-restart").addEventListener("click", () => {
-    if (LIVE) location.reload();
-    else go("entry");
+    history.replaceState(null, "", location.pathname + location.search);
+    location.reload();
   });
   $("btn-copy").addEventListener("click", () => {
     const btn = $("btn-copy");
