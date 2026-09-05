@@ -13,8 +13,8 @@ const readTsv = async (name: string): Promise<readonly (readonly string[])[]> =>
   parseTsv(await readFile(materialsPath(name), "utf8"));
 
 const materialExpectations = [
-  { name: "stage2_linelist.tsv", patientCount: 20, noiseCount: 3, rowCount: 23 },
-  { name: "stage2_linelist.annotated.tsv", patientCount: 20, noiseCount: 3, rowCount: 23 },
+  { name: "stage2_linelist.tsv", patientCount: 20, noiseCount: 2, rowCount: 22 },
+  { name: "stage2_linelist.annotated.tsv", patientCount: 20, noiseCount: 2, rowCount: 22 },
   { name: "stage2_linelist_addendum.tsv", patientCount: 10, noiseCount: 0, rowCount: 10 },
 ] as const;
 

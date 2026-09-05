@@ -291,7 +291,11 @@
 .reader p:last-child { margin-bottom: 0; }
 
 /* --- ワークスペース ---------------------------------------------------- */
-.work { flex: 1; overflow-y: auto; padding: 22px 28px; display: flex; flex-direction: column; gap: 18px; }
+/* 下パディングを厚くしてあるのは、常駐する院内連絡先（.phs＝中央ペインの右下に
+   浮いている、高さ44pxのバー）を避けるため。これが無いと、最下段の［提出する］
+   ［確認した（次へ）］がバーの下へ潜って押せなくなる（Issue #93）。
+   22px（他辺と同じ余白）＋62px（バーの高さ＋余白）。 */
+.work { flex: 1; overflow-y: auto; padding: 22px 28px 84px; display: flex; flex-direction: column; gap: 18px; }
 .stage-title { font-size: calc(20px * var(--fs-scale)); font-weight: 700; display: flex; align-items: center; gap: 9px; }
 .stage-title::before { content: "▸"; color: var(--accent); }
 .brief { font-size: calc(18px * var(--fs-scale)); line-height: 1.75; max-width: 60ch; }
@@ -811,11 +815,14 @@
 .lock .note { font-size: 13px; color: var(--fg); padding: 0 2px; }
 .lock .stat { font-size: 12px; color: var(--fg-muted); padding: 6px 2px 0; font-variant-numeric: tabular-nums; }
 /* 全部詰め終わってから出る掲示。最初から棚に貼ってあったもの——
-   読まずに手を動かした、が Stage 3 の縮小再演になる（docs/ui/04_Stage3.md §罰ゲーム）。 */
+   読まずに手を動かした、が Stage 3 の縮小再演になる（docs/ui/04_Stage3.md §罰ゲーム）。
+   見落としていたことが効くよう、院内掲示物らしい太枠・太字・大きめで出す
+   （2026-09-05。文言そのものは変えていない）。 */
 .lock .notice {
-  border: 1px solid var(--warn); color: var(--warn); background: rgba(217,154,31,.07);
-  font-family: var(--font-legacy); font-size: 14px; line-height: 1.9;
-  white-space: pre; padding: 14px 18px; margin: 4px 0 2px;
+  border: 3px solid var(--warn); color: var(--warn); background: rgba(217,154,31,.12);
+  font-family: var(--font-legacy); font-size: 19px; font-weight: 700; line-height: 1.8;
+  letter-spacing: .03em; text-align: center;
+  white-space: pre; padding: 18px 22px; margin: 8px 0 4px;
 }
 .lock .shicho { font-family: var(--font-legacy); font-size: 13px; color: var(--fg); padding: 2px; }
 .lock .discard { font-size: 13px; color: var(--fg-muted); padding: 2px; }
@@ -894,10 +901,9 @@
    書式は「病院から届くもの」＝2003年風：緑のタイトルバー（--phs）・白背景・
    角丸なし。中の .box/.submit-area はテーマ追従の色を持つので、白い紙の上で
    読めるよう固定色へ上書きする（§9「ファイル」はテーマに追従させない）。
-   下マージンは、常駐する院内連絡先（.phs＝中央ペインの右下に浮いている）を
-   避けるため——これが無いと、.work をいちばん下まで送ったときに［送信する］
-   ［確認した（次へ）］が .phs のバーの下へ潜って押せなくなる。 */
-.s35-talk { font-family: var(--font-legacy); border: 1px solid var(--phs); background: #fff; color: #16181a; margin-bottom: 62px; }
+   院内連絡先（.phs）を避ける下余白は .work のパディングへ移した（Issue #93。
+   どのステージの最下段ボタンも同じ理由で潜るため、個別マージンをやめた）。 */
+.s35-talk { font-family: var(--font-legacy); border: 1px solid var(--phs); background: #fff; color: #16181a; }
 .s35-talk > .tb { background: var(--phs); color: #fff; padding: 9px 12px; font-size: 13px; }
 .s35-talk > .bd { padding: 16px 18px; display: flex; flex-direction: column; gap: 11px; }
 .s35-talk .say { font-size: 15px; line-height: 1.8; }
@@ -988,6 +994,9 @@
 .viewer .cols button:hover { background: #e3e5df; }
 .viewer .sheet { overflow: auto; padding: 14px; }
 .viewer pre { margin: 0; font-family: var(--font-legacy); font-size: calc(13px * var(--fs-scale)); line-height: 1.95; white-space: pre; }
+/* メール本文のように「行」に意味が無い文章だけ折り返す（VIEWERS[*].wrap）。
+   タブ区切りの表（Excel系）は列がずれるので従来どおり折り返さない。 */
+.viewer pre.wrap { white-space: pre-wrap; word-break: break-word; }
 
 /* Final：振り返りボード（2026-08-22 全面改修。旧4欄フォーム＋ルールベース
    判定は廃止し、判定そのものが無い「レース後」の唯一のステージにした。
@@ -1165,6 +1174,14 @@
   animation: hdocFadeIn .8s ease-out 1.05s both;
 }
 @keyframes hdocFadeIn { from { opacity: 0; } to { opacity: 1; } }
+/* 感謝状の下に置く控えめな戻り導線。賞状の書式（.hdoc）には干渉させず、
+   ナレーションと同じ veil の上の要素として組む。 */
+.hdoc-restart {
+  background: transparent; color: #cdd3d8; border: 1px solid #6c757c;
+  font-family: var(--font-ui); font-size: 13px; letter-spacing: .06em;
+  padding: 7px 20px; animation: hdocFadeIn .8s ease-out 1.35s both;
+}
+.hdoc-restart:hover { background: rgba(255,255,255,.09); color: #fff; }
 
 /* レースのゴール演出（2026-08-22追加・ユーザー決定「もっと賑やかに」）。
    紙吹雪は goalConfettiBurst() が数十片を都度生成し、数秒で降り切って
@@ -1232,14 +1249,6 @@
       <button id="btn-fill-raw">グリッドを汚いまま戻す</button>
       <button id="btn-phs">苅部さんから着信</button>
       <button id="btn-s1-nobrief">Stage 1（説明を飛ばす）</button>
-    </div>
-    <div class="sep"></div>
-    <div class="grp">
-      <span class="tag">🧪 S1画面プレビュー(仮)</span>
-      <button id="btn-s1prev-round1">R1失敗（短文）</button>
-      <button id="btn-s1prev-round2">R2失敗（時間切れ）</button>
-      <button id="btn-s1prev-manual">成功（手動）</button>
-      <button id="btn-s1prev-ai">成功（AI）</button>
     </div>
   </div>
 
@@ -1520,7 +1529,7 @@
 
         <div class="veil unlock hide" id="ov-unlock">
           <div class="bar"></div>
-          <div class="t">Stage 3 を解錠しました</div>
+          <div class="t">Stage 2 をクリアしました</div>
           <div class="s">方針 — 転院患者の対応</div>
         </div>
 
@@ -1633,6 +1642,10 @@
               </div>
             </div>
             <div class="hdoc-narration">——次にこの病院へ来る誰かは、あなたたちが残した一言に助けられて、始まる。</div>
+            <!-- 最初へ戻る導線（2026-09-05追加）。研修が終わった後、次のチームへ
+                 席を渡せるようにする。感謝状の書式には触れず、ナレーションと同じ
+                 veil の上に置く。 -->
+            <button type="button" class="hdoc-restart" id="btn-f-restart">最初に戻る</button>
           </div>
         </div>
 
@@ -1682,7 +1695,7 @@
              （unlockSequence() 系と同じ理由。docs/ui/mock/README.md 既知の設計負債）。
              #penalty-host は空のまま持ち、startPenalty()/startS4Penalty() が中身を注入する。 -->
         <div class="veil lock hide" id="ov-lock">
-          <div class="hd" id="lock-hd">拡大対応業務：消毒液ボトルの補充</div>
+          <div class="hd" id="lock-hd">拡大対応業務：🧴 消毒液ボトルの補充</div>
           <!-- 2026-08-22改修：残り時間のカウントダウンをやめ、この業務に実際に
                費やしている時間を数え上げる（startPenaltyClock）。罰は作業を
                終えたときに終わるのであって、秒数で解放されるわけではない。 -->
@@ -2074,7 +2087,7 @@
   /* 正典は docs/materials/stage2_linelist.tsv。ここはその写し。         */
   /* 設計用の annotated 版（伏線3名に ★ が付いている）は絶対に持ち込まない。*/
   /*                                                                    */
-  /* 先頭3行はノイズ行（注釈・タイトル・途中の空行）で、1列目にしか値が    */
+  /* ノイズ行は2つ（先頭のタイトル行と途中の空行）で、1列目にしか値が      */
   /* ない。参加者が削除すべき行であり、判定「行数が一致」はこの削除操作を  */
   /* 見ている。元ファイルのヘッダ行はグリッドの列見出しに吸収されるので    */
   /* データ行としては持たない（添付ビューアの表示にだけ現れる）。          */
@@ -2089,7 +2102,6 @@
   const S2_HEAD_DIRTY = ["患者ＩＤ", "びょうとう", "採取日", "MRSA", "発熱", "メモ"];
 
   const S2_SHEET_ROWS = [
-    ["※このファイルは5A病棟師長が個人的につけている記録です。正式なものではありません。", "", "", "", "", ""],
     ["5A病棟の状況　7月分", "", "", "", "", ""],
     ["００１", "5A病棟", "7/3", "陽性", "あり", "個室へ"],
     ["id-2", "", "7月3日", "(+)", "38.2℃", ""],
@@ -2153,7 +2165,7 @@
         ? r[0]
         : r.map((c, i) => (COLW[i] ? padTo(c, COLW[i]) : c)).join("").trimEnd();
     const out = rows.map(line);
-    // 元ファイルのヘッダ行は、注釈行とタイトル行のあとに現れる。
+    // 元ファイルのヘッダ行は、タイトル行のあとに現れる。
     // r[1]（病棟）は汚れで空欄が多いため、常に埋まっている r[2]（採取日）で
     // 「最初の実データ行」を判定する（氏名列削除前は常に埋まっている氏名＝r[1]を見ていた）。
     const at = rows.findIndex((r) => r[2] !== "");
@@ -5739,84 +5751,6 @@
     }
   }
 
-  /* ==================================================================== */
-  /* devS1Preview — テストプレイ準備用の一時機能。テストプレイ後に削除する。 */
-  /* devbar の「🧪 S1画面プレビュー(仮)」から、Stage 1 の各結果画面を通し     */
-  /* プレイなしでワンクリック再現するためのもの。                             */
-  /*                                                                        */
-  /* 起動は btn-s1-nobrief と同じ流儀（s1SkipBrief を立てて go("s1")）で行い、  */
-  /* setInterval(s1Frame, 250) の最初のティックが来るより前——つまり同期的に    */
-  /* 実行できているうち——に s1 の状態を捏造し直して s1ShowResultWin を呼ぶ。   */
-  /* Stage 1 本体の関数（s1Init / s1Center / s1ShowResultWin /                */
-  /* s1DeliverAIAndRetry / s1StartRound3 / s1Result / transition）は一切書き   */
-  /* 換えず、呼ぶだけにとどめる——OKボタンを押した先は本物の分岐がそのまま      */
-  /* 動くので、捏造した状態が壊れたまま残ることはない。                        */
-  /* ==================================================================== */
-  function devS1PreviewIds(defs) { return defs.map((d) => d.id); }
-
-  function devS1Preview(kind) {
-    s1SkipBrief = true;
-    go("s1");
-    s1SkipBrief = false;
-    // ここまでで s1Init() は走っているが、s1Frame の最初のティックはまだ来ていない
-    // （250ms後）。以降の代入はそのティックより前に完了する。
-
-    if (kind === "round1") {
-      // 1回目・全6通は返信済みだが、そのうち2通がそっけない返信（S1_MIN_LEN未満）
-      // だった、という想定。時間切れは0。
-      s1.doneIds = new Set(devS1PreviewIds(S1_MAILS_R1));
-      s1.curt = [
-        { def: S1_MAILS_R1[0], reply: "承知しました。" },
-        { def: S1_MAILS_R1[2], reply: "了解いたしました。" }
-      ];
-      s1.items = [];
-      s1.interstitial = true;
-      s1Center();
-      s1ShowResultWin("round1");
-      return;
-    }
-    if (kind === "round2") {
-      // 2回目・AIの下書きはあるが要点入力が間に合わず、6通中2通が時間切れ。
-      // そっけない返信は0（今回は時間切れが主因、というシナリオ）。
-      s1.round = 2;
-      s1.aiReady = true;
-      s1.doneIds = new Set(devS1PreviewIds(S1_MAILS_R2.slice(0, 4)));
-      s1.curt = [];
-      s1.items = S1_MAILS_R2.slice(4).map((def, i) => ({
-        def, key: def.id + "#prev" + i, due: s1Now() - 1, state: "missed", point: "", bodyDraft: ""
-      }));
-      s1.interstitial = true;
-      s1Center();
-      s1ShowResultWin("round2");
-      return;
-    }
-    if (kind === "manual") {
-      // 1回目、AIを使わず全6通を丁寧に捌き切った手動クリア。
-      // ここだけは s1ShowResultWin を直接呼ばず s1Result("manual") を通す——
-      // 苅部さんのオチ（S1_KARUBE_MANUAL）は結果ウィンドウには出ず、phs経路
-      // （s1Result内でバッジ着信をセットする箇所）だけで出るようになったため、
-      // その着信を再現するには s1Result を呼ぶ必要がある。
-      s1.doneIds = new Set(devS1PreviewIds(S1_MAILS_R1));
-      s1.curt = [];
-      s1.items = [];
-      s1Result("manual");
-      return;
-    }
-    if (kind === "ai") {
-      // 3回目・コンテキスト投入まで進み、全6通をAI下書きで捌き切ったクリア。
-      s1.round = 3;
-      s1.aiReady = true;
-      s1.doneIds = new Set(devS1PreviewIds(S1_MAILS_R3));
-      s1.curt = [];
-      s1.items = [];
-      s1.cleared = true;
-      s1.result = "ai";
-      s1Center();
-      s1ShowResultWin("ai");
-      return;
-    }
-  }
-
   // 段落が出る時刻（ms）。.beat の並び順とそのまま対応する。
   // 最後の2拍——通達枠とボタン——だけ間を空けてある。事務長が話し終えた後に
   // 総務課の文書が置かれ、そこで初めて押せるようになる、という順序。
@@ -6180,7 +6114,7 @@
        それまでは後続ステージで押しても何も起きない死んだ行だった）。
        伏線（夜勤師長メールの「原因不明の発熱」）を後から読み返せることは、
        このステージの設計意図そのものなので、一覧から消すのではなく読ませる。 */
-    ...Object.fromEntries(MAILS.map((m, i) => ["p" + i, { name: m.subj, text: m.body.join("\n\n") }])),
+    ...Object.fromEntries(MAILS.map((m, i) => ["p" + i, { name: m.subj, text: m.body.join("\n\n"), wrap: true }])),
     main: { name: MAIL_S1.attach, text: SHEET },
     add: { name: MAIL_S1_ADD.attach, text: SHEET_ADD },
     s3manual: { name: "院内感染対策マニュアル.pdf", text: S3_MANUAL_TEXT },
@@ -6188,7 +6122,7 @@
     // 検査科メールには添付が無い。Stage 2/3 の中央ペインはワークスペース専用で
     // メール本文を出す場所が無いため、添付が無いメールもこのビューアで読ませる
     // （本来の .reader 書式ではなく viewer の白紙書式になる簡略化・モック限定）。
-    s3lab: { name: MAIL_S3_LAB.subj, text: MAIL_S3_LAB.body.join("\n\n") },
+    s3lab: { name: MAIL_S3_LAB.subj, text: MAIL_S3_LAB.body.join("\n\n"), wrap: true },
     // 3B病棟看護師長：添え状（本文）と患者サマリ（添付）を同じビューアにまとめて表示する
     // ——s5notice/fpress と同じ簡略化（本文と添付を分ける器が無いモック限定の措置）。
     s3patients: {
@@ -6208,28 +6142,33 @@
       table: S4_FEVER_TABLE
     },
     // 事務長メールも添付が無いので同じ簡略化を踏襲する。
-    s5jimu: { name: MAIL_S5_JIMU.subj, text: MAIL_S5_JIMU.body.join("\n\n") },
+    s5jimu: { name: MAIL_S5_JIMU.subj, text: MAIL_S5_JIMU.body.join("\n\n"), wrap: true },
     // 近藤さんの本文（多言語対応の依頼）は、添付（去年の悪い実例）と同じビューアに
     // まとめて表示する——モック限定の簡略化。この教材は罠ではないので、
     // 本文と添付を分ける必要が無い（docs/materials/stage5_notice_old.md 実装メモ）。
     s5notice: {
       name: MAIL_S5_SOUDAN.attach,
-      text: MAIL_S5_SOUDAN.body.join("\n\n") + "\n\n---\n\n📎 " + MAIL_S5_SOUDAN.attach + "\n\n" + S5_NOTICE_OLD_TEXT
+      text: MAIL_S5_SOUDAN.body.join("\n\n") + "\n\n---\n\n📎 " + MAIL_S5_SOUDAN.attach + "\n\n" + S5_NOTICE_OLD_TEXT,
+      wrap: true
     },
     // 事務長メールも添付が無いので同じ簡略化を踏襲する。
-    fjimu: { name: MAIL_F_JIMU.subj, text: MAIL_F_JIMU.body.join("\n\n") },
+    fjimu: { name: MAIL_F_JIMU.subj, text: MAIL_F_JIMU.body.join("\n\n"), wrap: true },
     // 広報課の本文（記者クラブからの申し送り）は、添付（記者クラブ事前質問）と同じ
     // ビューアにまとめて表示する——s5notice と同じ簡略化。ただし [コピー] は置く
     // （docs/ui/07_Final.md §1「質問リストを AI へ貼って下書きさせる動線は正当」）。
     fpress: {
       name: MAIL_F_KOHO.attach,
-      text: MAIL_F_KOHO.body.join("\n\n") + "\n\n---\n\n📎 " + MAIL_F_KOHO.attach + "\n\n" + F_PRESS_Q_TEXT
+      text: MAIL_F_KOHO.body.join("\n\n") + "\n\n---\n\n📎 " + MAIL_F_KOHO.attach + "\n\n" + F_PRESS_Q_TEXT,
+      wrap: true
     }
   };
   function openViewer(which) {
     const v = VIEWERS[which];
     $("viewer-name").textContent = v.name;
     $("sheet").textContent = v.text;
+    // 文章（メール本文・掲示物）は折り返す。タブ区切りの表は折り返すと列が
+    // ずれて読めなくなるので、wrap を立てた項目だけを対象にする。
+    $("sheet").classList.toggle("wrap", !!v.wrap);
     // [作業エリアに追加] は追加分の添付にだけ置く。最初の添付は既にグリッドに
     // 入っているので不要だし、押せると二重取り込みが起きる。
     $("btn-take").classList.toggle("hide", !(which === "add") || s2AddTaken);
@@ -6437,7 +6376,7 @@
       s2Hot = [];
       s2StopDeadline();
       const d = document.createElement("div");
-      d.className = "done"; d.textContent = "Stage 3 を解錠しました";
+      d.className = "done"; d.textContent = "Stage 2 をクリアしました";
       box.appendChild(d);
       unlockSequence();
     } else {
@@ -6458,7 +6397,7 @@
     // 毎回明示的にセットし直す（どちらが先に使われても正しい文言になるように）。
     // 副題に罠の名前（「嘘」「ハルシネーション」）を書かない——次のステージに何が
     // 待っているかを予告した時点で罠が死ぬ（docs/ui/04_Stage3.md 冒頭の ⚠️）。
-    $("ov-unlock").querySelector(".t").textContent = "Stage 3 を解錠しました";
+    $("ov-unlock").querySelector(".t").textContent = "Stage 2 をクリアしました";
     $("ov-unlock").querySelector(".s").textContent = "方針 — 転院患者の対応";
     $("ov-unlock").classList.remove("hide");
     sfx("success1");   // 解錠
@@ -6655,9 +6594,11 @@
     }
 
     const d = document.createElement("div");
-    // 解錠されるのは「次の」ステージ。Stage 3 のクリア先は Stage 4 ではなく
-    // Stage 3.5「新情報の解釈」（stage3UnlockSequence() のオーバーレイ文言と必ず揃えること）。
-    d.className = "done"; d.textContent = "Stage 4 を解錠しました";
+    // 見出しは「今クリアしたステージ」を言う（Issue #79。解錠は次のステージが
+    // 開くという意味だが、参加者には自分が何を終えたのかを伝えるほうが分かりやすい）。
+    // 次に開くのは Stage 4 ではなく Stage 3.5「新情報の解釈」で、そちらは
+    // stage3UnlockSequence() の副題が言う。
+    d.className = "done"; d.textContent = "Stage 3 をクリアしました";
     box.appendChild(d);
     s3Verdicting = false;
     stage3UnlockSequence();
@@ -6666,7 +6607,7 @@
   async function stage3UnlockSequence() {
     // 参加者向け呼称は「新情報の解釈」（Stage 3.5 は設計上の番号。罠ステージでは
     // ないので番号を出しても予告の心配は無い）。
-    $("ov-unlock").querySelector(".t").textContent = "Stage 4 を解錠しました";
+    $("ov-unlock").querySelector(".t").textContent = "Stage 3 をクリアしました";
     $("ov-unlock").querySelector(".s").textContent = "新情報の解釈 — 海外速報";
     $("ov-unlock").classList.remove("hide");
     sfx("success1");   // 解錠
@@ -6711,6 +6652,8 @@
     for (let i = 0; i < S3_BOTTLES_5A; i++) s3Bottles.push({ ward: "5A", state: "todo" });
     s3BottlesExtraAdded = false;
 
+    // 見出しは Stage 4 の罰（startS4Penalty）が同じ器を書き換えるので、毎回セットし直す。
+    $("lock-hd").textContent = "拡大対応業務：🧴 消毒液ボトルの補充";
     $("penalty-host").innerHTML =
       '<div class="note">5A病棟の消毒液ボトルを補充してください。</div>' +
       '<div class="bottles" id="bottles"></div>' +
@@ -6998,7 +6941,7 @@
 
   /* 差し込んだ位置まで送る——.work はスクロールするので、下に足しただけでは
      画面外に出て「送信したのに何も起きない」に見える。要素の scrollIntoView
-     ではなく .work を最下部まで送る：.s35-talk の下マージン（.phs 避け）ごと
+     ではなく .work を最下部まで送る：.work の下パディング（.phs 避け）ごと
      出さないと、ボタンが院内連絡先のバーの下に残る。 */
   function s35ScrollTalkIntoView() {
     const work = paneC.querySelector(".work");
@@ -7097,7 +7040,7 @@
 
   async function stage35UnlockSequence() {
     if (view !== "s35") return;   // 判断C
-    $("ov-unlock").querySelector(".t").textContent = "Stage 5 を解錠しました";
+    $("ov-unlock").querySelector(".t").textContent = "Stage 4 をクリアしました";
     $("ov-unlock").querySelector(".s").textContent = "報告 — 保健所への発熱患者一覧";
     $("ov-unlock").classList.remove("hide");
     sfx("success1");   // 解錠
@@ -7298,9 +7241,9 @@
       box.appendChild(l);
     });
     const d = document.createElement("div");
-    // 解錠されるのは「次の」ステージ。Stage 4 をクリアしたので Stage 5 が開く
-    // （stage4UnlockSequence() のオーバーレイ文言と必ず揃えること）。
-    d.className = "done"; d.textContent = "Stage 6 を解錠しました";
+    // 見出しは「今クリアしたステージ」を言う（Issue #79）。次に開く Stage 6 は
+    // stage4UnlockSequence() の副題が言う。
+    d.className = "done"; d.textContent = "Stage 5 をクリアしました";
     box.appendChild(d);
     s4Verdicting = false;
     // 台詞を読む一拍を置いてから解錠オーバーレイへ。即座に覆うと、追加した
@@ -7310,7 +7253,7 @@
 
   async function stage4UnlockSequence() {
     s4StopDeadline();   // クリア済みなので回答期限は止める（罰は時間＝クリア後に事務長の督促を割り込ませない）
-    $("ov-unlock").querySelector(".t").textContent = "Stage 6 を解錠しました";
+    $("ov-unlock").querySelector(".t").textContent = "Stage 5 をクリアしました";
     $("ov-unlock").querySelector(".s").textContent = "掲示 — 面会制限のお知らせ";
     $("ov-unlock").classList.remove("hide");
     sfx("success1");   // 解錠
@@ -8639,7 +8582,7 @@
     setJumpOpen(!jumpEl.classList.contains("open"));
   });
 
-  /* 開発用。判定はグリッドの実データで走るので、通過を見るには本来23行を
+  /* 開発用。判定はグリッドの実データで走るので、通過を見るには本来22行を
      直さなければならない。それを1クリックで済ませるためのボタン。
      normalizeRows() は「模範解答」そのもの——判定が何を通すかがコードで読める。 */
   $("btn-fill-ok").addEventListener("click", () => {
@@ -8660,11 +8603,6 @@
   $("jump-s1-nobrief").addEventListener("click", () => jumpGo(() => {
     s1SkipBrief = true; go("s1"); s1SkipBrief = false;
   }));
-  // devS1Preview 自体はテストプレイ準備用の一時機能（定義側のコメント参照）。
-  $("btn-s1prev-round1").addEventListener("click", () => devS1Preview("round1"));
-  $("btn-s1prev-round2").addEventListener("click", () => devS1Preview("round2"));
-  $("btn-s1prev-manual").addEventListener("click", () => devS1Preview("manual"));
-  $("btn-s1prev-ai").addEventListener("click", () => devS1Preview("ai"));
   $("btn-phs").addEventListener("click", () => {
     // Stage 1 の初回登場は固定タイマー任せ（s1DeliverAI）。この開発ボタンは
     // Stage 2 以降の「通常の苅部さん」（待たされる遅延あり）を試すためのもの。
@@ -8916,6 +8854,15 @@
     fAdvanceRelay();
   });
   $("btn-f-relay-next").addEventListener("click", fRelayNext);
+  // 感謝状の［最初に戻る］。go("entry") ではモジュール状態（fLine・fEnded・罠の
+  // フラグ等）が残り、次のチームが前のチームの進行を引き継いでしまうので、必ず
+  // リロードして作り直す。開発用のステージ指定ハッシュ（#final 等）は先に消す
+  // ——残っているとリロード後にそのステージへ直行してしまう。LIVE でリロード後に
+  // チェックポイントで Final へ戻るのは意図どおり（同じチームで戻れる）。
+  $("btn-f-restart").addEventListener("click", () => {
+    history.replaceState(null, "", location.pathname + location.search);
+    location.reload();
+  });
   $("btn-copy").addEventListener("click", () => {
     const btn = $("btn-copy");
     const which = $("ov-viewer").dataset.which;
