@@ -1250,14 +1250,6 @@
       <button id="btn-phs">苅部さんから着信</button>
       <button id="btn-s1-nobrief">Stage 1（説明を飛ばす）</button>
     </div>
-    <div class="sep"></div>
-    <div class="grp">
-      <span class="tag">🧪 S1画面プレビュー(仮)</span>
-      <button id="btn-s1prev-round1">R1失敗（短文）</button>
-      <button id="btn-s1prev-round2">R2失敗（時間切れ）</button>
-      <button id="btn-s1prev-manual">成功（手動）</button>
-      <button id="btn-s1prev-ai">成功（AI）</button>
-    </div>
   </div>
 
   <div class="stage-wrap" id="wrap">
@@ -5760,84 +5752,6 @@
     }
   }
 
-  /* ==================================================================== */
-  /* devS1Preview — テストプレイ準備用の一時機能。テストプレイ後に削除する。 */
-  /* devbar の「🧪 S1画面プレビュー(仮)」から、Stage 1 の各結果画面を通し     */
-  /* プレイなしでワンクリック再現するためのもの。                             */
-  /*                                                                        */
-  /* 起動は btn-s1-nobrief と同じ流儀（s1SkipBrief を立てて go("s1")）で行い、  */
-  /* setInterval(s1Frame, 250) の最初のティックが来るより前——つまり同期的に    */
-  /* 実行できているうち——に s1 の状態を捏造し直して s1ShowResultWin を呼ぶ。   */
-  /* Stage 1 本体の関数（s1Init / s1Center / s1ShowResultWin /                */
-  /* s1DeliverAIAndRetry / s1StartRound3 / s1Result / transition）は一切書き   */
-  /* 換えず、呼ぶだけにとどめる——OKボタンを押した先は本物の分岐がそのまま      */
-  /* 動くので、捏造した状態が壊れたまま残ることはない。                        */
-  /* ==================================================================== */
-  function devS1PreviewIds(defs) { return defs.map((d) => d.id); }
-
-  function devS1Preview(kind) {
-    s1SkipBrief = true;
-    go("s1");
-    s1SkipBrief = false;
-    // ここまでで s1Init() は走っているが、s1Frame の最初のティックはまだ来ていない
-    // （250ms後）。以降の代入はそのティックより前に完了する。
-
-    if (kind === "round1") {
-      // 1回目・全6通は返信済みだが、そのうち2通がそっけない返信（S1_MIN_LEN未満）
-      // だった、という想定。時間切れは0。
-      s1.doneIds = new Set(devS1PreviewIds(S1_MAILS_R1));
-      s1.curt = [
-        { def: S1_MAILS_R1[0], reply: "承知しました。" },
-        { def: S1_MAILS_R1[2], reply: "了解いたしました。" }
-      ];
-      s1.items = [];
-      s1.interstitial = true;
-      s1Center();
-      s1ShowResultWin("round1");
-      return;
-    }
-    if (kind === "round2") {
-      // 2回目・AIの下書きはあるが要点入力が間に合わず、6通中2通が時間切れ。
-      // そっけない返信は0（今回は時間切れが主因、というシナリオ）。
-      s1.round = 2;
-      s1.aiReady = true;
-      s1.doneIds = new Set(devS1PreviewIds(S1_MAILS_R2.slice(0, 4)));
-      s1.curt = [];
-      s1.items = S1_MAILS_R2.slice(4).map((def, i) => ({
-        def, key: def.id + "#prev" + i, due: s1Now() - 1, state: "missed", point: "", bodyDraft: ""
-      }));
-      s1.interstitial = true;
-      s1Center();
-      s1ShowResultWin("round2");
-      return;
-    }
-    if (kind === "manual") {
-      // 1回目、AIを使わず全6通を丁寧に捌き切った手動クリア。
-      // ここだけは s1ShowResultWin を直接呼ばず s1Result("manual") を通す——
-      // 苅部さんのオチ（S1_KARUBE_MANUAL）は結果ウィンドウには出ず、phs経路
-      // （s1Result内でバッジ着信をセットする箇所）だけで出るようになったため、
-      // その着信を再現するには s1Result を呼ぶ必要がある。
-      s1.doneIds = new Set(devS1PreviewIds(S1_MAILS_R1));
-      s1.curt = [];
-      s1.items = [];
-      s1Result("manual");
-      return;
-    }
-    if (kind === "ai") {
-      // 3回目・コンテキスト投入まで進み、全6通をAI下書きで捌き切ったクリア。
-      s1.round = 3;
-      s1.aiReady = true;
-      s1.doneIds = new Set(devS1PreviewIds(S1_MAILS_R3));
-      s1.curt = [];
-      s1.items = [];
-      s1.cleared = true;
-      s1.result = "ai";
-      s1Center();
-      s1ShowResultWin("ai");
-      return;
-    }
-  }
-
   // 段落が出る時刻（ms）。.beat の並び順とそのまま対応する。
   // 最後の2拍——通達枠とボタン——だけ間を空けてある。事務長が話し終えた後に
   // 総務課の文書が置かれ、そこで初めて押せるようになる、という順序。
@@ -8690,11 +8604,6 @@
   $("jump-s1-nobrief").addEventListener("click", () => jumpGo(() => {
     s1SkipBrief = true; go("s1"); s1SkipBrief = false;
   }));
-  // devS1Preview 自体はテストプレイ準備用の一時機能（定義側のコメント参照）。
-  $("btn-s1prev-round1").addEventListener("click", () => devS1Preview("round1"));
-  $("btn-s1prev-round2").addEventListener("click", () => devS1Preview("round2"));
-  $("btn-s1prev-manual").addEventListener("click", () => devS1Preview("manual"));
-  $("btn-s1prev-ai").addEventListener("click", () => devS1Preview("ai"));
   $("btn-phs").addEventListener("click", () => {
     // Stage 1 の初回登場は固定タイマー任せ（s1DeliverAI）。この開発ボタンは
     // Stage 2 以降の「通常の苅部さん」（待たされる遅延あり）を試すためのもの。
