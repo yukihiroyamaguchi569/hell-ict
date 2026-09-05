@@ -25,6 +25,12 @@ import { HttpRequestError, postJson } from "./http-client.js";
 const isStaleGeneration = (caught: unknown): boolean =>
   caught instanceof HttpRequestError && caught.code === "stale-generation";
 
+/**
+ * 入室手続きの結末。`superseded`は「あとから始まった入室に追い越された」で、
+ * 失敗ではない——エラー表示を出すと、成功した側の画面に無関係な警告が残る。
+ */
+type SessionOutcome = "ok" | "failed" | "superseded";
+
 const savedTeamCodeKey = "hell-ict-team-code";
 const isTeamCode = (value: string): boolean => teamCodeSchema.safeParse(value).success;
 const socketUrl = (path: string): string =>
@@ -112,13 +118,15 @@ const LeaderboardPane = ({ snapshot }: { snapshot: LeaderboardSnapshot | null })
 const useRestoredSession = (
   joinedCode: string | null,
   openedCode: { current: string | null },
-  openSession: (code: string) => Promise<boolean>,
+  openSession: (code: string) => Promise<SessionOutcome>,
   onFailure: () => void,
 ): void => {
   useEffect(() => {
     if (joinedCode === null || openedCode.current === joinedCode) return;
-    void openSession(joinedCode).then((ok) => {
-      if (!ok) onFailure();
+    // 追い越された（superseded）ときは何も言わない。フォームから入り直した側が
+    // 成功しているので、そこへ「取得できません」を出すと嘘になる。
+    void openSession(joinedCode).then((outcome) => {
+      if (outcome === "failed") onFailure();
     }, onFailure);
   }, [joinedCode, onFailure, openSession, openedCode]);
 };
@@ -147,6 +155,8 @@ export const App = () => {
   const [stale, setStale] = useState(false);
   /** どのコードで入室手続きを済ませたか。リロード復帰の二重実行を防ぐ。 */
   const openedCode = useRef<string | null>(null);
+  /** 入室手続きの連番。並走したときに、最後に始めたものの応答だけを採る。 */
+  const sessionSeq = useRef(0);
 
   const acceptTeamSnapshot = useCallback((next: TeamSnapshot) => {
     setSnapshot((current) =>
@@ -237,19 +247,24 @@ export const App = () => {
     setMessage("進行状況を取得できません。接続を確認して再読み込みしてください。");
   }, []);
 
-  const openSession = useCallback(
-    async (code: string): Promise<boolean> => {
-      const parsed = sessionResultSchema.safeParse(
-        await postJson("/api/session", { teamCode: code }),
-      );
-      if (!parsed.success) return false;
-      openedCode.current = code;
-      setResetGeneration(parsed.data.generation);
-      acceptTeamSnapshot(parsed.data);
-      return true;
-    },
-    [acceptTeamSnapshot],
-  );
+  const openSession = useCallback(async (code: string): Promise<SessionOutcome> => {
+    const seq = ++sessionSeq.current;
+    const parsed = sessionResultSchema.safeParse(
+      await postJson("/api/session", { teamCode: code }),
+    );
+    // 待っている間に別の入室が始まっていたら、この応答は捨てる。保存済みコードからの
+    // 復元が遅れている最中にフォームから別のチームで入ると、遅い応答があとから
+    // 世代とsnapshotを上書きし、「表示は別チーム・世代は前のチーム」になる。
+    if (seq !== sessionSeq.current) return "superseded";
+    if (!parsed.success) return "failed";
+    openedCode.current = code;
+    setResetGeneration(parsed.data.generation);
+    // 入室応答はその時点のサーバ正で、世代と組で受け取っている。revisionの単調性
+    // （acceptTeamSnapshot）は通さずそのまま採る——別チームへ入り直したときや、
+    // リセットでrevisionが0へ戻ったときに、手元の大きいrevisionが勝ってしまう。
+    setSnapshot(parsed.data);
+    return "ok";
+  }, []);
 
   useRestoredSession(joinedCode, openedCode, openSession, reportRestoreFailure);
 
@@ -259,7 +274,9 @@ export const App = () => {
       return;
     }
     try {
-      if (!(await openSession(teamCode))) throw new Error();
+      const outcome = await openSession(teamCode);
+      if (outcome === "superseded") return;
+      if (outcome === "failed") throw new Error();
       localStorage.setItem(savedTeamCodeKey, teamCode);
       setJoinedCode(teamCode);
       setMessage("おかえりなさい。チーム状態を復元しました。");
