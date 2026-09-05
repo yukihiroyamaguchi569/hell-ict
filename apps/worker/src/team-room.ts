@@ -63,6 +63,7 @@ import {
   rateLimitRetryAfterSeconds,
 } from "./guard.js";
 import { CHAT_COMMAND_IDS_MAX, error, isWebSocketRequest } from "./http.js";
+import { applyAddColumns } from "./sqlite.js";
 
 type StoredCommand = { result: string };
 type StoredState = { snapshot: string };
@@ -297,6 +298,25 @@ const RESET_TABLES = [
   "rate_limit",
 ] as const;
 
+/**
+ * 既にテーブルを持つDOには`CREATE TABLE IF NOT EXISTS`が効かないので、列は後から足す。
+ * `ADD COLUMN`に`IF NOT EXISTS`は無く、2度目以降は必ず「列が既にある」で失敗するので、
+ * その1種類だけを握る（applyAddColumns）。ほかの失敗まで握ると、列の無いまま
+ * コンストラクタが通り、以後の読み書きが欠けた列を相手に延々失敗し続ける。
+ *
+ * 既存行のprompt_profileはNULLになり、照合をスキップする（下のmismatchesPending）。
+ *
+ * テストが各文を直接当てて「移行後は全列が揃っている」ことを確かめるので公開する。
+ */
+export const TEAM_ROOM_ADD_COLUMNS = [
+  "ALTER TABLE pending_message_commands ADD COLUMN prompt_profile TEXT",
+  "ALTER TABLE pending_message_commands ADD COLUMN fingerprint TEXT",
+  "ALTER TABLE processed_message_commands ADD COLUMN fingerprint TEXT",
+  "ALTER TABLE pending_message_commands ADD COLUMN claim_generation INTEGER NOT NULL DEFAULT 0",
+  "ALTER TABLE processed_thread_commands ADD COLUMN fingerprint TEXT",
+  "ALTER TABLE processed_checkpoint_commands ADD COLUMN fingerprint TEXT",
+] as const;
+
 export class TeamRoom extends DurableObject<Env> {
   constructor(ctx: DurableObjectState, env: Env) {
     super(ctx, env);
@@ -318,23 +338,6 @@ export class TeamRoom extends DurableObject<Env> {
     this.ctx.storage.sql.exec(
       "CREATE TABLE IF NOT EXISTS pending_message_commands (command_id TEXT PRIMARY KEY, thread_id TEXT NOT NULL, created_at TEXT NOT NULL, claimed_at TEXT, prompt_profile TEXT, fingerprint TEXT, claim_generation INTEGER NOT NULL DEFAULT 0)",
     );
-    // 既にテーブルを持つDOにはCREATE TABLE IF NOT EXISTSが効かないので、列を後から足す。
-    // 2度目以降は「列が既にある」で失敗するだけなので握りつぶす。既存行のprompt_profileは
-    // NULLになり、照合をスキップする（下のmismatchesPending）。
-    for (const statement of [
-      "ALTER TABLE pending_message_commands ADD COLUMN prompt_profile TEXT",
-      "ALTER TABLE pending_message_commands ADD COLUMN fingerprint TEXT",
-      "ALTER TABLE processed_message_commands ADD COLUMN fingerprint TEXT",
-      "ALTER TABLE pending_message_commands ADD COLUMN claim_generation INTEGER NOT NULL DEFAULT 0",
-      "ALTER TABLE processed_thread_commands ADD COLUMN fingerprint TEXT",
-      "ALTER TABLE processed_checkpoint_commands ADD COLUMN fingerprint TEXT",
-    ]) {
-      try {
-        this.ctx.storage.sql.exec(statement);
-      } catch {
-        // 列が既に存在する。
-      }
-    }
     this.ctx.storage.sql.exec(
       "CREATE TABLE IF NOT EXISTS checkpoint_state (id INTEGER PRIMARY KEY CHECK (id = 1), snapshot TEXT NOT NULL)",
     );
@@ -351,6 +354,9 @@ export class TeamRoom extends DurableObject<Env> {
     );
     this.ctx.storage.sql.exec("INSERT OR IGNORE INTO reset_generation (id, value) VALUES (1, 0)");
     this.ctx.storage.sql.exec("CREATE TABLE IF NOT EXISTS migrations (name TEXT PRIMARY KEY)");
+    // 列の追加はCREATE群をすべて流し終えてから当てる。対象テーブルより先に当てると、
+    // 新しいDOでは`no such table`で失敗する（握らないので初期化ごと落ちる）。
+    applyAddColumns(this.ctx.storage.sql, TEAM_ROOM_ADD_COLUMNS);
   }
 
   // ---- チーム状態（P1Bから継続） ----
