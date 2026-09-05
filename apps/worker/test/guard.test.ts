@@ -187,7 +187,7 @@ describe("チームコードの規則判定（Pure Function）", () => {
     const rule = parseTeamCodeRule({ EVENT_NO: "02" });
     expect(rule).toEqual({ kind: "rule", eventNo: "02", teamMax: DEFAULT_TEAM_MAX });
     expect(DEFAULT_TEAM_MAX).toBe(100);
-    expect(teamCodeRuleStatus(rule)).toEqual({ eventNo: "02", teamMax: 100 });
+    expect(teamCodeRuleStatus(rule)).toEqual({ eventNo: true, teamMax: 100 });
   });
 
   it("上2桁が開催回と一致し、下4桁が1〜TEAM_MAXのコードだけを通す", () => {
@@ -212,7 +212,7 @@ describe("チームコードの規則判定（Pure Function）", () => {
     expect(rule).toEqual({ kind: "rule", eventNo: "02", teamMax: 6 });
     expect(isTeamCodeAllowed("020006", rule)).toBe(true);
     expect(isTeamCodeAllowed("020007", rule)).toBe(false);
-    expect(teamCodeRuleStatus(rule)).toEqual({ eventNo: "02", teamMax: 6 });
+    expect(teamCodeRuleStatus(rule)).toEqual({ eventNo: true, teamMax: 6 });
   });
 
   it("EVENT_NOが2桁数字でなければinvalidで全拒否（fail-closed）", () => {
@@ -231,7 +231,7 @@ describe("チームコードの規則判定（Pure Function）", () => {
       expect(rule, raw).toEqual({ kind: "invalid", reason: "teamMax", eventNo: "02" });
       expect(isTeamCodeAllowed("020001", rule), raw).toBe(false);
       // EVENT_NO側は壊れていないので、どちらの書き損じかがhealthで見分けられる。
-      expect(teamCodeRuleStatus(rule), raw).toEqual({ eventNo: "02", teamMax: "invalid" });
+      expect(teamCodeRuleStatus(rule), raw).toEqual({ eventNo: true, teamMax: "invalid" });
     }
   });
 
@@ -536,19 +536,22 @@ describe("入口ガード（リーダーボード）", () => {
 });
 
 describe("ヘルスチェックのguards", () => {
-  it("運用値の設定状況を返し、許可オリジンの値は伏せる", async () => {
-    await withEnv({ EVENT_NO: "02", TEAM_MAX: "6", ALLOWED_ORIGINS: OTHER_ORIGIN }, async () => {
+  it("運用値の設定状況を返し、開催回と許可オリジンの値は伏せる", async () => {
+    // healthはOrigin不問で誰でも読める。開催回が漏れると、通るコードの範囲が
+    // 6桁全体から1万通りへ狭まるので、値そのものは出さない。
+    await withEnv({ EVENT_NO: "07", TEAM_MAX: "6", ALLOWED_ORIGINS: OTHER_ORIGIN }, async () => {
       const response = await get("/api/health");
       const body = await response.json();
       expect(body).toEqual({
         status: "ok",
         guards: {
-          eventNo: "02",
+          eventNo: true,
           teamMax: 6,
           allowedOrigins: true,
           chatRateLimitPerMinute: 20,
         },
       });
+      expect(JSON.stringify(body)).not.toContain("07");
       expect(JSON.stringify(body)).not.toContain(OTHER_ORIGIN);
     });
   });
@@ -563,7 +566,7 @@ describe("ヘルスチェックのguards", () => {
   it("TEAM_MAX未設定なら既定の100がguardsに出る", async () => {
     await withEnv({ EVENT_NO: "50" }, async () => {
       await expect((await get("/api/health")).json()).resolves.toMatchObject({
-        guards: { eventNo: "50", teamMax: 100 },
+        guards: { eventNo: true, teamMax: 100 },
       });
     });
   });
@@ -587,7 +590,7 @@ describe("ヘルスチェックのguards", () => {
   it('TEAM_MAXが壊れているとteamMaxが"invalid"になり、全チームが入室できない', async () => {
     await withEnv({ EVENT_NO: "50", TEAM_MAX: "0" }, async () => {
       await expect((await get("/api/health")).json()).resolves.toMatchObject({
-        guards: { eventNo: "50", teamMax: "invalid" },
+        guards: { eventNo: true, teamMax: "invalid" },
       });
 
       const before = await listDurableObjectIds(env.TEAM_ROOM);

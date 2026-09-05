@@ -588,8 +588,9 @@ const handleGet = (request: Request, env: Env, url: URL): Promise<Response> => {
  * 許可オリジンの値そのものは伏せ、設定の有無だけを返す。
  */
 const guardStatus = (env: Env): Record<string, boolean | number | string> => ({
-  // eventNoは開催回そのもの（"02"）／未設定のfalse／壊れているときの"invalid"。
-  // teamMaxは効いている上限／規則が効いていないfalse／壊れているときの"invalid"。
+  // eventNoは設定済みのtrue／未設定のfalse／壊れているときの"invalid"。開催回の値は
+  // 出さない（分かると通るコードの範囲が狭まる）。teamMaxは効いている上限／規則が
+  // 効いていないfalse／壊れているときの"invalid"。
   // "invalid"は全チームが404になる状態を指すので、デプロイ後にここで捕まえる。
   ...teamCodeRuleStatus(parseTeamCodeRule(env)),
   allowedOrigins: parseAllowedOrigins(env.ALLOWED_ORIGINS).length > 0,

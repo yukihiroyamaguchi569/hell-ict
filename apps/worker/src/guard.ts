@@ -168,19 +168,21 @@ export const isTeamCodeAllowed = (code: string, rule: TeamCodeRule): boolean => 
 };
 
 /**
- * `GET /api/health`のguardsへ載せる表示。`eventNo`は秘匿情報ではない（2桁の開催回であって
- * 入室資格ではない）ので値をそのまま出し、当日どの開催回で動いているかを目視できるようにする。
+ * `GET /api/health`のguardsへ載せる表示。healthはOrigin不問で誰でも読めるので、
+ * `eventNo`は値を出さず設定の有無だけを返す——開催回が分かると、通るコードの範囲が
+ * 6桁全体から1万通りへ狭まる。`teamMax`は数値のまま出す（当日の運用者が効いている
+ * 上限を確認できないと、配布数を増やしたときの取りこぼしに気付けない）。
  * 規則が効いていない項目は`false`を返す。
  */
 export const teamCodeRuleStatus = (
   rule: TeamCodeRule,
-): { eventNo: string | false; teamMax: number | "invalid" | false } => {
+): { eventNo: boolean | "invalid"; teamMax: number | "invalid" | false } => {
   if (rule.kind === "open") return { eventNo: false, teamMax: false };
-  if (rule.kind === "rule") return { eventNo: rule.eventNo, teamMax: rule.teamMax };
+  if (rule.kind === "rule") return { eventNo: true, teamMax: rule.teamMax };
   // EVENT_NOが壊れているときはTEAM_MAXを読んでいないので、teamMaxはfalseのまま出す。
   return rule.reason === "eventNo"
     ? { eventNo: "invalid", teamMax: false }
-    : { eventNo: rule.eventNo, teamMax: "invalid" };
+    : { eventNo: true, teamMax: "invalid" };
 };
 
 export const RATE_LIMIT_WINDOW_MS = 60_000;
