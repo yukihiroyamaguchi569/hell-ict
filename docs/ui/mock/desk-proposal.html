@@ -126,6 +126,7 @@ html[data-fs="3"] .case-row.unread::before, html[data-ai="wide"] .case-row.unrea
 .answer textarea { width: 100%; min-height: 7.5rem; resize: vertical; border: 1px solid var(--rule); border-radius: 6px; padding: 10px; background: var(--bg); color: var(--fg); line-height: 1.5; }
 .answer .row { display: flex; gap: 8px; align-items: center; margin-top: 10px; }
 .answer .row .grow { flex: 1; }
+.btn:disabled { opacity: .45; cursor: not-allowed; }
 .btn { height: 40px; padding: 0 16px; border-radius: 6px; border: 1px solid var(--rule); background: var(--surface-2); color: var(--fg); }
 .btn.primary { background: var(--accent); color: #fff; border-color: var(--accent); font-weight: 700; }
 .verdict { margin-top: 10px; font-family: var(--font-legacy); font-size: .9rem; padding: 8px 10px; border: 1px solid #999; background: #fff; color: #111; }
@@ -166,6 +167,7 @@ html[data-fs="3"] .case-row.unread::before, html[data-ai="wide"] .case-row.unrea
 .bubble.ai { align-self: flex-start; background: #fff; border: 1px solid var(--ai-rule); }
 .bubble table { border-collapse: collapse; font-family: var(--font-num); font-size: .82rem; margin: 6px 0; }
 .bubble td, .bubble th { border: 1px solid var(--ai-rule); padding: 2px 6px; white-space: nowrap; }
+.bubble .tbl { max-height: 12rem; overflow: auto; margin-top: 8px; border: 1px solid var(--ai-rule); }
 .bubble .send-to { margin-top: 8px; display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
 .bubble .send-to button { white-space: nowrap; height: 36px; padding: 0 12px; border-radius: 6px; border: 1px solid var(--accent); background: var(--accent); color: #fff; font-weight: 700; }
 .bubble .send-to small { color: var(--ai-muted); }
@@ -482,11 +484,17 @@ function renderGrid(c) {
   g.addEventListener("input", (e) => { c.grid[+e.target.dataset.i][+e.target.dataset.j] = e.target.value; });
   wrap.appendChild(g);
   const meta = document.createElement("div"); meta.className = "grid-meta"; meta.id = "grid-meta";
-  meta.textContent = "AIの返答に表が含まれていれば「回答欄へ送る」で流し込めます。手で貼り付ける場合はセルへ直接入力します。";
+  meta.textContent = latestTable()
+    ? "AIの表が届いています。「AIの表を取り込む」で流し込めます。"
+    : "右のAIに整形を頼むと、返答の表を「AIの表を取り込む」または返答内の「回答欄へ送る」でここへ流し込めます。手で入力もできます。";
   wrap.appendChild(meta);
   const row = document.createElement("div"); row.className = "row";
-  row.innerHTML = `<span class="grow"></span><button class="btn" data-clear>クリア</button><button class="btn primary" data-submit>提出する</button>`;
+  row.innerHTML = `<button class="btn" data-pull>AIの表を取り込む</button><span class="grow"></span><button class="btn" data-clear>クリア</button><button class="btn primary" data-submit>提出する</button>`;
   wrap.appendChild(row);
+  const pull = row.querySelector("[data-pull]");
+  pull.disabled = !latestTable();
+  pull.title = pull.disabled ? "右のAIに整形を頼むと、返ってきた表をここへ取り込めます" : "AIの最新の表をこのグリッドへ流し込みます";
+  pull.onclick = sendToGrid;
   const v = document.createElement("div"); v.className = "verdict"; wrap.appendChild(v);
   row.querySelector("[data-clear]").onclick = () => { c.grid = null; openCase(c.id); };
   row.querySelector("[data-submit]").onclick = () => {
@@ -550,11 +558,15 @@ function renderLog() {
 }
 function tableReply() {
   const table = `<table><thead><tr>${S2_COLS.map((h) => `<th>${h}</th>`).join("")}</tr></thead><tbody>${S2_CLEAN.map((r) => `<tr>${r.map((v) => `<td>${esc(v)}</td>`).join("")}</tr>`).join("")}</tbody></table>`;
-  return { html: `整形しました。日付はISO形式、結果は陽性/陰性、注釈行と空行は除きました。` + table + `<div class="send-to"><button data-send-grid>回答欄へ送る</button><small>「至急！！MRSAのやつまとめて」のグリッドに流し込みます</small></div>` };
+  return { rows: S2_CLEAN, html: `整形しました。日付はISO形式、結果は陽性/陰性、注釈行と空行は除きました（20行）。<div class="send-to"><button data-send-grid>回答欄へ送る</button><small>「至急！！MRSAのやつまとめて」のグリッドに流し込みます</small></div><div class="tbl">` + table + `</div>` };
+}
+function latestTable() {
+  for (const th of state.threads) for (let i = th.log.length - 1; i >= 0; i--) if (th.log[i].rows) return th.log[i].rows;
+  return null;
 }
 function sendToGrid() {
-  const c = state.cases.find((x) => x.answer === "grid"); if (!c) return;
-  c.grid = S2_CLEAN.map((r) => [...r]);
+  const c = state.cases.find((x) => x.answer === "grid"); const rows = latestTable(); if (!c || !rows) return;
+  c.grid = rows.map((r) => [...r]);
   openCase(c.id);
   document.querySelectorAll(".grid tbody tr").forEach((tr) => tr.classList.add("filled"));
   document.querySelector(".answer")?.scrollIntoView({ behavior: "smooth", block: "start" });
@@ -567,8 +579,10 @@ function aiSend() {
   th.log.push({ role: "me", text: q }); renderLog();
   setTimeout(() => {
     const r = STAGES[state.stageId].ai(q);
-    th.log.push(typeof r === "string" ? { role: "ai", text: r } : { role: "ai", html: r.html });
+    th.log.push(typeof r === "string" ? { role: "ai", text: r } : { role: "ai", html: r.html, rows: r.rows });
     renderLog();
+    const open = state.cases.find((x) => x.id === state.open);
+    if (open && open.answer === "grid") openCase(open.id);
   }, 900);
 }
 $("#ai-send").onclick = aiSend;
