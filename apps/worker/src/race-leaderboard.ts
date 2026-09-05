@@ -76,6 +76,24 @@ export class RaceLeaderboard extends DurableObject<Env> {
     return this.snapshotFor(teamCode);
   }
 
+  /**
+   * ゲームマスターのリセットで、そのチームの行を落とす（`POST /api/gm/teams/.../reset`）。
+   * 初期位置の行を書き戻すのではなく消す——次の入室で`/api/session`がupsertし、
+   * revision 0・prologueの行として作り直されるので、消しておくほうが状態が1つ少ない。
+   *
+   * revisionを進めて配信し直すのは、既に帯を購読している端末から、消した行が
+   * 消えたことが見えるようにするためである。
+   */
+  async resetTeam(teamCodeInput: unknown): Promise<{ readonly ok: true }> {
+    const teamCode = teamCodeSchema.parse(teamCodeInput);
+    this.ctx.storage.sql.exec("DELETE FROM leaderboard_entries WHERE team_code = ?", teamCode);
+    this.ctx.storage.sql.exec(
+      "UPDATE leaderboard_meta SET value = value + 1 WHERE key = 'revision'",
+    );
+    this.broadcast();
+    return { ok: true };
+  }
+
   override async fetch(request: Request): Promise<Response> {
     if (!isWebSocketRequest(request)) return error("WebSocket接続が必要です。", 426);
     const parsed = teamCodeSchema.safeParse(new URL(request.url).searchParams.get("teamCode"));

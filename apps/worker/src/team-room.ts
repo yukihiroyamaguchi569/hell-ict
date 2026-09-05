@@ -263,6 +263,26 @@ const assistantTextOf = (outcome: CompleteChatMessageOutcome): string | null => 
   return normalizeAssistantText(redactPii(normalized));
 };
 
+/**
+ * ゲームマスターのリセットで空にするテーブル。DDLで作っているもののうち`migrations`以外
+ * すべてを列挙する。テーブルを足したらここへも足す——消し忘れると、リセットしたつもりの
+ * チームに古い状態が残る。
+ *
+ * `migrations`だけ残すのは、完了印が指す移行が「台帳に残った平文PIIを潰す」ものであり、
+ * 行ごと消した後にもう一度走らせる意味が無いためである。
+ */
+const RESET_TABLES = [
+  "team_state",
+  "processed_commands",
+  "chat_state",
+  "processed_thread_commands",
+  "processed_message_commands",
+  "pending_message_commands",
+  "checkpoint_state",
+  "processed_checkpoint_commands",
+  "rate_limit",
+] as const;
+
 export class TeamRoom extends DurableObject<Env> {
   constructor(ctx: DurableObjectState, env: Env) {
     super(ctx, env);
@@ -314,6 +334,28 @@ export class TeamRoom extends DurableObject<Env> {
   }
 
   // ---- チーム状態（P1Bから継続） ----
+
+  /**
+   * チーム状態をまるごと初期化する（ゲームマスター用。`POST /api/gm/teams/.../reset`）。
+   * テーブルは残して行だけ消すので、次の入室でjoinが初期snapshotを作り直し、
+   * 冪等台帳が空でもチャット送信・チェックポイント保存はそのまま通る。
+   *
+   * WebSocketのattachment（`serializeAttachment`）はソケットごとの値でSQLには無く、
+   * 次の接続で作り直される。開いたままの接続は古い画面を持ち続けるので、リセット後は
+   * 参加者にリロードさせる運用にする（docs/development-harness.md）。
+   *
+   * 削除は1つのトランザクションにまとめる。途中で落ちて「会話だけ消えて
+   * チェックポイントが残る」という中途半端な状態を作らない。
+   */
+  async resetTeam(teamCodeInput: unknown): Promise<{ readonly ok: true }> {
+    teamCodeSchema.parse(teamCodeInput);
+    this.ctx.storage.transactionSync(() => {
+      for (const table of RESET_TABLES) {
+        this.ctx.storage.sql.exec(`DELETE FROM ${table}`);
+      }
+    });
+    return { ok: true };
+  }
 
   async join(teamCodeInput: unknown): Promise<TeamSnapshot> {
     const teamCode = teamCodeSchema.parse(teamCodeInput);

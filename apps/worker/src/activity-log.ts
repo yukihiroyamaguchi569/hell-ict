@@ -141,6 +141,17 @@ const insertActivity = async (env: Env, input: ActivityEvent): Promise<void> => 
 };
 
 /**
+ * ゲームマスターのリセットを1行残す。他のサーバ記録（logActivity）と違い`waitUntil`へ
+ * 逃がさず待つ——1回の手動操作なので、記録できたかどうかを応答で返せるほうがよい。
+ *
+ * 過去の行は消さない。何が起きたかの記録はリセットしても残す、が設計の前提である
+ * （消えるのはDurable Objectのチーム状態だけ）。
+ */
+export const recordGmReset = async (env: Env, teamCode: string): Promise<void> => {
+  await insertActivity(env, { teamCode, kind: "gm.reset", text: "", meta: { by: "gm" } });
+};
+
+/**
  * サーバ側の自動記録。記録はゲーム進行より優先度が低いので、応答を待たせず
  * `waitUntil`へ逃がし、失敗しても握り潰す（ログのためにチャットが落ちる方が害が大きい）。
  */

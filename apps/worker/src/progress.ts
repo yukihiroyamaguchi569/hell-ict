@@ -169,7 +169,8 @@ const eventRowSchema = z.object({
  * チームごとの現在位置。
  * - pos: 復帰イベント（jump=手動復帰、resume=チェックポイントからの自動復帰）は
  *   自力で進んだわけではないので集計から外す。復帰以外のイベントが1件も無いチームは
- *   0（Prologue）として扱う。
+ *   0（Prologue）として扱う。ゲームマスターのリセット（kind=reset）より前のイベントも
+ *   同じく外す——MAXで畳むだけでは、消したはずの最高到達点が残り続けて位置が戻らない。
  * - teamName: 空文字で送られてくることがあるため、最新の「非空」の名前を採る。
  * - updatedAt: 生存確認なので復帰を含む全イベントの最新時刻を使う。
  */
@@ -202,7 +203,9 @@ const teamsSql = (filter: string): string => `SELECT
     WHERE i.team_code = e.team_code AND i.team_name <> ''
     ORDER BY i.id DESC LIMIT 1
   ), '') AS teamName,
-  COALESCE(MAX(CASE WHEN e.kind NOT IN ('jump', 'resume') THEN e.pos END), 0) AS pos,
+  COALESCE(MAX(CASE WHEN e.kind NOT IN ('jump', 'resume', 'reset') AND e.id > COALESCE((
+    SELECT MAX(r.id) FROM progress_events r WHERE r.team_code = e.team_code AND r.kind = 'reset'
+  ), 0) THEN e.pos END), 0) AS pos,
   MAX(e.created_at) AS updatedAt
 FROM progress_events e
 ${filter}
@@ -365,4 +368,37 @@ export const handleProgressSummary = async (env: Env, url: URL): Promise<Respons
   } catch {
     return error("進捗の取得に失敗しました。", 503);
   }
+};
+
+/**
+ * ゲームマスターのリセットを進捗イベントとして残す。位置は初期（pos 0・welcome）へ戻り、
+ * teamsSqlはこの行より前のイベントを集計から外す。
+ *
+ * クライアントが送れるkind（progressEventSchema）には`reset`を含めない——含めると
+ * 参加者の端末から自分の位置を初期へ戻せてしまう。サーバ側でだけ書く。
+ */
+export const recordProgressReset = async (env: Env, teamCode: string): Promise<void> => {
+  await ensureSchema(env.PROGRESS_DB);
+  await env.PROGRESS_DB.prepare(
+    `INSERT INTO progress_events (team_code, team_name, pos, view, kind, client_at)
+     VALUES (?, '', 0, 'welcome', 'reset', '')`,
+  )
+    .bind(teamCode)
+    .run();
+};
+
+/**
+ * publicId（`publicTeamId`＝SHA-256の先頭8桁）からチームコードを引くための候補集合。
+ * ダッシュボードの行はまさにこのテーブルの集計なので、画面に出ているチームは必ずここに居る。
+ *
+ * 逆引きが要るのは、ダッシュボードがチームコードを表示しない設計だからである
+ * （見えた時点でそのチームへ入室できてしまう）。
+ */
+export const listProgressTeamCodes = async (db: D1Database): Promise<string[]> => {
+  await ensureSchema(db);
+  const rows = await db.prepare("SELECT DISTINCT team_code FROM progress_events").all();
+  return z
+    .array(z.object({ team_code: z.string() }))
+    .parse(rows.results)
+    .map((row) => row.team_code);
 };

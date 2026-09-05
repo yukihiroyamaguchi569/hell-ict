@@ -27,6 +27,7 @@ import type {
 
 import { handleActivityPost, logActivity } from "./activity-log.js";
 import type { ActivityEvent } from "./activity-log.js";
+import { handleGmReset } from "./gm.js";
 import {
   corsHeadersFor,
   isApiRequestAllowed,
@@ -515,26 +516,39 @@ const handleLeaderboardSync = (request: Request, env: Env): Promise<Response> =>
     ? env.RACE_LEADERBOARD.getByName("global").fetch(request)
     : Promise.resolve(error("WebSocket接続が必要です。", 426));
 
-const handlePost = (request: Request, scope: RequestScope, url: URL): Promise<Response> => {
+/** `/api/teams/:code/*`のPOST。handlePostの複雑度を上限内に保つための切り出し。 */
+const handleTeamPost = (
+  request: Request,
+  scope: RequestScope,
+  pathname: string,
+): Promise<Response> => {
   const { env } = scope;
-  if (url.pathname === "/api/session") return handleSession(request, env);
-  if (url.pathname === "/api/progress") return handleProgressPost(request, env);
-  const activityTeamCode = teamCodeFromPath(url.pathname, "/api/teams/", "/activity");
+  const activityTeamCode = teamCodeFromPath(pathname, "/api/teams/", "/activity");
   if (activityTeamCode !== null) return handleActivityPost(request, env, activityTeamCode);
-  const threadsTeamCode = teamCodeFromPath(url.pathname, "/api/teams/", "/chat/threads");
+  const threadsTeamCode = teamCodeFromPath(pathname, "/api/teams/", "/chat/threads");
   if (threadsTeamCode !== null) return handleCreateThread(request, scope, threadsTeamCode);
-  const messagesTeamCode = teamCodeFromPath(url.pathname, "/api/teams/", "/chat/messages");
+  const messagesTeamCode = teamCodeFromPath(pathname, "/api/teams/", "/chat/messages");
   if (messagesTeamCode !== null)
     return handleChatMessage(request, scope, messagesTeamCode, {
       aiGateway: createAiGateway(env),
       nowMs: Date.now(),
     });
-  const checkpointTeamCode = teamCodeFromPath(url.pathname, "/api/teams/", "/checkpoint");
+  const checkpointTeamCode = teamCodeFromPath(pathname, "/api/teams/", "/checkpoint");
   if (checkpointTeamCode !== null) return handleSaveCheckpoint(request, env, checkpointTeamCode);
-  const commandTeamCode = teamCodeFromPath(url.pathname, "/api/teams/", "/commands");
+  const commandTeamCode = teamCodeFromPath(pathname, "/api/teams/", "/commands");
   return commandTeamCode === null
     ? Promise.resolve(new Response("Not found", { status: 404 }))
     : handleCommand(request, env, commandTeamCode);
+};
+
+const handlePost = (request: Request, scope: RequestScope, url: URL): Promise<Response> => {
+  const { env } = scope;
+  // GM系はまとめてhandleGmResetへ渡す。未知のパスもトークンを通していない相手には
+  // 404で、経路の有無を確かめられないようにする（gm.ts先頭の注記）。
+  if (url.pathname.startsWith("/api/gm/")) return handleGmReset(request, env, url);
+  if (url.pathname === "/api/session") return handleSession(request, env);
+  if (url.pathname === "/api/progress") return handleProgressPost(request, env);
+  return handleTeamPost(request, scope, url.pathname);
 };
 
 /**
@@ -633,7 +647,9 @@ const preflightResponse = (cors: CorsHeaders): Response =>
     headers: {
       ...cors,
       "Access-Control-Allow-Methods": "GET, POST",
-      "Access-Control-Allow-Headers": "Content-Type",
+      // AuthorizationはGM系（POST /api/gm/...）のトークン用。許可オリジンの判定は
+      // 変わらないので、別オリジン配信の開発時にpreflightだけで詰まらないようにする。
+      "Access-Control-Allow-Headers": "Content-Type, Authorization",
       "Access-Control-Max-Age": "86400",
     },
   });
