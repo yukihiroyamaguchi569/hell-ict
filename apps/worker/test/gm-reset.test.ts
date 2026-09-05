@@ -657,3 +657,33 @@ describe("GMリセット: 照合とINSERTの隙間", () => {
     });
   });
 });
+
+describe("GMリセット: Reactクライアントが送る形", () => {
+  it("世代を添えた command / create-thread / send-message がリセット後も通る", async () => {
+    await withEnv({ ADMIN_TOKEN }, async () => {
+      const teamCode = "380001";
+      await session(teamCode);
+      expect((await resetByCode(teamCode)).status).toBe(200);
+
+      // 入室し直して世代を取り、Reactクライアントと同じ形で書き込む。
+      const generation = await joinGeneration(teamCode);
+      expect(generation).toBe(1);
+      expect(
+        (await createThread(teamCode, "00000000-0000-4000-8000-000000001201", generation)).status,
+      ).toBe(200);
+      expect(
+        (await enterStage1(teamCode, "00000000-0000-4000-8000-000000001202", generation)).status,
+      ).toBe(200);
+      const threadId = (await chatSnapshot(teamCode)).threads[0]?.threadId ?? "";
+      const sent = await postJson(`/api/teams/${teamCode}/chat/messages`, {
+        type: "send-message",
+        commandId: "00000000-0000-4000-8000-000000001203",
+        threadId,
+        text: "手洗いの手順を教えてください",
+        generation,
+      });
+      // AIはテスト環境で呼べないので、世代で弾かれていない（409でない）ことだけ見る。
+      expect(sent.status).not.toBe(409);
+    });
+  });
+});
