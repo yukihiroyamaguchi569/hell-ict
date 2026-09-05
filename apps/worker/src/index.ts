@@ -334,7 +334,10 @@ export type ChatMessageDeps = {
 };
 
 /**
- * 送信前PIIゲートで拒否するときの応答。拒否もレート制限の枠を1つ消費する——この経路は
+ * 送信前PIIゲートで拒否するときの応答。枠を消費する前に世代を照合するので、
+ * リセットより前に入室した端末はここでも422ではなく409で止まる（枠も記録も動かない）。
+ *
+ * 拒否もレート制限の枠を1つ消費する——この経路は
  * beginChatMessageへ進まないので通常の枠消費を通らず、PII入りの本文を連投するだけで
  * 活動ログを無限に増やせてしまう。超過なら429で、ログも書かない。
  *
@@ -348,9 +351,13 @@ const respondToPiiBlock = async (
   log: ChatLogger,
   command: SendMessageCommand,
 ): Promise<Response> => {
-  const verdict = await room.consumeChatAttempt(gate.nowMs, gate.limit).catch(() => null);
+  const verdict = await room
+    .consumeChatAttempt(gate.nowMs, gate.limit, command.generation)
+    .catch(() => null);
   if (verdict === null)
     return error("メッセージの処理に失敗しました。時間を置いて再試行してください。", 503);
+  // 世代切れはPII判定より優先する。枠も活動ログも動かさずに返す。
+  if ("staleGeneration" in verdict) return staleGenerationResponse();
   if (!verdict.allowed)
     return errorWithHeaders("送信が多すぎます。少し待ってから再試行してください。", 429, {
       "Retry-After": String(verdict.retryAfterSeconds),

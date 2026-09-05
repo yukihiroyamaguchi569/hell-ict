@@ -755,3 +755,30 @@ describe("GMリセット: リーダーボードのフェンス", () => {
     });
   });
 });
+
+describe("GMリセット: PIIゲートの世代", () => {
+  it("古い世代のPII本文の送信は409で、枠も活動ログも動かない", async () => {
+    await withEnv({ ADMIN_TOKEN }, async () => {
+      const teamCode = "360001";
+      const generation = await joinGeneration(teamCode);
+      const threadId = (await chatSnapshot(teamCode)).threads[0]?.threadId ?? "";
+      expect((await resetByCode(teamCode)).status).toBe(200);
+
+      // PII判定より前に世代を見るので、422 pii_blocked ではなく409で止まる。
+      const stale = await postJson(`/api/teams/${teamCode}/chat/messages`, {
+        type: "send-message",
+        commandId: "00000000-0000-4000-8000-000000001001",
+        threadId,
+        text: "患者の渡辺三郎さん（090-1234-5678）の件です",
+        generation,
+      });
+      expect(stale.status).toBe(409);
+      await expect(stale.json()).resolves.toMatchObject({ code: "stale-generation" });
+
+      // 枠を1つも消費していない。連投で入り直したチームの送信枠を削れない。
+      await expect(ledgerRows(teamCode, "rate_limit")).resolves.toBe(0);
+      // 活動ログにも chat.pii_blocked を積まない（増えるのは gm.reset の1件だけ）。
+      await expect(activityKinds(teamCode)).resolves.toEqual(["gm.reset"]);
+    });
+  });
+});

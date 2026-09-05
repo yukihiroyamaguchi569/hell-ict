@@ -726,7 +726,15 @@ export class TeamRoom extends DurableObject<Env> {
    * 同じテーブル・同じ窓を使い、二重計上にならないよう「PII拒否経路はこれだけ、
    * 通常経路はbeginChatMessageだけ」が枠を消費する分担にする。
    */
-  async consumeChatAttempt(nowMs: unknown, limit: unknown): Promise<RateLimitVerdict> {
+  async consumeChatAttempt(
+    nowMs: unknown,
+    limit: unknown,
+    generationInput: unknown,
+  ): Promise<RateLimitVerdict | StaleGenerationReply> {
+    // 世代の照合は枠を減らす前。ここを通すと、リセット前のタブがPII入りの本文を
+    // 連投するだけで、入り直したチームの送信枠と活動ログを削れてしまう。
+    if (resetGenerationSchema.parse(generationInput) !== this.readGeneration())
+      return { staleGeneration: true };
     const retryAfterSeconds = this.consumeRateLimit(
       "chat",
       nowMsSchema.parse(nowMs),
