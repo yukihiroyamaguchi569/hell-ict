@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import { ensureSchema } from "../src/progress.js";
+import { ensureSchema, migrateSchema } from "../src/progress.js";
 import type { SchemaRunner } from "../src/progress.js";
 
 /**
@@ -52,6 +52,40 @@ const flush = (): Promise<void> =>
     setTimeout(resolve, 0);
   });
 
+/**
+ * CREATE群は通し、ALTERだけを指定のエラーで落とすFake。`ADD COLUMN`の失敗のうち
+ * 「列が既にある」だけを握る、という切り分けを直接確かめるために使う。
+ */
+const failingAlterRunner = (message: string): { runner: SchemaRunner; calls: () => number } => {
+  let calls = 0;
+  const runner: SchemaRunner = {
+    exec: (query: string) => {
+      calls += 1;
+      return query.startsWith("ALTER")
+        ? Promise.reject(new Error(message))
+        : Promise.resolve({ count: 2, duration: 0 });
+    },
+  };
+  return { runner, calls: () => calls };
+};
+
+describe("migrateSchema", () => {
+  it("ADD COLUMNの『列が既にある』だけを握って完了する", async () => {
+    // 2度目以降の起動。SQLiteはこの文言だけを返すので、移行済みとみなしてよい。
+    const { runner, calls } = failingAlterRunner(
+      "D1_ERROR: duplicate column name: generation: SQLITE_ERROR",
+    );
+    await expect(migrateSchema(runner)).resolves.toBeUndefined();
+    expect(calls()).toBe(2);
+  });
+
+  it("ADD COLUMNのそれ以外の失敗は握らずに投げる", async () => {
+    // 握ると、列の無いまま「移行済み」になってINSERTが延々失敗し続ける。
+    const { runner } = failingAlterRunner("D1_ERROR: no such table: progress_events");
+    await expect(migrateSchema(runner)).rejects.toThrow("no such table");
+  });
+});
+
 describe("ensureSchema", () => {
   // 失敗時は初期化状態がnullへ戻るので、後続のテストは未初期化から始められる。
   // この順序に依存しているため、テストを入れ替えるときは注意すること。
@@ -67,6 +101,15 @@ describe("ensureSchema", () => {
     await expect(ensureSchema(runner)).rejects.toThrow("D1 down");
     await expect(ensureSchema(runner)).rejects.toThrow("D1 down");
     expect(calls).toBe(2);
+  });
+
+  it("ADD COLUMNが本物の失敗をしたら成功として記憶せず、次の呼び出しで作り直す", async () => {
+    const { runner, calls } = failingAlterRunner("D1_ERROR: no such table: progress_events");
+
+    await expect(ensureSchema(runner)).rejects.toThrow("no such table");
+    // 失敗を覚えていないので、次のリクエストがもう一度DDLを流す（CREATE＋ALTERで2本ずつ）。
+    await expect(ensureSchema(runner)).rejects.toThrow("no such table");
+    expect(calls()).toBe(MIGRATION_STATEMENTS * 2);
   });
 
   it("初期化中に来た呼び出しを待たせ、DDLは1回だけ流す", async () => {
