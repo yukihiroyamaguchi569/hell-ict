@@ -28,10 +28,20 @@ import { bodyErrorResponse, error, json, parseJson } from "./http.js";
  * 本番とテストでスキーマがずれないようにする。
  */
 export const progressSchemaSql = [
-  "CREATE TABLE IF NOT EXISTS progress_events (id INTEGER PRIMARY KEY AUTOINCREMENT, team_code TEXT NOT NULL, team_name TEXT NOT NULL DEFAULT '', pos INTEGER NOT NULL, view TEXT NOT NULL DEFAULT '', kind TEXT NOT NULL, client_at TEXT NOT NULL DEFAULT '', created_at TEXT NOT NULL DEFAULT (datetime('now')));",
+  "CREATE TABLE IF NOT EXISTS progress_events (id INTEGER PRIMARY KEY AUTOINCREMENT, team_code TEXT NOT NULL, team_name TEXT NOT NULL DEFAULT '', pos INTEGER NOT NULL, view TEXT NOT NULL DEFAULT '', kind TEXT NOT NULL, generation INTEGER NOT NULL DEFAULT 0, client_at TEXT NOT NULL DEFAULT '', created_at TEXT NOT NULL DEFAULT (datetime('now')));",
   "CREATE INDEX IF NOT EXISTS idx_progress_team ON progress_events(team_code, id);",
   "CREATE TABLE IF NOT EXISTS migrations (name TEXT PRIMARY KEY);",
 ].join("\n");
+
+/**
+ * 既にテーブルを持つD1には`CREATE TABLE IF NOT EXISTS`が効かないので、列は後から足す。
+ * SQLiteの`ADD COLUMN`に`IF NOT EXISTS`は無く、2度目以降は「列が既にある」で失敗する
+ * だけなので握りつぶす（team-room.tsのコンストラクタと同じ流儀）。既存行の世代は
+ * 既定の0になり、リセット前のイベントとして扱われる。
+ */
+const PROGRESS_ALTERS = [
+  "ALTER TABLE progress_events ADD COLUMN generation INTEGER NOT NULL DEFAULT 0;",
+];
 
 /**
  * schema/progress.sqlの適用忘れで当日リクエストが全滅しないよう、初回アクセス時に
@@ -48,16 +58,24 @@ export const progressSchemaSql = [
 /** ensureSchemaが必要とするのはexecだけ。テストからFakeを渡せるよう最小限へ絞る。 */
 export type SchemaRunner = Pick<D1Database, "exec">;
 
+const migrateSchema = async (db: SchemaRunner): Promise<void> => {
+  await db.exec(progressSchemaSql);
+  for (const statement of PROGRESS_ALTERS) {
+    try {
+      await db.exec(statement);
+    } catch {
+      // 列が既に存在する。
+    }
+  }
+};
+
 let schemaReady: Promise<void> | null = null;
 export const ensureSchema = (db: SchemaRunner): Promise<void> => {
   if (schemaReady !== null) return schemaReady;
-  schemaReady = db.exec(progressSchemaSql).then(
-    () => undefined,
-    (caught: unknown) => {
-      schemaReady = null;
-      throw caught;
-    },
-  );
+  schemaReady = migrateSchema(db).catch((caught: unknown) => {
+    schemaReady = null;
+    throw caught;
+  });
   return schemaReady;
 };
 
@@ -174,6 +192,9 @@ const eventRowSchema = z.object({
  *   自力で進んだわけではないので集計から外す。復帰以外のイベントが1件も無いチームは
  *   0（Prologue）として扱う。ゲームマスターのリセット（kind=reset）より前のイベントも
  *   同じく外す——MAXで畳むだけでは、消したはずの最高到達点が残り続けて位置が戻らない。
+ *   古いかどうかはidではなくgenerationで見る。世代の照合（DOへの問い合わせ）と
+ *   INSERTは別の操作なので、その隙にリセットが入ると、古い行がreset行より後の
+ *   idで積まれる——「idが後か」では守れない。行に世代を持たせて列で判定する。
  * - teamName: 空文字で送られてくることがあるため、最新の「非空」の名前を採る。
  * - updatedAt: 生存確認なので復帰を含む全イベントの最新時刻を使う。
  */
@@ -185,6 +206,29 @@ const eventRowSchema = z.object({
  * 規則が無い（open）なら条件を付けず全件を返す。不正な設定はfail-closedで、
  * 常に偽の条件を置く。
  */
+/**
+ * その行が「今の世代」に属するかの述語。チームごとに、最後のreset行の世代以上の行だけを
+ * 数える（resetを一度もしていないチームは0以上＝全件）。照合を通った後にリセットが
+ * 入って積まれた古い行は、世代が小さいのでここで落ちる。
+ */
+const currentGeneration = (alias: string): string =>
+  `${alias}.generation >= COALESCE((SELECT MAX(r.generation) FROM progress_events r WHERE r.team_code = ${alias}.team_code AND r.kind = 'reset'), 0)`;
+
+/** 規則の絞り込みへ世代の述語をANDで足す。規則が無ければ世代だけのWHEREになる。 */
+const currentRowsFilter = (
+  rule: TeamCodeRule,
+  alias: string,
+): { clause: string; params: (string | number)[] } => {
+  const filter = teamFilter(rule, `${alias}.team_code`);
+  return {
+    clause:
+      filter.clause === ""
+        ? `WHERE ${currentGeneration(alias)}`
+        : `${filter.clause} AND ${currentGeneration(alias)}`,
+    params: filter.params,
+  };
+};
+
 const teamFilter = (
   rule: TeamCodeRule,
   column: string,
@@ -206,9 +250,7 @@ const teamsSql = (filter: string): string => `SELECT
     WHERE i.team_code = e.team_code AND i.team_name <> ''
     ORDER BY i.id DESC LIMIT 1
   ), '') AS teamName,
-  COALESCE(MAX(CASE WHEN e.kind NOT IN ('jump', 'resume', 'reset') AND e.id > COALESCE((
-    SELECT MAX(r.id) FROM progress_events r WHERE r.team_code = e.team_code AND r.kind = 'reset'
-  ), 0) THEN e.pos END), 0) AS pos,
+  COALESCE(MAX(CASE WHEN e.kind NOT IN ('jump', 'resume', 'reset') THEN e.pos END), 0) AS pos,
   MAX(e.created_at) AS updatedAt
 FROM progress_events e
 ${filter}
@@ -216,15 +258,15 @@ GROUP BY e.team_code
 ORDER BY pos DESC, updatedAt ASC`;
 
 const eventsSql = (filter: string): string => `SELECT
-  team_code AS teamCode,
-  team_name AS teamName,
-  pos,
-  view,
-  kind,
-  created_at AS createdAt
-FROM progress_events
+  p.team_code AS teamCode,
+  p.team_name AS teamName,
+  p.pos,
+  p.view,
+  p.kind,
+  p.created_at AS createdAt
+FROM progress_events p
 ${filter}
-ORDER BY id DESC
+ORDER BY p.id DESC
 LIMIT 20`;
 
 export const handleProgressPost = async (request: Request, env: Env): Promise<Response> => {
@@ -262,8 +304,8 @@ export const handleProgressPost = async (request: Request, env: Env): Promise<Re
   try {
     await ensureSchema(env.PROGRESS_DB);
     await env.PROGRESS_DB.prepare(
-      `INSERT INTO progress_events (team_code, team_name, pos, view, kind, client_at)
-       VALUES (?, ?, ?, ?, ?, ?)`,
+      `INSERT INTO progress_events (team_code, team_name, pos, view, kind, generation, client_at)
+       VALUES (?, ?, ?, ?, ?, ?, ?)`,
     )
       .bind(
         event.teamCode,
@@ -276,6 +318,9 @@ export const handleProgressPost = async (request: Request, env: Env): Promise<Re
         event.pos,
         event.view,
         event.kind,
+        // クライアントが名乗った世代をそのまま行へ残す。DOへの事前照合は早期拒否で
+        // あって、正しさはこの列が担保する（集計はreset行の世代より古い行を数えない）。
+        event.generation,
         event.clientAt,
       )
       .run();
@@ -358,8 +403,8 @@ export const handleProgressSummary = async (env: Env, url: URL): Promise<Respons
     await migrateProgressPii(env.PROGRESS_DB);
     const rule = parseTeamCodeRule(env);
     const selfCode = selfTeamCode(url, rule);
-    const teamsFilter = teamFilter(rule, "e.team_code");
-    const eventsFilter = teamFilter(rule, "team_code");
+    const teamsFilter = currentRowsFilter(rule, "e");
+    const eventsFilter = currentRowsFilter(rule, "p");
     const [teams, events] = await Promise.all([
       env.PROGRESS_DB.prepare(teamsSql(teamsFilter.clause))
         .bind(...teamsFilter.params)
@@ -390,18 +435,23 @@ export const handleProgressSummary = async (env: Env, url: URL): Promise<Respons
 
 /**
  * ゲームマスターのリセットを進捗イベントとして残す。位置は初期（pos 0・welcome）へ戻り、
- * teamsSqlはこの行より前のイベントを集計から外す。
+ * 集計はこの行の世代より古い行を数えない。`generation`はリセット後の（＝1つ進んだ）値で、
+ * これが以後の集計の下限になる。
  *
  * クライアントが送れるkind（progressEventSchema）には`reset`を含めない——含めると
  * 参加者の端末から自分の位置を初期へ戻せてしまう。サーバ側でだけ書く。
  */
-export const recordProgressReset = async (env: Env, teamCode: string): Promise<void> => {
+export const recordProgressReset = async (
+  env: Env,
+  teamCode: string,
+  generation: number,
+): Promise<void> => {
   await ensureSchema(env.PROGRESS_DB);
   await env.PROGRESS_DB.prepare(
-    `INSERT INTO progress_events (team_code, team_name, pos, view, kind, client_at)
-     VALUES (?, '', 0, 'welcome', 'reset', '')`,
+    `INSERT INTO progress_events (team_code, team_name, pos, view, kind, generation, client_at)
+     VALUES (?, '', 0, 'welcome', 'reset', ?, '')`,
   )
-    .bind(teamCode)
+    .bind(teamCode, generation)
     .run();
 };
 

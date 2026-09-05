@@ -1,5 +1,5 @@
 import { env, exports } from "cloudflare:workers";
-import { listDurableObjectIds } from "cloudflare:test";
+import { listDurableObjectIds, runInDurableObject } from "cloudflare:test";
 import { publicTeamId } from "@hell-ict/domain";
 import { beforeEach, describe, expect, it } from "vitest";
 import { z } from "zod";
@@ -108,6 +108,45 @@ const progressKinds = async (teamCode: string): Promise<string[]> => {
     .parse(rows.results)
     .map((row) => row.kind);
 };
+
+const enterStage1 = (
+  teamCode: string,
+  commandId: string,
+  generation: number,
+  expectedRevision = 0,
+): Promise<Response> =>
+  postJson(`/api/teams/${teamCode}/commands`, {
+    type: "enter-stage1",
+    commandId,
+    expectedRevision,
+    generation,
+  });
+
+const createThread = (teamCode: string, commandId: string, generation: number): Promise<Response> =>
+  postJson(`/api/teams/${teamCode}/chat/threads`, {
+    type: "create-thread",
+    commandId,
+    title: "Stage 3",
+    kind: "stage",
+    generation,
+  });
+
+const chatSnapshot = async (
+  teamCode: string,
+): Promise<{ threads: { title: string; threadId: string }[] }> => {
+  const response = await get(`/api/teams/${teamCode}/chat`);
+  expect(response.status).toBe(200);
+  return z
+    .object({ threads: z.array(z.object({ title: z.string(), threadId: z.string() })) })
+    .parse(await response.json());
+};
+
+/** Durable Objectの台帳・レート制限の行数。拒否したときに1行も増えないことを見る。 */
+const ledgerRows = (teamCode: string, table: string): Promise<number> =>
+  runInDurableObject(
+    env.TEAM_ROOM.getByName(teamCode),
+    (_instance, state) => state.storage.sql.exec(`SELECT * FROM ${table}`).toArray().length,
+  );
 
 const saveCheckpoint = (
   teamCode: string,
@@ -301,15 +340,7 @@ describe("GMリセット: リセットの中身", () => {
       const teamCode = "310003";
       await session(teamCode);
       const commandId = "00000000-0000-4000-8000-000000000301";
-      expect(
-        (
-          await postJson(`/api/teams/${teamCode}/commands`, {
-            type: "enter-stage1",
-            commandId,
-            expectedRevision: 0,
-          })
-        ).status,
-      ).toBe(200);
+      expect((await enterStage1(teamCode, commandId, 0)).status).toBe(200);
       expect((await resetByCode(teamCode)).status).toBe(200);
 
       const rejoined = await session(teamCode);
@@ -317,15 +348,11 @@ describe("GMリセット: リセットの中身", () => {
       await expect(rejoined.json()).resolves.toMatchObject({
         teamCode,
         revision: 0,
+        generation: 1,
         state: { stage: "prologue" },
       });
-      // 冪等台帳も空なので、同じcommandIdの操作がもう一度適用できる。
-      const replayed = await postJson(`/api/teams/${teamCode}/commands`, {
-        type: "enter-stage1",
-        commandId,
-        expectedRevision: 0,
-      });
-      expect(replayed.status).toBe(200);
+      // 冪等台帳も空なので、同じcommandIdの操作がもう一度適用できる（新しい世代で送る）。
+      expect((await enterStage1(teamCode, commandId, 1)).status).toBe(200);
     });
   });
 
@@ -506,6 +533,127 @@ describe("GMリセット: リセット世代", () => {
       const ahead = await postJson("/api/progress", progressEvent(teamCode, { generation: 9 }));
       expect(ahead.status).toBe(409);
       await expect(progressKinds(teamCode)).resolves.toEqual([]);
+    });
+  });
+});
+
+describe("GMリセット: 会話とコマンドの世代", () => {
+  it("リセット後、古い世代のスレッド作成は409でchat_stateも台帳も空のまま", async () => {
+    await withEnv({ ADMIN_TOKEN }, async () => {
+      const teamCode = "340001";
+      const generation = await joinGeneration(teamCode);
+      expect(
+        (await createThread(teamCode, "00000000-0000-4000-8000-000000000701", generation)).status,
+      ).toBe(200);
+      await expect(chatSnapshot(teamCode)).resolves.toMatchObject({
+        threads: [{ title: "メイン" }, { title: "Stage 3" }],
+      });
+      expect((await resetByCode(teamCode)).status).toBe(200);
+
+      const stale = await createThread(
+        teamCode,
+        "00000000-0000-4000-8000-000000000702",
+        generation,
+      );
+      expect(stale.status).toBe(409);
+      await expect(stale.json()).resolves.toMatchObject({ code: "stale-generation" });
+      // 作り直された初期スナップショットのまま。古いタブがステージ用スレッドを
+      // 生やし直していないことを、台帳ではなく見える状態で確かめる。
+      await expect(chatSnapshot(teamCode)).resolves.toMatchObject({
+        threads: [{ title: "メイン" }],
+      });
+      await expect(ledgerRows(teamCode, "processed_thread_commands")).resolves.toBe(0);
+
+      // 新しい世代なら通る。
+      expect((await createThread(teamCode, "00000000-0000-4000-8000-000000000703", 1)).status).toBe(
+        200,
+      );
+    });
+  });
+
+  it("リセット後、古い世代のメッセージ送信は409で台帳もレート制限も動かない", async () => {
+    await withEnv({ ADMIN_TOKEN }, async () => {
+      const teamCode = "340002";
+      const generation = await joinGeneration(teamCode);
+      const threadId = (await chatSnapshot(teamCode)).threads[0]?.threadId ?? "";
+      expect((await resetByCode(teamCode)).status).toBe(200);
+
+      const stale = await postJson(`/api/teams/${teamCode}/chat/messages`, {
+        type: "send-message",
+        commandId: "00000000-0000-4000-8000-000000000801",
+        threadId,
+        text: "リセット前のタブからの送信",
+        generation,
+      });
+      expect(stale.status).toBe(409);
+      await expect(stale.json()).resolves.toMatchObject({ code: "stale-generation" });
+      await expect(ledgerRows(teamCode, "pending_message_commands")).resolves.toBe(0);
+      await expect(ledgerRows(teamCode, "processed_message_commands")).resolves.toBe(0);
+      // 枠も消費しない。古いタブの連投で、入り直したチームの送信枠を削らせない。
+      await expect(ledgerRows(teamCode, "rate_limit")).resolves.toBe(0);
+    });
+  });
+
+  it("リセット後、古い世代のステージ遷移は409でチーム状態が初期のまま", async () => {
+    await withEnv({ ADMIN_TOKEN }, async () => {
+      const teamCode = "340003";
+      const generation = await joinGeneration(teamCode);
+      expect((await resetByCode(teamCode)).status).toBe(200);
+
+      const stale = await enterStage1(teamCode, "00000000-0000-4000-8000-000000000901", generation);
+      expect(stale.status).toBe(409);
+      await expect(stale.json()).resolves.toMatchObject({ code: "stale-generation" });
+      await expect(ledgerRows(teamCode, "processed_commands")).resolves.toBe(0);
+      const rejoined = await session(teamCode);
+      await expect(rejoined.json()).resolves.toMatchObject({
+        revision: 0,
+        generation: 1,
+        state: { stage: "prologue" },
+      });
+
+      // 新しい世代なら通る。
+      expect((await enterStage1(teamCode, "00000000-0000-4000-8000-000000000902", 1)).status).toBe(
+        200,
+      );
+    });
+  });
+});
+
+describe("GMリセット: 照合とINSERTの隙間", () => {
+  it("照合の後にリセットが入って積まれた古い世代の行は、集計に数えない", async () => {
+    await withEnv({ ADMIN_TOKEN }, async () => {
+      const teamCode = "350001";
+      await session(teamCode);
+      await postJson("/api/progress", progressEvent(teamCode));
+      expect((await resetByCode(teamCode)).status).toBe(200);
+      await expect(posOf(teamCode)).resolves.toBe(0);
+
+      // 「世代の照合を通った直後にリセットが走り、そのままINSERTされた」状態を
+      // D1へ直接作る。世代0の行が、reset行（世代1）より後のidで積まれる。
+      await env.PROGRESS_DB.prepare(
+        `INSERT INTO progress_events (team_code, team_name, pos, view, kind, generation, client_at)
+         VALUES (?, '', 5, 's5', 'clear', 0, '')`,
+      )
+        .bind(teamCode)
+        .run();
+
+      // idで見ていた頃はここで5へ復活していた。列で見るので初期のまま。
+      await expect(posOf(teamCode)).resolves.toBe(0);
+      const events = await summary();
+      expect(events.events.some((row) => row.pos === 5)).toBe(false);
+    });
+  });
+
+  it("リセット後の新しい世代で積んだ行は、reset行より後でも数える", async () => {
+    await withEnv({ ADMIN_TOKEN }, async () => {
+      const teamCode = "350002";
+      await session(teamCode);
+      expect((await resetByCode(teamCode)).status).toBe(200);
+      await postJson(
+        "/api/progress",
+        progressEvent(teamCode, { pos: 4, view: "s4", generation: 1 }),
+      );
+      await expect(posOf(teamCode)).resolves.toBe(4);
     });
   });
 });

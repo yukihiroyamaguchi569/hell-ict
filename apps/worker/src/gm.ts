@@ -108,14 +108,19 @@ const gmTargetTeamCode = async (env: Env, pathname: string): Promise<TeamCode | 
  * リセットは何度実行しても同じ結果になるので、そのまま押し直せばよい。
  */
 const resetTeam = async (env: Env, teamCode: TeamCode): Promise<Response> => {
+  let generation: number;
   try {
-    await env.TEAM_ROOM.getByName(teamCode).resetTeam(teamCode);
+    const room = env.TEAM_ROOM.getByName(teamCode);
+    await room.resetTeam(teamCode);
+    // リセット後の世代。進捗イベントのreset行へ入れると、これが以後の集計の下限になる
+    // ——照合を通った後に積まれた古い世代の行を、行の列だけで見分けられる。
+    generation = await room.resetGeneration(teamCode);
     await env.RACE_LEADERBOARD.getByName("global").resetTeam(teamCode);
   } catch {
     return error("チーム状態のリセットに失敗しました。時間を置いて再試行してください。", 503);
   }
   try {
-    await recordProgressReset(env, teamCode);
+    await recordProgressReset(env, teamCode, generation);
     await recordGmReset(env, teamCode);
   } catch {
     return error("リセットは実行しましたが、記録に失敗しました。もう一度実行してください。", 503);

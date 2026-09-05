@@ -113,7 +113,21 @@ pnpm exec wrangler secret put ADMIN_TOKEN
 
 リセットしただけでは、リロードしていない古いタブの書き込みで状態が戻りうる。遅れて届いた`POST /api/progress`は帯の位置を復活させ、離脱時flushのチェックポイント保存は「初回保存」として古い状態を再生してしまう（CASも単調マージも、状態が空になった後は何も止められない）。
 
-そこでTeamRoomが**リセット世代**（整数、初期0）を持ち、リセットのたびに1つ進める。世代は入室（`POST /api/session`）の応答に載り、クライアントは以後`POST /api/progress`とチェックポイント保存（通常・flushとも）へ添える。サーバは一致しない書き込みを409 `{"code":"stale-generation"}`で拒否し、**D1にもDurable Objectにも1行も書かない**。世代を省いた要求は0として扱うので、一度もリセットしていないチームは今までどおり動く（後方互換）。
+そこでTeamRoomが**リセット世代**（整数、初期0）を持ち、リセットのたびに1つ進める。世代は入室（`POST /api/session`）の応答に載り、**進捗・チェックポイント・会話・コマンドのすべての書き込みに世代が付く。**
+
+| 書き込み | 世代を添える場所 | 拒否したときの状態 |
+|---|---|---|
+| `POST /api/progress` | 本文の`generation` | D1に1行も書かない |
+| `POST /api/teams/:code/checkpoint`（通常・flush とも） | 本文の`generation` | Durable Objectに1行も書かない（冪等台帳にも触れない） |
+| `POST /api/teams/:code/chat/threads` | 本文の`generation` | `chat_state`も台帳も変わらない |
+| `POST /api/teams/:code/chat/messages` | 本文の`generation` | 台帳もレート制限の枠も動かない |
+| `POST /api/teams/:code/commands` | 本文の`generation` | チーム状態も台帳も変わらない |
+
+一致しない書き込みはすべて409 `{"code":"stale-generation"}`で拒否する。世代を省いた要求は0として扱うので、一度もリセットしていないチームは今までどおり動く（後方互換）。照合はどの経路でも**冪等台帳を引くより前**に置く——後に置くと、リセット前のcommandIdが「処理済み」として古い結果を返しうる。
+
+`/api/session`はsnapshotと世代を1回のRPCで返す。2回に分けると、その間にリセットが入ったときに「リセット前のsnapshotとリセット後の世代」という食い違う組をクライアントへ渡すことになる。
+
+進捗記録だけは、DOへの事前照合とD1へのINSERTが別の操作になる。その隙にリセットが入ると古い行が`reset`行より後のidで積まれるため、**`progress_events`に`generation`列を持たせ、集計はそのチームの`reset`行の最大世代以上の行だけを数える**。事前照合は早期拒否であって、正しさは列が担保する。既存のD1には`ALTER TABLE ... ADD COLUMN`で足し（2度目以降の失敗は握りつぶす）、既存行は既定の0＝リセット前の行として扱われる。
 
 リセット世代は`RESET_TABLES`に含めない——リセットのたびに消すと、何回リセットしたかが失われて古い端末を見分けられなくなる。
 
