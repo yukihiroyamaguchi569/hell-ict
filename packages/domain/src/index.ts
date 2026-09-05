@@ -3,7 +3,9 @@ export type { ExternalMessage } from "./schemas/external-message.js";
 export {
   commandIdSchema,
   commandResultSchema,
+  leaderboardEntrySchema,
   leaderboardSnapshotSchema,
+  revisionSchema,
   teamCodeSchema,
   teamCommandSchema,
   teamSnapshotSchema,
@@ -18,11 +20,15 @@ export type {
 } from "./schemas/team-state.js";
 export { initialTeamSnapshot, initialTeamState, transitionTeam } from "./team-state.js";
 export {
+  CHAT_MESSAGE_MAX_CHARS,
   chatCommandSchema,
   chatMessageResultSchema,
   chatMessageSchema,
   chatSnapshotSchema,
+  chatThreadIdSchema,
+  chatThreadKindSchema,
   chatThreadSchema,
+  commandStatusSchema,
   createThreadCommandSchema,
   createThreadResultSchema,
   promptProfileSchema,
@@ -37,13 +43,56 @@ export type {
   ChatSnapshot,
   ChatThread,
   ChatThreadId,
+  ChatThreadKind,
+  CommandStatus,
   CreateThreadCommand,
   CreateThreadResult,
   PromptProfile,
   SendMessageCommand,
 } from "./schemas/chat.js";
-export { appendMessage, createThread, initialChatSnapshot } from "./chat.js";
+export {
+  appendMessage,
+  chatCommandFingerprint,
+  countThreadsOfKind,
+  createThread,
+  initialChatSnapshot,
+  normalizeAssistantText,
+  redactChatMessageResultPii,
+  redactSnapshotPii,
+} from "./chat.js";
 export type { ChatMutationResult } from "./chat.js";
+export {
+  checkpointFingerprint,
+  createThreadFingerprint,
+  publicTeamId,
+  sha256Hex,
+  stableStringify,
+} from "./fingerprint.js";
+export {
+  CHECKPOINT_DATA_MAX_BYTES,
+  CHECKPOINT_DATA_MAX_DEPTH,
+  CHECKPOINT_DATA_TOO_LARGE_MESSAGE,
+  CHECKPOINT_ELAPSED_MAX_MS,
+  CHECKPOINT_REJECTION_REASONS,
+  checkpointBodySchema,
+  checkpointRejectionReasonSchema,
+  checkpointSnapshotSchema,
+  checkpointStateSchema,
+  checkpointTrapSchema,
+  saveCheckpointCommandSchema,
+  saveCheckpointResultSchema,
+} from "./schemas/checkpoint.js";
+export type {
+  CheckpointBody,
+  CheckpointRejectionReason,
+  CheckpointSnapshot,
+  CheckpointState,
+  CheckpointTrap,
+  SaveCheckpointCommand,
+  SaveCheckpointResult,
+} from "./schemas/checkpoint.js";
+export { applyCheckpoint, mergeCheckpoint } from "./checkpoint.js";
+export type { CheckpointResult } from "./checkpoint.js";
 export {
   openAiChatCompletionSchema,
   parseOpenAiChatCompletion,
@@ -53,6 +102,15 @@ export { teamSyncMessageSchema } from "./schemas/sync.js";
 export type { TeamSyncMessage } from "./schemas/sync.js";
 export { httpErrorCodeSchema, httpErrorSchema } from "./schemas/http-error.js";
 export type { HttpError, HttpErrorCode } from "./schemas/http-error.js";
-export { detectPii, piiPatterns, stage4Patient } from "./pii.js";
+export {
+  containsPii,
+  detectPii,
+  PII_REDACTION,
+  piiPatterns,
+  redactPii,
+  stage4Patient,
+} from "./pii.js";
 export type { PiiLabel } from "./pii.js";
+export { VIEW_IDS, viewIdSchema } from "./schemas/view.js";
+export type { ViewId } from "./schemas/view.js";
 export type { AiGateway, AiMessage, AiRequest, AiResponse } from "./ports/ai-gateway.js";

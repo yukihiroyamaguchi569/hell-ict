@@ -1,13 +1,25 @@
 import {
   appendMessage,
+  applyCheckpoint,
   chatMessageResultSchema,
+  chatMessageSchema,
   chatSnapshotSchema,
+  chatThreadIdSchema,
+  commandIdSchema,
+  checkpointSnapshotSchema,
   commandResultSchema,
+  countThreadsOfKind,
   createThread as domainCreateThread,
   createThreadCommandSchema,
   createThreadResultSchema,
   initialChatSnapshot,
   initialTeamSnapshot,
+  normalizeAssistantText,
+  promptProfileSchema,
+  redactChatMessageResultPii,
+  redactPii,
+  redactSnapshotPii,
+  saveCheckpointCommandSchema,
   sendMessageCommandSchema,
   teamCodeSchema,
   teamCommandSchema,
@@ -20,33 +32,128 @@ import type {
   ChatMessage,
   ChatMessageResult,
   ChatSnapshot,
+  ChatThreadId,
+  ChatThreadKind,
+  CheckpointRejectionReason,
+  CheckpointSnapshot,
   CommandResult,
+  CommandStatus,
   CreateThreadCommand,
   CreateThreadResult,
+  SaveCheckpointCommand,
   SendMessageCommand,
   TeamCode,
   TeamSnapshot,
   TeamSyncMessage,
 } from "@hell-ict/domain";
 import { DurableObject } from "cloudflare:workers";
+import { z } from "zod";
 
-import { error, isWebSocketRequest } from "./http.js";
+import {
+  beginChatGateSchema,
+  claimGenerationSchema,
+  completeChatOutcomeSchema,
+  fingerprintSchema,
+  nowMsSchema,
+  RATE_LIMIT_WINDOW_MS,
+  rateLimitBucket,
+  rateLimitCountSchema,
+  rateLimitRetryAfterSeconds,
+} from "./guard.js";
+import { CHAT_COMMAND_IDS_MAX, error, isWebSocketRequest } from "./http.js";
 
 type StoredCommand = { result: string };
 type StoredState = { snapshot: string };
 type StoredChatState = { snapshot: string };
-type StoredThreadCommand = { result: string };
-type StoredMessageCommand = { result: string };
-type StoredPendingMessage = { thread_id: string; claimed_at: string | null };
+/**
+ * 冪等台帳の行。fingerprintは取り違え検出の要なので、型指定だけで信用しない
+ * ——SQLiteは列の型を強制せず、壊れた値をそのまま渡すとmismatchesFingerprintが
+ * 黙って「照合できないので通す」側へ倒れ、別内容の再送を冪等再送として受けてしまう。
+ * 壊れていたら例外にし、Workerの503（時間を置いて再試行）へ倒す。
+ */
+/** 完了印の名前。値そのものが台帳に残るので、変えると移行がもう一度走る。 */
+const LEDGER_PII_MIGRATION = "ledger-pii-redaction";
+
+/** 全行走査で読む最小限の列。 */
+const storedLedgerMigrationRowSchema = z.object({
+  command_id: z.string(),
+  result: z.string(),
+});
+
+const storedLedgerRowSchema = z.object({
+  result: z.string(),
+  fingerprint: fingerprintSchema.nullable(),
+});
+/**
+ * pending行。SQLiteは列の型を強制しないので、読み出しも実行時に検証する。壊れた行を
+ * 「pending無し」と読み替えると、既に保存済みのユーザーメッセージがもう一度積まれる
+ * ——台帳行と同じく、不整合は黙って通さず503（時間を置いて再試行）へ倒す。
+ */
+const storedPendingMessageSchema = z.object({
+  thread_id: chatThreadIdSchema,
+  claimed_at: z.iso.datetime().nullable(),
+  // 列を足す前に作られた行はNULL。値があるなら既知のprofileでなければならない。
+  prompt_profile: promptProfileSchema.nullable(),
+  fingerprint: fingerprintSchema.nullable(),
+  claim_generation: z
+    .number()
+    .int()
+    .nonnegative()
+    .max(Number.MAX_SAFE_INTEGER - 1)
+    .nullable(),
+});
+
+type StoredPendingMessage = z.infer<typeof storedPendingMessageSchema>;
+type StoredCheckpointState = { snapshot: string };
+/** チェックポイント台帳の行。台帳のfingerprintを信用しない理由は上と同じ。 */
+const storedCheckpointCommandSchema = z.object({
+  revision: checkpointSnapshotSchema.shape.revision,
+  fingerprint: fingerprintSchema.nullable(),
+});
+/**
+ * スレッド作成の結果。`created`は「このリクエストで実際にスレッドが増えたか」で、
+ * 冪等再送とステージスレッドの重複抑止では false になる。Workerはこれを見て
+ * 活動ログの`thread.create`を記録するかどうかを決める——スナップショットの末尾を
+ * 作成されたスレッドとみなすと、増えていない経路でも記録が積まれ、しかも無関係な
+ * threadIdが載る。
+ */
+export type CreateThreadOutcome =
+  | { snapshot: ChatSnapshot; created: false }
+  | { snapshot: ChatSnapshot; created: true; threadId: ChatThreadId };
+
 type ConflictReply = { conflict: true };
 type UnknownThreadReply = { unknownThread: true };
 
+/** チェックポイント保存の拒否理由。Workerが理由ごとに409の文言を分ける。 */
+export type CheckpointRejection = { rejected: CheckpointRejectionReason };
+
+/**
+ * transactionSyncを巻き戻すためだけの内部シグナル。CASが0行だったことを
+ * 例外として伝え、saveCheckpointの外でconflictへ写す。DOの外へは漏らさない。
+ */
+class CheckpointConflictError extends Error {}
+
+/** スレッド上限に達した作成要求。DOには何も保存しない。kindごとに文言を変える。 */
+export type ThreadLimitReply = { threadLimit: true; max: number; kind: ChatThreadKind };
+
 export type BeginChatMessageOutcome =
   | { kind: "already-processed"; result: ChatMessageResult }
-  | { kind: "pending"; history: AiMessage[] }
-  | { kind: "in-progress" };
+  | { kind: "pending"; history: AiMessage[]; claimGeneration: number }
+  | { kind: "in-progress" }
+  | { kind: "rate-limited"; retryAfterSeconds: number }
+  // 同じcommandIdが別のスレッド／別のpromptProfileで使い回された。冪等再送ではなく
+  // クライアント側の取り違えなので、pendingを流用せず409で突き返す。
+  | { kind: "conflict" };
 
 export type CompleteChatMessageOutcome = { kind: "success"; text: string } | { kind: "failure" };
+
+/** レート制限の用途。同じテーブル・同じ固定窓を、接頭辞で分けて数える。 */
+type RateLimitKind = "chat" | "activity";
+
+/** consumeChatAttempt / consumeActivityAttemptの判定。超過なら待つべき秒数を返す。 */
+export type RateLimitVerdict =
+  | { readonly allowed: true }
+  | { readonly allowed: false; readonly retryAfterSeconds: number };
 
 /**
  * AI呼び出しが失敗し続け、クライアントが二度と同じcommandIdで再送しない場合に
@@ -67,6 +174,95 @@ const PENDING_MESSAGE_EXPIRY_MS = 6 * 60 * 60 * 1000;
  */
 const CLAIM_TIMEOUT_MS = 45 * 1000;
 
+/**
+ * 1チームが持てるスレッド数の上限。kindごとに独立して数える——上限を1本にすると、
+ * 手動スレッドを作りすぎたチームがステージ進行そのものを止めてしまう。
+ * どちらもDOのストレージが際限なく膨らむのを防ぐための粗い上限である。
+ */
+export const MAX_MANUAL_THREADS_PER_TEAM = 25;
+/** ステージが自動で開く5本に、改名・再設計の余裕を足した値。 */
+export const MAX_STAGE_THREADS_PER_TEAM = 8;
+
+const THREAD_LIMITS: Readonly<Record<ChatThreadKind, number>> = {
+  manual: MAX_MANUAL_THREADS_PER_TEAM,
+  stage: MAX_STAGE_THREADS_PER_TEAM,
+};
+
+/**
+ * chatSnapshotへ渡せる問い合わせ対象のID。RPCの境界なので、Worker側で検証済みでも
+ * ここでもう一度形と件数を見る（上限はhttp.tsのCHAT_COMMAND_IDS_MAXと揃える）。
+ */
+const chatCommandIdsSchema = z.array(commandIdSchema).max(CHAT_COMMAND_IDS_MAX);
+
+/** rate_limitの行。壊れた値でレート制限が黙って無効化されないよう実行時に検証する。 */
+const storedRateLimitSchema = z.object({ count: z.number().int().nonnegative() });
+
+/** promptProfile未指定は"default"として保存・照合する（index.tsの既定と揃える）。 */
+const promptProfileOf = (command: SendMessageCommand): string => command.promptProfile ?? "default";
+
+/**
+ * beginChatMessageへ渡す、コマンド本体以外の入力。fingerprintの計算はWebCryptoで
+ * 非同期なのでWorker側で済ませて渡す——DOの中でawaitすると、その隙に同じcommandIdの
+ * 別リクエストが入り込み、冪等判定と枠消費が二重に走りうる。
+ */
+export type BeginChatMessageGate = {
+  readonly nowMs: number;
+  readonly limit: number;
+  readonly fingerprint: string;
+};
+
+/**
+ * 記録済みの指紋と受信commandが同じ内容を指しているか。指紋を持たない行
+ * （この列を足す前に作られたもの）は照合をスキップする——古い行を理由に正当な
+ * 再送を弾かないことを優先する。
+ */
+const mismatchesFingerprint = (stored: string | null, fingerprint: string): boolean =>
+  stored !== null && stored !== fingerprint;
+
+/**
+ * pending行と受信commandが同じ送信を指しているか。指紋があれば指紋だけで足りる
+ * （threadId・promptProfile・本文をすべて畳んである）。指紋を持たない古い行は、
+ * 従来どおりthreadIdとpromptProfileで照合する。
+ */
+const mismatchesPending = (
+  pending: StoredPendingMessage,
+  command: SendMessageCommand,
+  fingerprint: string,
+): boolean => {
+  if (pending.fingerprint !== null) return mismatchesFingerprint(pending.fingerprint, fingerprint);
+  if (pending.thread_id !== command.threadId) return true;
+  return pending.prompt_profile !== null && pending.prompt_profile !== promptProfileOf(command);
+};
+
+/**
+ * processed行から冪等再送の結果を組み立てる。内容が違えば冪等再送ではないので、
+ * 元の結果を返さずconflictにする——返してしまうと、クライアントは送ったつもりの
+ * 本文が消えたことに気づけない。
+ */
+const replayProcessed = (
+  processed: { result: ChatMessageResult; fingerprint: string | null },
+  fingerprint: string,
+): BeginChatMessageOutcome =>
+  mismatchesFingerprint(processed.fingerprint, fingerprint)
+    ? { kind: "conflict" }
+    : { kind: "already-processed", result: processed.result };
+
+/**
+ * 応答をsnapshotへ載せられる形へ整える。失敗と、載せられない応答（空白だけ）は
+ * どちらもnullへ畳む——空の本文をsnapshotへ積むと、以後そのスレッドの読み出しが
+ * parse失敗で丸ごと壊れる。上限超過はnormalizeAssistantTextが切り詰める。
+ */
+const assistantTextOf = (outcome: CompleteChatMessageOutcome): string | null => {
+  if (outcome.kind !== "success") return null;
+  const normalized = normalizeAssistantText(outcome.text);
+  if (normalized === null) return null;
+  // AI応答にPIIが混ざることがある（Stage 4の設計上、モデルは渡された文脈を復唱しうる）。
+  // 平文でchat_stateとprocessed台帳へ残すと、以後のGETでも配信され続けるので、保存前に
+  // 伏せ字へ置き換える。拒否ではなく置換を選ぶ理由はdomainのredactPiiに書いた。
+  // 伏せ字化で長さが変わりうるので、もう一度上限へ収める。
+  return normalizeAssistantText(redactPii(normalized));
+};
+
 export class TeamRoom extends DurableObject<Env> {
   constructor(ctx: DurableObjectState, env: Env) {
     super(ctx, env);
@@ -80,14 +276,41 @@ export class TeamRoom extends DurableObject<Env> {
       "CREATE TABLE IF NOT EXISTS chat_state (id INTEGER PRIMARY KEY CHECK (id = 1), snapshot TEXT NOT NULL)",
     );
     this.ctx.storage.sql.exec(
-      "CREATE TABLE IF NOT EXISTS processed_thread_commands (command_id TEXT PRIMARY KEY, result TEXT NOT NULL)",
+      "CREATE TABLE IF NOT EXISTS processed_thread_commands (command_id TEXT PRIMARY KEY, result TEXT NOT NULL, fingerprint TEXT)",
     );
     this.ctx.storage.sql.exec(
-      "CREATE TABLE IF NOT EXISTS processed_message_commands (command_id TEXT PRIMARY KEY, result TEXT NOT NULL)",
+      "CREATE TABLE IF NOT EXISTS processed_message_commands (command_id TEXT PRIMARY KEY, result TEXT NOT NULL, fingerprint TEXT)",
     );
     this.ctx.storage.sql.exec(
-      "CREATE TABLE IF NOT EXISTS pending_message_commands (command_id TEXT PRIMARY KEY, thread_id TEXT NOT NULL, created_at TEXT NOT NULL, claimed_at TEXT)",
+      "CREATE TABLE IF NOT EXISTS pending_message_commands (command_id TEXT PRIMARY KEY, thread_id TEXT NOT NULL, created_at TEXT NOT NULL, claimed_at TEXT, prompt_profile TEXT, fingerprint TEXT, claim_generation INTEGER NOT NULL DEFAULT 0)",
     );
+    // 既にテーブルを持つDOにはCREATE TABLE IF NOT EXISTSが効かないので、列を後から足す。
+    // 2度目以降は「列が既にある」で失敗するだけなので握りつぶす。既存行のprompt_profileは
+    // NULLになり、照合をスキップする（下のmismatchesPending）。
+    for (const statement of [
+      "ALTER TABLE pending_message_commands ADD COLUMN prompt_profile TEXT",
+      "ALTER TABLE pending_message_commands ADD COLUMN fingerprint TEXT",
+      "ALTER TABLE processed_message_commands ADD COLUMN fingerprint TEXT",
+      "ALTER TABLE pending_message_commands ADD COLUMN claim_generation INTEGER NOT NULL DEFAULT 0",
+      "ALTER TABLE processed_thread_commands ADD COLUMN fingerprint TEXT",
+      "ALTER TABLE processed_checkpoint_commands ADD COLUMN fingerprint TEXT",
+    ]) {
+      try {
+        this.ctx.storage.sql.exec(statement);
+      } catch {
+        // 列が既に存在する。
+      }
+    }
+    this.ctx.storage.sql.exec(
+      "CREATE TABLE IF NOT EXISTS checkpoint_state (id INTEGER PRIMARY KEY CHECK (id = 1), snapshot TEXT NOT NULL)",
+    );
+    this.ctx.storage.sql.exec(
+      "CREATE TABLE IF NOT EXISTS processed_checkpoint_commands (command_id TEXT PRIMARY KEY, revision INTEGER NOT NULL, created_at TEXT NOT NULL, fingerprint TEXT)",
+    );
+    this.ctx.storage.sql.exec(
+      "CREATE TABLE IF NOT EXISTS rate_limit (bucket TEXT PRIMARY KEY, count INTEGER NOT NULL)",
+    );
+    this.ctx.storage.sql.exec("CREATE TABLE IF NOT EXISTS migrations (name TEXT PRIMARY KEY)");
   }
 
   // ---- チーム状態（P1Bから継続） ----
@@ -148,18 +371,99 @@ export class TeamRoom extends DurableObject<Env> {
 
   // ---- チャット ----
 
+  /**
+   * チャットのsnapshotを読む。伏せ字化を入れる前に保存された平文のPIIが、GET・
+   * WebSocket配信・台帳の再生から出続けないよう、読み出した時点で伏せ字へ置き換える。
+   * 内容が変わったらその場で保存し直す（一度きりの移行。次回以降は参照が変わらないので
+   * 書き込みは走らない）。
+   */
   private loadChatSnapshot(teamCode: TeamCode): ChatSnapshot {
+    this.migrateLedgerPii();
     const stored =
       this.ctx.storage.sql
         .exec<StoredChatState>("SELECT snapshot FROM chat_state WHERE id = 1")
         .toArray()[0] ?? null;
-    if (stored !== null) return chatSnapshotSchema.parse(JSON.parse(stored.snapshot) as unknown);
+    if (stored !== null) {
+      const parsed = chatSnapshotSchema.parse(JSON.parse(stored.snapshot) as unknown);
+      const redacted = redactSnapshotPii(parsed);
+      if (redacted !== parsed) this.saveChatSnapshot(redacted);
+      return redacted;
+    }
     const snapshot = initialChatSnapshot(teamCode, crypto.randomUUID());
     this.ctx.storage.sql.exec(
       "INSERT INTO chat_state (id, snapshot) VALUES (1, ?)",
       JSON.stringify(snapshot),
     );
     return snapshot;
+  }
+
+  /**
+   * 冪等台帳に残った平文PIIを、DOに触れた最初の一度だけ全行走査して伏せ字化する。
+   *
+   * 読み出し時の伏せ字化（readProcessedMessage / readProcessedThread）は「再送された行」
+   * しか直せない。台帳の大半は二度と再送されないので、伏せ字化を入れる前に書かれた
+   * 平文はそのまま残り続ける。研修が終わってもDOのストレージに氏名が残るのは、
+   * 表に出るか出ないかとは別の問題なので、行そのものを消しに行く。
+   *
+   * 完了印はmigrationsテーブルへ置き、二度目は1行も読まない——台帳は増え続けるので、
+   * loadChatSnapshotのたびに全行を走査させるわけにはいかない。
+   */
+  private migrateLedgerPii(): void {
+    const done =
+      this.ctx.storage.sql
+        .exec("SELECT name FROM migrations WHERE name = ?", LEDGER_PII_MIGRATION)
+        .toArray()[0] ?? null;
+    if (done !== null) return;
+    this.ctx.storage.transactionSync(() => {
+      this.redactLedgerTable("processed_message_commands", (raw) => {
+        const parsed = chatMessageResultSchema.parse(raw);
+        const redacted = redactChatMessageResultPii(parsed);
+        return redacted === parsed ? null : redacted;
+      });
+      this.redactLedgerTable("processed_thread_commands", (raw) => {
+        const parsed = createThreadResultSchema.parse(raw);
+        const snapshot = redactSnapshotPii(parsed.snapshot);
+        return snapshot === parsed.snapshot ? null : { snapshot };
+      });
+      this.ctx.storage.sql.exec("INSERT INTO migrations (name) VALUES (?)", LEDGER_PII_MIGRATION);
+    });
+  }
+
+  /**
+   * 台帳1テーブル分の伏せ字化。`redact`がnullを返した行（変化なし）は書き換えない。
+   *
+   * 壊れて読めない行はスキップする。ここで例外にすると、行が1つ壊れているだけで
+   * 移行が永久に完了印を得られず、DOへ触れるたびに全行走査をやり直すことになる
+   * ——壊れた行は読み出し時の検証が別途503で止めるので、二重に守る必要はない。
+   */
+  private redactLedgerTable(
+    table: "processed_message_commands" | "processed_thread_commands",
+    redact: (raw: unknown) => unknown,
+  ): void {
+    const rows = this.ctx.storage.sql
+      .exec(`SELECT command_id, result FROM ${table}`)
+      .toArray()
+      .map((row) => storedLedgerMigrationRowSchema.safeParse(row).data)
+      .filter((row) => row !== undefined);
+    for (const row of rows) {
+      const replacement = this.redactedLedgerResult(row.result, redact);
+      if (replacement === null) continue;
+      this.ctx.storage.sql.exec(
+        `UPDATE ${table} SET result = ? WHERE command_id = ?`,
+        replacement,
+        row.command_id,
+      );
+    }
+  }
+
+  /** 保存されているJSONを伏せ字化した文字列。変化がない・読めないときはnull。 */
+  private redactedLedgerResult(result: string, redact: (raw: unknown) => unknown): string | null {
+    try {
+      const redacted = redact(JSON.parse(result) as unknown);
+      return redacted === null ? null : JSON.stringify(redacted);
+    } catch {
+      return null;
+    }
   }
 
   private saveChatSnapshot(snapshot: ChatSnapshot): void {
@@ -169,77 +473,276 @@ export class TeamRoom extends DurableObject<Env> {
     );
   }
 
-  async chatSnapshot(teamCodeInput: unknown): Promise<ChatSnapshot> {
-    return this.loadChatSnapshot(teamCodeSchema.parse(teamCodeInput));
+  /**
+   * チャットのsnapshotを返す。`commandIdsInput`を渡した呼び出しでは、そのIDが
+   * 冪等台帳のどこにあるかも添える。再入室したクライアントは、これで「手元の
+   * 未確定IDのうち、もう完了しているのはどれか」をID単位で確かめられる——
+   * 履歴の本文や並び順からは区別できない（同じ文面を打ち直したとき、そして
+   * 先に送った要求が後から完了したときに取り違える）。
+   */
+  async chatSnapshot(teamCodeInput: unknown, commandIdsInput?: unknown): Promise<ChatSnapshot> {
+    const snapshot = this.loadChatSnapshot(teamCodeSchema.parse(teamCodeInput));
+    if (commandIdsInput === undefined) return snapshot;
+    const commandIds = chatCommandIdsSchema.parse(commandIdsInput);
+    const commands: Record<string, CommandStatus> = {};
+    for (const commandId of commandIds) commands[commandId] = this.messageCommandStatus(commandId);
+    return { ...snapshot, commands };
   }
 
-  async createThread(teamCodeInput: unknown, commandInput: unknown): Promise<CreateThreadResult> {
+  /**
+   * 送信コマンドが台帳のどこにあるか。processedにあれば完了、pendingにあれば
+   * 処理中（または処理が落ちて再送待ち）、どちらにも無ければ届いていないか、
+   * 猶予期間を過ぎて掃除された。DOはチーム単位なので、他チームのIDはunknownになる。
+   */
+  private messageCommandStatus(commandId: string): CommandStatus {
+    const processed = this.ctx.storage.sql
+      .exec("SELECT 1 AS found FROM processed_message_commands WHERE command_id = ?", commandId)
+      .toArray();
+    if (processed.length > 0) return "processed";
+    const pending = this.ctx.storage.sql
+      .exec("SELECT 1 AS found FROM pending_message_commands WHERE command_id = ?", commandId)
+      .toArray();
+    return pending.length > 0 ? "pending" : "unknown";
+  }
+
+  async createThread(
+    teamCodeInput: unknown,
+    commandInput: unknown,
+    fingerprintInput: unknown,
+  ): Promise<CreateThreadOutcome | ThreadLimitReply | ConflictReply> {
+    const fingerprint = fingerprintSchema.parse(fingerprintInput);
     const teamCode = teamCodeSchema.parse(teamCodeInput);
     const command: CreateThreadCommand = createThreadCommandSchema.parse(commandInput);
-    const saved =
-      this.ctx.storage.sql
-        .exec<StoredThreadCommand>(
-          "SELECT result FROM processed_thread_commands WHERE command_id = ?",
-          command.commandId,
-        )
-        .toArray()[0] ?? null;
-    if (saved !== null) return createThreadResultSchema.parse(JSON.parse(saved.result) as unknown);
+    const saved = this.readProcessedThread(command.commandId);
+    if (saved !== null) {
+      // 同じcommandIdで別のタイトル・別のkindを送る取り違えは冪等再送ではない。
+      if (mismatchesFingerprint(saved.fingerprint, fingerprint)) return { conflict: true };
+      return { snapshot: saved.result.snapshot, created: false };
+    }
     const snapshot = this.loadChatSnapshot(teamCode);
+    // ステージ用スレッドはtitleがステージ名で一意、という契約にする。リロードや
+    // タブの競合で同じステージの作成要求が二重に来ても増やさない——commandIdは
+    // 要求ごとに新しいので、冪等台帳だけでは同名スレッドの増殖を止められない。
+    // manualは参加者が同じ名前を付けてよいので従来どおり増やす。
+    if (command.kind === "stage") {
+      const existing = snapshot.threads.find(
+        (thread) => (thread.kind ?? "manual") === "stage" && thread.title === command.title,
+      );
+      if (existing !== undefined) return this.replayExistingThread(snapshot, command, fingerprint);
+    }
+    // 冪等再送（processed済み）は上限に関係なく従来の結果を返す。上限を当てるのは
+    // 新しいスレッドを実際に増やすときだけである。kindごとに独立して数える。
+    const max = THREAD_LIMITS[command.kind];
+    if (countThreadsOfKind(snapshot, command.kind) >= max) {
+      return { threadLimit: true, max, kind: command.kind };
+    }
+    const threadId = chatThreadIdSchema.parse(crypto.randomUUID());
     const created = domainCreateThread(snapshot, {
-      threadId: crypto.randomUUID(),
+      threadId,
       title: command.title,
+      kind: command.kind,
     });
     if (!created.ok) throw new Error("スレッドの作成に失敗しました。");
-    this.saveChatSnapshot(created.snapshot);
     const result = createThreadResultSchema.parse({ snapshot: created.snapshot });
+    // snapshotの更新と冪等台帳は必ず同時に成立させる。片方だけ書けると、スレッドは
+    // 増えたのに台帳に記録が無い状態になり、同じcommandIdの再送が新規作成として
+    // もう1本増やしてしまう（checkpointと同じ流儀）。
+    this.ctx.storage.transactionSync(() => {
+      this.saveChatSnapshot(created.snapshot);
+      this.ctx.storage.sql.exec(
+        "INSERT INTO processed_thread_commands (command_id, result, fingerprint) VALUES (?, ?, ?)",
+        command.commandId,
+        JSON.stringify(result),
+        fingerprint,
+      );
+    });
+    this.broadcastChat(created.snapshot);
+    return { snapshot: result.snapshot, created: true, threadId };
+  }
+
+  /**
+   * 固定窓の枠を1つ消費する。消費できたらnull、超過していたら待つべき秒数を返す。
+   *
+   * beginChatMessageの中からだけ呼ぶ。以前は別RPCとしてWorkerから先に呼んでいたが、
+   * それだと「枠の予約」と「pending行の作成」が別々のDO操作になり、同じcommandIdの
+   * 並行再送が二重に枠を減らした。1操作にまとめると、DOの直列実行がそのまま
+   * 「数えるのは新しいpending行を作るときだけ」を保証する。
+   *
+   * `nowMs`はWorkerから渡す。DO内でDate.now()を直書きすると窓をテストから固定できない。
+   */
+  private consumeRateLimit(kind: RateLimitKind, nowMs: number, limit: number): number | null {
+    // 用途ごとに接頭辞を付けて枠を分ける。チャットと活動ログを同じ枠で数えると、
+    // ログが詰まってゲーム操作が止まる（あるいはその逆）ことになる。
+    const bucket = `${kind}:${rateLimitBucket(nowMs, RATE_LIMIT_WINDOW_MS)}`;
+    const count = this.rateLimitCount(bucket);
+    if (count >= limit) return rateLimitRetryAfterSeconds(nowMs, RATE_LIMIT_WINDOW_MS);
+    // 固定窓なので過去の窓の行は不要。消費するときに掃除して用途ごとに1行だけ残す
+    // （超過で戻るときは1行も書かないよう、判定より後に置く）。
     this.ctx.storage.sql.exec(
-      "INSERT INTO processed_thread_commands (command_id, result) VALUES (?, ?)",
+      "DELETE FROM rate_limit WHERE bucket <> ? AND bucket LIKE ?",
+      bucket,
+      `${kind}:%`,
+    );
+    // `count + 1`ではなく読み取った値からの上書きにする。壊れた行へ加算し続けると
+    // 上限へ永久に届かず、制限が黙って無効化される。
+    this.ctx.storage.sql.exec(
+      "INSERT OR REPLACE INTO rate_limit (bucket, count) VALUES (?, ?)",
+      bucket,
+      count + 1,
+    );
+    return null;
+  }
+
+  /**
+   * 現在の窓のカウンタを読む。行が無い、または値が壊れている（型が違う、負数）ときは0を返す。
+   *
+   * 自前で書いている行だが、SQLiteは列の型を強制しないので、手作業のSQLや将来の
+   * スキーマ変更で数値以外が入りうる。素通しするとNaNとの比較が常にfalseになり、
+   * レート制限が例外もログも出さずに効かなくなる。壊れた行は0として扱い、
+   * consumeRateLimitの上書きで正しい値へ戻す。
+   */
+  private rateLimitCount(bucket: string): number {
+    const row =
+      this.ctx.storage.sql
+        .exec("SELECT count FROM rate_limit WHERE bucket = ?", bucket)
+        .toArray()[0] ?? null;
+    if (row === null) return 0;
+    return storedRateLimitSchema.safeParse(row).data?.count ?? 0;
+  }
+
+  /**
+   * 送信前PIIゲートで拒否する送信のために、レート制限の枠を1つだけ消費する。
+   *
+   * PII拒否はbeginChatMessageへ進まないため通常の枠消費を通らず、PII入りの本文を
+   * 連投するだけで活動ログ（activity_events）を無限に増やせてしまう。beginChatMessageと
+   * 同じテーブル・同じ窓を使い、二重計上にならないよう「PII拒否経路はこれだけ、
+   * 通常経路はbeginChatMessageだけ」が枠を消費する分担にする。
+   */
+  async consumeChatAttempt(nowMs: unknown, limit: unknown): Promise<RateLimitVerdict> {
+    const retryAfterSeconds = this.consumeRateLimit(
+      "chat",
+      nowMsSchema.parse(nowMs),
+      rateLimitCountSchema.parse(limit),
+    );
+    return retryAfterSeconds === null ? { allowed: true } : { allowed: false, retryAfterSeconds };
+  }
+
+  /**
+   * 活動ログ1件ぶんの枠を消費する。POST /api/teams/:code/activity には回数制限が
+   * 無く、1チームがD1のactivity_eventsを無制限に増やせた。チャットとは別の枠で
+   * 数える（同じテーブル・同じ固定窓、接頭辞だけ違う）。
+   */
+  async consumeActivityAttempt(nowMs: unknown, limit: unknown): Promise<RateLimitVerdict> {
+    const retryAfterSeconds = this.consumeRateLimit(
+      "activity",
+      nowMsSchema.parse(nowMs),
+      rateLimitCountSchema.parse(limit),
+    );
+    return retryAfterSeconds === null ? { allowed: true } : { allowed: false, retryAfterSeconds };
+  }
+
+  /**
+   * 送信を受け付け、AIへ渡す履歴を返す。レート制限の消費もここで行う——判定と
+   * pending行の作成を1つのDO操作にまとめることで、次の3つを同時に保証する。
+   *
+   * - 冪等再送（processed済み・pending残り）は枠を消費しない。通信が不安定で再送を
+   *   繰り返しているチームが、1通も新しく送っていないのに429で詰むのを避ける。
+   * - 存在しないthreadIdへの送信は枠を消費しない。不正なリクエストで正規の枠を
+   *   削れてしまうのを避ける。
+   * - 枠を消費するのは、新しいpending行を実際に作る直前だけ。DOは操作を直列に
+   *   実行するので、同じcommandIdの並行再送が二重に数えられることはない。
+   *
+   * 超過したときはユーザーメッセージを保存せず（saveChatSnapshotより手前で返す）、
+   * 呼び出し側もAiGatewayに触れない。
+   */
+  /**
+   * 既に同じステージ用スレッドがある作成要求へ、現在のsnapshotをそのまま返す。
+   * 台帳へも記録して、同じcommandIdの再送が同じ結果を返すようにする。
+   */
+  private replayExistingThread(
+    snapshot: ChatSnapshot,
+    command: CreateThreadCommand,
+    fingerprint: string,
+  ): CreateThreadOutcome {
+    const result = createThreadResultSchema.parse({ snapshot });
+    this.ctx.storage.sql.exec(
+      "INSERT OR IGNORE INTO processed_thread_commands (command_id, result, fingerprint) VALUES (?, ?, ?)",
       command.commandId,
       JSON.stringify(result),
+      fingerprint,
     );
-    this.broadcastChat(created.snapshot);
-    return result;
+    return { snapshot: result.snapshot, created: false };
+  }
+
+  /**
+   * 送信の冪等台帳を読む。行には当時のsnapshot全体が入るので、平文のPIIが残っていれば
+   * 伏せ字化して行ごと保存し直す（chat_stateと同じ一度きりの移行）。返却値だけ
+   * 伏せ字にしても、行の中の平文は次の再生でまた読まれる。
+   */
+  private readProcessedMessage(
+    commandId: string,
+  ): { result: ChatMessageResult; fingerprint: string | null } | null {
+    const stored =
+      this.ctx.storage.sql
+        .exec(
+          "SELECT result, fingerprint FROM processed_message_commands WHERE command_id = ?",
+          commandId,
+        )
+        .toArray()[0] ?? null;
+    if (stored === null) return null;
+    const row = storedLedgerRowSchema.parse(stored);
+    const parsed = chatMessageResultSchema.parse(JSON.parse(row.result) as unknown);
+    const redacted = redactChatMessageResultPii(parsed);
+    if (redacted !== parsed) {
+      this.ctx.storage.sql.exec(
+        "UPDATE processed_message_commands SET result = ? WHERE command_id = ?",
+        JSON.stringify(redacted),
+        commandId,
+      );
+    }
+    return { result: redacted, fingerprint: row.fingerprint };
+  }
+
+  /** スレッド作成の冪等台帳。readProcessedMessageと同じ理由で行ごと保存し直す。 */
+  private readProcessedThread(
+    commandId: string,
+  ): { result: CreateThreadResult; fingerprint: string | null } | null {
+    const stored =
+      this.ctx.storage.sql
+        .exec(
+          "SELECT result, fingerprint FROM processed_thread_commands WHERE command_id = ?",
+          commandId,
+        )
+        .toArray()[0] ?? null;
+    if (stored === null) return null;
+    const row = storedLedgerRowSchema.parse(stored);
+    const parsed = createThreadResultSchema.parse(JSON.parse(row.result) as unknown);
+    const snapshot = redactSnapshotPii(parsed.snapshot);
+    if (snapshot !== parsed.snapshot) {
+      this.ctx.storage.sql.exec(
+        "UPDATE processed_thread_commands SET result = ? WHERE command_id = ?",
+        JSON.stringify({ snapshot }),
+        commandId,
+      );
+    }
+    return { result: { snapshot }, fingerprint: row.fingerprint };
   }
 
   async beginChatMessage(
     teamCodeInput: unknown,
     commandInput: unknown,
+    gate: unknown,
   ): Promise<BeginChatMessageOutcome | UnknownThreadReply> {
     const teamCode = teamCodeSchema.parse(teamCodeInput);
     const command: SendMessageCommand = sendMessageCommandSchema.parse(commandInput);
+    const validated = beginChatGateSchema.parse(gate);
+    const { nowMs, limit, fingerprint } = validated;
     this.expirePendingMessages();
-    const processed =
-      this.ctx.storage.sql
-        .exec<StoredMessageCommand>(
-          "SELECT result FROM processed_message_commands WHERE command_id = ?",
-          command.commandId,
-        )
-        .toArray()[0] ?? null;
-    if (processed !== null)
-      return {
-        kind: "already-processed",
-        result: chatMessageResultSchema.parse(JSON.parse(processed.result) as unknown),
-      };
+    const processed = this.readProcessedMessage(command.commandId);
+    if (processed !== null) return replayProcessed(processed, fingerprint);
 
-    const pending =
-      this.ctx.storage.sql
-        .exec<StoredPendingMessage>(
-          "SELECT thread_id, claimed_at FROM pending_message_commands WHERE command_id = ?",
-          command.commandId,
-        )
-        .toArray()[0] ?? null;
-    if (pending !== null) {
-      if (!this.isClaimStale(pending.claimed_at)) return { kind: "in-progress" };
-      // 未クレーム、またはクレームが古い（AI呼び出しが完了しないまま終わった）ので、
-      // ここで改めてクレームを取り直してから再試行させる。
-      this.ctx.storage.sql.exec(
-        "UPDATE pending_message_commands SET claimed_at = ? WHERE command_id = ?",
-        new Date().toISOString(),
-        command.commandId,
-      );
-      const snapshot = this.loadChatSnapshot(teamCode);
-      return { kind: "pending", history: this.historyFor(snapshot, pending.thread_id) };
-    }
+    const pending = this.readPending(command.commandId);
+    if (pending !== null) return this.resumePending(teamCode, command, pending, validated);
 
     const snapshot = this.loadChatSnapshot(teamCode);
     if (!snapshot.threads.some((thread) => thread.threadId === command.threadId)) {
@@ -253,42 +756,122 @@ export class TeamRoom extends DurableObject<Env> {
     };
     const appended = appendMessage(snapshot, { threadId: command.threadId, message: userMessage });
     if (!appended.ok) return { unknownThread: true };
-    this.saveChatSnapshot(appended.snapshot);
-    const now = new Date().toISOString();
-    this.ctx.storage.sql.exec(
-      "INSERT INTO pending_message_commands (command_id, thread_id, created_at, claimed_at) VALUES (?, ?, ?, ?)",
-      command.commandId,
-      command.threadId,
-      now,
-      now,
-    );
+    // ここまでは何も永続化していない。「枠の加算・snapshotの保存・pending行の作成」は
+    // 全部そろって初めて意味を持つので、1つのトランザクションにまとめる。途中で
+    // ストレージが失敗しても、枠だけ減ってメッセージが残らない中途半端な状態にしない。
+    // 超過のときはconsumeRateLimitが1行も書かずに戻るため、この中では何も起きない。
+    const retryAfterSeconds = this.ctx.storage.transactionSync(() => {
+      const retry = this.consumeRateLimit("chat", nowMs, limit);
+      if (retry !== null) return retry;
+      this.saveChatSnapshot(appended.snapshot);
+      const now = new Date().toISOString();
+      this.ctx.storage.sql.exec(
+        "INSERT INTO pending_message_commands (command_id, thread_id, created_at, claimed_at, prompt_profile, fingerprint, claim_generation) VALUES (?, ?, ?, ?, ?, ?, 1)",
+        command.commandId,
+        command.threadId,
+        now,
+        now,
+        promptProfileOf(command),
+        fingerprint,
+      );
+      return null;
+    });
+    if (retryAfterSeconds !== null) return { kind: "rate-limited", retryAfterSeconds };
     this.broadcastChat(appended.snapshot);
-    return { kind: "pending", history: this.historyFor(appended.snapshot, command.threadId) };
+    return {
+      kind: "pending",
+      history: this.historyFor(appended.snapshot, command.threadId),
+      claimGeneration: 1,
+    };
   }
 
-  async completeChatMessage(
-    commandId: string,
-    outcome: CompleteChatMessageOutcome,
-  ): Promise<ChatMessageResult | { retry: true }> {
-    const processed =
+  /**
+   * 既にpending行が残っているcommandIdの再送を捌く。クレームが生きていれば処理中、
+   * 古ければ取り直して履歴を返す。どちらも新しい送信ではないので枠は消費しない。
+   * beginChatMessageの複雑度を下げるための切り出し。
+   */
+  /**
+   * pending行を読む。行が無ければnull。行はあるが値が壊れているときは例外にして、
+   * Worker側のcatchから503へ倒す（storedPendingMessageSchemaの注記を参照）。
+   */
+  private readPending(commandId: string): StoredPendingMessage | null {
+    const row =
       this.ctx.storage.sql
-        .exec<StoredMessageCommand>(
-          "SELECT result FROM processed_message_commands WHERE command_id = ?",
+        .exec(
+          "SELECT thread_id, claimed_at, prompt_profile, fingerprint, claim_generation FROM pending_message_commands WHERE command_id = ?",
           commandId,
         )
         .toArray()[0] ?? null;
-    if (processed !== null)
-      return chatMessageResultSchema.parse(JSON.parse(processed.result) as unknown);
+    return row === null ? null : storedPendingMessageSchema.parse(row);
+  }
 
-    const pending =
-      this.ctx.storage.sql
-        .exec<StoredPendingMessage>(
-          "SELECT thread_id, claimed_at FROM pending_message_commands WHERE command_id = ?",
-          commandId,
-        )
-        .toArray()[0] ?? null;
+  private resumePending(
+    teamCode: TeamCode,
+    command: SendMessageCommand,
+    pending: StoredPendingMessage,
+    gate: BeginChatMessageGate,
+  ): BeginChatMessageOutcome {
+    // 同じcommandIdを別の内容（別スレッド／別profile／別本文）で使い回した送信は、
+    // 冪等再送ではなくクライアント側の取り違えである。pendingの履歴を流用すると、
+    // 別スレッドの文脈をそのままAIへ渡してしまうので、流用せずに突き返す。
+    if (mismatchesPending(pending, command, gate.fingerprint)) return { kind: "conflict" };
+    if (!this.isClaimStale(pending.claimed_at)) return { kind: "in-progress" };
+    // ここから先はこれから改めてOpenAIを呼ぶ経路なので、新規送信と同じく枠を1つ消費する。
+    // completeChatMessageはAI失敗・refusalでクレームを解放するため、消費しないと
+    // 「失敗する本文を同じcommandIdで投げ続ける」だけでレート制限に一切当たらず
+    // OpenAIを何度でも呼べてしまう。AIを呼ばない再送——processed（結果を返すだけ）と
+    // クレームが生きている最中（in-progress）——は従来どおり消費しない。
+    const retryAfterSeconds = this.consumeRateLimit("chat", gate.nowMs, gate.limit);
+    // 超過してもpending行は消さない。ユーザー発言は既に保存済みで、行を消すと
+    // 同じcommandIdの再送が新規送信として二重に積まれる（冪等性を失う）。
+    if (retryAfterSeconds !== null) return { kind: "rate-limited", retryAfterSeconds };
+    // 未クレーム、またはクレームが古い（AI呼び出しが完了しないまま終わった）ので、
+    // ここで改めてクレームを取り直してから再試行させる。世代番号を1つ進めることで、
+    // 前のクレームで走っていたAI呼び出しが後から戻ってきても弾ける（fencing token）。
+    const claimGeneration = (pending.claim_generation ?? 0) + 1;
+    this.ctx.storage.sql.exec(
+      "UPDATE pending_message_commands SET claimed_at = ?, claim_generation = ? WHERE command_id = ?",
+      new Date().toISOString(),
+      claimGeneration,
+      command.commandId,
+    );
+    const snapshot = this.loadChatSnapshot(teamCode);
+    return {
+      kind: "pending",
+      history: this.historyFor(snapshot, pending.thread_id),
+      claimGeneration,
+    };
+  }
+
+  /**
+   * AI呼び出しの顛末を確定させる。`claimGeneration`はbeginChatMessageが返した
+   * クレームの世代番号（fencing token）で、現在の世代と一致するときだけ適用する。
+   *
+   * クレームが古くなって別のリクエストが取り直した後に、前のAI呼び出しが遅れて
+   * 戻ってくることがある。世代を見ないと、その古い応答が新しいクレームの結果を
+   * 上書きしたり、解放したばかりのクレームをもう一度解放したりする。一致しない
+   * ときは何も書かず`{ stale: true }`を返し、呼び出し側もsnapshotへ触れない。
+   */
+  async completeChatMessage(
+    commandIdInput: unknown,
+    outcomeInput: unknown,
+    claimGenerationInput: unknown,
+  ): Promise<ChatMessageResult | { retry: true } | { stale: true }> {
+    // 他のRPCと同じく、補助入力も実行時に検証する。壊れた値で台帳やクレームを
+    // 触らせない（弾いた入力は例外になり、Worker側のcatchが503へ倒す）。
+    const commandId = commandIdSchema.parse(commandIdInput);
+    const outcome: CompleteChatMessageOutcome = completeChatOutcomeSchema.parse(outcomeInput);
+    const claimGeneration = claimGenerationSchema.parse(claimGenerationInput);
+    // 伏せ字化と行の保存し直しを含む読み出しをここでも通す（beginと同じ）。
+    const processed = this.readProcessedMessage(commandId);
+    if (processed !== null) return processed.result;
+
+    const pending = this.readPending(commandId);
     if (pending === null) throw new Error("該当する送信途中のメッセージがありません。");
-    if (outcome.kind === "failure") {
+    if ((pending.claim_generation ?? 0) !== claimGeneration) return { stale: true };
+
+    const text = assistantTextOf(outcome);
+    if (text === null) {
       // クレームを解放する。解放しないと、正当な再送（同じcommandIdでの再送信）が
       // 誤って「進行中」と判定され、二度とAIを呼べなくなる。
       this.ctx.storage.sql.exec(
@@ -297,37 +880,54 @@ export class TeamRoom extends DurableObject<Env> {
       );
       return { retry: true };
     }
+    return this.appendAssistantMessage(commandId, pending, text);
+  }
 
+  /**
+   * 検証済みの応答をsnapshotへ積み、冪等台帳へ移す。completeChatMessageの複雑度を
+   * 下げるための切り出し。
+   */
+  private appendAssistantMessage(
+    commandId: string,
+    pending: StoredPendingMessage,
+    text: string,
+  ): ChatMessageResult {
     const stored = this.ctx.storage.sql
       .exec<StoredChatState>("SELECT snapshot FROM chat_state WHERE id = 1")
       .toArray()[0];
     if (stored === undefined) throw new Error("チャット状態が見つかりません。");
     const snapshot = chatSnapshotSchema.parse(JSON.parse(stored.snapshot) as unknown);
-    const assistantMessage: ChatMessage = {
+    // schemaを通してからappendする。ここで弾かれる値がsnapshotへ入ることはない。
+    const assistantMessage: ChatMessage = chatMessageSchema.parse({
       messageId: crypto.randomUUID(),
       role: "assistant",
-      text: outcome.text,
+      text,
       createdAt: new Date().toISOString(),
-    };
+    });
     const appended = appendMessage(snapshot, {
       threadId: pending.thread_id,
       message: assistantMessage,
     });
     if (!appended.ok) throw new Error("応答の保存先スレッドが見つかりません。");
-    this.saveChatSnapshot(appended.snapshot);
     const result = chatMessageResultSchema.parse({
       snapshot: appended.snapshot,
       assistant: assistantMessage,
     });
-    this.ctx.storage.sql.exec(
-      "INSERT INTO processed_message_commands (command_id, result) VALUES (?, ?)",
-      commandId,
-      JSON.stringify(result),
-    );
-    this.ctx.storage.sql.exec(
-      "DELETE FROM pending_message_commands WHERE command_id = ?",
-      commandId,
-    );
+    this.ctx.storage.transactionSync(() => {
+      this.saveChatSnapshot(appended.snapshot);
+      this.ctx.storage.sql.exec(
+        // pending行の指紋をそのまま引き継ぐ。processed側にも残しておかないと、
+        // 完了後の再送で内容の取り違えを検出できない。
+        "INSERT INTO processed_message_commands (command_id, result, fingerprint) VALUES (?, ?, ?)",
+        commandId,
+        JSON.stringify(result),
+        pending.fingerprint,
+      );
+      this.ctx.storage.sql.exec(
+        "DELETE FROM pending_message_commands WHERE command_id = ?",
+        commandId,
+      );
+    });
     this.broadcastChat(appended.snapshot);
     return result;
   }
@@ -346,6 +946,126 @@ export class TeamRoom extends DurableObject<Env> {
   private historyFor(snapshot: ChatSnapshot, threadId: string): AiMessage[] {
     const thread = snapshot.threads.find((candidate) => candidate.threadId === threadId);
     return (thread?.messages ?? []).map((message) => ({ role: message.role, text: message.text }));
+  }
+
+  // ---- チェックポイント ----
+
+  private readCheckpoint(): CheckpointSnapshot | null {
+    const stored =
+      this.ctx.storage.sql
+        .exec<StoredCheckpointState>("SELECT snapshot FROM checkpoint_state WHERE id = 1")
+        .toArray()[0] ?? null;
+    return stored === null
+      ? null
+      : checkpointSnapshotSchema.parse(JSON.parse(stored.snapshot) as unknown);
+  }
+
+  async loadCheckpoint(teamCodeInput: unknown): Promise<CheckpointSnapshot | null> {
+    teamCodeSchema.parse(teamCodeInput);
+    return this.readCheckpoint();
+  }
+
+  /**
+   * 台帳にあるcommandIdへの再送を、本文を見ずに処理する。適用済みのコマンドは二度と
+   * 適用しない——台帳が指すrevisionが今のrevisionなら「直前の保存の再送」なので現在の
+   * snapshotをそのまま返し、ずれていれば既に上書きされた古い保存なのでconflictにする
+   * （クライアントはGETして最新を採用すればよい）。この判定により、台帳はsnapshotを
+   * 持たず`(command_id, revision)`だけで足り、剪定して有限に保つ必要も無くなる——
+   * 剪定すると、溢れた古いcommandIdの再送が「未処理」に見え、古いdataが最新revision
+   * の新規保存として通ってしまう。
+   */
+  private replayCheckpoint(
+    current: CheckpointSnapshot | null,
+    appliedRevision: number,
+  ): CheckpointSnapshot | CheckpointRejection {
+    return current !== null && current.revision === appliedRevision
+      ? current
+      : { rejected: "conflict" };
+  }
+
+  /**
+   * チェックポイントを保存する。`nowIso`はWorker側で採る——DOはテストからClockを
+   * 差し替えられないため、時刻の境界をWorkerのhandlerへ寄せている。
+   */
+  async saveCheckpoint(
+    teamCodeInput: unknown,
+    commandInput: unknown,
+    nowIsoInput: unknown,
+    fingerprintInput: unknown,
+  ): Promise<CheckpointSnapshot | CheckpointRejection> {
+    const fingerprint = fingerprintSchema.parse(fingerprintInput);
+    const teamCode = teamCodeSchema.parse(teamCodeInput);
+    const command: SaveCheckpointCommand = saveCheckpointCommandSchema.parse(commandInput);
+    const now = checkpointSnapshotSchema.shape.savedAt.parse(nowIsoInput);
+    const savedRow =
+      this.ctx.storage.sql
+        .exec(
+          "SELECT revision, fingerprint FROM processed_checkpoint_commands WHERE command_id = ?",
+          command.commandId,
+        )
+        .toArray()[0] ?? null;
+    const saved = savedRow === null ? null : storedCheckpointCommandSchema.parse(savedRow);
+    const current = this.readCheckpoint();
+    // 台帳の行も検証してから使う。壊れた行を「台帳に無い」と読み替えると、適用済みの
+    // commandIdが未処理に見えて古いbodyを再適用してしまう。不整合は黙って通さず、
+    // 例外にしてWorkerの503（時間を置いて再試行）へ倒す。
+    if (saved !== null) {
+      // 同じcommandIdで別のbodyを送る取り違えは冪等再送ではない。元の結果を返すと、
+      // クライアントは保存したつもりの状態が入っていないことに気づけない。
+      if (mismatchesFingerprint(saved.fingerprint, fingerprint)) return { rejected: "conflict" };
+      return this.replayCheckpoint(current, saved.revision);
+    }
+
+    const applied = applyCheckpoint(current, command, { teamCode, now });
+    if (!applied.ok) return { rejected: applied.reason };
+    try {
+      this.writeCheckpoint(applied.snapshot, command, { current, fingerprint });
+    } catch (caught) {
+      if (caught instanceof CheckpointConflictError) return { rejected: "conflict" };
+      throw caught;
+    }
+    return applied.snapshot;
+  }
+
+  /**
+   * 状態更新と冪等台帳を1トランザクションで書く。片方だけ書けると、revisionだけ進んで
+   * 台帳に記録が無い状態になり、同じcommandIdの再送が現在のsnapshotではなく新規の保存
+   * として再適用されてしまう（AGENTS.mdの「保存失敗・重複イベント」）。CASが0行だった
+   * 場合はreturnではロールバックできないので、例外で抜けてトランザクションごと巻き戻す。
+   * saveCheckpointの複雑度を下げるための切り出し。
+   */
+  private writeCheckpoint(
+    snapshot: CheckpointSnapshot,
+    command: SaveCheckpointCommand,
+    context: { current: CheckpointSnapshot | null; fingerprint: string },
+  ): void {
+    const { current, fingerprint } = context;
+    // flushはCASを掛けずに確定させるので、照合はクライアントが申告したexpectedRevision
+    // ではなく、直前に読んだ現在のrevision（合成の土台）で行う。通常の保存は従来どおり。
+    const casRevision = command.flush === true ? current?.revision : command.expectedRevision;
+    const serialized = JSON.stringify(snapshot);
+    this.ctx.storage.transactionSync(() => {
+      // 既存commandと同じくrevisionのCASで書く。想定外の並行更新があれば0行になる。
+      const written =
+        current === null
+          ? this.ctx.storage.sql.exec(
+              "INSERT OR IGNORE INTO checkpoint_state (id, snapshot) VALUES (1, ?)",
+              serialized,
+            ).rowsWritten
+          : this.ctx.storage.sql.exec(
+              "UPDATE checkpoint_state SET snapshot = ? WHERE id = 1 AND json_extract(snapshot, '$.revision') = ?",
+              serialized,
+              casRevision ?? 0,
+            ).rowsWritten;
+      if (written === 0) throw new CheckpointConflictError();
+      this.ctx.storage.sql.exec(
+        "INSERT INTO processed_checkpoint_commands (command_id, revision, created_at, fingerprint) VALUES (?, ?, ?, ?)",
+        command.commandId,
+        snapshot.revision,
+        snapshot.savedAt,
+        fingerprint,
+      );
+    });
   }
 
   // ---- WebSocket ----

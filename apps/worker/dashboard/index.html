@@ -295,8 +295,9 @@
         const teamLabel = (team) => {
           const name = typeof team.teamName === "string" ? team.teamName.trim() : "";
           if (name !== "") return name;
-          const code = String(team.teamCode || "");
-          return "チーム " + (code.length >= 2 ? code.slice(-2) : code || "??");
+          // サマリーは生のチームコードを返さない（publicId＝ハッシュの先頭8桁）。
+          const id = String(team.publicId || "");
+          return "チーム " + (id.length >= 2 ? id.slice(0, 2).toUpperCase() : id || "??");
         };
 
         const el = (tag, className, text) => {
@@ -314,7 +315,7 @@
           const row = el("div", "team" + (stale ? " stale" : "") + (pos >= 7 ? " goal" : ""));
 
           const name = el("div", "name", teamLabel(team));
-          name.appendChild(el("span", "code", "No." + String(team.teamCode || "------")));
+          name.appendChild(el("span", "code", "No." + String(team.publicId || "--------")));
           row.appendChild(name);
 
           const track = el("div", "track");
@@ -328,7 +329,7 @@
           return row;
         };
 
-        const KIND_TEXT = { clear: "を突破", entry: "に到着", jump: "へ移動" };
+        const KIND_TEXT = { clear: "を突破", entry: "に到着", jump: "へ移動", resume: "へ復帰" };
 
         const eventText = (event) => {
           const pos = Math.min(STOPS.length - 1, Math.max(0, Number(event.pos) || 0));

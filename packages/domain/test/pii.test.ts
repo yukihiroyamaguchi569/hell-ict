@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import { detectPii, stage4Patient } from "../src/pii.js";
+import { containsPii, detectPii, PII_REDACTION, redactPii, stage4Patient } from "../src/pii.js";
 
 describe("送信前PIIゲート", () => {
   it.each([
@@ -157,5 +157,82 @@ describe("送信前PIIゲート", () => {
   it("Stage 4カルテの経過欄相当（ID＋氏名＋生年月日が同居する文）は引き続き検知する", () => {
     const text = `7/3 患者ID ${stage4Patient.id}、${stage4Patient.name}さん（${stage4Patient.dob}生、74歳）が受診。`;
     expect(detectPii(text)).toBe("患者氏名");
+  });
+});
+
+describe("containsPii", () => {
+  it("PIIを含まないJSON値は素通しする", () => {
+    expect(containsPii({})).toBe(false);
+    expect(containsPii({ pos: 3, view: "s1", ok: true, none: null })).toBe(false);
+    expect(containsPii([1, "メモ", { nested: ["配列", { deep: "値" }] }])).toBe(false);
+    expect(containsPii("ただのテキスト")).toBe(false);
+    expect(containsPii(42)).toBe(false);
+    expect(containsPii(null)).toBe(false);
+    expect(containsPii(undefined)).toBe(false);
+  });
+
+  it("入れ子の値に混ざったPIIを拾う", () => {
+    expect(containsPii({ memo: `${stage4Patient.name}さんの件` })).toBe(true);
+    expect(containsPii({ a: { b: { c: [`連絡先は${stage4Patient.phone}`] } } })).toBe(true);
+    expect(containsPii([["深い配列", { dob: `${stage4Patient.dob}生まれ` }]])).toBe(true);
+  });
+
+  it("キーに置かれたPIIも拾う", () => {
+    // 値ではなくキー側へ置く経路を塞ぐ（チェックポイントのdataはキーが自由文字列）。
+    expect(containsPii({ [`${stage4Patient.name}さん`]: 1 })).toBe(true);
+    expect(containsPii({ outer: { [stage4Patient.phone]: "x" } })).toBe(true);
+  });
+
+  it("1つの値に収まったPIIも、分割されたJSON全体の並びも見る", () => {
+    // 個別の値だけを見るのでは足りず、JSON全体だけを見るのでも足りないので両方掛ける。
+    expect(containsPii({ text: `${stage4Patient.name}さん` })).toBe(true);
+    expect(containsPii([`${stage4Patient.familyName}様`])).toBe(true);
+  });
+
+  it("文字列以外のプリミティブはそれ自体では反応しない", () => {
+    expect(containsPii(true)).toBe(false);
+    expect(containsPii([1, 2, 3])).toBe(false);
+  });
+
+  it("深く入れ子になった値も最下層まで辿る", () => {
+    // 深さの上限は呼び出し側の責務（チェックポイントはschemaのCHECKPOINT_DATA_MAX_DEPTH、
+    // 活動ログのmetaは平坦なrecord）。ここではその範囲を十分に超える深さでも
+    // 最下層まで届くことだけを固定する。
+    const deep = Array.from({ length: 20 }).reduce<unknown>((inner) => ({ nested: inner }), {
+      memo: `${stage4Patient.name}さん`,
+    });
+    expect(containsPii(deep)).toBe(true);
+  });
+});
+
+describe("redactPii", () => {
+  it("PIIを含まないテキストはそのまま返す", () => {
+    expect(redactPii("ただのメモです")).toBe("ただのメモです");
+    expect(redactPii("")).toBe("");
+  });
+
+  it("既知のパターンを伏せ字へ置き換える", () => {
+    const redacted = redactPii(`${stage4Patient.name}さんの件`);
+    expect(redacted).not.toContain(stage4Patient.name);
+    expect(redacted).toContain(PII_REDACTION);
+    expect(redacted).toContain("さんの件");
+  });
+
+  it("同じ本文に複数回出てきても全部置き換える", () => {
+    const redacted = redactPii(
+      `${stage4Patient.name}さんと${stage4Patient.name}さん、連絡先は${stage4Patient.phone}`,
+    );
+    expect(detectPii(redacted)).toBeNull();
+  });
+
+  it("置換後のテキストはdetectPiiに反応しない", () => {
+    for (const source of [
+      `${stage4Patient.name}さんについて`,
+      `${stage4Patient.dob}生まれの方です`,
+      `連絡先は${stage4Patient.phone}です`,
+      `ご長男の${stage4Patient.familyName}様より`,
+    ]) {
+      expect(detectPii(redactPii(source)), source).toBeNull();
+    }
   });
 });

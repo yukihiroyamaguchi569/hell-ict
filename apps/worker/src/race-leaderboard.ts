@@ -1,11 +1,34 @@
-import { leaderboardSnapshotSchema, teamCodeSchema, teamSnapshotSchema } from "@hell-ict/domain";
+import {
+  leaderboardEntrySchema,
+  leaderboardSnapshotSchema,
+  revisionSchema,
+  teamCodeSchema,
+  teamSnapshotSchema,
+} from "@hell-ict/domain";
 import type { LeaderboardSnapshot, TeamCode } from "@hell-ict/domain";
 import { DurableObject } from "cloudflare:workers";
+import { z } from "zod";
 
+import { isTeamCodeAllowed, parseTeamCodes } from "./guard.js";
 import { error, isWebSocketRequest } from "./http.js";
 
-type StoredLeaderboard = { team_code: string; team_revision: number; stage: "prologue" | "stage1" };
-type StoredRevision = { revision: number };
+/**
+ * leaderboard_entriesの行。SQLiteは列の型を強制しないので、読み出しも実行時に検証する。
+ *
+ * 壊れた行は配信全体を止めずスキップする——ここで例外にすると、1チームの1行が壊れた
+ * だけで全購読者の帯が更新されなくなる。レースの表示は「1チームが欠ける」ほうが
+ * 「全員の画面が止まる」より害が小さい。
+ */
+const storedLeaderboardSchema = z.object({
+  team_code: teamCodeSchema,
+  team_revision: revisionSchema,
+  stage: leaderboardEntrySchema.shape.stage,
+});
+
+type StoredLeaderboard = z.infer<typeof storedLeaderboardSchema>;
+
+/** meta.revisionも同じ理由で、壊れていたら0として扱い配信は続ける。 */
+const storedRevisionSchema = z.object({ revision: revisionSchema });
 
 export class RaceLeaderboard extends DurableObject<Env> {
   constructor(ctx: DurableObjectState, env: Env) {
@@ -25,13 +48,19 @@ export class RaceLeaderboard extends DurableObject<Env> {
     const teamCode = teamCodeSchema.parse(teamCodeInput);
     const snapshot = teamSnapshotSchema.parse(snapshotInput);
     if (teamCode !== snapshot.teamCode) throw new Error("チームコードが一致しません。");
+    // 既存行も読み出し時に検証する。型指定だけで信用すると、壊れた巨大な
+    // team_revisionが入っていた場合に以後の正常な更新がすべて「古い」と判定され、
+    // そのチームの帯が二度と進まなくなる。壊れていれば行が無かったものとして
+    // 上書きし、次のupsertで正常な値へ戻す。
     const existing =
       this.ctx.storage.sql
-        .exec<StoredLeaderboard>(
+        .exec(
           "SELECT team_code, team_revision, stage FROM leaderboard_entries WHERE team_code = ?",
           teamCode,
         )
-        .toArray()[0] ?? null;
+        .toArray()
+        .map((row) => storedLeaderboardSchema.safeParse(row).data)
+        .filter((row) => row !== undefined)[0] ?? null;
     if (existing !== null && existing.team_revision >= snapshot.revision)
       return this.snapshotFor(teamCode);
     this.ctx.storage.sql.exec(
@@ -68,16 +97,29 @@ export class RaceLeaderboard extends DurableObject<Env> {
     socket.close();
   }
 
+  /**
+   * 配信する行を読む。TEAM_CODESを設定したら、許可リストに無いチームは配信から外す
+   * ——設定前に試験で入れたコードや前回開催のチームがleaderboard_entriesに残っており、
+   * そのままだと当日の帯にゴーストとして並ぶ。行そのものは消さない（設定を戻せば
+   * また見える。掃除は運用の判断に委ねる）。
+   *
+   * 許可リストが不正（invalid）なら空を配信する。他のガードと同じくfail-closedへ倒し、
+   * 「設定したつもりで全部見えている」を作らない。
+   */
   private readEntries(): { revision: number; rows: StoredLeaderboard[] } {
     const meta = this.ctx.storage.sql
-      .exec<StoredRevision>("SELECT value AS revision FROM leaderboard_meta WHERE key = 'revision'")
-      .one();
+      .exec("SELECT value AS revision FROM leaderboard_meta WHERE key = 'revision'")
+      .toArray()[0];
+    const allowlist = parseTeamCodes(this.env.TEAM_CODES);
     const rows = this.ctx.storage.sql
-      .exec<StoredLeaderboard>(
+      .exec(
         "SELECT team_code, team_revision, stage FROM leaderboard_entries ORDER BY team_revision DESC, team_code ASC",
       )
-      .toArray();
-    return { revision: meta?.revision ?? 0, rows };
+      .toArray()
+      .map((row) => storedLeaderboardSchema.safeParse(row).data)
+      .filter((row) => row !== undefined)
+      .filter((row) => isTeamCodeAllowed(row.team_code, allowlist));
+    return { revision: storedRevisionSchema.safeParse(meta).data?.revision ?? 0, rows };
   }
 
   private snapshotFrom(

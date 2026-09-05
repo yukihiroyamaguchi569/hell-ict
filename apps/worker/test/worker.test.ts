@@ -8,7 +8,7 @@ import {
 } from "@hell-ict/domain";
 import { describe, expect, it } from "vitest";
 
-import { firstMessage, session, upgrade } from "./support.js";
+import { firstMessage, get, postJson, session, upgrade } from "./support.js";
 
 describe("P1B Worker", () => {
   it("health checkはDOを作らず固定の成功応答を返す", async () => {
@@ -18,7 +18,16 @@ describe("P1B Worker", () => {
     const response = await exports.default.fetch(new Request("https://example.test/api/health"));
 
     expect(response.status).toBe(200);
-    await expect(response.json()).resolves.toEqual({ status: "ok" });
+    await expect(response.json()).resolves.toEqual({
+      status: "ok",
+      // 運用値の設定状況。テスト環境ではどれも未設定なので既定のまま出る。
+      guards: {
+        teamCodes: false,
+        teamCodesCount: 0,
+        allowedOrigins: false,
+        chatRateLimitPerMinute: 20,
+      },
+    });
     await expect(listDurableObjectIds(env.TEAM_ROOM)).resolves.toEqual([]);
     await expect(listDurableObjectIds(env.RACE_LEADERBOARD)).resolves.toEqual([]);
   });
@@ -50,13 +59,9 @@ describe("P1B Worker", () => {
       commandId: "00000000-0000-4000-8000-000000000001",
       expectedRevision: 0,
     };
-    const endpoint = "https://example.test/api/teams/000001/commands";
-    const first = await exports.default.fetch(
-      new Request(endpoint, { method: "POST", body: JSON.stringify(command) }),
-    );
-    const repeated = await exports.default.fetch(
-      new Request(endpoint, { method: "POST", body: JSON.stringify(command) }),
-    );
+    const endpoint = "/api/teams/000001/commands";
+    const first = await postJson(endpoint, command);
+    const repeated = await postJson(endpoint, command);
     await expect(first.json()).resolves.toMatchObject({
       applied: true,
       leaderboardPending: false,
@@ -72,27 +77,17 @@ describe("P1B Worker", () => {
   it("不正な入力と競合は状態を変えずに拒否する", async () => {
     expect((await session("１２３４５６")).status).toBe(400);
     await session("000002");
-    const endpoint = "https://example.test/api/teams/000002/commands";
-    const invalid = await exports.default.fetch(
-      new Request(endpoint, {
-        method: "POST",
-        body: JSON.stringify({
-          type: "enter-stage1",
-          commandId: "00000000-0000-4000-8000-000000000002",
-          expectedRevision: 0.5,
-        }),
-      }),
-    );
-    const stale = await exports.default.fetch(
-      new Request(endpoint, {
-        method: "POST",
-        body: JSON.stringify({
-          type: "enter-stage1",
-          commandId: "00000000-0000-4000-8000-000000000003",
-          expectedRevision: 1,
-        }),
-      }),
-    );
+    const endpoint = "/api/teams/000002/commands";
+    const invalid = await postJson(endpoint, {
+      type: "enter-stage1",
+      commandId: "00000000-0000-4000-8000-000000000002",
+      expectedRevision: 0.5,
+    });
+    const stale = await postJson(endpoint, {
+      type: "enter-stage1",
+      commandId: "00000000-0000-4000-8000-000000000003",
+      expectedRevision: 1,
+    });
     expect(invalid.status).toBe(400);
     expect(stale.status).toBe(409);
     await expect((await session("000002")).json()).resolves.toMatchObject({
@@ -102,12 +97,8 @@ describe("P1B Worker", () => {
   });
 
   it("syncはWebSocket Upgrade以外の要求を426で拒否する", async () => {
-    const team = await exports.default.fetch(
-      new Request("https://example.test/api/teams/000003/sync"),
-    );
-    const leaderboard = await exports.default.fetch(
-      new Request("https://example.test/api/leaderboard/sync?teamCode=000003"),
-    );
+    const team = await get("/api/teams/000003/sync");
+    const leaderboard = await get("/api/leaderboard/sync?teamCode=000003");
     expect(team.status).toBe(426);
     expect(leaderboard.status).toBe(426);
   });
@@ -137,9 +128,7 @@ describe("P1B Worker", () => {
 
   it("GET /api/teams/{code}/chatは200でchatSnapshot形状を返す", async () => {
     await session("000005");
-    const response = await exports.default.fetch(
-      new Request("https://example.test/api/teams/000005/chat"),
-    );
+    const response = await get("/api/teams/000005/chat");
     expect(response.status).toBe(200);
     const snapshot = chatSnapshotSchema.parse(await response.json());
     expect(snapshot).toMatchObject({ teamCode: "000005", threads: [{ title: "メイン" }] });

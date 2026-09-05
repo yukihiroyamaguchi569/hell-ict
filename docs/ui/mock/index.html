@@ -380,6 +380,10 @@
   padding: 11px 26px; font-size: 16px; font-weight: 700; letter-spacing: .04em;
 }
 .btn:hover { filter: brightness(1.12); }
+/* 押せない状態を見た目でも伝える。疎通確認中・失敗中の［入室する］が押せる顔の
+   ままだと、参加者は連打して「壊れている」と受け取る。 */
+.btn:disabled { opacity: .45; cursor: default; filter: none; }
+.btn:disabled:hover { filter: none; }
 .btn.ghost { background: transparent; color: var(--fg); border-color: var(--rule); font-weight: 500; }
 .btn.ghost:hover { background: var(--surface-2); filter: none; }
 
@@ -500,6 +504,15 @@
 }
 .mark-t.me { color: var(--accent); font-weight: 700; font-size: 14px; }
 .mark-t.lead { color: var(--fg); }
+/* 他チーム（LIVE時のみ・GET /api/progress/summary 由来）。自チームより一段
+   小さく淡くして、どれが自分かを一目で分かるようにする。同じ停留所に並ぶと
+   drawMarks() が bottom を段積みし、上段は停留所ラベルの高さまで来るので、
+   帯と同じ地色を敷いてラベルと文字が絡まないようにする。 */
+.mark-t.other {
+  color: var(--fg-muted); font-size: 11px; opacity: .85;
+  background: var(--surface); padding: 0 3px; border-radius: 3px;
+}
+.mark-t.other .nm { font-size: 11px; }
 .mark-t .nm { font-family: var(--font-ui); font-size: 12px; }
 
 /* --- 院内連絡先：浮く別ウィンドウ（AIと同じ吹き出しを共用しない） ------
@@ -599,6 +612,12 @@
 .entry .teamname input::placeholder { color: var(--fg-muted); font-weight: 400; }
 /* LIVE時、POST /api/session 失敗時のエラー表示（サーバのmessageをそのまま出す）。 */
 .entry .entry-error { font-size: 14px; color: #c1121f; text-align: center; max-width: 42ch; }
+/* 起動時の疎通確認。確認中は淡く、失敗したときだけ赤くする（.bad） */
+.entry .entry-probe { font-size: 14px; color: var(--fg-muted); text-align: center; max-width: 42ch; }
+.entry .entry-probe.bad { color: #c1121f; }
+.entry .probe-actions { display: flex; flex-direction: column; align-items: center; gap: 6px; }
+.entry .probe-buttons { display: flex; gap: 10px; flex-wrap: wrap; justify-content: center; }
+.entry .probe-note { font-size: 12px; color: var(--fg-muted); }
 
 /* 幹部ブリーフィング — 急変直後、Stage 1 の冒頭。.entry と同じく不透明で
    下地を完全に隠す（ヘッダーの時計もリーダーボードも見せない）。
@@ -1345,7 +1364,19 @@
           </div>
           <!-- LIVE時のみ使う。scriptedのbtn-enterはgo("welcome")へ即抜けるため空のまま。 -->
           <div class="entry-error hide" id="entry-error"></div>
+          <!-- 起動時の /api/health プローブの状態。確認が終わるまで入室させない
+               （http(s)配信時のみ。file:// は最初からscripted） -->
+          <div class="entry-probe hide" id="entry-probe"></div>
           <button class="btn" id="btn-enter">入室する</button>
+          <!-- プローブ失敗時だけ出す。台本モードは「黙って落ちる」のではなく
+               参加者・ファシリテーターが選ぶ最後の手段（README「ライブAPI接続」）。 -->
+          <div class="probe-actions hide" id="probe-actions">
+            <div class="probe-buttons">
+              <button class="btn ghost" id="btn-probe-retry">再試行</button>
+              <button class="btn ghost" id="btn-probe-offline">オフラインで進める（台本モード）</button>
+            </div>
+            <div class="probe-note">AI・保存・帯は動きません</div>
+          </div>
         </div>
 
         <!-- 幹部ブリーフィング：急変直後、Stage 1 の冒頭。事務長が一方向で告げるだけで、
@@ -3094,11 +3125,13 @@
   $("code").addEventListener("input", prefillTeamName);
   prefillTeamName();
 
-  /* リーダーボードの位置。📌 表示は自チームのみ（2026-08-22 ユーザー決定。
-     理由は drawMarks() のコメント）——kind:"other"/"lead" の行はもう画面に
-     出ない。TEAMS[2]（kind:"me"）の pos だけが各ステージから更新され、帯に
-     反映される。配列の形を変えないのは、TEAMS[2].pos を進める既存の散在箇所を
-     そのまま動かし続けるため。nm:"B班" は未入室・devbar 直行時のプレースホルダ。 */
+  /* リーダーボードの位置。TEAMS[2]（kind:"me"）が自チームで、pos は各ステージ
+     から更新される。配列の先頭付近の形を変えないのは、TEAMS[2].pos を進める
+     既存の散在箇所をそのまま動かし続けるため。nm:"B班" は未入室・devbar
+     直行時のプレースホルダ。
+     kind:"other" の行は LIVE 時に GET /api/progress/summary の結果で丸ごと
+     入れ替わる（syncTeamsFromSummary）。scripted 時は初期値のまま残るが、
+     drawMarks() が自チームだけを描くので画面には出ない。 */
   /* 停留所の数（Prologue/S1/S2/S3/S4/S5/S6/Final）。2026-08-22 の表示番号
      振り直しで旧 Stage 3.5 が Stage 4 として独立し、7→8 へ増えた。マーカーの左位置は
      pos ÷ (STOP_COUNT - 1) で決まる——帯のラベル（.board .stops）は
@@ -3110,40 +3143,139 @@
     { pos: 2, kind: "other" }, { pos: 3, kind: "lead", nm: "D班" },
     { pos: 1, kind: "other" }
   ];
-  /* 帯に描くのは自チームのマーカー1つだけ（2026-08-22 ユーザー決定）。
-     ダミーの他班（A班・D班…）を並べていた頃は、入室時にチーム自身が入力した
-     名前がヘッダーのチップと感謝状には出るのに、帯だけが作り話の並びを見せて
-     いた——同じ画面で名前が食い違うくらいなら、正直に自分の位置だけを出す。
-     他チームのライブ表示は本実装の宿題（全体用 Durable Object から配信・
-     企画書§7）で、モックでは持たない。
+  /* 帯に描くマーカー。
 
-     TEAMS 自体は残してある——各ステージが TEAMS[2].pos を進める既存の散在箇所
-     （設計負債・10箇所超）をそのまま活かすための位置の記録係で、kind:"other"/
-     "lead" の行はもう描画に使われない。
+     2026-08-22 は「自チームの1つだけ」に絞っていた——ダミーの他班（A班・D班…）
+     を並べていた頃は、チーム自身が入力した名前がヘッダーのチップと感謝状には
+     出るのに、帯だけが作り話の並びを見せていたためで、作り話をやめるための
+     決定だった。LIVE 時は他チームの位置が GET /api/progress/summary から実データ
+     として取れるようになったので（syncTeamsFromSummary）、作り話ではなくなった
+     この条件では全チームを描く。scripted 時（file:// 直開き・外部通信ゼロ）は
+     実データが無いので、従来どおり自チームだけを描く。
 
      ラベルは入室時のチーム名。未入室・devbar 直行時は TEAMS[2].nm（既定の
      プレースホルダ）へ落とす——感謝状（fShowHandover）と同じ流儀。名前は
-     チーム自身の入力なので必ず esc() を通す。 */
+     チーム自身（他チームの場合は他人）の入力なので必ず esc() を通す。
+
+     同じ停留所に複数チームが並ぶと横位置が完全に重なるので、縦に積む。
+     自チームを必ず最下段（いちばん読みやすい位置）に置く。積める段数は帯の
+     高さ（48px、うち上段は停留所ラベル）で決まるので3段まで——研修開始直後は
+     全チームが同じ停留所にいるため、名前を全部並べようとすると帯の外へ溢れて
+     本編の画面を覆う。溢れた分は最上段の「＋N」にまとめ、何チームそこにいるかは
+     必ず読めるようにする（チーム名の一覧は会場前面のダッシュボードが持つ）。 */
+  const MARK_STACK_STEP_PX = 13;
+  const MARK_MAX_ROWS = 3;
+  // サーバの集計を一度でも受け取るまでは他チームを描かない。TEAMS の初期値に
+  // 残っているダミー（A班・D班…）を実データのふりで見せないため。
+  let summarySeen = false;
+
+  /* 両端の停留所だけ寄せ方を変える。既定の中心合わせ（.mark-t の
+     translateX(-50%)）のままだと、ラベルの半分が帯の外へ出る——Final に
+     着いたチームの名前が画面の右端で切れていた。ここはファシリテーターが
+     チーム名を読む場所なので、端では内側へ寄せる。 */
+  function placeMark(d, pos, level) {
+    const last = STOP_COUNT - 1;
+    d.style.left = (pos * (100 / last)) + "%";
+    if (level > 0) d.style.bottom = (level * MARK_STACK_STEP_PX) + "px";
+    d.style.transform = pos === 0 ? "translateX(0)"
+      : pos === last ? "translateX(-100%)"
+      : "translateX(-50%)";
+  }
+
   function drawMarks(targetId) {
     const el = $(targetId || "marks"); el.innerHTML = "";
     const me = TEAMS.find((t) => t.kind === "me");
     if (!me) return;
-    const d = document.createElement("div");
-    d.className = "mark-t me";
-    // 横に散らす計算はもう要らない（1つしか置かないので重なりようがない）。
-    const last = STOP_COUNT - 1;
-    d.style.left = (me.pos * (100 / last)) + "%";
-    // 両端の停留所だけ寄せ方を変える。既定の中心合わせ（.mark-t の
-    // translateX(-50%)）のままだと、ラベルの半分が帯の外へ出る——Final に
-    // 着いたチームの名前が画面の右端で切れていた。ここはファシリテーターが
-    // チーム名を読む場所なので、端では内側へ寄せる。
-    d.style.transform = me.pos === 0 ? "translateX(0)"
-      : me.pos === last ? "translateX(-100%)"
-      : "translateX(-50%)";
-    d.innerHTML = "◆" + '<span class="nm">' + esc(teamName || me.nm) + "</span>";
-    el.appendChild(d);
+    // 実データが届いているときだけ他チームを混ぜる。自チームが先頭＝最下段。
+    const shown = summarySeen ? [me].concat(TEAMS.filter((t) => t !== me && t.kind === "other")) : [me];
+    const byPos = {};
+    shown.forEach((t) => { (byPos[t.pos] = byPos[t.pos] || []).push(t); });
+    Object.keys(byPos).forEach((key) => {
+      const list = byPos[key];
+      const pos = list[0].pos;
+      const overflow = list.length > MARK_MAX_ROWS ? list.length - (MARK_MAX_ROWS - 1) : 0;
+      (overflow ? list.slice(0, MARK_MAX_ROWS - 1) : list).forEach((t, level) => {
+        const d = document.createElement("div");
+        d.className = "mark-t " + (t === me ? "me" : "other");
+        placeMark(d, pos, level);
+        d.innerHTML = (t === me ? "◆" : "◇") +
+          '<span class="nm">' + esc((t === me ? teamName : "") || t.nm || "") + "</span>";
+        el.appendChild(d);
+      });
+      if (!overflow) return;
+      const more = document.createElement("div");
+      more.className = "mark-t other";
+      placeMark(more, pos, MARK_MAX_ROWS - 1);
+      more.innerHTML = '◇<span class="nm">ほか' + overflow + "チーム</span>";
+      el.appendChild(more);
+    });
   }
   drawMarks();
+
+  /* ------------------------------------------------------------------ */
+  /* 全チームの帯（LIVE時のみ）                                          */
+  /*                                                                    */
+  /* 会場前面のダッシュボード（apps/worker/dashboard/index.html）と同じ    */
+  /* GET /api/progress/summary をポーリングし、自チーム以外を TEAMS へ    */
+  /* 流し込む。失敗は握りつぶす——帯が更新されないだけで進行は止めない。   */
+  /* ------------------------------------------------------------------ */
+  const SUMMARY_POLL_MS = 10000;
+
+  /* teams[] は apps/worker/src/progress.ts の teamRowSchema（publicId / teamName /
+     pos / updatedAt / isSelf?）。サーバは生の teamCode を返さない——他チームの
+     コードが配られた端末から読めると、なりすまして進行を書き換えられる。
+     代わりに突合できない publicId（8桁hex）が来て、自分の行だけはクエリに
+     `?teamCode=` を付けたときに isSelf: true が付く。
+
+     自チームの行は捨てる——自前の TEAMS[2] が正で、サーバの集計はこちらの pos より
+     1拍遅れることがある。
+
+     📌 自チームは TEAMS[2] に固定したまま入れ替える。各ステージが
+     TEAMS[2].pos を直接書く既存の散在箇所（設計負債・10箇所超）が index に
+     依存しているため、席をずらすとそこが全部壊れる。空席は kind:"empty" で
+     埋める（drawMarks は kind:"other" しか描かない）。 */
+  /* 帯に描ける行かどうか。1行でも形が違うと drawMarks() が NaN の left や
+     undefined の名前を吐いて帯が崩れるので、不正な行は描く前に落とす
+     ——帯は表示だけの機能で、1チーム欠けても進行は止まらない。 */
+  const isSummaryTeam = (r) =>
+    !!r && typeof r.publicId === "string" && /^[0-9a-f]{8}$/i.test(r.publicId) &&
+    typeof r.teamName === "string" &&
+    Number.isInteger(r.pos) && r.pos >= 0 && r.pos <= STOP_COUNT - 1 &&
+    (r.isSelf === undefined || typeof r.isSelf === "boolean");
+
+  function syncTeamsFromSummary(rows) {
+    const others = rows
+      .filter((r) => isSummaryTeam(r) && r.isSelf !== true)
+      .map((r) => ({
+        pos: r.pos,
+        kind: "other",
+        publicId: r.publicId,
+        nm: r.teamName.slice(0, 24) || "（無名）",
+      }));
+    const next = [
+      others[0] || { pos: 0, kind: "empty" },
+      others[1] || { pos: 0, kind: "empty" },
+      TEAMS[2],
+    ].concat(others.slice(2));
+    TEAMS.length = 0;
+    next.forEach((t) => TEAMS.push(t));
+    summarySeen = true;
+    drawMarks();
+  }
+
+  /* 入室前（liveState===null）は回さない。まだどのチームでもない画面で
+     他チームの位置を取りに行っても描く相手がおらず、entry を開いたまま
+     置かれた端末が10秒ごとにサーバを叩き続けるだけになる。 */
+  async function pollSummary() {
+    if (!LIVE || !liveState) return;
+    // 自分の行を教えてもらうためにコードを添える。付けないと isSelf が付かず、
+    // 自チームが他チームとして二重に描かれる。
+    const path = "/api/progress/summary?teamCode=" + encodeURIComponent(liveState.teamCode);
+    const res = await liveFetch(path, { method: "GET" }, LIVE_RESTORE_TIMEOUT_MS);
+    if (res.ok && res.body && Array.isArray(res.body.teams)) syncTeamsFromSummary(res.body.teams);
+  }
+  // later() は使わない（go() の clearLater() に回収されるとポーリングが止まる）。
+  setInterval(pollSummary, SUMMARY_POLL_MS);
 
   /* 経過時間 */
   let clockOn = false, elapsed = 0, clockTimer = null;
@@ -3288,21 +3420,195 @@
   // スレッドID。scripted時は最後まで null のまま（sendAI等はこれで分岐する）。
   let liveState = null;
 
-  (async function probeLive() {
-    if (location.protocol !== "http:" && location.protocol !== "https:") return;
-    try {
-      const ctrl = new AbortController();
-      const timer = setTimeout(() => ctrl.abort(), 1500);
-      const res = await fetch(LIVE_API_BASE + "/api/health", { signal: ctrl.signal });
-      clearTimeout(timer);
-      LIVE = res.ok;
-    } catch {
-      LIVE = false;   // file://・8788（pythonサーバ、APIなし）はここに落ちる
-    }
-  })();
+  /* プローブの結果。"pending"（確認中）／"live"（API有り）／"scripted"（file://）／
+     "failed"（http(s)なのに繋がらない）。 */
+  let liveProbeState = "pending";
+  /* 1.5秒では本番のコールドスタート（DO・D1の初回起動）に届かないことがある。
+     短すぎるタイムアウトは「黙ってscriptedで開始し、入室も保存も全部台本」という
+     いちばん気づきにくい事故を生むので、待つ側へ倒す。 */
+  const LIVE_PROBE_TIMEOUT_MS = 5000;
 
-  /* fetchを{ok,status,body}へ正規化する。ネットワーク断・タイムアウトも
+  /* 確認が終わるまで入室させない。http(s)で開いている以上、APIがある前提の
+     配信物なので、繋がらないまま静かにscriptedへ落とさない——当日それに気づくのは
+     「入室したのに他のチームが帯に出ない」と言われた後になる。 */
+  /* 入室を止めている理由（プローブ失敗以外）。入室手続きの途中でサーバから
+     必要なものを取れなかったときに立て、［再試行］の宛先も差し替える。 */
+  let entryBlockMessage = null;
+  let entryRetry = probeLive;
+  let entryBusy = false;   // 入室手続きの実行中（多重クリック防止）
+
+  /* 入室を止めていた状態の後始末。プローブのやり直しと台本モードの選択で
+     同じものを通す——片方だけ消し忘れると、ボタンがdisabledのまま残って
+     入室そのものができなくなる。 */
+  function clearEntryBlock() {
+    entryBlockMessage = null;
+    entryRetry = probeLive;
+    entryBusy = false;
+  }
+
+  function updateEntryProbeUi() {
+    const btn = $("btn-enter");
+    const note = $("entry-probe");
+    const actions = $("probe-actions");
+    if (!btn || !note || !actions) return;
+    const pending = liveProbeState === "pending" || entryBusy;
+    const failed = liveProbeState === "failed" || entryBlockMessage !== null;
+    btn.disabled = pending || failed;
+    note.classList.toggle("hide", !(pending || failed));
+    note.classList.toggle("bad", failed);
+    note.textContent = entryBlockMessage
+      ? entryBlockMessage
+      : liveProbeState === "failed"
+        ? "サーバに接続できません。ネットワークを確認して再試行してください。"
+        : pending ? (entryBusy ? "入室しています…" : "接続を確認しています…") : "";
+    actions.classList.toggle("hide", !failed);
+  }
+
+  async function probeLive() {
+    // file:// は最初からscripted。プローブそのものを試みない（従来どおり）。
+    if (location.protocol !== "http:" && location.protocol !== "https:") {
+      liveProbeState = "scripted";
+      updateEntryProbeUi();
+      return;
+    }
+    liveProbeState = "pending";
+    clearEntryBlock();
+    updateEntryProbeUi();
+    const ctrl = new AbortController();
+    const timer = setTimeout(() => ctrl.abort(), LIVE_PROBE_TIMEOUT_MS);
+    try {
+      const res = await fetch(LIVE_API_BASE + "/api/health", { signal: ctrl.signal });
+      // 200 だけでは足りない。静的ホスティングは存在しないパスへも index.html を
+      // 200 で返すので、res.ok だけを見ると「APIが居る」と誤認して LIVE になり、
+      // 以降のAPIが全部HTMLを返して静かに壊れる。健康診断の中身まで確かめる。
+      const health = res.ok ? await res.json().catch(() => null) : null;
+      const alive = !!health && health.status === "ok" &&
+        !!health.guards && typeof health.guards === "object";
+      LIVE = alive;
+      liveProbeState = alive ? "live" : "failed";
+    } catch {
+      LIVE = false;
+      liveProbeState = "failed";
+    } finally {
+      clearTimeout(timer);
+    }
+    updateEntryProbeUi();
+  }
+
+  // 宛先は状況で変わる——プローブ失敗なら再プローブ、入室手続きが途中で
+  // 失敗したなら入室のやり直し。
+  $("btn-probe-retry").addEventListener("click", () => entryRetry());
+
+  /* 台本モードで進む、を明示的に選ぶ。開発用の静的サーバ配信（python -m http.server）
+     と、会場でサーバが落ちたときの最後の手段。押されたら以後プローブし直さない
+     ——「黙ってscriptedへ落ちる」のを避けるのが今回の趣旨で、選んだこと自体は
+     参加者・ファシリテーターの意思決定として尊重する。 */
+  $("btn-probe-offline").addEventListener("click", () => {
+    LIVE = false;
+    liveProbeState = "scripted";
+    // 入室手続きの途中（進行状況の取得失敗）から選ばれた場合、liveState は
+    // もう埋まっている。落とさないと「LIVE=false なのにセッションはある」という
+    // 中途半端な状態が残り、liveState だけを見ているスレッド作成が動いて
+    // 台本モードのはずの画面から通信が出る。
+    liveState = null;
+    // プローブ失敗だけでなく、入室手続きの途中（進行状況の取得失敗）から
+    // 選ばれることもある。そちらの理由も必ず消す——消し忘れると失敗表示と
+    // disabled が残り、台本モードを選んだのに入室できない。
+    clearEntryBlock();
+    updateEntryProbeUi();
+  });
+
+  probeLive();
+
+  /* 429 の Retry-After（秒）を数える。RFC はHTTP-dateも許すが、Workerは秒で返すので
+     秒だけを読む——読めなければ null にして、文言から秒数を落とす。 */
+  function retryAfterSeconds(res) {
+    const raw = res.headers.get("Retry-After");
+    if (raw === null) return null;
+    const seconds = Number(raw.trim());
+    return Number.isFinite(seconds) && seconds >= 0 ? Math.ceil(seconds) : null;
+  }
+
+  /* 429（レート制限）の案内文。自動再送はしない——待たせている間に画面が勝手に
+     動くより、参加者が「何秒待てばいいか」を読んで自分で押し直せる方がよい。 */
+  function rateLimitMessage(retryAfter) {
+    return retryAfter === null
+      ? "送信が多すぎます。少し待ってからもう一度送ってください。"
+      : "送信が多すぎます。" + retryAfter + " 秒待ってからもう一度送ってください。";
+  }
+
+  /* fetchを{ok,status,body,retryAfter}へ正規化する。ネットワーク断・タイムアウトも
      例外を投げさせず status:0 として呼び出し側の分岐へ寄せる。 */
+  /* ------------------------------------------------------------------ */
+  /* LIVE応答の実行時検証                                                 */
+  /*                                                                    */
+  /* 200 が返ったからといって中身が契約どおりとは限らない（デプロイの        */
+  /* 食い違い、プロキシの差し込み、別サービスの応答）。素直に読みに行くと    */
+  /* 「threads[0] が undefined」で例外になり、そこで止まった関数は          */
+  /* entryBusy を戻さないまま——入室ボタンが「入室しています…」で固まる。   */
+  /* 読む前に形を確かめ、違っていれば通信失敗と同じ経路（busy解除・         */
+  /* エラー表示・再試行）へ倒す。                                        */
+  /* ------------------------------------------------------------------ */
+  const isTeamCode = (v) => typeof v === "string" && /^\d{6}$/.test(v);
+  const isChatMessage = (m) =>
+    !!m && typeof m.messageId === "string" && (m.role === "user" || m.role === "assistant") &&
+    typeof m.text === "string" && typeof m.createdAt === "string";
+  /* kind は後から足した列なので、持たないスレッドも通す（持つなら stage/manual だけ）。 */
+  const isChatThread = (t) =>
+    !!t && typeof t.threadId === "string" && typeof t.title === "string" &&
+    (t.kind === undefined || t.kind === "stage" || t.kind === "manual") &&
+    Array.isArray(t.messages) && t.messages.every(isChatMessage);
+  /* commands は commandIds を渡して問い合わせたときだけ付く。値は3種のいずれか
+     ——知らない値を「処理済み」と読んでしまうと、まだ処理中の commandId を捨てて
+     発言が二重に積まれるので、1つでも読めなければ snapshot ごと不正として弾く。 */
+  const COMMAND_STATUSES = ["pending", "processed", "unknown"];
+  const isCommandStatusMap = (v) =>
+    v === undefined ||
+    (!!v && typeof v === "object" && !Array.isArray(v) &&
+      Object.keys(v).every((k) => UUID_RE.test(k) && COMMAND_STATUSES.indexOf(v[k]) >= 0));
+  /* スレッドは必ず1本以上ある（サーバが「メイン」を必ず作る）。空配列を通すと
+     activeThreadId が undefined のまま送信へ進む。revision は「古いsnapshotで
+     巻き戻さない」判断の土台なので、欠けていたら不正として扱う。 */
+  const isChatSnapshot = (v) =>
+    !!v && isTeamCode(v.teamCode) && Number.isInteger(v.revision) && v.revision >= 0 &&
+    Array.isArray(v.threads) && v.threads.length > 0 && v.threads.every(isChatThread) &&
+    isCommandStatusMap(v.commands);
+  /* サーバは秒未満まで持つISO日時を返す。Date.parse だけだと "3" のような
+     文字列も通るので、書式と解釈の両方を見る。 */
+  const isIsoDateTime = (v) =>
+    typeof v === "string" &&
+    /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(\.\d+)?(Z|[+-]\d{2}:\d{2})$/.test(v) &&
+    Number.isFinite(Date.parse(v));
+  const PENALTY_STATES = ["none", "in-progress", "done"];
+  /* 罰の進行は3値。知らない値を採ると、復帰時に罰を出すか出さないかの判断が狂う。 */
+  const isPenaltyState = (v) => v === undefined || PENALTY_STATES.indexOf(v) >= 0;
+  const isCheckpointData = (d) =>
+    !!d && typeof d === "object" && isPenaltyState(d.s3Penalty) && isPenaltyState(d.s4Penalty);
+  const isCheckpointBody = (b) =>
+    !!b &&
+    // view は go() が扱える画面idだけ。知らない画面を渡すと go() が STEPS[0] へ
+    // 落ちて、復帰したはずのチームが入室画面に戻る。
+    STEPS.some((step) => step.id === b.view) &&
+    Number.isInteger(b.pos) && b.pos >= 0 && b.pos <= STOP_COUNT - 1 &&
+    Number.isInteger(b.elapsedMs) && b.elapsedMs >= 0 && !!b.trap &&
+    typeof b.trap.s3Used === "boolean" && typeof b.trap.s4Used === "boolean" &&
+    isCheckpointData(b.data) &&
+    Number.isInteger(b.dataRevision) && b.dataRevision >= 0;
+  const isCheckpointSnapshot = (v) =>
+    !!v && isTeamCode(v.teamCode) && Number.isInteger(v.revision) &&
+    isIsoDateTime(v.savedAt) && isCheckpointBody(v.body);
+  /* GET応答。checkpoint キーが「有って null」か「有って揃っている」かだけを通す
+     ——キーごと無い応答（200 の {} など）を「初回入室」と読むと、進行が残って
+     いるチームを welcome へ戻してしまう。serverNow は経過時間の基準なので必須。 */
+  const isCheckpointState = (b) =>
+    !!b && Object.prototype.hasOwnProperty.call(b, "checkpoint") &&
+    (b.checkpoint === null || isCheckpointSnapshot(b.checkpoint)) &&
+    isIsoDateTime(b.serverNow);
+  /* 保存応答（POST 200）。形が違えば「確認済み」にしない＝dirty を維持する。 */
+  const isSaveCheckpointResult = (b) => !!b && isCheckpointSnapshot(b.snapshot);
+  const isAssistantReply = (b) =>
+    !!b && !!b.assistant && typeof b.assistant.text === "string" && isChatSnapshot(b.snapshot);
+
   async function liveFetch(path, options, timeoutMs) {
     const ctrl = new AbortController();
     const timer = setTimeout(() => ctrl.abort(), timeoutMs || LIVE_TIMEOUT_MS);
@@ -3310,9 +3616,11 @@
       const res = await fetch(LIVE_API_BASE + path, Object.assign({ signal: ctrl.signal }, options));
       let body = null;
       try { body = await res.json(); } catch {}
-      return { ok: res.ok, status: res.status, body };
+      // 429 のときだけ意味を持つ待ち秒数。headers を丸ごと露出させず、必要な1つだけ
+      // 数値へ落として返す（読めなければ null＝「何秒待てとは言えない」）。
+      return { ok: res.ok, status: res.status, body, retryAfter: retryAfterSeconds(res) };
     } catch {
-      return { ok: false, status: 0, body: null };
+      return { ok: false, status: 0, body: null, retryAfter: null };
     } finally {
       clearTimeout(timer);
     }
@@ -3335,6 +3643,323 @@
         kind: kind,
         clientAt: new Date().toISOString(),
       }),
+    });
+  }
+
+  /* ------------------------------------------------------------------ */
+  /* チェックポイント（LIVE時のみ）                                       */
+  /*                                                                    */
+  /* リロード・タブ落ちからの復帰を、ファシリテーターの手動ジャンプ        */
+  /* （docs/testplay/2026-08-23_進行台本.md §5-1）ではなく「再入室するだけ」 */
+  /* で済ませるための保存。reportProgress と同じ fire-and-forget の流儀で、 */
+  /* 失敗しても握りつぶして進行は止めない——保存できないことより、保存の    */
+  /* 失敗でゲームが止まることのほうが本番では痛い。                       */
+  /* ------------------------------------------------------------------ */
+  const CHECKPOINT_DEBOUNCE_MS = 500;
+  let checkpointTimer = null;
+  /* 罰ゲームの進行。"none"（未発動）→"in-progress"（実施中）→"done"（払い終えた）。
+     チェックポイントの data へそのまま載せ、復帰時に in-progress なら罰をやり直す。 */
+  let s3PenaltyState = "none";
+  let s4PenaltyState = "none";
+  /* 「最後に要求した状態が、まだサーバで確認できていない」印。デバウンス待ちだけを
+     見ていると、キューへ積んだ直後や送信中（fetchが返る前）のリロードで取りこぼす
+     ——タイマーはもう null なので離脱時のflushが何もしない。要求で立て、200応答で
+     revisionを採用した時点でだけ下ろす。 */
+  let checkpointDirty = false;
+  /* 保存要求の通し番号。送信中に新しい要求が入っていたら、古い応答が返ってきても
+     dirtyを下ろさない（新しい状態が未送信のまま「確認済み」になるのを防ぐ）。 */
+  let checkpointSeq = 0;
+
+  /* 現在の状態をそのまま body へ写す。ステージ固有の状態（グリッドの中身・
+     生成済みポスター等）は持たない——復元は「そのステージの先頭から」。
+
+     data に入れるのは罰ゲームの進行だけ（"none" | "in-progress" | "done"）。
+     罠は1回で発動済みになるのに罰のUIはリロードで消えるので、これが無いと
+     「罠を踏んだ直後にリロードすれば罰だけ踏み倒せる」——罰は時間で払う設計
+     （企画書§6）なので、払わずに済む抜け道は塞ぐ。
+     data は平坦なオブジェクトで、個人情報は一切入れない（サーバはdata内のPIIを
+     422で拒否する）。 */
+  function checkpointData() {
+    return { s3Penalty: s3PenaltyState, s4Penalty: s4PenaltyState };
+  }
+
+  function checkpointBody() {
+    const data = checkpointData();
+    return {
+      view: view,
+      pos: TEAMS[2].pos,
+      elapsedMs: elapsed * 1000,
+      trap: { s3Used: s3TrapUsed, s4Used: s4TrapUsed },
+      data: data,
+      dataRevision: dataRevisionFor(data),
+    };
+  }
+
+  /* data（罰の進行）の世代番号。pos と elapsedMs は数値そのものが単調なので
+     後退を弾けるが、data は中身を見ても新旧が決まらない——同じ停留所にいる
+     古いタブの flush が「まだ罰は始まっていない」を書き戻せてしまう。
+     そこで世代番号を添え、サーバは pos → dataRevision の順で新しい側を採る。
+
+     📌 番号を上げるのは「ローカルの data が変わった保存」だけ。ステージ遷移や
+     停留所の前進のように data が同じままの保存でも番号を上げてしまうと、
+     古いタブが「サーバの世代＋1」を名乗って自分の古い data を新しいものとして
+     押し通せる——世代番号が意味を持つのは「その data を作ったのは誰か」であって、
+     「誰が最後に喋ったか」ではない。data が変わっていない保存は、観測済みの
+     番号をそのまま送る（サーバは同値を許す）。 */
+  function dataRevisionFor(data) {
+    if (!liveState) return 1;
+    const observed = Math.max(liveState.serverDataRevision || 0, liveState.sentDataRevision || 0);
+    const json = JSON.stringify(data);
+    if (json === liveState.sentDataJson) return observed;
+    liveState.sentDataRevision = observed + 1;
+    liveState.sentDataJson = json;
+    return liveState.sentDataRevision;
+  }
+
+  /* サーバの data を取り込んだ直後に呼ぶ。いま持っている data は「サーバが
+     持っていたもの」そのものなので、次の保存で新しい世代を名乗らせない。 */
+  function syncSentData() {
+    if (!liveState) return;
+    liveState.sentDataJson = JSON.stringify(checkpointData());
+  }
+
+  /* サーバのsnapshotから dataRevision を取り込む。後退させない。 */
+  function adoptDataRevision(snapshot) {
+    if (!liveState || !snapshot || !snapshot.body) return;
+    const seen = Number(snapshot.body.dataRevision);
+    if (!Number.isFinite(seen)) return;
+    liveState.serverDataRevision = Math.max(liveState.serverDataRevision || 0, seen);
+  }
+
+  /* 経過時計の表示だけを書き直す（setInterval の次のティックを待たない）。 */
+  function paintClock() {
+    $("clock").textContent =
+      String(Math.floor(elapsed / 60)).padStart(2, "0") + ":" + String(elapsed % 60).padStart(2, "0");
+  }
+
+  /* 保存を拒否された（409）ときに、サーバの方が進んでいる値をこちらへ取り込む。
+     罠の発動・経過時間・停留所はどれも後退させてはいけない値なので、大きい方を
+     採る。view（今どの画面か）は取り込まない——復帰ではなく進行中の拒否なので、
+     参加者が見ている画面を勝手に動かさない。
+
+     経過時間をサーバ側優先にするのは、devbar のジャンプや別タブで時計を0から
+     始め直してもレースの経過時間は巻き戻らない、という扱いにするため
+     （罰＝時間で払う設計で、時計のリセットが抜け道になるのを塞ぐ）。 */
+  function adoptServerState(server) {
+    if (!server) return false;
+    if (server.trap && server.trap.s3Used) s3TrapUsed = true;
+    if (server.trap && server.trap.s4Used) s4TrapUsed = true;
+    if (typeof server.elapsedMs === "number" && server.elapsedMs > elapsed * 1000) {
+      elapsed = Math.round(server.elapsedMs / 1000);
+      paintClock();
+    }
+    if (typeof server.pos === "number" && server.pos > TEAMS[2].pos) {
+      TEAMS[2].pos = server.pos;
+      drawMarks();
+    }
+    // data だけは「大きい方を採る」が使えない——中身（none/in-progress/done）を
+    // 見ても新旧が決まらないので、世代番号で決める。サーバの方が新しいときだけ
+    // 採り、同じか古ければローカルを残す。
+    //
+    // 無条件に採ると両方向へ壊れる。こちらが done（rev 6）でサーバが
+    // in-progress（rev 5）なら、払い終えた罰が未実施へ戻されたうえ、
+    // syncSentData() がそれを「サーバ由来」と記録して rev 6 のまま送り返す
+    // ——サーバの古い内容を自分の世代で上書きしてしまう。逆にこちらが古い
+    // in-progress でサーバが新しい none のときに採らなければ、罰を踏み倒せる。
+    // 採用したかどうかを返し、呼び出し側は採用したときだけ syncSentData() を通す。
+    const serverDataRevision = Number(server.dataRevision) || 0;
+    const sentDataRevision = liveState ? liveState.sentDataRevision || 0 : 0;
+    if (!server.data || serverDataRevision <= sentDataRevision) return false;
+    if (server.data.s3Penalty) s3PenaltyState = server.data.s3Penalty;
+    if (server.data.s4Penalty) s4PenaltyState = server.data.s4Penalty;
+    return true;
+  }
+
+  /* サーバへ1本ずつ送る。POSTを並行させると、先に投げた古いbodyが後から
+     新しいrevisionで通ってしまい、進んだ状態を巻き戻すことがある
+     （expectedRevisionのCASは「revisionが合っているか」しか見ないので、
+     中身の新しさは守ってくれない）。保存はこのチェーンで直列化し、
+     body は必ず「送る直前の最新状態」から組み直す。 */
+  let checkpointChain = Promise.resolve();
+
+  async function postCheckpoint(retried) {
+    if (!LIVE || !liveState || !liveState.teamCode) return;
+    const teamCode = liveState.teamCode;
+    const sentRevision = liveState.checkpointRevision;
+    // 送る直前に組む。キュー待ちの間に進んだ状態があれば、それごと送る。
+    const body = checkpointBody();
+    const sentSeq = checkpointSeq;   // これ以降に来た要求は、この応答では確認済みにしない
+    const res = await liveFetch("/api/teams/" + teamCode + "/checkpoint", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        type: "save-checkpoint",
+        commandId: crypto.randomUUID(),
+        expectedRevision: sentRevision,
+        body: body,
+      }),
+    }, LIVE_RESTORE_TIMEOUT_MS);
+    if (!liveState || liveState.teamCode !== teamCode) return;   // 待っている間に入り直していたら捨てる
+    // 形が違う200は「保存できた」と見なさない——dirty を維持したまま抜け、
+    // 離脱時の flush と次の保存にやり直させる。
+    if (res.ok && isSaveCheckpointResult(res.body)) {
+      // 自分の保存が通った証拠は「送ったrevision+1が返ること」。それ以外
+      // （冪等台帳による過去commandの再生など）は自分の一手ではないので
+      // 採用しない——ずれたままなら次の保存が409 conflictで取り直す。
+      adoptDataRevision(res.body.snapshot);
+      if (res.body.snapshot.revision === sentRevision + 1) {
+        liveState.checkpointRevision = res.body.snapshot.revision;
+        // ここだけが「サーバで確認できた」と言える地点。送った後に新しい要求が
+        // 入っていた場合（seqが進んでいる）は、その分がまだ未送信なので下ろさない。
+        if (checkpointSeq === sentSeq) checkpointDirty = false;
+      }
+      return;
+    }
+    // 409 以外（通信断・503・404）はそのまま諦める。次の保存でまた送られる。
+    if (res.status !== 409) return;
+
+    // 409 の理由は5種類（conflict／trap-regression／elapsed-regression／
+    // pos-regression／data-regression）。サーバが機械可読な code で返すので分岐する
+    // ——日本語のmessageを文字列一致で読むと、文言を直したとたんに壊れる。
+    const code = (res.body && typeof res.body.code === "string") ? res.body.code : null;
+    const latest = await liveFetch("/api/teams/" + teamCode + "/checkpoint", { method: "GET" }, LIVE_RESTORE_TIMEOUT_MS);
+    if (!liveState || liveState.teamCode !== teamCode) return;
+    if (!latest.ok || !isCheckpointState(latest.body)) return;
+    const snapshot = latest.body.checkpoint;
+    const serverRevision = snapshot ? snapshot.revision : 0;
+    liveState.checkpointRevision = serverRevision;
+    liveState.checkpointTrap = snapshot ? snapshot.body.trap : null;
+    adoptDataRevision(snapshot);
+    // code を持たない応答（codeを載せる前のサーバ）へのフォールバック。送った
+    // expectedRevision とサーバの revision がずれていれば conflict、一致して
+    // いれば「revisionは合っていたのに中身が後退していた」＝ regression、と
+    // 構造だけで見分けられる。
+    // 拒否の理由に関わらず、取り直したサーバの状態をまず自分へ取り込む。
+    // conflict でも同じ——別タブが進めた罰の状態などを持たないまま body を
+    // 組み直すと、「サーバの世代を観測しただけの古い data」を新しい世代として
+    // 押し戻すことになる。data を実際に取り込んだときだけ syncSentData() で
+    // 「この data はサーバ由来」と記録する——取り込まなかった（こちらの方が
+    // 新しい）のに記録すると、自分の data をサーバ由来と誤って扱う。
+    if (adoptServerState(snapshot ? snapshot.body : null)) syncSentData();
+
+    const conflicted = code === null ? serverRevision !== sentRevision : code === "conflict";
+    if (conflicted) {
+      // 同じPCで複数タブが開かれた等でrevisionがずれただけ。revisionを合わせて
+      // 「もう一度だけ」送る（無限再送はしない）。送り直すのは同じbodyではなく、
+      // その時点の最新状態から組み直したbody——古いbodyの再送は、まさに
+      // 巻き戻しを起こす経路そのもの。
+      if (!retried) await postCheckpoint(true);
+      return;
+    }
+    // trap-regression／elapsed-regression／pos-regression／data-regression。
+    // いずれもサーバ値を採用済みで、再送はしない——次の保存（ステージ遷移・
+    // 停留所の前進）が、取り込んだ値を含む新しい body で自然に送られる。
+  }
+
+  /* キューへ積む。失敗はここで握りつぶし、チェーンが切れないようにする
+     ——1回の失敗で以後の保存が全部止まるのがいちばん怖い。 */
+  function enqueueCheckpoint() {
+    checkpointChain = checkpointChain.then(() => postCheckpoint(false)).catch(() => undefined);
+  }
+
+  /* 離脱の直前に、まだサーバで確認できていない状態を投げ切る。通常の fetch は
+     ページが消えた時点で中断されるので keepalive を付ける（本文は数百バイトで、
+     keepalive の 64KB 制限に遠く届かない）。
+
+     見るのはタイマーの有無ではなく dirty——罠の発動は即時にキューへ積むので
+     タイマーは既に null で、それでもチェーン待ちや送信中（fetchが返る前）で
+     ありうる。そこでリロードされると、サーバには罠を踏む前の状態が残り、
+     復帰したチームが同じ罠をもう一度踏めてしまう。
+
+     キューは通さない——チェーンの手前に何か詰まっていると離脱までに送れない。
+
+     `flush: true` を付ける。送信中の通常POSTとこれは同じ expectedRevision を握って
+     いるので、素のまま投げると片方が 409 conflict になる——離脱側が負けると、
+     まさに残したかった罠フラグが落ちる。flush を立てた保存だけは、サーバが
+     revision の一致を要求せず、trap は OR・pos と elapsedMs は max・view と data は
+     「pos が大きい側 → 同じ pos なら dataRevision が大きい側 → それも同じなら受信側」で
+     単調にマージして 200 を返す（どちらが先に着いても後退しない）。
+     通常経路には付けない——CAS を外すのは離脱時の1発だけに限る。 */
+  function flushCheckpoint() {
+    if (!checkpointDirty) return;
+    if (checkpointTimer !== null) clearTimeout(checkpointTimer);
+    checkpointTimer = null;
+    if (!LIVE || !liveState || !liveState.teamCode) return;
+    try {
+      fetch(LIVE_API_BASE + "/api/teams/" + liveState.teamCode + "/checkpoint", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          type: "save-checkpoint",
+          commandId: crypto.randomUUID(),
+          expectedRevision: liveState.checkpointRevision,
+          body: checkpointBody(),
+          flush: true,
+        }),
+        keepalive: true,
+      }).catch(() => {});
+    } catch {}
+  }
+
+  // リロード・タブ閉じ・バックグラウンド化。pagehide だけでは、モバイル等で
+  // タブが凍結されるときに来ないことがあるので visibilitychange も見る
+  // （どちらも「保留があれば投げる」だけなので、二重に来ても害はない）。
+  window.addEventListener("pagehide", flushCheckpoint);
+  document.addEventListener("visibilitychange", () => {
+    if (document.visibilityState === "hidden") flushCheckpoint();
+  });
+
+  /* 保存の入口。連続で呼ばれても最後の状態だけを送る（ステージ遷移では
+     go() の末尾と pos 更新がほぼ同時に走るため）。reason は呼び出し元の
+     識別で、デバッグ時に liveState を覗けば最後の理由が分かる。
+
+     immediate=true はデバウンスを挟まず即座にキューへ積む。罠の発動だけは
+     これを使う——踏んだ0.5秒以内にリロードされると罠がもう一度発動でき、
+     企画書§6「連続罰は1回まで」の抜け道になる。即時にしても送信中の中断は
+     残るので、離脱時の取りこぼしは dirty（flushCheckpoint）が受け持つ。 */
+  function saveCheckpoint(reason, immediate) {
+    if (!LIVE || !liveState || !liveState.teamCode) return;
+    if (view === "entry") return;   // 入室前の状態は復帰の役に立たない
+    liveState.lastCheckpointReason = reason;
+    checkpointDirty = true;
+    checkpointSeq++;
+    if (checkpointTimer !== null) clearTimeout(checkpointTimer);
+    if (immediate) {
+      checkpointTimer = null;
+      enqueueCheckpoint();
+      return;
+    }
+    // later() は使わない——go() の clearLater() に回収されると、ステージ遷移の
+    // たびに保存そのものが消える。
+    checkpointTimer = setTimeout(() => {
+      checkpointTimer = null;
+      enqueueCheckpoint();
+    }, CHECKPOINT_DEBOUNCE_MS);
+  }
+
+  /* ------------------------------------------------------------------ */
+  /* 活動ログ（LIVE時のみ）                                              */
+  /*                                                                    */
+  /* 提出・判定・罠をサーバへ積む。reportProgress と同じ fire-and-forget  */
+  /* ——await せず結果も見ない。振り返り用の記録であって、ゲームの進行に    */
+  /* 一切影響させない。                                                  */
+  /* ------------------------------------------------------------------ */
+  const ACTIVITY_TEXT_MAX = 20000;
+
+  function logActivity(kind, text, meta) {
+    if (!LIVE || !liveState || !liveState.teamCode) return;
+    const payload = {
+      commandId: crypto.randomUUID(),
+      kind: kind,
+      view: view,
+      clientAt: new Date().toISOString(),
+    };
+    if (typeof text === "string") payload.text = text.slice(0, ACTIVITY_TEXT_MAX);
+    if (meta) payload.meta = meta;
+    liveFetch("/api/teams/" + liveState.teamCode + "/activity", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(payload),
     });
   }
 
@@ -3363,6 +3988,8 @@
     add.textContent = "＋";
     add.addEventListener("click", createLiveThread);
     box.appendChild(add);
+    // タブは作り直されるので、＋の disabled もここで付け直す。
+    updateAiInputLock();
   }
 
   /* #ai-log を liveState のスレッド履歴から再描画する。role: user→「あなた」/mine、
@@ -3412,9 +4039,86 @@
   // 作成中のタイトル。同じステージへ連続で入場しても二重に作らせない。
   const stageThreadCreating = new Set();
 
+  let aiSending = false;
+  /* スレッド作成の飛行中カウント。ステージ入場の自動スレッド（activateStageThread）と
+     ＋ボタン（createLiveThread）が同時に走りうるので、真偽値ではなく数で持つ
+     ——片方の完了でもう片方の分までロックを外さないため。 */
+  let aiThreadPending = 0;
+
+  /* 入力欄と送信ボタンのロックを1箇所で決める。送信中（aiSending）に加えて
+     スレッド作成中も塞ぐ——作成が返る前に送ると、activeThreadId がまだ前ステージの
+     ままなので、新ステージの発言が前ステージのスレッドへ保存されてしまう
+     （Stage 2 のタスク別文脈分離＝AGENTS.md「壊してはいけない設計判断」が崩れる）。 */
+  function updateAiInputLock() {
+    const send = $("ai-send");
+    const input = $("ai-input");
+    const locked = aiSending || aiThreadPending > 0;
+    if (send) send.disabled = locked;
+    if (input) {
+      input.disabled = locked;
+      // 送信中は従来どおり文言を足さない（吹き出しで「入力中…」が出ている）。
+      input.placeholder = !aiSending && aiThreadPending > 0 ? "スレッドを準備しています…" : "";
+    }
+    // ＋ボタンも作成中は塞ぐ。連打すると同じ名前のスレッドが何本も生まれ、
+    // さらに応答の到着順が入れ替わると古いsnapshotで手元のタブが巻き戻る。
+    const add = document.querySelector("#ai-tabs .tab.add");
+    if (add) add.disabled = aiThreadPending > 0;
+  }
+
+  /* サーバのチャットsnapshotを取り込む。今持っている revision より古い応答は捨てる
+     ——create-thread と send-message は別々に飛ぶので、遅れて届いた古い snapshot を
+     そのまま代入すると、新しく作ったスレッドや直前の発言が画面から消える。
+     採用したときだけ true を返す（呼び出し側の再描画の判断に使う）。 */
+  function applyChatSnapshot(snapshot) {
+    // 形が違う応答は捨てる。空の threads を入れると、以後どのスレッドも選べない。
+    if (!liveState || !isChatSnapshot(snapshot)) return false;
+    const revision = Number(snapshot.revision);
+    const known = liveState.chatRevision || 0;
+    // revision を持たない応答（古いサーバ）は比較できないので素通しする。
+    if (Number.isFinite(revision) && revision < known) return false;
+    if (Number.isFinite(revision)) liveState.chatRevision = revision;
+    liveState.threads = snapshot.threads;
+    return true;
+  }
+
+  /* スレッド作成の再送用ID。宛先は (title, kind) で決まる——makePendingCommand の
+     キーは3つの引数を繋いだものなので、3つ目は空で埋める。 */
+  const threadCreateCommand = makePendingCommand();
+
+  /* 作成要求の後始末。返り値は「liveState.threads を最新にできたか」。
+
+     成否が分からない失敗（通信断・タイムアウト＝status 0、5xx）だけは、IDを
+     捨てずに GET /chat で確かめる——サーバ側では作られているのに応答だけ
+     落ちた、が普通に起こる。そのまま次回 crypto.randomUUID() で振り直すと
+     同じ名前のスレッドが2本並ぶ。既にあればそれを採用してIDを捨て、無ければ
+     IDを持ったまま次の機会に同じ commandId で送り直す（サーバは同 commandId・
+     同内容なら200で同じ結果を返す）。
+
+     4xx（上限など）は確定した拒否なのでIDを捨てる。 */
+  async function settleThreadCreate(res, title, kind) {
+    if (res.ok && res.body) {
+      threadCreateCommand.clear(title, kind, "");
+      // 古い応答・形の違う応答なら捨てる（applyChatSnapshot が両方を見る）。
+      return applyChatSnapshot(res.body.snapshot);
+    }
+    const unknown = res.status === 0 || res.status >= 500;
+    if (!unknown) {
+      threadCreateCommand.clear(title, kind, "");
+      return false;
+    }
+    const teamCode = liveState ? liveState.teamCode : null;
+    await restoreChatFromServer();
+    if (!liveState || liveState.teamCode !== teamCode) return false;
+    if (!liveState.threads.some((t) => t.title === title)) return false;   // まだ無い。IDは持ち越す
+    threadCreateCommand.clear(title, kind, "");
+    return true;
+  }
+
   async function activateStageThread(id) {
     const title = STAGE_THREAD_TITLES[id];
-    if (!title || !liveState) return;      // scripted時はgo()のAI_GREETING_HTMLリセットだけで足りる
+    // scripted時はgo()のAI_GREETING_HTMLリセットだけで足りる。LIVE も見る——
+    // 台本モードを選んだ直後は liveState を落とすが、片方だけの判定を残さない。
+    if (!title || !LIVE || !liveState) return;
     const existing = liveState.threads.find((t) => t.title === title);
     if (existing) {
       liveState.activeThreadId = existing.threadId;
@@ -3424,17 +4128,30 @@
     }
     if (stageThreadCreating.has(title)) return;
     stageThreadCreating.add(title);
+    // 作成が返るまで送信を塞ぐ。ここを開けたままにすると、新ステージで打った
+    // 発言が前ステージのスレッドへ入る（updateAiInputLock のコメント参照）。
+    aiThreadPending++;
+    updateAiInputLock();
     const teamCode = liveState.teamCode;
     const res = await liveFetch("/api/teams/" + teamCode + "/chat/threads", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ type: "create-thread", commandId: crypto.randomUUID(), title }),
+      // kind:"stage" はステージ入場で自動に作られる枠。サーバは stage(8件)と
+      // manual(25件)を独立に数えるので、参加者が＋で足したスレッドの数に関係なく、
+      // ステージぶんは必ず作れる。
+      body: JSON.stringify({
+        type: "create-thread",
+        commandId: threadCreateCommand.idFor(title, "stage", ""),
+        title,
+        kind: "stage",
+      }),
     });
     stageThreadCreating.delete(title);
-    // 失敗しても進行は止めない。現行スレッドのまま従来どおり会話できる。
-    if (!res.ok || !res.body) return;
+    aiThreadPending--;
+    updateAiInputLock();   // 成功・失敗のどちらでも必ず解除する
     if (!liveState || liveState.teamCode !== teamCode) return;
-    liveState.threads = res.body.snapshot.threads;
+    // 失敗しても進行は止めない。現行スレッドのまま従来どおり会話できる。
+    if (!(await settleThreadCreate(res, title, "stage"))) return;
     const created = liveState.threads.find((t) => t.title === title);
     // 待っている間に別ステージへ移っていたら、そちらの切り替えを上書きしない。
     if (!created || view !== id) return;
@@ -3446,19 +4163,39 @@
   async function createLiveThread() {
     if (!liveState) return;
     const title = "スレッド" + (liveState.threads.length + 1);
+    // ＋ボタンにも同じ穴がある——作成前に送ると、切り替わる前のスレッドへ入る。
+    aiThreadPending++;
+    updateAiInputLock();
     const res = await liveFetch("/api/teams/" + liveState.teamCode + "/chat/threads", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ type: "create-thread", commandId: crypto.randomUUID(), title }),
+      // kind:"manual" は参加者が＋で足す枠（上限25件）。省略時もmanual扱いだが、
+      // stage側と対で読めるよう明示する。
+      body: JSON.stringify({
+        type: "create-thread",
+        commandId: threadCreateCommand.idFor(title, "manual", ""),
+        title,
+        kind: "manual",
+      }),
     });
-    if (!res.ok || !res.body) return;   // スレッド追加は進行を止めない操作なので、失敗しても静かに諦める
-    liveState.threads = res.body.snapshot.threads;
-    liveState.activeThreadId = liveState.threads[liveState.threads.length - 1].threadId;
+    aiThreadPending--;
+    updateAiInputLock();   // 成功・失敗のどちらでも必ず解除する
+    if (res.status === 409) {
+      // 上限に当たった。黙って何も起きないと「＋が壊れている」ように見えるので、
+      // 理由だけは告げる（進行は止めない——今のスレッドでそのまま会話できる）。
+      aiBubble("システム", esc((res.body && res.body.message) || "スレッドは 25 件までです。"));
+      return;
+    }
+    if (!liveState) return;
+    if (!(await settleThreadCreate(res, title, "manual"))) return;
+    const created = liveState.threads.find((t) => t.title === title);
+    liveState.activeThreadId = created
+      ? created.threadId
+      : liveState.threads[liveState.threads.length - 1].threadId;
     renderAiTabs();
     renderAiLogFromThread(liveState.activeThreadId);
   }
 
-  let aiSending = false;
   function aiPlaceholderBubble() {
     const log = $("ai-log");
     const empty = log.querySelector(".empty");
@@ -3478,6 +4215,14 @@
     if (view === "s4") {
       if (!s4TrapUsed) {
         s4TrapUsed = true;
+        // 本文は残さない（PIIの罠なので、送ろうとした個人情報をログへ写さない）。
+        logActivity("trap.s4", undefined, { gate: "server" });
+        // 罰の開始も同じ保存に含める。罠の確定から startPenalty() までは
+        // 暗転と叱責で数秒あり、その間にリロードされると「罠は発動済み・罰は未実施」
+        // という、罰が二度と始まらない状態がサーバに残る（＝罰の踏み倒し）。
+        // 演出は復帰時にやり直さないが、罰そのものは resumePenalty() が始める。
+        s4PenaltyState = "in-progress";
+        saveCheckpoint("trap-s4", true);   // デバウンスしない（踏んだ直後のリロードで罠が復活しないように）
         triggerLeak();
       } else {
         aiBubble("システム", "個人情報を検知したため、送信をブロックしました。");
@@ -3504,6 +4249,11 @@
       aiBubble("システム", "同じ内容を処理中です。少し待って再送してください。");
       return;
     }
+    if (res.status === 429) {
+      // レート制限。自動では送り直さない（待ち時間を告げて参加者に委ねる）。
+      aiBubble("システム", esc(rateLimitMessage(res.retryAfter)));
+      return;
+    }
     // 503・ネットワーク断・タイムアウト（20秒）はここへ集約する。
     aiBubble("システム", "AIの応答を取得できませんでした。再試行してください。");
   }
@@ -3514,23 +4264,163 @@
      同じ commandId を再利用しなければならない——送信のたびに crypto.randomUUID()
      で振り直していたため、20秒タイムアウト後の再送が別コマンドとして通り、
      ユーザーメッセージの二重保存とOpenAIの二重呼び出しを起こしていた
-     （2026-08-22 修正）。キーは送信テキスト——同じ文面を送り直したときだけIDを
-     再利用し、別の文面を送ったら新しい試行として扱う。
-     送信経路ごとに1枠ずつ持つ（AIチャットの sendAiLive と Stage 1 の s1DraftLive）
+     （2026-08-22 修正）。
+
+     キーは threadId・promptProfile・本文の3つを繋いだもの。本文だけを見ていた頃は、
+     別スレッド（Stage 2 のタブと Stage 3 のタブ）や別ステージ（promptProfile が
+     "default" と "s3"）へ同じ文面を送ると同じ commandId が再利用され、2通目が
+     「処理済みの再送」と見なされて片方が消えていた。同じ宛先へ同じ文面を送り直した
+     ときだけIDを再利用する、が正しい単位。
+
+     送信経路ごとに1つずつ持つ（AIチャットの sendAiLive と Stage 1 の s1DraftLive）
      ——どちらも同じメインスレッドへ書き込むが、進行中の試行は経路ごとに独立で、
-     片方の成功でもう片方のIDを捨ててはいけない。 */
-  function makePendingCommand() {
-    let pending = null;
+     片方の成功でもう片方のIDを捨ててはいけない。
+
+     未確定の試行は1件ではなくMapで持つ。1枠だけだと、スレッドAで失敗したあと
+     スレッドBへ送った時点でAのIDが上書きされ、Aの原文を送り直しても別コマンドに
+     なって発言が二重に積まれる。参加者は詰まったスレッドを放って別の話題を
+     始めるので、これは普通に起きる。上限を超えたら古い順に捨てる——20件あれば
+     1ステージ分の試行錯誤には足り、際限なく抱えても意味が無い。 */
+  const PENDING_COMMAND_LIMIT = 20;
+
+  const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+
+  /* 指紋（threadId + " " + promptProfile + " " + 本文）を分解して戻す。
+     threadId と promptProfile に空白は入らないので、先頭2つの空白で切れる。
+     本文にはいくらでも空白が入りうるので、3つ目以降は分けない。 */
+  function parsePendingKey(key) {
+    const first = key.indexOf(" ");
+    const second = key.indexOf(" ", first + 1);
+    if (first < 0 || second < 0) return null;
     return {
-      idFor(text) {
-        if (pending === null || pending.text !== text) pending = { text, commandId: crypto.randomUUID() };
-        return pending.commandId;
-      },
-      clear() { pending = null; }
+      threadId: key.slice(0, first),
+      promptProfile: key.slice(first + 1, second),
+      text: key.slice(second + 1),
     };
   }
 
-  const chatSendCommand = makePendingCommand();
+  /* `slot` を渡すと sessionStorage へ永続化する（渡さなければメモリのみ）。
+     メモリだけだと「AI待ちの最中にリロード」で未確定IDが消え、同じ本文を
+     送り直したときに新しいUUIDになる——サーバでは先の要求が完了しているので、
+     ユーザー発言もOpenAI呼び出しも二重になる。タブを閉じたら消えてよい類の
+     状態なので localStorage ではなく sessionStorage を使う。 */
+  function makePendingCommand(slot) {
+    const pending = new Map();   // 指紋 → commandId（Mapは挿入順を保つ＝先頭が最も古い）
+    let storageKey = null;
+    const keyOf = (threadId, promptProfile, text) => threadId + " " + promptProfile + " " + text;
+
+    const persist = () => {
+      if (storageKey === null) return;
+      try {
+        sessionStorage.setItem(storageKey, JSON.stringify(Array.from(pending.entries())));
+      } catch {}   // 容量超過・プライベートモード。永続化できなくても進行は止めない
+    };
+    const trim = () => {
+      while (pending.size > PENDING_COMMAND_LIMIT) pending.delete(pending.keys().next().value);
+    };
+
+    return {
+      idFor(threadId, promptProfile, text) {
+        const key = keyOf(threadId, promptProfile, text);
+        const known = pending.get(key);
+        if (known !== undefined) return known;
+        pending.set(key, crypto.randomUUID());
+        trim();
+        persist();
+        return pending.get(key);
+      },
+      /* 解決した試行を捨てる。引数なしは全消し（入り直しなど）。 */
+      clear(threadId, promptProfile, text) {
+        if (threadId === undefined) pending.clear();
+        else pending.delete(keyOf(threadId, promptProfile, text));
+        persist();
+      },
+      forget(key) { pending.delete(key); persist(); },
+      keys() { return Array.from(pending.keys()); },
+      idFrom(key) { return pending.get(key); },
+
+      /* 入室時に、そのチームぶんの未確定IDを読み戻す。壊れていれば丸ごと捨てる
+         ——半端に拾うより、次の送信で新しいIDを振る方が害が小さい。 */
+      load(teamCode) {
+        if (!slot) return;
+        storageKey = "hellPending:" + teamCode + ":" + slot;
+        pending.clear();
+        let raw = null;
+        try { raw = sessionStorage.getItem(storageKey); } catch { return; }
+        if (!raw) return;
+        let parsed = null;
+        try { parsed = JSON.parse(raw); } catch { parsed = null; }
+        const valid = Array.isArray(parsed) && parsed.every((pair) =>
+          Array.isArray(pair) && pair.length === 2 &&
+          typeof pair[0] === "string" && pair[0].length > 0 &&
+          typeof pair[1] === "string" && UUID_RE.test(pair[1]));
+        if (!valid) {
+          try { sessionStorage.removeItem(storageKey); } catch {}
+          return;
+        }
+        parsed.forEach((pair) => pending.set(pair[0], pair[1]));
+        trim();
+        persist();
+      }
+    };
+  }
+
+  /* 再入室したときの突き合わせ。未確定として持っているIDのうち、サーバが
+     「処理済み」と答えたものだけを捨てる。
+
+     判定はサーバへの commandId 単位の照会（GET /chat?commandIds=…）に任せる。
+     履歴の本文や並び順では原理的に区別できない——同じ文面を打ち直したときは
+     どの組が今の未確定分か分からず、サーバはチャットを直列化しないので
+     「A がタイムアウト → B を送信 → A が遅れて完了」で並びも件数も当てにならない。
+     取り違えた側の損は、処理中のIDを捨てて発言とOpenAI呼び出しが二重になることと、
+     完了したIDを持ち続けて同じ文面の2通目が冪等の再送として黙って捨てられること。
+
+     "pending"（処理中）と "unknown"（サーバが知らない）は保持する。同じIDで
+     送り直せば、サーバは pending を再開するか新規として処理するかを冪等に決める。
+     commands が付いていない応答（照会しなかった・古いサーバ）では何も捨てない。 */
+  function reconcilePendingCommands(store, snapshot) {
+    if (!isChatSnapshot(snapshot) || !snapshot.commands) return;
+    store.keys().forEach((key) => {
+      // 指紋として読めないキーは、送信時のキー生成では作れない形（壊れた
+      // sessionStorage 由来）。同じIDが再利用されることはないので捨てる。
+      if (!parsePendingKey(key)) { store.forget(key); return; }
+      const id = store.idFrom(key);
+      if (id !== undefined && snapshot.commands[id] === "processed") store.forget(key);
+    });
+  }
+
+  /* 再入室時にサーバへ状態を尋ねる commandId を集める。サーバは1回あたり
+     PENDING_COMMAND_QUERY_LIMIT 件までしか受けないので、超えたら古い方から落とす
+     ——落とした分は「捨てない」側に倒れるだけで、二重送信は起きない。 */
+  const PENDING_COMMAND_QUERY_LIMIT = 20;
+  function pendingCommandIdsFor(stores) {
+    const ids = [];
+    stores.forEach((store) => {
+      store.keys().forEach((key) => {
+        const id = store.idFrom(key);
+        if (typeof id === "string" && ids.indexOf(id) < 0) ids.push(id);
+      });
+    });
+    return ids.slice(-PENDING_COMMAND_QUERY_LIMIT);
+  }
+
+  const chatSendCommand = makePendingCommand("chat");
+
+  /* サーバに何も保存されないまま確定した拒否か。ここが false のときは、
+     ユーザー発言だけが保存済み（AIは未応答）なので、commandId を捨ててはいけない
+     ——捨てると同じ本文の再送が別コマンドになり、発言が二重に積まれる。
+
+     422 の内訳はサーバの code で分かる：
+       pii_blocked … 送信前ゲートで止めた。何も保存されていない
+       history_pii … 履歴にPIIを見つけて中断。ユーザー発言は保存済み
+       ai_refusal  … AIが回答を拒否。ユーザー発言は保存済み
+     code が読めない422（codeを載せる前のサーバ）は「保存済み」側に倒す
+     ——IDを持ち越しても、未保存なら台帳に無いので普通に処理されるだけで害が無く、
+     取り違えたときの損（二重保存）が片側だけ大きいため。 */
+  function isUnsavedRejection(res) {
+    if (res.status === 400) return true;   // schema違反。DOへ渡る前に落ちている
+    return res.status === 422 && res.body !== null && res.body.code === "pii_blocked";
+  }
 
   /* 送信に失敗した後のスレッド表示を、サーバのスナップショットで復元する。
      プレースホルダを消すだけだと、DO側では適用済みなのに画面から消えた
@@ -3540,8 +4430,7 @@
   async function restoreChatFromServer() {
     if (!liveState) return;
     const res = await liveFetch("/api/teams/" + liveState.teamCode + "/chat", { method: "GET" }, LIVE_RESTORE_TIMEOUT_MS);
-    if (!res.ok || !res.body || !res.body.threads) return;
-    liveState.threads = res.body.threads;
+    if (!res.ok || !applyChatSnapshot(res.body)) return;
     if (!liveState.threads.some((t) => t.threadId === liveState.activeThreadId)) {
       liveState.activeThreadId = liveState.threads[0].threadId;
     }
@@ -3551,37 +4440,46 @@
 
   async function sendAiLive(text) {
     aiSending = true;
-    $("ai-send").disabled = true;
+    updateAiInputLock();
+    // 再送用IDのキーにも入るので、送信本文と同じ一箇所から決める。
+    const chatProfile = view === "s3" ? "s3" : "default";
+    // 応答が返る頃にはタブが切り替わっているかもしれないので、宛先は送信時点で
+    // 固定する（このキーで解決済みのIDを消す）。
+    const sentThreadId = liveState.activeThreadId;
     const placeholder = aiPlaceholderBubble();
     const res = await liveFetch("/api/teams/" + liveState.teamCode + "/chat/messages", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
         type: "send-message",
-        commandId: chatSendCommand.idFor(text),
-        threadId: liveState.activeThreadId,
+        commandId: chatSendCommand.idFor(sentThreadId, chatProfile, text),
+        threadId: sentThreadId,
         text,
-        promptProfile: view === "s3" ? "s3" : "default",
+        promptProfile: chatProfile,
       }),
     });
     aiSending = false;
-    $("ai-send").disabled = false;
+    updateAiInputLock();
 
-    if (res.ok && res.body) {
-      chatSendCommand.clear();   // 確定したのでIDを破棄する（次の送信は新しい試行）
-      liveState.threads = res.body.snapshot.threads;
+    // 200でも assistant.text と snapshot が揃っていなければ成功扱いにしない
+    // ——読みに行って例外になると、吹き出しが「AIが入力中…」のまま残る。
+    if (res.ok && isAssistantReply(res.body)) {
+      chatSendCommand.clear(sentThreadId, chatProfile, text);   // 確定したので破棄
+      applyChatSnapshot(res.body.snapshot);
       placeholder.querySelector(".body").innerHTML = esc(res.body.assistant.text).replace(/\n/g, "<br>");
       renderAiTabs();
       return;
     }
     placeholder.remove();   // プレースホルダは残留させない（差し替え or 削除のどちらか必ず）
-    // 400（長すぎ）・422（PIIゲート/AI拒否）はコマンドが適用されずに確定した拒否
-    // なので、IDを持ち越さず、サーバ状態も動いていないから取り直さない。
-    // 0（タイムアウト・ネットワーク断）・409（処理中）・503（一時障害）は結果が
-    // 未確定——同じIDで再送すればDO側の冪等性に当たる。この場合だけ、DO側で適用
-    // 済みかどうかが画面から判断できないので、スナップショットを取り直して描き直す。
-    if (res.status === 400 || res.status === 422) {
-      chatSendCommand.clear();
+    // 何も保存されずに確定した拒否（400・422 pii_blocked）は、IDを持ち越さず、
+    // サーバ状態も動いていないから取り直さない。
+    // それ以外——422 history_pii/ai_refusal（ユーザー発言は保存済み・AI未応答）、
+    // 0（タイムアウト・断）、409（処理中）、503（一時障害）——はIDを保持する。
+    // 同じ本文を送り直せば同じcommandIdで送られ、DO側の冪等性に当たって二重保存
+    // にならない。画面はサーバの状態と食い違っているので取り直して描き直す
+    // （history_pii/ai_refusal では、保存済みのユーザー発言がここで現れる）。
+    if (isUnsavedRejection(res)) {
+      chatSendCommand.clear(sentThreadId, chatProfile, text);
     } else {
       await restoreChatFromServer();
     }
@@ -3720,7 +4618,9 @@
     const liveTurn = LIVE && liveState !== null &&
       (view === "s3" || view === "s35" || view === "s4");
     if (!liveTurn && view !== "s2" && view !== "s3" && view !== "s4" && view !== "s5" && view !== "s35") return;
-    if (liveTurn && aiSending) return;   // 二重送信ガード（LIVE時のみ。送信中はai-sendもdisabledにする）
+    // 二重送信ガードと、スレッド作成の完了待ち（LIVE時のみ。どちらの間も
+    // ai-send/ai-input を disabled にしてあるので、通常は押せない）。
+    if (liveTurn && (aiSending || aiThreadPending > 0)) return;
     const ta = $("ai-input");
     const text = ta.value.trim();
     if (!text) return;
@@ -3735,6 +4635,14 @@
           if (view !== "s4") return;   // 判断C
           if (!s4TrapUsed) {
             s4TrapUsed = true;
+            // 本文は残さない（PIIの罠なので、送ろうとした個人情報をログへ写さない）。
+            logActivity("trap.s4", undefined, { gate: "client", detected: hit.label });
+            // 罰の開始も同じ保存に含める。罠の確定から startPenalty() までは
+            // 暗転と叱責で数秒あり、その間にリロードされると「罠は発動済み・罰は未実施」
+            // という、罰が二度と始まらない状態がサーバに残る（＝罰の踏み倒し）。
+            // 演出は復帰時にやり直さないが、罰そのものは resumePenalty() が始める。
+            s4PenaltyState = "in-progress";
+            saveCheckpoint("trap-s4", true);   // デバウンスしない（踏んだ直後のリロードで罠が復活しないように）
             triggerLeak();
           } else {
             // 上限は1回（企画書§6）。2回目以降は罰を出さず、ブロックだけ告げる。
@@ -4523,7 +5431,7 @@
   // コンテキストで押し直したときだけIDが再利用され、要点を書き足してから
   // 押し直せば新しい試行になる——参加者の意図（同じものを再送 vs 作り直し）と
   // 一致する。
-  const s1DraftCommand = makePendingCommand();
+  const s1DraftCommand = makePendingCommand("s1draft");
 
   // s1Draftの実Worker経路。メインスレッド（liveState.activeThreadId）をそのまま
   // 使う——Stage1専用のスレッドは作らない。Stage2以降のチャットUIに下書き依頼の
@@ -4537,34 +5445,49 @@
     if (btn) { btn.textContent = "下書き中…"; btn.disabled = true; }
 
     const text = s1BuildDraftText(it, hasCtx);
+    // 宛先は送信時点で固定する（sendAiLive と同じ理由）。
+    const sentThreadId = liveState.activeThreadId;
     const res = await liveFetch("/api/teams/" + liveState.teamCode + "/chat/messages", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
         type: "send-message",
-        commandId: s1DraftCommand.idFor(text),
-        threadId: liveState.activeThreadId,
+        commandId: s1DraftCommand.idFor(sentThreadId, "s1", text),
+        threadId: sentThreadId,
         text,
         promptProfile: "s1",
       }),
     });
     s1DraftBusy = false;
 
-    if (res.ok && res.body && res.body.assistant) {
-      s1DraftCommand.clear();   // 確定したのでIDを破棄する（次の依頼は新しい試行）
-      if (res.body.snapshot && res.body.snapshot.threads) liveState.threads = res.body.snapshot.threads;
+    if (res.ok && isAssistantReply(res.body)) {
+      s1DraftCommand.clear(sentThreadId, "s1", text);   // 確定したので破棄
+      applyChatSnapshot(res.body.snapshot);
       if (view !== "s1") return;   // 下書き要求中に Stage 1 を離れていたら他ステージの中央ペインへ着弾させない
       it.bodyDraft = res.body.assistant.text;
       if (s1.open === it.key) s1Center();
       return;
     }
 
-    // 400（長すぎ）/422（PII等）は適用されずに確定した拒否なのでIDを持ち越さない。
+    // sendAiLive と同じ切り分け。何も保存されずに確定した拒否（400・422
+    // pii_blocked）だけIDを捨てる。422 history_pii/ai_refusal はユーザー発言が
+    // 保存済みなので持ち越す——捨てると再送が別コマンドになり発言が二重に積まれる。
+    // 429（レート制限）も本文はまだ処理されていないが、同じ下書きを送り直すのが
+    // 自然なのでIDは持ち越す（待ってから押し直せば冪等に当たる）。
     // 0（タイムアウト・断）/409（処理中）/503 は結果が未確定——同じIDで再送すれば
     // DO側の冪等性に当たる。
-    if (res.status === 400 || res.status === 422) s1DraftCommand.clear();
+    const unsaved = isUnsavedRejection(res);
+    if (unsaved) s1DraftCommand.clear(sentThreadId, "s1", text);
 
-    // 422（PII等）/409（二重送信）/503・タイムアウト、いずれもここへ集約する。
+    if (res.status === 429) {
+      // レート制限だけは「失敗」ではなく「待て」なので、専用の文言をボタンへ出す。
+      // Stage 1 には会話の表示欄が無いので、他の失敗と同じくボタンで知らせる。
+      s1ShowDraftNotice(it, rateLimitMessage(res.retryAfter));
+      return;   // 未確定ではないのでスナップショットの取り直しも要らない
+    }
+
+    // 422（PIIゲート・履歴PII・AI拒否）/409（二重送信）/503・タイムアウト、
+    // いずれもここへ集約する。
     // Stage1は締切が短いので、専用の警告行は作らずボタンの文言を一時的に
     // 差し替えるだけにして、必ず再クリック可能な状態へ戻す（固まらせない）。
     // ——スナップショットの取り直し（下）より先にここを済ませる。取り直しの
@@ -4575,21 +5498,29 @@
     // 結果が未確定のまま liveState.threads を放置すると、Stage 2 でAIペインを開いた
     // ときに実際の履歴とズレる。sendAiLive と同じ restoreChatFromServer() で
     // 取り直しておく（表示の復元ではなく、状態の整合が目的）。
-    if (res.status !== 400 && res.status !== 422) await restoreChatFromServer();
+    if (!unsaved) await restoreChatFromServer();
   }
 
   /* 下書きボタンを失敗表示へ戻し、少し置いて元の文言へ戻す。s1DraftLive の
      失敗経路から呼ぶ（await をまたがずに必ず押せる状態にするため分離した）。 */
-  function s1RestoreDraftButton(it) {
+  /* ボタンの文言を一時的に差し替えて知らせ、必ず再クリック可能な状態へ戻す。
+     Stage 1 の中央ペインには会話の表示欄が無いので、失敗もレート制限もここを通す。
+     戻すときは「自分が出した文言のままか」を確かめる——待っている間に別の通知が
+     上書きしていたら、そちらを消さない。 */
+  function s1ShowDraftNotice(it, notice) {
     if (s1.open !== it.key) return;   // 送信中に別のメールへ移っていたら黙る（sendAI判断Cと同じ流儀）
-    const failBtn = $("s1-draft");
-    if (!failBtn) return;
-    failBtn.textContent = "下書きに失敗しました（再試行可）";
-    failBtn.disabled = false;
+    const btn = $("s1-draft");
+    if (!btn) return;
+    btn.textContent = notice;
+    btn.disabled = false;
     later(() => {
       const b = $("s1-draft");
-      if (b && s1.open === it.key && b.textContent === "下書きに失敗しました（再試行可）") b.textContent = "AIに下書きさせる";
+      if (b && s1.open === it.key && b.textContent === notice) b.textContent = "AIに下書きさせる";
     }, 2400);
+  }
+
+  function s1RestoreDraftButton(it) {
+    s1ShowDraftNotice(it, "下書きに失敗しました（再試行可）");
   }
 
   // 引き継ぎメモの[本文をコピー]。Clipboard API を優先し、使えない/失敗する
@@ -4645,6 +5576,7 @@
     // メールスレッド演出（round1）や簡易表示（それ以外）で返ってくる。
     // その場では何も知らせない——知らせたら不意打ちにならない。
     if (body.length < S1_MIN_LEN || !S1_POLITE.test(body)) s1.curt.push({ def: it.def, reply: body });
+    logActivity("submit.s1-reply", body, { mailId: it.def.id, round: s1.round });
     s1Close(it);
     s1.doneIds.add(it.def.id);
     s1Say("返信した　" + it.def.subj);
@@ -4738,7 +5670,8 @@
   function s1Result(kind) {
     s1.cleared = true; s1.result = kind;
     s1.items.forEach((x) => { if (x.state === "live") x.state = "done"; });
-    TEAMS[2].pos = 2; drawMarks(); reportProgress(2, "clear");
+    logActivity("verdict.s1", undefined, { result: kind, round: s1.round, curt: s1.curt.length });
+    TEAMS[2].pos = 2; drawMarks(); reportProgress(2, "clear"); saveCheckpoint("stage-clear");
     s1Center(); s1List();
     // Stage 2 へは直接飛ばさない。片付いたと思った一拍のあとに急変が来る。
     // 事務長の窓はOKボタンで閉じ、閉じた0.7秒後に赤帯（okBtnハンドラ側）。
@@ -5376,6 +6309,10 @@
     if (!v || verdicting) return;   // 連打で判定が二重に走らないようにする
     verdicting = true;
     closePasteBar();
+    // 提出時点のグリッドをTSVで残す。判定より先に積む——判定が落ちても
+    // 「何を出したか」は振り返りに要る（上限は logActivity 側で切る）。
+    logActivity("submit.s2-grid", [S2_COLS].concat(s2Grid).map((r) => r.join("\t")).join("\n"),
+      { rows: s2Grid.length, addendumTaken: s2AddTaken });
     const bad = checkGrid();
     const CHECKS = [
       "必須列がすべて埋まっている",
@@ -5416,6 +6353,11 @@
 
     await wait(400);
     verdicting = false;
+    logActivity("verdict.s2", undefined, {
+      ok: !bad,
+      ngCells: bad ? (bad.hot || []).length : 0,
+      failedCheck: bad ? CHECKS[bad.at] : "",
+    });
     if (!bad) {
       s2Hot = [];
       s2StopDeadline();
@@ -5452,7 +6394,7 @@
     hasUnlockMail = true; renderMails("u");
     sfx("decision1");   // 師長の承認メールが着弾する
     // 自チームのマーカーが S3 へ滑る
-    TEAMS[2].pos = 3; drawMarks(); reportProgress(3, "clear");
+    TEAMS[2].pos = 3; drawMarks(); reportProgress(3, "clear"); saveCheckpoint("stage-clear");
     await wait(700);
     if (view !== "s2") return;   // 判断C
     // 解錠の喜びの陰で、誰も見ていない数字が増える。演出はつけない。
@@ -5511,6 +6453,7 @@
     hideOverlays();
     paneL.classList.remove("hide"); paneR.classList.remove("hide");
     s3Verdicting = false; s3TrapUsed = false; s3KarubeAutoNudged = false;
+    s3PenaltyState = "none";   // 罠フラグと対。復帰時は go() の後に書き戻す
     hasS3LabMail = true; hasS3KawaiMail = true; hasS3ShichoMail = true;
     // 着地は3B病棟師長メール——これが Stage 3 開始の引き金そのもの
     // （docs/materials/stage3_patients.md 実装メモ）。検査科メールは謎の発熱の種で
@@ -5584,11 +6527,22 @@
     await wait(500);
     if (view !== "s3") { s3Verdicting = false; return; }   // 判断C：シーンを離れていたら以降は何もしない
 
+    logActivity("submit.s3", JSON.stringify(vals));
     const result = checkStage3(vals);
+    logActivity("verdict.s3", undefined, {
+      trap: result.trap, short: !!result.short, field: result.field || "", trapUsed: s3TrapUsed,
+    });
 
     if (result.trap) {
       if (!s3TrapUsed) {
         s3TrapUsed = true;
+        logActivity("trap.s3", undefined, { field: result.field || "" });
+        // 罰の開始も同じ保存に含める。罠の確定から startPenalty() までは
+        // 暗転と叱責で数秒あり、その間にリロードされると「罠は発動済み・罰は未実施」
+        // という、罰が二度と始まらない状態がサーバに残る（＝罰の踏み倒し）。
+        // 演出は復帰時にやり直さないが、罰そのものは resumePenalty() が始める。
+        s3PenaltyState = "in-progress";
+        saveCheckpoint("trap-s3", true);   // デバウンスしない（踏んだ直後のリロードで罠が復活しないように）
         s3Verdicting = false;
         triggerTrap();
         return;
@@ -5648,7 +6602,7 @@
     // （先に 14 にすると急変の一報が死ぬ）。
     // 停留所は 2026-08-22 の表示番号振り直しで S4 が独立したので、ここで進める
     // （以前は S3 の停留所を共有していたため進めなかった）。
-    TEAMS[2].pos = 4; drawMarks(); reportProgress(4, "clear");
+    TEAMS[2].pos = 4; drawMarks(); reportProgress(4, "clear"); saveCheckpoint("stage-clear");
     go("s35");
   }
 
@@ -5674,6 +6628,10 @@
   /* 拡大対応業務：消毒液ボトルの補充。
      1本ずつ押して待つだけ。褒めも音も出さず、済んだ本数が増えるだけにする。 */
   function startPenalty() {
+    // 罰は時間で払う（企画書§6）。開始を即時に記録しないと、踏んだ直後の
+    // リロードで罰だけ踏み倒せる。
+    s3PenaltyState = "in-progress";
+    saveCheckpoint("s3-penalty-start", true);
     s3Bottles = [];
     for (let i = 0; i < S3_BOTTLES_5A; i++) s3Bottles.push({ ward: "5A", state: "todo" });
     s3BottlesExtraAdded = false;
@@ -5767,6 +6725,8 @@
   }
 
   function finishPenalty() {
+    s3PenaltyState = "done";
+    saveCheckpoint("s3-penalty-done", true);
     s3Stop();
     $("ov-lock").classList.add("hide");
     $("penalty-host").innerHTML = "";
@@ -5889,7 +6849,10 @@
     await wait(500);
     if (view !== "s35") { s35Verdicting = false; return; }   // 判断C：シーンを離れていたら以降は何もしない
 
-    if (!checkS35Summary(text)) {
+    logActivity("submit.s35", text, { which: "summary" });
+    const summaryOk = checkS35Summary(text);
+    logActivity("verdict.s35", undefined, { which: "summary", ok: summaryOk });
+    if (!summaryOk) {
       $("s35-box").classList.add("warn");
       sfx("cancel");   // 差し戻し
       const d = document.createElement("div");
@@ -5930,7 +6893,10 @@
     await wait(400);
     if (view !== "s35") { s35ActionVerdicting = false; return; }   // 判断C
 
-    if (!(S35_ACTION_TARGET.test(text) && S35_ACTION_CONTENT.test(text))) {
+    logActivity("submit.s35", text, { which: "action" });
+    const actionOk = S35_ACTION_TARGET.test(text) && S35_ACTION_CONTENT.test(text);
+    logActivity("verdict.s35", undefined, { which: "action", ok: actionOk });
+    if (!actionOk) {
       // 内容語は掴めていて、相手だけが患者へ向いている場合だけ専用の差し戻しにする
       // （定数側のコメント参照）。それ以外は従来どおり汎用の差し戻し。
       const toPatients = S35_ACTION_CONTENT.test(text) && S35_ACTION_PATIENT.test(text);
@@ -6014,7 +6980,7 @@
     if (view !== "s35") return;   // 判断C
     $("ov-unlock").classList.add("hide");
     // 表示番号振り直し後、このクリアで進むのは S5（旧 Stage 4）の停留所。
-    TEAMS[2].pos = 5; drawMarks(); reportProgress(5, "clear");
+    TEAMS[2].pos = 5; drawMarks(); reportProgress(5, "clear"); saveCheckpoint("stage-clear");
     // このステージだけ、クリア後に次のシーンへ実際に遷移する（devbar・URLハッシュ
     // 単体起動でも詰まないようにするため。docs/ui/mock/README.md の他ステージは
     // 遷移せず状態更新のみで留まるが、S3.5→S4 の配線検証にはここが要る）。
@@ -6124,6 +7090,7 @@
     hideOverlays();
     paneL.classList.remove("hide"); paneR.classList.remove("hide");
     s4Verdicting = false; s4TrapUsed = false; s4Masked = new Set();
+    s4PenaltyState = "none";   // 罠フラグと対。復帰時は go() の後に書き戻す
     hasS4JimuMail = true;
     openIdx = "s4jimu"; readS4Jimu = false;
     renderMails("s4jimu");
@@ -6176,7 +7143,11 @@
     await wait(500);
     if (view !== "s4") { s4Verdicting = false; return; }   // 判断C
 
+    // 本文は残さない。ここへ届く提出はIDベースの一覧が正解だが、氏名を残した
+    // まま出すチームもいる——罠の対象そのものをログへ写さない（trap.s4 と同じ扱い）。
     const missing = checkStage4(text);
+    logActivity("submit.s4", undefined, { form: "linelist", chars: text.length });
+    logActivity("verdict.s4", undefined, { form: "linelist", ok: missing.length === 0, missing: missing.length });
     if (missing.length) {
       $("s4-box").classList.add("warn");
       sfx("cancel");   // 差し戻し（IDの不足）
@@ -6226,7 +7197,7 @@
     // devbarで送る必要があった）。
     // 発熱インジケータは動かさない——Stage 4・5 は 14 のまま継続
     // （docs/scenario/00_未知ウイルスの通奏低音.md §3「●●●継続」）。
-    TEAMS[2].pos = 6; drawMarks(); reportProgress(6, "clear");
+    TEAMS[2].pos = 6; drawMarks(); reportProgress(6, "clear"); saveCheckpoint("stage-clear");
     await wait(900);
     if (view !== "s4") return;   // 判断C
     go("s5");
@@ -6258,6 +7229,9 @@
      塗るべきトークンと塗ってはいけないトークンが混在し、判断がいる——
      Stage 3 のボトル補充（押して待つだけ）とは質の違う罰にしてある。 */
   function startS4Penalty() {
+    // Stage 3 の罰と同じ理由で、開始を即時に記録する（startPenalty のコメント参照）。
+    s4PenaltyState = "in-progress";
+    saveCheckpoint("s4-penalty-start", true);
     s4Masked = new Set();
     $("lock-hd").textContent = "インシデント対応業務：報告書の作成";
 
@@ -6305,6 +7279,10 @@
     s4ReportVerdicting = true;
     const missing = S4_REPORT.some((seg, i) => seg.pii === true && !s4Masked.has(i));
     const over = S4_REPORT.some((seg, i) => seg.pii === false && s4Masked.has(i));
+    // 罰ゲーム（黒塗り）の提出。塗った数だけ残す——報告書の本文は個人情報を
+    // 含むのでログへ写さない。
+    logActivity("submit.s4", undefined, { form: "report", masked: s4Masked.size });
+    logActivity("verdict.s4", undefined, { form: "report", ok: !missing && !over, missing: missing, over: over });
     const box = verdictChecking(v);
     await wait(500);
     s4ReportVerdicting = false;
@@ -6326,6 +7304,8 @@
   }
 
   function finishS4Penalty() {
+    s4PenaltyState = "done";
+    saveCheckpoint("s4-penalty-done", true);
     s4Stop();
     $("ov-lock").classList.add("hide");
     $("penalty-host").innerHTML = "";
@@ -6422,6 +7402,7 @@
     }
     // 上限で画像が出ない回でも「AIに伝えた」事実は残る——要件判定の累積には入れる。
     s5PromptLog.push(text);
+    logActivity("submit.s5-prompt", text, { genCount: s5GenCount });
     // タグ無し指示（様式継承）× 様式継承の連鎖で全候補が default のまま上限に
     // 達すると、合格しうる候補（pictogram/multilingual）がゼロのまま提出手段が
     // 尽き、進行不能になる（2026-08-22 レビューで実測再現）。合格しうる候補が
@@ -6473,6 +7454,8 @@
 
   function s5PickCandidate(idx) {
     s5Selected = idx;
+    const c = s5Candidates[idx];
+    logActivity("select.s5", undefined, { phase: "pick", index: idx, type: c ? c.type : "" });
     s5DrawCandidate();
   }
 
@@ -6568,6 +7551,15 @@
     if (view !== "s5") { s5Verdicting = false; return; }   // 判断C
 
     const reject = checkStage5(s5Candidates[s5Selected]);
+    // 活動ログの kind に verdict.s5 は無い（Workerのenum）。提出判定の結果は
+    // select.s5 の meta へ phase:"verdict" として入れる。
+    logActivity("select.s5", undefined, {
+      phase: "verdict",
+      index: s5Selected,
+      type: s5Candidates[s5Selected].type,
+      ok: !reject,
+      reject: reject || "",
+    });
     if (reject) {
       // 差し戻し（無罰・無制限）。候補と生成済み画像はそのまま残り、
       // 選び直し・再提出に何度でも戻れる（docs/ui/06_Stage5.md §4 の
@@ -6604,7 +7596,7 @@
   function stage5GoalSequence() {
     // 発熱インジケータは動かさない——Stage 4・5 は 14 のまま継続
     // （docs/scenario/00_未知ウイルスの通奏低音.md §3「●●●継続」）。
-    TEAMS[2].pos = 7; drawMarks(); reportProgress(7, "clear");   // フッターの停留所表示も同時に進める
+    TEAMS[2].pos = 7; drawMarks(); reportProgress(7, "clear"); saveCheckpoint("stage-clear");   // フッターの停留所表示も同時に進める
     goalSequence();
     $("goal-s").textContent = "レース終了 — このあと振り返りへ進みます";
     // .onclick への代入（addEventListener の積み増しではなく上書き）——
@@ -6771,6 +7763,7 @@
       return;
     }
     fLine = text;
+    logActivity("submit.final", text);
     fRenderPieceBody();
     $("f-piece").classList.add("done");
     $("f-board").classList.add("done");
@@ -7108,7 +8101,7 @@
     // 置いていったことが見えるほうが、このステージの主題に合う。
     s2.left = 0;
     s2.items.forEach((x) => { if (x.state === "live") { x.state = "left"; s2.left++; } });
-    TEAMS[2].pos = 3; drawMarks(); reportProgress(3, "clear");
+    TEAMS[2].pos = 3; drawMarks(); reportProgress(3, "clear"); saveCheckpoint("stage-clear");
     // 通奏低音は Stage 2 で 9 名（docs/ui/00 §4）。1回だけ薄く光らせる。
     const f = $("fever");
     f.textContent = "9"; f.classList.add("bumped");
@@ -7294,6 +8287,23 @@
     { id: "final",   label: "⑪ Final 振り返り",  mode: "crisis", note: "2026-08-22 全面改修（ユーザー決定）。参加者に見える名は「会見」から「振り返り」へ改称した——旧実装は記者会見資料を作って提出する4欄フォームだったが、レースのゴールが Stage 5 クリアへ移ったことで「会見資料を作る」という前提のタスクではなくなったため、「振り返り」の方が画面の中身（対応の全体図＋一言）と一致する。旧4欄判定（checkFinal/F_ORDER/F_WRONG/F_REQUIRED、誤り→不足・Stage 3 と同じ順序）は削除した——判定そのものが無い。発熱インジケータ・crisisモードは Stage 4・5 から継続で14のまま動かさない。事務長・広報課からのメール2通は「資料を4点作れ」ではなく「振り返って一言を残せ」の前振りに書き換えた（聖クロノス熱（仮）の爆誕・記者クラブ事前質問は文言のみ調整して維持）。中央ペインは振り返りボード——この研修で作った成果物のタイル6枚（S1メール対応／S2火の手・発熱の芽／S3疥癬の方針／S3.5眼痛の手がかり／S4保健所報告14名／S5面会制限ポスター）が0.4秒間隔（F_BOARD_LIGHT_MS）で順に点灯し（fLightTiles）、全点灯後に中央下の空白ピース「引き継ぎ」が開く（2026-08-22再設計・親裁定済み：当初の「記者会見」ラベル／「明日の記者会見で最初に伝える一言」だとICTの振り返りという主題からズレたため、Stage 1 の前任ICNの引き継ぎメモと対をなす「引き継ぎメモ」型に変更した）。ピースには「次にこの病院へ来るICTに引き継ぎをしましょう。次のチームに伝えたい一言をチームで相談して入力してください。」の入力欄（placeholder例「AIに渡す前に、名前を消す。」）と［記す］ボタンのみ——判定は空欄拒否（fSubmitLine）だけで内容は一切見ない。記すとボード全体が一拍点灯し（.fboard.done）、締めのメッセージ（F_CLOSE_LINES＝「あなたたちも、引き継ぐ側になった。」で始まる、前任ICNのメモに始まりチーム自身のメモで終わる円環を示す文言）を出す。記した一言は画面に残り続け、再訪時もアニメーションを再生せず完成状態を直接描く（fLine が re-render をまたいで保持される）——ファシリテーターが各チームのPCから読み上げるため。苅部さんは登場しない（2026-08-22 ユーザー決定）——旧実装は入場40秒後にPHSを鳴らして「私も呼ばれてます。で、どこまで公表するんですか。」と言わせていたが、公表を前提にした旧・記者会見設計の台詞であり、判定なしの振り返りとなった現Finalと文脈が噛み合わないため、F_KARUBE_LINE・F_KARUBE_DELAY・phsFPending 一式ごと削除した（旧2段目＝最終セーフティは、それ以前に判定廃止で削除済み）。AIチャットに Final 専用の台本応答はもう無い（2026-08-22 ユーザー決定）——旧実装は F_REQUEST_TRIGGER→F_AI_REPLY で「承知しました。会見用の文案です。」と返していたが、記者会見の資料を作らせる旧設計の応答なので定数と sendAI() の Final 分岐ごと削除し、scripted 時は他ステージのトリガー不一致と同じ既定応答（「（このモックでは応答しません）」）へ合流させた（LIVE時は従来どおり sendAiLive()）。振り返りボード自体はAIチャットに依存しない。ゴール演出は Stage 5 側（stage5GoalSequence）に移った——#ov-goal に追加した「振り返りへ進む」ボタンを押すと go(\"final\") でここへ来る。Final 自身はもう #ov-goal を開かない（goalSequence() は Stage 5 専用の共有関数として残した）。ボード完成の後にエンディングが続く（2026-08-22追加）：①幹部の労いリレー（#ov-f-relay。院長→看護部長→事務長を F_RELAY から1人ずつ、［次へ］ボタンと背景クリックの早送りだけで送る。自動タイマーは無い）→②感謝状（#ov-f-handover。同日ユーザー決定で「引き継ぎ書」から改稿——病院からチームへの謝意と、記した一言を次のICTチームへ必ず申し送るという約束を賞状の体裁で見せる。宛名はチーム名、一言は esc() を通して引用枠へ入る）。感謝状はゲームの最終状態で閉じる導線を持たず、fEnded が立った後は #final 再入場のたびに renderFinal() が直接復元する。devbar・URLハッシュからの単体起動は従来どおり可能。" }
   ];
 
+  /* 停留所（pos）→ そのステージ先頭の view。STEPS の並び順から作るので、
+     ステージを足したときにこの表だけ更新し忘れる、という取りこぼしが起きない。
+     帯に停留所を持たない導入・開発用のステップ（entry/welcome/inbox/unlock）は
+     除く。pos 0（Prologue）はまだステージに入っていないので welcome へ落とす。
+
+     復帰でこれが要る理由：クリア処理は「画面遷移より先に TEAMS[2].pos を進める」
+     （unlockSequence・stage4UnlockSequence 等）。クリアカードや解錠演出を見ている
+     数秒の間にリロードされると { view: 前のステージ, pos: 次の停留所 } という
+     ねじれた状態が保存され、view をそのまま信じるとクリア済みのステージへ
+     戻してしまう——Stage 6 では { view:"s5", pos:7 } になり、ゴール演出の手前で
+     もう一度クリアできてしまう。pos を正とし、view はその裏付けがあるときだけ使う。 */
+  const NON_STAGE_VIEWS = ["entry", "welcome", "inbox", "unlock"];
+  const POS_TO_VIEW = ["welcome"].concat(
+    STEPS.filter((s) => NON_STAGE_VIEWS.indexOf(s.id) < 0).map((s) => s.id)
+  );
+  const viewPos = (id) => POS_TO_VIEW.indexOf(id);
+
   function go(id, keepMode) {
     clearLater();
     verdicting = false;
@@ -7471,6 +8481,9 @@
     // 旧S5→新S6）。STEPS.note の解説文と設計ドキュメントのファイル名・内部IDは
     // 旧番号のままなので、読み違えないよう対応表を先頭に添える。
     $("note").innerHTML = STEP_RENUMBER_NOTE + "<b>" + step.label + "</b>　" + step.note;
+
+    // ステージ遷移のたびに保存する。LIVE・入室後でなければ何もしない。
+    saveCheckpoint("go:" + id);
   }
 
   STEPS.forEach((s) => {
@@ -7538,7 +8551,7 @@
     el.textContent = message;
     el.classList.toggle("hide", !message);
   }
-  $("btn-enter").addEventListener("click", async () => {
+  async function attemptEnter() {
     const code = currentTeamCode();
     // チーム名は必須。LIVE・scriptedのどちらの経路でも先に止める。
     const name = currentTeamNameInput();
@@ -7553,30 +8566,184 @@
       return;
     }
     showEntryError("");
-    const btn = $("btn-enter");
-    btn.disabled = true;
+    if (entryBusy) return;   // ［入室する］と［再試行］の多重起動を止める
+    clearEntryBlock();
+    entryBusy = true;
+    updateEntryProbeUi();
+    // 途中で何が起きても必ず busy を戻す。ここを取りこぼすと、入室ボタンが
+    // 「入室しています…」で固定されて手も足も出なくなる。
+    try {
+      await runEnter(code, name);
+    } finally {
+      entryBusy = false;
+      updateEntryProbeUi();
+    }
+  }
+
+  async function runEnter(code, name) {
     const sessionRes = await liveFetch("/api/session", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ teamCode: code }),
     });
     if (!sessionRes.ok) {
-      btn.disabled = false;
       showEntryError((sessionRes.body && sessionRes.body.message) || "入室に失敗しました。時間を置いて再試行してください。");
       return;
     }
-    const chatRes = await liveFetch("/api/teams/" + code + "/chat");
-    btn.disabled = false;
-    if (!chatRes.ok || !chatRes.body) {
+    // 未確定の送信IDを先に読み戻し、GETと同時にサーバへ状態を尋ねる。捨ててよいのは
+    // 「サーバが処理済みと答えたID」だけで、履歴の本文や並びからは判定できない。
+    chatSendCommand.load(code);
+    s1DraftCommand.load(code);
+    const pendingIds = pendingCommandIdsFor([chatSendCommand, s1DraftCommand]);
+    const chatPath = "/api/teams/" + code + "/chat" +
+      (pendingIds.length > 0 ? "?commandIds=" + pendingIds.join(",") : "");
+    const chatRes = await liveFetch(chatPath);
+    // 200でも中身が契約どおりとは限らない。読む前に形を確かめる
+    // （空の threads を通すと activeThreadId が undefined のまま進む）。
+    if (!chatRes.ok || !isChatSnapshot(chatRes.body)) {
+      entryBlockMessage = "入室に失敗しました。ネットワークを確認して再試行してください。";
+      entryRetry = attemptEnter;
       showEntryError((chatRes.body && chatRes.body.message) || "チャット状態の取得に失敗しました。時間を置いて再試行してください。");
       return;
     }
-    liveState = { teamCode: code, threads: chatRes.body.threads, activeThreadId: chatRes.body.threads[0].threadId };
+    liveState = {
+      teamCode: code,
+      threads: chatRes.body.threads,
+      activeThreadId: chatRes.body.threads[0].threadId,
+      checkpointRevision: 0,
+      chatRevision: chatRes.body.revision || 0,   // 古いsnapshotで巻き戻さないための世代番号
+      serverDataRevision: 0,   // GET直後に adoptDataRevision で埋める
+      sentDataRevision: 0,
+    };
     commitTeamName(code, name);
-    // チーム名がサーバへ届く最初の機会。commitTeamName の後（teamName 確定後）に送る。
-    reportProgress(TEAMS[2].pos, "entry");
-    go("welcome");
-  });
+    // 「AI待ちの最中にリロード」を挟んでも、同じ本文の送り直しが同じ commandId に
+    // なる——サーバでは先の要求が完了していることがあり、新しいIDで送ると発言も
+    // OpenAI呼び出しも二重になる。処理済みと分かったぶんだけここで捨てる。
+    reconcilePendingCommands(chatSendCommand, chatRes.body);
+    reconcilePendingCommands(s1DraftCommand, chatRes.body);
+    // 保存済みのチェックポイントがあれば、そのステージへ戻す（進行台本 §5-1 の
+    // 手動ジャンプを不要にするための自動復帰）。
+    // 制限時間は短縮版（LIVE_RESTORE_TIMEOUT_MS＝4秒）ではなく本送信と同じ20秒を使う。
+    // 4秒は「失敗しても進行に影響しない取り直し」のための値で、ここは違う——
+    // 取れなければ Prologue からやり直しになる一度きりの機会なので、待つ価値がある。
+    const cpRes = await liveFetch("/api/teams/" + code + "/checkpoint", { method: "GET" }, LIVE_TIMEOUT_MS);
+    // 「200で checkpoint が null（＝初回入室）」と「取得できなかった」を必ず分ける。
+    // 一緒くたに welcome へ通すと、サーバに進行が残っているチームを Prologue から
+    // やり直させることになる——復帰の仕組みごと無かったことになるのがいちばん痛い。
+    if (!cpRes.ok || !isCheckpointState(cpRes.body)) {
+      entryBlockMessage = "進行状況を取得できません。ネットワークを確認して再試行してください。";
+      entryRetry = attemptEnter;
+      return;
+    }
+    const snapshot = cpRes.body.checkpoint || null;
+    if (snapshot) liveState.checkpointRevision = snapshot.revision;
+    adoptDataRevision(snapshot);   // 別タブが進めていれば、その先から番号を振り直す
+    pollSummary();   // 帯を10秒待たずに一度埋める（以後は setInterval が回す）
+    // Prologue圏（entry/welcome/inbox）までしか進んでいないチームは、初回入室と
+    // 同じ扱いでよい——ここを pos で判定しないのは、go() がこの3画面にも
+    // pos=1（S1の停留所）を振るため。ステージにはまだ入っていない。
+    const savedView = snapshot ? snapshot.body.view : null;
+    if (!snapshot || savedView === "entry" || savedView === "welcome" || savedView === "inbox") {
+      // 初回入室のときだけ entry を記録する。復帰でも送っていた頃は、まだ pos が
+      // 初期値1のまま entry が D1 へ入り、ダッシュボードとログ分析に
+      // 「再入室して Stage 1 へ戻った」と見えていた。復帰側は resume だけを送る
+      // （チーム名はそちらにも載るので、名前がサーバへ届かなくなることはない）。
+      reportProgress(TEAMS[2].pos, "entry");
+      go("welcome");
+      return;
+    }
+    resumeFromCheckpoint(snapshot, cpRes.body.serverNow);
+  }
+  $("btn-enter").addEventListener("click", attemptEnter);
+
+  /* チェックポイントからの復帰。ステージ固有の状態（グリッドの中身・生成済み
+     ポスター等）は預けていないので、戻す先は「そのステージの先頭」——赤帯や
+     ブリーフィングが再生されるのは許容する（Stage 1 の長いブリーフィングだけは
+     s1SkipBrief で飛ばす。復帰のたびに読み直させると、その分だけレースで損をする）。
+
+     📌 経過時計はリロード中も止めない。レースなので、リロードした側が時間を
+     取り戻せると「詰まったらリロード」が最適戦略になってしまう。savedAt から
+     serverNow までの実時間を加算し、席を外していた分もそのまま払わせる
+     （2026-08-23 テストプレイではファシリテーターの裁量だった扱いを、ここで
+     機械的に決める）。 */
+  function resumeFromCheckpoint(snapshot, serverNow) {
+    const body = snapshot.body;
+    TEAMS[2].pos = body.pos;
+
+    // 戻す先は pos が正。保存済みの view は、pos が示すステージと同じか後ろに
+    // あるときだけ信じる（同じ停留所の中でどの画面にいたかは view の方が詳しい）。
+    // pos より前を指しているときは、クリア処理が pos を先に進めた直後に
+    // リロードされた——つまり view が1ステージ古い——ので pos 側を開く
+    // （POS_TO_VIEW のコメント参照）。
+    const target = viewPos(body.view) >= body.pos
+      ? body.view
+      : (POS_TO_VIEW[body.pos] || POS_TO_VIEW[POS_TO_VIEW.length - 1]);
+
+    const savedAtMs = Date.parse(snapshot.savedAt);
+    const serverNowMs = Date.parse(serverNow);
+    const awayMs = Number.isFinite(savedAtMs) && Number.isFinite(serverNowMs)
+      ? Math.max(0, serverNowMs - savedAtMs)
+      : 0;
+    elapsed = Math.round((body.elapsedMs + awayMs) / 1000);
+
+    // 時計は go() より先に積み、go() の中で始まる startClock() に引き継がせる
+    // （Stage 1 は renderStage1Flood→s1Begin が、それ以外は go() 自身が始める）。
+    const wasS1 = target === "s1";
+    if (wasS1) s1SkipBrief = true;
+    go(target);
+    if (wasS1) s1SkipBrief = false;
+    startClock();   // go() が始めていなければここで（clockOn のガードで二重には動かない）
+    paintClock();   // 最初のティックまでの1秒を「--:--」で見せない
+
+    // 罠のフラグは go() の後で戻す。renderStage3()/renderStage4() が入場のたびに
+    // s3TrapUsed/s4TrapUsed を false へ戻すので、go() より前に立てても消える
+    // ——消えたままだと、復帰したチームだけ同じ罠をもう一度踏めてしまう
+    // （企画書§6「連続罰は1回まで」の抜け道になる）。
+    s3TrapUsed = body.trap.s3Used;
+    s4TrapUsed = body.trap.s4Used;
+
+    // 罰も同じく go() の後で戻す（renderStage3/renderStage4 が "none" へ戻すため）。
+    const data = body.data || {};
+    s3PenaltyState = data.s3Penalty || "none";
+    s4PenaltyState = data.s4Penalty || "none";
+    syncSentData();   // いま持っている data はサーバ由来。次の保存で新世代を名乗らせない
+    resumePenalty(target);
+
+    reportProgress(TEAMS[2].pos, "resume");
+    logActivity("resume", undefined, {
+      view: target, savedView: body.view, pos: body.pos, elapsedMs: elapsed * 1000,
+      s3Penalty: s3PenaltyState, s4Penalty: s4PenaltyState,
+    });
+  }
+
+  /* 罰ゲームの途中でリロードされていたら、そのステージで罰をやり直す。
+
+     途中から復元はしない——この罰は時間で払うもの（企画書§6）で、詰めた本数や
+     塗った箇所そのものに意味は無い。中断時点を復元するより、最初からやり直して
+     もう一度払わせる方が設計に合っており、保存する状態も「進行中かどうか」の
+     一語で済む。踏み倒しを防ぐのが目的なので、やり直しが重いのはむしろ正しい。
+
+     開始はステージの入場演出（赤帯・看護部長の一報）が終わってから。演出の最中に
+     ロックを重ねると、閉じた先にまたロックが居る、という読めない画面になる。
+     一報は復帰時には出さずに畳む——同じ知らせを二度読ませない。 */
+  const RESUME_PENALTY_DELAY_MS = 3200;   // renderStage3 の一報（2600ms）より後
+
+  function resumePenalty(target) {
+    if (target === "s3" && s3PenaltyState === "in-progress") {
+      later(() => {
+        if (view !== "s3") return;   // 判断C
+        $("ov-s3notice").classList.add("hide");
+        startPenalty();
+      }, RESUME_PENALTY_DELAY_MS);
+      return;
+    }
+    if (target === "s4" && s4PenaltyState === "in-progress") {
+      later(() => {
+        if (view !== "s4") return;   // 判断C
+        startS4Penalty();
+      }, RESUME_PENALTY_DELAY_MS);
+    }
+  }
   $("btn-brief").addEventListener("click", s1Begin);
   // 段落待ちの早送り。[了解しました] 自身は s1Begin へ抜けるので拾わない。
   $("ov-brief").addEventListener("click", (e) => {

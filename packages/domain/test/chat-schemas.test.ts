@@ -53,10 +53,34 @@ describe("チャットschemaの境界", () => {
     expect(chatSnapshotSchema.safeParse({ ...snapshot, threads: [] }).success).toBe(false);
   });
 
+  it("snapshotのcommandsは省略でき、3種の状態だけを受理する", () => {
+    const base = {
+      teamCode: "000000",
+      revision: 0,
+      threads: [{ threadId, title: "メイン", messages: [] }],
+    };
+    // 照会しなかった応答にはcommands自体が付かない。
+    expect(chatSnapshotSchema.parse(base)).toEqual(base);
+    const withCommands = {
+      ...base,
+      commands: { [commandId]: "processed", [threadId]: "pending", [messageId]: "unknown" },
+    };
+    expect(chatSnapshotSchema.parse(withCommands)).toEqual(withCommands);
+    for (const commands of [
+      { [commandId]: "done" }, // 未知の状態値
+      { [commandId]: null },
+      { "not-a-uuid": "processed" }, // 不正なキー
+      [],
+    ]) {
+      expect(chatSnapshotSchema.safeParse({ ...base, commands }).success).toBe(false);
+    }
+  });
+
   it("コマンドはtypeで判別され、未知typeと欠落フィールドを拒否する", () => {
     const createThread = { type: "create-thread", commandId, title: "副" };
     const sendMessage = { type: "send-message", commandId, threadId, text: "本文" };
-    expect(chatCommandSchema.parse(createThread)).toEqual(createThread);
+    // kindを送らない既存クライアントはmanualとして解釈される（既定値）。
+    expect(chatCommandSchema.parse(createThread)).toEqual({ ...createThread, kind: "manual" });
     expect(chatCommandSchema.parse(sendMessage)).toEqual(sendMessage);
     for (const input of [
       { type: "delete-thread", commandId, threadId },

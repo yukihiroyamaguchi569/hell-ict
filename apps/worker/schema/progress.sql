@@ -9,3 +9,5 @@ CREATE TABLE IF NOT EXISTS progress_events (
   created_at TEXT NOT NULL DEFAULT (datetime('now'))
 );
 CREATE INDEX IF NOT EXISTS idx_progress_team ON progress_events(team_code, id);
+-- 一度きりの移行の完了印。名前だけを持つ。
+CREATE TABLE IF NOT EXISTS migrations (name TEXT PRIMARY KEY);
