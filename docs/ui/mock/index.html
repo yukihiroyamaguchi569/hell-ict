@@ -1171,6 +1171,14 @@
   animation: hdocFadeIn .8s ease-out 1.05s both;
 }
 @keyframes hdocFadeIn { from { opacity: 0; } to { opacity: 1; } }
+/* 感謝状の下に置く控えめな戻り導線。賞状の書式（.hdoc）には干渉させず、
+   ナレーションと同じ veil の上の要素として組む。 */
+.hdoc-restart {
+  background: transparent; color: #cdd3d8; border: 1px solid #6c757c;
+  font-family: var(--font-ui); font-size: 13px; letter-spacing: .06em;
+  padding: 7px 20px; animation: hdocFadeIn .8s ease-out 1.35s both;
+}
+.hdoc-restart:hover { background: rgba(255,255,255,.09); color: #fff; }
 
 /* レースのゴール演出（2026-08-22追加・ユーザー決定「もっと賑やかに」）。
    紙吹雪は goalConfettiBurst() が数十片を都度生成し、数秒で降り切って
@@ -1639,6 +1647,10 @@
               </div>
             </div>
             <div class="hdoc-narration">——次にこの病院へ来る誰かは、あなたたちが残した一言に助けられて、始まる。</div>
+            <!-- 最初へ戻る導線（2026-09-05追加）。研修が終わった後、次のチームへ
+                 席を渡せるようにする。感謝状の書式には触れず、ナレーションと同じ
+                 veil の上に置く。 -->
+            <button type="button" class="hdoc-restart" id="btn-f-restart">最初に戻る</button>
           </div>
         </div>
 
@@ -8929,6 +8941,13 @@
     fAdvanceRelay();
   });
   $("btn-f-relay-next").addEventListener("click", fRelayNext);
+  // 感謝状の［最初に戻る］。LIVE はチェックポイントが Final なので、リロードすると
+  // 入室画面を経由して同じチームで Final へ戻る（次のチームは別のチームコードで
+  // 入室する）。scripted は預ける先が無いので入室画面へ戻すだけでよい。
+  $("btn-f-restart").addEventListener("click", () => {
+    if (LIVE) location.reload();
+    else go("entry");
+  });
   $("btn-copy").addEventListener("click", () => {
     const btn = $("btn-copy");
     const which = $("ov-viewer").dataset.which;
