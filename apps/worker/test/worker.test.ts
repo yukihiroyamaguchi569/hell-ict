@@ -22,8 +22,8 @@ describe("P1B Worker", () => {
       status: "ok",
       // 運用値の設定状況。テスト環境ではどれも未設定なので既定のまま出る。
       guards: {
-        teamCodes: false,
-        teamCodesCount: 0,
+        eventNo: false,
+        teamMax: false,
         allowedOrigins: false,
         chatRateLimitPerMinute: 20,
       },

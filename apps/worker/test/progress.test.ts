@@ -287,23 +287,28 @@ describe("進捗記録", () => {
     await expect(rowCount()).resolves.toBe(0);
   });
 
-  it("TEAM_CODES設定時、未登録チームの進捗は404で拒否しD1へ書かない", async () => {
-    const saved = env.TEAM_CODES;
-    env.TEAM_CODES = "100001,100002";
+  it("EVENT_NO設定時、規則外チームの進捗は404で拒否しD1へ書かない", async () => {
+    const saved = { EVENT_NO: env.EVENT_NO, TEAM_MAX: env.TEAM_MAX };
+    env.EVENT_NO = "10";
+    env.TEAM_MAX = "2";
     try {
-      const rejected = await postJson("/api/progress", event({ teamCode: "100009" }));
-      expect(rejected.status).toBe(404);
+      // 別の開催回。
+      expect((await postJson("/api/progress", event({ teamCode: "110001" }))).status).toBe(404);
+      // TEAM_MAXを超えるチーム番号。
+      expect((await postJson("/api/progress", event({ teamCode: "100003" }))).status).toBe(404);
+      // チーム番号0。
+      expect((await postJson("/api/progress", event({ teamCode: "100000" }))).status).toBe(404);
       await expect(rowCount()).resolves.toBe(0);
 
       const accepted = await postJson("/api/progress", event({ teamCode: "100001" }));
       expect(accepted.status).toBe(200);
       await expect(rowCount()).resolves.toBe(1);
     } finally {
-      env.TEAM_CODES = saved;
+      Object.assign(env, saved);
     }
   });
 
-  it("TEAM_CODES未設定なら任意の6桁の進捗を受け付ける", async () => {
+  it("EVENT_NO未設定なら任意の6桁の進捗を受け付ける", async () => {
     const response = await postJson("/api/progress", event({ teamCode: "987654" }));
     expect(response.status).toBe(200);
     await expect(rowCount()).resolves.toBe(1);
@@ -316,7 +321,7 @@ describe("進捗記録", () => {
     await expect(rowCount()).resolves.toBe(0);
   });
 
-  it("TEAM_CODES設定時、summaryは許可コードの行だけを返す", async () => {
+  it("EVENT_NO設定時、summaryは規則に合う行だけを返す", async () => {
     const insert = env.PROGRESS_DB.prepare(
       `INSERT INTO progress_events (team_code, team_name, pos, view, kind, client_at, created_at)
        VALUES (?, ?, ?, '', 'clear', '', ?)`,
@@ -327,9 +332,10 @@ describe("進捗記録", () => {
       insert.bind("999999", "未登録", 7, "2026-08-23 01:00:02"),
     ]);
 
-    const saved = env.TEAM_CODES;
+    const saved = { EVENT_NO: env.EVENT_NO, TEAM_MAX: env.TEAM_MAX };
     try {
-      env.TEAM_CODES = "100001,100002";
+      env.EVENT_NO = "10";
+      env.TEAM_MAX = "2";
       const filtered = await summary();
       expect(filtered.teams.map((team) => team.publicId)).toEqual([
         await idOf("100002"),
@@ -338,7 +344,7 @@ describe("進捗記録", () => {
       expect(filtered.events.map((event) => event.publicId)).not.toContain(await idOf("999999"));
       expect(filtered.events).toHaveLength(2);
     } finally {
-      env.TEAM_CODES = saved;
+      Object.assign(env, saved);
     }
 
     // 未設定なら従来どおり全件。
@@ -365,14 +371,15 @@ describe("進捗記録", () => {
       ),
     ]);
 
-    const saved = env.TEAM_CODES;
+    const saved = { EVENT_NO: env.EVENT_NO, TEAM_MAX: env.TEAM_MAX };
     try {
-      env.TEAM_CODES = "100001";
+      env.EVENT_NO = "10";
+      env.TEAM_MAX = "1";
       const result = await summary();
       expect(result.events.map((event) => event.view)).toEqual(["allowed-old"]);
       expect(result.teams.map((team) => team.publicId)).toEqual([await idOf("100001")]);
     } finally {
-      env.TEAM_CODES = saved;
+      Object.assign(env, saved);
     }
 
     // 未設定なら従来どおり全チームから最新20件。
@@ -408,18 +415,19 @@ describe("進捗記録", () => {
     expect(result.events.filter((e) => e.isSelf === true).map((e) => e.publicId)).toEqual([selfId]);
   });
 
-  it("許可リストに無いコードを?teamCodeに付けてもisSelfは立たない", async () => {
+  it("規則に合わないコードを?teamCodeに付けてもisSelfは立たない", async () => {
     await postJson("/api/progress", event({ teamCode: "100001", teamName: "自分" }));
 
-    const saved = env.TEAM_CODES;
+    const saved = { EVENT_NO: env.EVENT_NO, TEAM_MAX: env.TEAM_MAX };
     try {
-      env.TEAM_CODES = "100001";
-      // 未登録のコードで他チームの行へisSelfを立てさせない。
+      env.EVENT_NO = "10";
+      env.TEAM_MAX = "1";
+      // 規則外のコードで他チームの行へisSelfを立てさせない。
       const result = await summary("?teamCode=999999");
       expect(result.teams.some((team) => team.isSelf === true)).toBe(false);
       expect(result.events.some((e) => e.isSelf === true)).toBe(false);
     } finally {
-      env.TEAM_CODES = saved;
+      Object.assign(env, saved);
     }
   });
 
@@ -431,9 +439,10 @@ describe("進捗記録", () => {
 
   it("teamNameに入れた配布コードはsummaryで伏せ字になる", async () => {
     // publicIdで隠した意味が無くならないよう、teamName経由でコードが漏れる経路も塞ぐ。
-    const saved = env.TEAM_CODES;
+    const saved = { EVENT_NO: env.EVENT_NO, TEAM_MAX: env.TEAM_MAX };
     try {
-      env.TEAM_CODES = "100001,100002";
+      env.EVENT_NO = "10";
+      env.TEAM_MAX = "2";
       await postJson("/api/progress", event({ teamCode: "100001", teamName: "100001" }));
 
       const result = await summary();
@@ -441,26 +450,27 @@ describe("進捗記録", () => {
       const body = await (await get("/api/progress/summary")).text();
       expect(body).not.toContain("100001");
     } finally {
-      env.TEAM_CODES = saved;
+      Object.assign(env, saved);
     }
   });
 
-  it("許可リストが無いときは6桁連続数字を一律で伏せる", async () => {
+  it("規則が無いときは6桁連続数字を一律で伏せる", async () => {
     // 配布コードが分からないので、6桁の並びはすべて配布コードとみなす。
     await postJson("/api/progress", event({ teamName: "班 100001" }));
     const result = await summary();
     expect(result.teams[0]?.teamName).toBe(`班 ${PII_REDACTION}`);
   });
 
-  it("許可リストにあるコードだけを伏せ、無関係な6桁は残す", async () => {
-    const saved = env.TEAM_CODES;
+  it("規則に合うコードだけを伏せ、無関係な6桁は残す", async () => {
+    const saved = { EVENT_NO: env.EVENT_NO, TEAM_MAX: env.TEAM_MAX };
     try {
-      env.TEAM_CODES = "100001";
+      env.EVENT_NO = "10";
+      env.TEAM_MAX = "1";
       await postJson("/api/progress", event({ teamCode: "100001", teamName: "病床 400000" }));
       const result = await summary();
       expect(result.teams[0]?.teamName).toBe("病床 400000");
     } finally {
-      env.TEAM_CODES = saved;
+      Object.assign(env, saved);
     }
   });
 
