@@ -109,7 +109,14 @@
   font-family: var(--font-ui); font-size: 16px; line-height: 1.6;
   display: flex; flex-direction: column;
   transition: background-color .78s ease, color .78s ease;
+  --fs-scale: 1;
 }
+/* 文字サイズ3段階（issue #87）。1画面を3〜4人で囲むので、後ろの人に合わせて
+   会場でその場で上げられるようにする。読ませるものだけを --fs-scale の乗算に
+   してあり、ヘッダー・リーダーボード帯・ペイン幅・ボタンの寸法は倍率を掛けない
+   ——ファシリテーターが「右のAI」と言える配置は段階が変わっても動かない。 */
+.screen[data-fs="2"] { --fs-scale: 1.15; }
+.screen[data-fs="3"] { --fs-scale: 1.3; }
 .screen *, .screen *::before, .screen *::after { box-sizing: border-box; }
 .screen button { font-family: inherit; cursor: pointer; }
 
@@ -157,6 +164,16 @@
   transition: border-color .78s ease, color .78s ease;
 }
 .hdr .mute:hover { color: var(--fg); border-color: var(--fg-muted); }
+/* 文字サイズ切替（A−／A＋）。ミュートと同じ枠の見た目に揃えて画面へ溶かす。
+   ヘッダー自身は拡大の対象外なので、ここの font-size は固定のままにする。 */
+.hdr .fs { display: flex; gap: 6px; }
+.hdr .fs button {
+  font-size: 15px; line-height: 1; padding: 5px 9px;
+  background: transparent; border: 1px solid var(--rule); color: var(--fg-muted);
+  transition: border-color .78s ease, color .78s ease;
+}
+.hdr .fs button:hover:not(:disabled) { color: var(--fg); border-color: var(--fg-muted); }
+.hdr .fs button:disabled { opacity: .35; cursor: default; }
 
 /* --- 本体3ペイン ------------------------------------------------------- */
 .body { flex: 1; display: flex; min-height: 0; overflow: hidden; }
@@ -265,26 +282,26 @@
 .s2-log .cost { color: var(--warn); }
 
 /* --- 病院から届くものは 2003年の書式で描く ----------------------------- */
-.legacy { font-family: var(--font-legacy); font-size: 15px; line-height: 1.9; }
+.legacy { font-family: var(--font-legacy); font-size: calc(15px * var(--fs-scale)); line-height: 1.9; }
 .reader { flex: 1; overflow-y: auto; padding: 22px 28px; }
 .reader .rule { border-top: 1px solid var(--rule); margin: 12px 0; transition: border-color .78s ease; }
-.reader .meta { font-family: var(--font-legacy); font-size: 13px; color: var(--fg-muted); }
-.reader h2 { font-family: var(--font-legacy); font-size: 17px; font-weight: 700; margin: 0; }
+.reader .meta { font-family: var(--font-legacy); font-size: calc(13px * var(--fs-scale)); color: var(--fg-muted); }
+.reader h2 { font-family: var(--font-legacy); font-size: calc(17px * var(--fs-scale)); font-weight: 700; margin: 0; }
 .reader p { margin: 0 0 1.1em; max-width: 62ch; }
 .reader p:last-child { margin-bottom: 0; }
 
 /* --- ワークスペース ---------------------------------------------------- */
 .work { flex: 1; overflow-y: auto; padding: 22px 28px; display: flex; flex-direction: column; gap: 18px; }
-.stage-title { font-size: 20px; font-weight: 700; display: flex; align-items: center; gap: 9px; }
+.stage-title { font-size: calc(20px * var(--fs-scale)); font-weight: 700; display: flex; align-items: center; gap: 9px; }
 .stage-title::before { content: "▸"; color: var(--accent); }
-.brief { font-size: 18px; line-height: 1.75; max-width: 60ch; }
+.brief { font-size: calc(18px * var(--fs-scale)); line-height: 1.75; max-width: 60ch; }
 .cols {
-  font-family: var(--font-num); font-size: 13px; color: var(--fg-muted);
+  font-family: var(--font-num); font-size: calc(13px * var(--fs-scale)); color: var(--fg-muted);
   border-left: 2px solid var(--rule); padding-left: 12px; line-height: 1.9;
 }
 .box { border: 1px solid var(--rule); background: var(--surface); transition: background-color .78s ease, border-color .78s ease; }
 .box > .hd {
-  padding: 8px 13px; font-size: 13px; font-weight: 700; letter-spacing: .05em;
+  padding: 8px 13px; font-size: calc(13px * var(--fs-scale)); font-weight: 700; letter-spacing: .05em;
   color: var(--fg-muted); border-bottom: 1px solid var(--rule);
 }
 /* Stage 3：差し戻し（不足）の枠。橙のみ、赤は使わない（Stage 2 §3の絶対条件を継続）。 */
@@ -297,11 +314,11 @@
 .submit-area {
   width: 100%; min-height: 132px; resize: vertical; display: block;
   background: transparent; color: var(--fg); border: 0; padding: 13px;
-  font-family: var(--font-num); font-size: 14px; line-height: 1.7;
+  font-family: var(--font-num); font-size: calc(14px * var(--fs-scale)); line-height: 1.7;
 }
 .submit-area::placeholder { color: var(--fg-muted); }
 .recog {
-  font-family: var(--font-num); font-size: 13px; color: var(--fg-muted);
+  font-family: var(--font-num); font-size: calc(13px * var(--fs-scale)); color: var(--fg-muted);
   padding: 0 13px 11px; min-height: 1.4em;
 }
 
@@ -398,9 +415,9 @@
 
 /* --- 判定：1項目ずつ点いていく2秒間 ------------------------------------ */
 .verdict { display: flex; flex-direction: column; gap: 9px; }
-.verdict .lead { font-size: 15px; color: var(--fg-muted); }
+.verdict .lead { font-size: calc(15px * var(--fs-scale)); color: var(--fg-muted); }
 .check {
-  display: flex; gap: 11px; align-items: flex-start; font-size: 16px;
+  display: flex; gap: 11px; align-items: flex-start; font-size: calc(16px * var(--fs-scale));
   opacity: 0; transform: translateY(3px); transition: opacity .22s ease, transform .22s ease;
 }
 .check.on { opacity: 1; transform: none; }
@@ -409,10 +426,10 @@
 .check.fail .mark { color: var(--warn); }
 .check.halt { color: var(--fg-muted); }
 .check .why {
-  display: block; font-size: 14px; color: var(--warn);
+  display: block; font-size: calc(14px * var(--fs-scale)); color: var(--warn);
   font-family: var(--font-legacy); margin-top: 4px;
 }
-.verdict .done { font-size: 17px; font-weight: 700; color: var(--ok); padding-top: 6px; }
+.verdict .done { font-size: calc(17px * var(--fs-scale)); font-weight: 700; color: var(--ok); padding-top: 6px; }
 /* 判定が「動いている」ことを見せる（issue #69）。差し戻しの文言が前回と同じだと
    画面が一切変わらず、確認されたのか分からなかった。確認中は回る輪を出し、
    結果の行は毎回改めて浮かび上がらせる。 */
@@ -457,22 +474,23 @@
    aiBubbleと同じ体裁の吹き出しにしたため——「.emptyがあれば消してから
    吹き出しを足す」既存ロジック（aiBubble/aiPlaceholderBubble/s5Generate）と
    クラス名を共有しつつ、この見た目（灰色・小さめ）は挨拶吹き出しには効かせない。 */
-.ai .empty:not(.bubble) { color: var(--ai-muted); font-size: 15px; }
+.ai .empty:not(.bubble) { color: var(--ai-muted); font-size: calc(15px * var(--fs-scale)); }
 .ai .compose { border-top: 1px solid var(--ai-rule); padding: 11px 12px; display: flex; gap: 9px; align-items: flex-end; }
 .ai .compose textarea {
   /* 自動グロー（input時にJSでheightを再計算）＋手動リサイズ（縦のみ）の両対応。
      min/max-heightはJS（capAiInputHeight/autoGrowAiInput）が実測値で上書きする——
      ここでの44px/84pxはJS実行前・pane-r非表示時のフォールバック。 */
-  flex: 1; resize: vertical; height: 44px; min-height: 44px; max-height: 84px; padding: 11px 12px;
+  flex: 1; resize: vertical; height: calc(44px * var(--fs-scale)); min-height: calc(44px * var(--fs-scale));
+  max-height: 84px; padding: 11px 12px;
   border: 1px solid var(--ai-rule); background: #fff; color: var(--ai-fg);
-  font-family: var(--font-ui); font-size: 15px; line-height: 1.5; overflow-y: auto;
+  font-family: var(--font-ui); font-size: calc(15px * var(--fs-scale)); line-height: 1.5; overflow-y: auto;
 }
 .ai .compose button {
   border: 0; background: var(--ai-fg); color: #fff; padding: 12px 17px;
   font-size: 15px; font-weight: 700;
 }
-.bubble { font-size: 16px; line-height: 1.7; }
-.bubble .who { font-size: 12px; font-weight: 700; letter-spacing: .1em; color: var(--ai-muted); margin-bottom: 5px; }
+.bubble { font-size: calc(16px * var(--fs-scale)); line-height: 1.7; }
+.bubble .who { font-size: calc(12px * var(--fs-scale)); font-weight: 700; letter-spacing: .1em; color: var(--ai-muted); margin-bottom: 5px; }
 .bubble.me .body { background: var(--ai-surface-2); padding: 11px 13px; }
 /* AIが表を返すとき（現状は Stage 2 の整形済みラインリスト）の本文。
    white-space: pre でタブと改行をそのまま保つ——ここが潰れると、参加者が
@@ -549,12 +567,12 @@
 @keyframes pulse { 0%,100% { opacity: 1; } 50% { opacity: .25; } }
 .phs .badge.blink { animation: pulse 1.1s ease-in-out infinite; }
 .phs .win { width: 320px; background: #fff; color: #16181a; border: 1px solid var(--phs); border-top: 0; }
-.phs .win .who { padding: 8px 12px; font-size: 13px; border-bottom: 1px solid #cfd6d1; background: #eef3ef; }
-.phs .win .log { height: 232px; overflow-y: auto; padding: 12px; font-size: 14px; line-height: 1.85; }
+.phs .win .who { padding: 8px 12px; font-size: calc(13px * var(--fs-scale)); border-bottom: 1px solid #cfd6d1; background: #eef3ef; }
+.phs .win .log { height: 232px; overflow-y: auto; padding: 12px; font-size: calc(14px * var(--fs-scale)); line-height: 1.85; }
 .phs .win .log p { margin: 0 0 10px; }
 .phs .win .log .wait { color: #6b736e; }
 .phs .win .cmp { display: flex; border-top: 1px solid #cfd6d1; }
-.phs .win .cmp input { flex: 1; border: 0; padding: 10px; font-family: var(--font-legacy); font-size: 14px; background: #fff; color: #16181a; }
+.phs .win .cmp input { flex: 1; border: 0; padding: 10px; font-family: var(--font-legacy); font-size: calc(14px * var(--fs-scale)); background: #fff; color: #16181a; }
 .phs .win .cmp button { border: 0; border-left: 1px solid #cfd6d1; background: #eef3ef; color: #16181a; padding: 10px 15px; font-family: var(--font-legacy); font-size: 14px; }
 
 /* --- 開発用ジャンプ引き出し（製品UIではない） --------------------------
@@ -970,7 +988,7 @@
 }
 .viewer .cols button:hover { background: #e3e5df; }
 .viewer .sheet { overflow: auto; padding: 14px; }
-.viewer pre { margin: 0; font-family: var(--font-legacy); font-size: 13px; line-height: 1.95; white-space: pre; }
+.viewer pre { margin: 0; font-family: var(--font-legacy); font-size: calc(13px * var(--fs-scale)); line-height: 1.95; white-space: pre; }
 
 /* Final：振り返りボード（2026-08-22 全面改修。旧4欄フォーム＋ルールベース
    判定は廃止し、判定そのものが無い「レース後」の唯一のステージにした。
@@ -1246,6 +1264,12 @@
                音源を選んで鳴らすUIではない（効果音ラボ規約。sfx() のコメント参照）。
                状態は localStorage に残す——同じPCで開き直しても切ったままにする。 -->
           <button class="mute" id="btn-mute" aria-pressed="false" aria-label="効果音を消す" title="効果音を消す">🔊</button>
+          <!-- 文字サイズ（標準／大／特大）。1画面を3〜4人で囲むので、後ろの人が
+               読めないときに会場でその場で上げる。状態は localStorage に残す。 -->
+          <div class="fs" role="group" aria-label="文字サイズ">
+            <button id="btn-fs-dec" aria-label="文字を小さく" title="文字を小さく">A−</button>
+            <button id="btn-fs-inc" aria-label="文字を大きく" title="文字を大きく">A＋</button>
+          </div>
           <div class="clock idle" id="clock">--:--</div>
           <!-- チーム名は入室画面でチーム自身が入力する（applyTeamName）。
                既定値の「B班」は入室前とdevbar直行時のプレースホルダ。 -->
@@ -1982,6 +2006,40 @@
   document.addEventListener("click", () => { sfxUnlocked = true; }, { once: true, capture: true });
   $("btn-mute").addEventListener("click", () => applySfxMute(!sfxMuted));
   try { applySfxMute(localStorage.getItem(SFX_MUTE_KEY) === "1"); } catch { applySfxMute(false); }
+
+  /* ------------------------------------------------------------------ */
+  /* 文字サイズ（3段階。issue #87）                                       */
+  /*                                                                    */
+  /* 倍率の実体はCSSの --fs-scale 側にあり、ここは #screen の data-fs を   */
+  /* 切り替えるだけにする（倍率をJSとCSSの2か所に持たない）。ミュートと    */
+  /* 同じくlocalStorageへ残す——同じPCで開き直しても段階を維持する。       */
+  /* ------------------------------------------------------------------ */
+  const FS_KEY = "hellFontStep";
+  const FS_MAX = 3;
+  let fsStep = 1;
+
+  // 現在の倍率をCSSから読む。JS側で高さを実測して置く箇所（AI入力欄）が
+  // 段階に追従できるようにするためだけの窓口。
+  function fsScale() {
+    const v = parseFloat(getComputedStyle(screenEl).getPropertyValue("--fs-scale"));
+    return v > 0 ? v : 1;
+  }
+
+  function applyFontStep(step) {
+    fsStep = Math.min(FS_MAX, Math.max(1, Math.trunc(step) || 1));
+    if (fsStep === 1) screenEl.removeAttribute("data-fs");
+    else screenEl.setAttribute("data-fs", String(fsStep));
+    $("btn-fs-dec").disabled = fsStep === 1;
+    $("btn-fs-inc").disabled = fsStep === FS_MAX;
+    try { localStorage.setItem(FS_KEY, String(fsStep)); } catch { /* 保存できなくても進行は止めない */ }
+  }
+
+  // 段階を変えたらAI入力欄の実測高も取り直す（CSSのheightをJSが上書きして
+  // いるので、ここで再計算しないと文字だけ大きくなって枠が追いつかない）。
+  const changeFontStep = (step) => { applyFontStep(step); autoGrowAiInput(); };
+  $("btn-fs-dec").addEventListener("click", () => changeFontStep(fsStep - 1));
+  $("btn-fs-inc").addEventListener("click", () => changeFontStep(fsStep + 1));
+  try { applyFontStep(Number(localStorage.getItem(FS_KEY))); } catch { applyFontStep(1); }
 
   /* ------------------------------------------------------------------ */
   /* シナリオの実文言（docs/scenario/ より）                              */
@@ -4542,13 +4600,16 @@
   /* #ai-input：自動グロー（内容に応じて伸縮）＋手動リサイズ（縦のみ、CSS resize:vertical）の
      両対応。手動でドラッグして広げたサイズは、以後の自動グローの下限として扱う
      （「手動サイズを下回らない」の単純な扱いに留め、複雑な追従はしない）。 */
+  // 1行ぶんの基準高。CSSの height/min-height と同じ 44px を文字サイズ段階で
+  // 倍する——ここを固定値のままにすると、特大で文字だけ大きくなって枠から溢れる。
+  const aiInputBaseHeight = () => Math.round(44 * fsScale());
   let aiInputManualMin = 44;
   let aiInputMouseDownHeight = null;
   function capAiInputHeight() {
     const ta = $("ai-input");
     // ペイン高の約40%を上限にする。#fitはtransform: scale()で見た目だけ縮小するため、
     // paneR.clientHeight（論理サイズ）はウィンドウ幅に関わらず一定——resize時の再計算は不要。
-    const cap = Math.max(44, Math.round(paneR.clientHeight * 0.4));
+    const cap = Math.max(aiInputBaseHeight(), Math.round(paneR.clientHeight * 0.4));
     ta.style.maxHeight = cap + "px";
     return cap;
   }
@@ -4556,11 +4617,11 @@
     const ta = $("ai-input");
     const cap = capAiInputHeight();
     ta.style.height = "auto";
-    ta.style.height = Math.min(cap, Math.max(44, ta.scrollHeight, aiInputManualMin)) + "px";
+    ta.style.height = Math.min(cap, Math.max(aiInputBaseHeight(), ta.scrollHeight, aiInputManualMin)) + "px";
   }
   function resetAiInputHeight() {
-    aiInputManualMin = 44;
-    $("ai-input").style.height = "44px";
+    aiInputManualMin = aiInputBaseHeight();
+    $("ai-input").style.height = aiInputBaseHeight() + "px";
   }
 
   /* Stage 3・4 だけ台本応答を返すAIチャット。Stage 1/2 は入力しても何も起きない
