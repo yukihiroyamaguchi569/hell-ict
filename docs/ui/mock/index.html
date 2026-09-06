@@ -468,6 +468,12 @@
 .bubble { font-size: calc(16px * var(--fs-scale)); line-height: 1.7; }
 .bubble .who { font-size: calc(12px * var(--fs-scale)); font-weight: 700; letter-spacing: .1em; color: var(--ai-muted); margin-bottom: 5px; }
 .bubble.me .body { background: var(--ai-surface-2); padding: 11px 13px; }
+/* 台本応答の印。実API（sendAiLive）の応答と見分けるためだけの目印なので、
+   名前の隣へ小さく添える——参加者の目に入っても物語の邪魔にならない灰色に留める
+   （Stage 2 はLIVEでも常に台本なので、当日も必ず出る）。右端へ寄せないのは、
+   吹き出しの右端が画面右のJUMPつまみと重なって読めなくなるため。 */
+.bubble.scripted .who { display: flex; align-items: baseline; gap: 8px; }
+.bubble.scripted .who .tag { font-weight: 400; letter-spacing: .04em; opacity: .6; }
 /* AIが表を返すとき（現状は Stage 2 の整形済みラインリスト）の本文。
    white-space: pre でタブと改行をそのまま保つ——ここが潰れると、参加者が
    選択してコピーしてもタブが失われ、parseTable() が区切りを見つけられずに
@@ -4722,13 +4728,19 @@
     const src = S2_SHEET_ROWS.concat(s2AddLanded ? S2_ADDENDUM_ROWS : []);
     return [S2_COLS].concat(normalizeRows(src)).map((r) => r.join("\t")).join("\n");
   }
-  function aiBubble(who, html, mine) {
+  /* opts.scripted は台本応答の印。実APIを叩かずに返している吹き出し
+     （scripted時の各ステージ応答と、LIVEでも常に台本の Stage 2）へ付ける
+     ——付けないと「同じ応答しか返らない」を実APIの不具合と取り違える。
+     sendAiLive 経由の実応答には付けない。 */
+  function aiBubble(who, html, mine, opts) {
+    const scripted = !!(opts && opts.scripted);
     const log = $("ai-log");
     const empty = log.querySelector(".empty");
     if (empty) empty.remove();
     const d = document.createElement("div");
-    d.className = "bubble" + (mine ? " me" : "");
-    d.innerHTML = '<div class="who">' + who + '</div><div class="body">' + html + "</div>";
+    d.className = "bubble" + (mine ? " me" : "") + (scripted ? " scripted" : "");
+    d.innerHTML = '<div class="who">' + who + (scripted ? '<span class="tag">台本</span>' : "")
+      + '</div><div class="body">' + html + "</div>";
     log.appendChild(d);
     log.scrollTop = log.scrollHeight;
     return d;
@@ -4823,24 +4835,24 @@
         // 表の下へ流れて見つからない。
         scrollBubbleToTop(aiBubble("AI", "<div>" + esc(S2_SCRIPTED_LEAD)
           + '<button class="to-grid" type="button">表に送る</button></div>'
-          + '<pre class="tsv">' + esc(s2ScriptedTable()) + "</pre>"));
+          + '<pre class="tsv">' + esc(s2ScriptedTable()) + "</pre>", false, { scripted: true }));
       } else if (view === "s3") {
         if (S3_TRAP_TRIGGER.test(text)) {
-          aiBubble("AI", S3_TRAP_LIE.map(esc).join("<br>"));
+          aiBubble("AI", S3_TRAP_LIE.map(esc).join("<br>"), false, { scripted: true });
         } else {
-          aiBubble("AI", "（このモックでは応答しません）");
+          aiBubble("AI", "（このモックでは応答しません）", false, { scripted: true });
         }
       } else if (view === "s35") {
         // 台本は簡略主義（s3の罠応答と同じ）——どんなプロンプトでも同じ要約を返す。
         // 実AI接続時はここを通らずsendAiLive経由になる。
-        aiBubble("AI", S35_SCRIPTED_SUMMARY.map(esc).join("<br>"));
+        aiBubble("AI", S35_SCRIPTED_SUMMARY.map(esc).join("<br>"), false, { scripted: true });
       } else if (view === "s4" && S4_REQUEST_TRIGGER.test(text)) {
-        aiBubble("AI", S4_AI_REPLY.map(esc).join("<br>"));
+        aiBubble("AI", S4_AI_REPLY.map(esc).join("<br>"), false, { scripted: true });
       } else {
         // s4 でトリガー語を含まない依頼がここへ落ちる。Final は 2026-08-22 に
         // 右ペインごと畳んだため、もうこの分岐へ到達しない（旧 Final 専用の台本
         // 応答 F_REQUEST_TRIGGER→F_AI_REPLY は、それ以前に削除済み）。
-        aiBubble("AI", "（このモックでは応答しません）");
+        aiBubble("AI", "（このモックでは応答しません）", false, { scripted: true });
       }
     }, 1100);
   }
