@@ -90,3 +90,20 @@ jobs:
           done
           echo "::error::/api/health が status=ok / guards.eventNo=true / guards.teamMax=数値 になりません（EVENT_NO・TEAM_MAXの設定を確認する）"
           exit 1
+      # 効果音はR2バケット（hell-ict-sounds）から配る。mp3はリポジトリに無いので
+      # デプロイでは運ばれず、投入し忘れると本番だけ無音になる（進行は止まらないので
+      # 当日まで気づけない）。代表として1点が200で返ることを確かめる。
+      # 投入は `bash scripts/upload-sounds.sh`（docs/development-harness.md）。
+      - name: /sounds/decision1.mp3 を確認
+        run: |
+          for i in 1 2 3 4 5; do
+            code=$(curl -s -o /dev/null -w '%{http_code}' https://hell-ict.yukihiroyamaguchi.workers.dev/sounds/decision1.mp3)
+            if [ "$code" = "200" ]; then
+              echo "sounds ok: $code"
+              exit 0
+            fi
+            echo "sounds not ready (attempt $i): $code"
+            sleep 5
+          done
+          echo "::error::/sounds/decision1.mp3 が200になりません（R2バケット hell-ict-sounds への投入を確認する: bash scripts/upload-sounds.sh）"
+          exit 1
