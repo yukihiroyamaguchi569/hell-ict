@@ -6,6 +6,7 @@ on:
     paths-ignore:
       - "docs/**"
       - "!docs/materials/**"
+      - "!docs/ui/mock/**"
       - "*.md"
   # mainへのpushでは走らせない。deploy.ymlのverifyジョブが同じ検証を行うため二重になる。
   workflow_dispatch:
