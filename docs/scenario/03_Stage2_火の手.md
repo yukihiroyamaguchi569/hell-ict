@@ -94,7 +94,7 @@
 
 ### 教材の実体（正典）
 
-**正典は TSV。`.xlsx` はそこから生成する派生物。**
+**正典は TSV。`.xlsx` は作らない**（添付ビューアの [DL] 撤去で用途が無くなった）。
 Stage 2 の手作業はアプリ内グリッドで行うので、アプリが読むのは表データそのものであって
 Excel ファイルではない（[../materials/README.md](../materials/README.md)）。
 
@@ -284,8 +284,8 @@ UI仕様は [../ui/03_Stage2.md](../ui/03_Stage2.md) §2 が正典。
 
 ## 実装メモ
 
-- 教材の正典は [`../materials/`](../materials/) の TSV。`.xlsx` はそこから生成し、
-  添付ビューアの [DL]（スプレッドシートに持っていきたいチーム向け）にだけ使う。**二重管理しない。**
+- 教材の正典は [`../materials/`](../materials/) の TSV。`.xlsx` は生成しない——
+  添付ビューアの [DL] は撤去した（[../ui/03_Stage2.md](../ui/03_Stage2.md) §1）。**二重管理しない。**
 - **列は6つ固定**（`患者ID`/`病棟`/`採取日`/`MRSA結果`/`発熱`/`備考`）。旧・氏名列は削除済み
   ——理由・単一の情報源は [`../materials/README.md`](../materials/README.md) §形式 📌。
   `docs/ui/mock/index.html` の `S2_COLS` もこの6列で固定してある。
