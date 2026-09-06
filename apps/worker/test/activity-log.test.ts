@@ -163,14 +163,19 @@ const activity = (overrides: Record<string, unknown> = {}): Record<string, unkno
 });
 
 /**
- * 400を期待する入力。commandIdをこのテスト専用の値に固定して、commandIdでの
- * 横断検索が他のテストの正当な行と混ざらないようにする（activity()の既定の
- * commandIdは多くのテストが共有していて、テストの識別子にはならない）。
+ * 400を期待する入力のcommandId。反復ごとに別の値にする——it.eachで1つのIDを共有すると、
+ * ある反復が漏らした書き込みを後続の反復が自分のものとして拾い、連鎖防止が崩れる。
+ * activity()の既定のcommandIdは多くのテストが共有していて識別子にならないので使わない。
  */
-const REJECTED_INPUT_COMMAND_ID = "00000000-0000-4000-8000-0000000000a5";
+const rejectedInputCommandId = (index: number): string =>
+  `00000000-0000-4000-8000-00000000a5${String(index).padStart(2, "0")}`;
 
-const rejected = (overrides: Record<string, unknown> = {}): Record<string, unknown> =>
-  activity({ commandId: REJECTED_INPUT_COMMAND_ID, ...overrides });
+/** [説明, 本文の組み立て, 横断検索で見るcommandId（省略時は反復ごとのID）]。 */
+type RejectedInputCase = readonly [
+  label: string,
+  build: (commandId: string) => unknown,
+  searchCommandId?: string,
+];
 
 /** 連番からUUID形式のcommandIdを作る（活動ログのschemaはUUIDを要求する）。 */
 const uniqueCommandId = (index: number): string =>
@@ -689,38 +694,54 @@ describe("活動ログ", () => {
       expect(metaOf((await rows("500113"))[0])).toEqual({ piiRedacted: true });
     });
 
-    it.each([
-      ["kindが列挙外", rejected({ kind: "submit.unknown" })],
-      ["commandIdがUUIDでない", rejected({ commandId: "not-a-uuid" })],
-      ["viewが空", rejected({ view: "" })],
-      ["viewに大文字", rejected({ view: "S1" })],
-      ["viewが33文字", rejected({ view: "a".repeat(33) })],
-      ["textが上限超過", rejected({ text: "あ".repeat(20001) })],
-      ["metaが4KB超", rejected({ meta: sizedMeta("xx") })],
-      ["metaが配列", rejected({ meta: [1, 2, 3] })],
+    const rejectedInputCases: readonly RejectedInputCase[] = [
+      ["kindが列挙外", (id) => activity({ commandId: id, kind: "submit.unknown" })],
+      // commandId自体が不正な場合だけは、その値のまま書かれていないかを見る。
+      ["commandIdがUUIDでない", () => activity({ commandId: "not-a-uuid" }), "not-a-uuid"],
+      ["viewが空", (id) => activity({ commandId: id, view: "" })],
+      ["viewに大文字", (id) => activity({ commandId: id, view: "S1" })],
+      ["viewが33文字", (id) => activity({ commandId: id, view: "a".repeat(33) })],
+      ["textが上限超過", (id) => activity({ commandId: id, text: "あ".repeat(20001) })],
+      ["metaが4KB超", (id) => activity({ commandId: id, meta: sizedMeta("xx") })],
+      ["metaが配列", (id) => activity({ commandId: id, meta: [1, 2, 3] })],
       // 平坦なrecordに限る——ネストや配列を許すと、PII検査が全てのstring値を
       // 漏れなく見て回る保証が持てない。
-      ["metaの値がネストしたobject", rejected({ meta: { nested: { a: 1 } } })],
-      ["metaの値が配列", rejected({ meta: { arr: [1, 2] } })],
-      ["metaの値が201文字", rejected({ meta: { long: "x".repeat(201) } })],
+      [
+        "metaの値がネストしたobject",
+        (id) => activity({ commandId: id, meta: { nested: { a: 1 } } }),
+      ],
+      ["metaの値が配列", (id) => activity({ commandId: id, meta: { arr: [1, 2] } })],
+      ["metaの値が201文字", (id) => activity({ commandId: id, meta: { long: "x".repeat(201) } })],
       // キーは識別子に限る。自由文を許すと、値ではなくキー側にPIIを書けてしまう——
       // boolean値のキーは値の個別検査に掛からず、JSON全体の検査も改行のエスケープで
       // すり抜けるため、入口の書式制限が唯一の防波堤になる。
-      ["metaのキーが日本語（PII）", rejected({ meta: { "渡辺\n三郎さん": true } })],
-      ["metaのキーに空白", rejected({ meta: { "a b": 1 } })],
-      ["metaのキーが65文字", rejected({ meta: { ["k".repeat(65)]: 1 } })],
-      ["clientAtが欠落", { commandId: REJECTED_INPUT_COMMAND_ID, kind: "resume", view: "s1" }],
+      [
+        "metaのキーが日本語（PII）",
+        (id) => activity({ commandId: id, meta: { "渡辺\n三郎さん": true } }),
+      ],
+      ["metaのキーに空白", (id) => activity({ commandId: id, meta: { "a b": 1 } })],
+      ["metaのキーが65文字", (id) => activity({ commandId: id, meta: { ["k".repeat(65)]: 1 } })],
+      ["clientAtが欠落", (id) => ({ commandId: id, kind: "resume", view: "s1" })],
       // 任意文字列のままだとPIIゲートを通らない列が残る。書式で塞いだことを固定する。
-      ["clientAtが電話番号", rejected({ clientAt: "090-1234-5678" })],
-      ["clientAtがISO 8601でない", rejected({ clientAt: "2026年9月3日 11時" })],
-      ["bodyが配列", []],
-      ["bodyがnull", null],
-    ])("不正な入力(%s)は400で拒否し、行を増やさない", async (_label, body) => {
+      ["clientAtが電話番号", (id) => activity({ commandId: id, clientAt: "090-1234-5678" })],
+      [
+        "clientAtがISO 8601でない",
+        (id) => activity({ commandId: id, clientAt: "2026年9月3日 11時" }),
+      ],
+      ["bodyが配列", () => []],
+      ["bodyがnull", () => null],
+    ];
+
+    it.each(
+      rejectedInputCases.map(([label, build, searchCommandId], index) => {
+        const commandId = rejectedInputCommandId(index);
+        return [label, build(commandId), searchCommandId ?? commandId] as const;
+      }),
+    )("不正な入力(%s)は400で拒否し、行を増やさない", async (_label, body, commandId) => {
       const response = await postJson("/api/teams/500105/activity", body);
       expect(response.status).toBe(400);
-      // どのチームのteam_codeで書かれても捕まえる。"not-a-uuid"は、そのcommandIdを
-      // そのまま書いてしまう不具合を見るために並べている。
-      await expect(rowsByCommandId(REJECTED_INPUT_COMMAND_ID, "not-a-uuid")).resolves.toEqual([]);
+      // どのチームのteam_codeで書かれても捕まえる。
+      await expect(rowsByCommandId(commandId)).resolves.toEqual([]);
       // 配列・nullの本文はcommandIdを持たないので、この経路はチームで見る。
       await expect(rows("500105")).resolves.toEqual([]);
     });
@@ -754,28 +775,36 @@ describe("活動ログ", () => {
 
     // schemaの検証は本文をJSONへ展開した後にしか効かない。展開前にバイト数で
     // 打ち切ることを、Content-Lengthを見る経路と実バイト数を測る経路の両方で固定する。
+    // commandIdは反復ごとに変える（1つを共有すると、ある反復が漏らした行を
+    // 後続の反復が自分のものとして拾ってしまう）。
     it.each([
-      ["Content-Lengthどおりの巨大な本文", {}],
+      ["Content-Lengthどおりの巨大な本文", {}, "00000000-0000-4000-8000-00000000a300"],
       // ヘッダは偽装できるので、小さく申告された巨大な本文も実バイト数で弾く。
-      ["Content-Lengthを小さく偽装した本文", { "Content-Length": "42" }],
-    ])("64KBを超える本文(%s)は413で拒否し、行を増やさない", async (_label, headers) => {
-      const oversizedCommandId = "00000000-0000-4000-8000-0000000000a3";
-      const huge = JSON.stringify({
-        ...activity({ commandId: oversizedCommandId }),
-        pad: "x".repeat(65 * 1024),
-      });
-      const response = await exports.default.fetch(
-        new Request("https://example.test/api/teams/500116/activity", {
-          method: "POST",
-          body: huge,
-          // 入口ガードを通すため、ブラウザと同じくOriginを付ける。
-          headers: { Origin: "https://example.test", ...headers },
-        }),
-      );
-      expect(response.status).toBe(413);
-      await expect(rowsByCommandId(oversizedCommandId)).resolves.toEqual([]);
-      await expect(rows("500116")).resolves.toEqual([]);
-    });
+      [
+        "Content-Lengthを小さく偽装した本文",
+        { "Content-Length": "42" },
+        "00000000-0000-4000-8000-00000000a301",
+      ],
+    ])(
+      "64KBを超える本文(%s)は413で拒否し、行を増やさない",
+      async (_label, headers, oversizedCommandId) => {
+        const huge = JSON.stringify({
+          ...activity({ commandId: oversizedCommandId }),
+          pad: "x".repeat(65 * 1024),
+        });
+        const response = await exports.default.fetch(
+          new Request("https://example.test/api/teams/500116/activity", {
+            method: "POST",
+            body: huge,
+            // 入口ガードを通すため、ブラウザと同じくOriginを付ける。
+            headers: { Origin: "https://example.test", ...headers },
+          }),
+        );
+        expect(response.status).toBe(413);
+        await expect(rowsByCommandId(oversizedCommandId)).resolves.toEqual([]);
+        await expect(rows("500116")).resolves.toEqual([]);
+      },
+    );
 
     it("上限を超えた活動ログは429で、D1に書かない", async () => {
       const teamCode = "500170";
@@ -841,22 +870,26 @@ describe("活動ログ", () => {
       expect(response.status).toBe(200);
     });
 
+    // commandIdは反復ごとに変える（1つを共有すると、ある反復が漏らした行を
+    // 後続の反復が自分のものとして拾ってしまう）。
     it.each([
-      ["電話番号のような文字列", "090-1234-5678"],
-      ["未知の画面id", "stage3-manual"],
-      ["空文字", ""],
-    ])("viewが既知の画面idでない(%s)ときは400で拒否し、行を増やさない", async (_label, view) => {
-      // `/^[a-z0-9-]+$/`は電話番号を通してしまい、text・metaのPIIゲートを素通りして
-      // D1へ残る。画面idは有限なのでenumで固定する。
-      const unknownViewCommandId = "00000000-0000-4000-8000-0000000000a4";
-      const response = await postJson("/api/teams/500118/activity", {
-        ...activity({ commandId: unknownViewCommandId }),
-        view,
-      });
-      expect(response.status).toBe(400);
-      await expect(rowsByCommandId(unknownViewCommandId)).resolves.toEqual([]);
-      await expect(rows("500118")).resolves.toEqual([]);
-    });
+      ["電話番号のような文字列", "090-1234-5678", "00000000-0000-4000-8000-00000000a400"],
+      ["未知の画面id", "stage3-manual", "00000000-0000-4000-8000-00000000a401"],
+      ["空文字", "", "00000000-0000-4000-8000-00000000a402"],
+    ])(
+      "viewが既知の画面idでない(%s)ときは400で拒否し、行を増やさない",
+      async (_label, view, unknownViewCommandId) => {
+        // `/^[a-z0-9-]+$/`は電話番号を通してしまい、text・metaのPIIゲートを素通りして
+        // D1へ残る。画面idは有限なのでenumで固定する。
+        const response = await postJson("/api/teams/500118/activity", {
+          ...activity({ commandId: unknownViewCommandId }),
+          view,
+        });
+        expect(response.status).toBe(400);
+        await expect(rowsByCommandId(unknownViewCommandId)).resolves.toEqual([]);
+        await expect(rows("500118")).resolves.toEqual([]);
+      },
+    );
 
     it("既知の画面idは受け付ける", async () => {
       const response = await postJson("/api/teams/500119/activity", {
