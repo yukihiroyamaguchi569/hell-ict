@@ -798,6 +798,9 @@
    1280×720 固定で、vh はモックのページ（見出し・開発用スイッチャ）の分だけ
    ずれる。Stage 4 の報告書は文章なので 880px / 56vh のまま。 */
 .lock .box.shelf { max-width: 1040px; max-height: 470px; }
+/* 罰ゲームの器へ放り込まれた理由を1〜2文で置く。責める言い方はしない
+   （企画書§6。罰も業務として出す）。Stage 3・4 で毎回セットし直す。 */
+.lock .why { font-size: 13px; color: var(--fg-muted); max-width: 880px; text-align: center; }
 /* ボトル棚。単調な作業そのものが罰なので、見た目で達成感を出さない——
    済んだ本数が増えるだけで、褒めも音も無い。
    40本（5A20＋5B10＋5C10）がスクロール無しで収まる寸法にしてある。はみ出すと
@@ -1769,6 +1772,10 @@
              （unlockSequence() 系と同じ理由。docs/ui/mock/README.md 既知の設計負債）。
              #penalty-host は空のまま持ち、startPenalty()/startS4Penalty() が中身を注入する。 -->
         <div class="veil lock hide" id="ov-lock">
+          <!-- なぜこの画面に放り込まれたのか（1〜2文）。突然ボトルが並ぶと
+               「何をやらされているのか」が分からない。見出しと同じく毎回
+               セットし直す——前のステージの説明を残さない。 -->
+          <div class="why" id="lock-why"></div>
           <div class="hd" id="lock-hd">拡大対応業務：🧴 消毒液ボトルの補充</div>
           <!-- 2026-08-22改修：残り時間のカウントダウンをやめ、この業務に実際に
                費やしている時間を数え上げる（startPenaltyClock）。罰は作業を
@@ -6764,7 +6771,9 @@
     s3BottleWaves = S3_BOTTLE_WAVES.slice();
     s3FreshWard = null;
 
-    // 見出しは Stage 4 の罰（startS4Penalty）が同じ器を書き換えるので、毎回セットし直す。
+    // 説明と見出しは Stage 4 の罰（startS4Penalty）が同じ器を書き換えるので、毎回セットし直す。
+    $("lock-why").textContent =
+      "皮膚科医の指摘を受け、ICTに追加業務が割り当てられました。すべて補充し終えるまで、方針の作業には戻れません。";
     $("lock-hd").textContent = "拡大対応業務：🧴 消毒液ボトルの補充";
     // 指示文（.t）とイラストを別要素に分ける。追加分が湧いたときに差し替えるのは .t だけで、
     // イラストは残る（fillBottle 参照）。進み具合（.stat）は注記の右隣に並べる。
@@ -7436,6 +7445,10 @@
     s4PenaltyState = "in-progress";
     saveCheckpoint("s4-penalty-start", true);
     s4Masked = new Set();
+    // 説明・見出し・器の広さは Stage 3 の罰と共有なので、毎回セットし直す
+    // （前のステージの説明が残ると、黒塗りの画面にボトルの話が出る）。
+    $("lock-why").textContent =
+      "個人情報インシデントの後処理として、ICTに追加業務が割り当てられました。報告書を提出するまで、AIは使用できません。";
     $("lock-hd").textContent = "インシデント対応業務：報告書の作成";
     $("penalty-host").classList.remove("shelf");
 
