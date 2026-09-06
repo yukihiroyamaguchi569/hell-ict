@@ -2001,7 +2001,9 @@
   // ——同じ波形を重ねて再生すると振幅が加算されて割れる。
   const sfxCache = new Map();
 
-  function sfx(name) {
+  /* opts.volume は「同じ音源を別の用途で借りる」ときだけ渡す（SFX_VOL は音源ごとの
+     既定であって、用途ごとの音量ではない）。ボトルの補充音がこれにあたる。 */
+  function sfx(name, opts) {
     if (!sfxUnlocked || sfxMuted) return;
     let el = sfxCache.get(name);
     if (!el) {
@@ -2012,7 +2014,8 @@
       el.addEventListener("error", () => {}, { once: true });
       sfxCache.set(name, el);
     }
-    el.volume = SFX_VOL[name] || SFX_DEFAULT_VOL;
+    // 0 を渡されたら「無音で鳴らす」ではなく指定通り 0 にする（|| だと既定へ落ちる）。
+    el.volume = opts && typeof opts.volume === "number" ? opts.volume : SFX_VOL[name] || SFX_DEFAULT_VOL;
     try { el.currentTime = 0; } catch { /* 未ロード時のシークは無視してよい */ }
     const played = el.play();
     if (played && typeof played.catch === "function") played.catch(() => {});
@@ -2430,6 +2433,13 @@
     { ward: "5C", count: 10, afterWard: "5B", afterDone: 8 }
   ];
   const S3_BOTTLE_FILL_MS = 700;    // 1本あたりの補充時間（仮値・P0実測で確定）
+
+  /* ボトルを押した音。押した手応えが無いと「反応していないのでは」と読まれるので、
+     1本ごとに鳴らす。専用の音源がまだ無いので decision1 を借りており、専用の音を
+     足すときはこの定数の名前だけ差し替える（音量は下の定数が持つ）。
+     40回鳴るので音量は他より明確に控えめにする——補充より音が主役になってしまう。 */
+  const S3_BOTTLE_SFX = "decision1";
+  const S3_BOTTLE_SFX_VOL = 0.22;
 
   /* 旧: 苅部さんの1段目トリガーは時限（S3_KARUBE_DELAY秒後に自動発火）だった。
      2026-08-22 ユーザー決定で廃止——時限トリガーは、チームが罠を踏む前に警告が
@@ -6777,7 +6787,8 @@
 
   function fillBottle(i) {
     const b = s3Bottles[i];
-    if (!b || b.state !== "todo") return;
+    if (!b || b.state !== "todo") return;   // 済み・詰め中は鳴らさない（この return より後に鳴らすこと）
+    sfx(S3_BOTTLE_SFX, { volume: S3_BOTTLE_SFX_VOL });
     b.state = "filling";
     drawBottles();
     later(() => {
