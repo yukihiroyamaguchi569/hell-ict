@@ -795,7 +795,11 @@ describe("チェックポイントAPI", () => {
  */
 describe("チェックポイント: 旧名で保存された行の読み出し", () => {
   /** 保存済みJSONを、振り直し前の形（trap.s4Used・data.s35Summary）へ差し替える。 */
-  const writeLegacySnapshot = (teamCode: string, view: string): Promise<void> =>
+  const writeLegacySnapshot = (
+    teamCode: string,
+    view: string,
+    overrides: Record<string, unknown> = {},
+  ): Promise<void> =>
     runInDurableObject(env.TEAM_ROOM.getByName(teamCode), (_instance, state) => {
       state.storage.sql.exec(
         "UPDATE checkpoint_state SET snapshot = ? WHERE id = 1",
@@ -810,6 +814,7 @@ describe("チェックポイント: 旧名で保存された行の読み出し",
             trap: { s3Used: true, s4Used: true },
             dataRevision: 2,
             data: { s3Penalty: "done", s4Penalty: "in-progress", s35Summary: "done" },
+            ...overrides,
           },
         }),
       );
@@ -833,6 +838,48 @@ describe("チェックポイント: 旧名で保存された行の読み出し",
       },
     });
   });
+
+  it.each([
+    ["trapを持たない", { trap: undefined }, { s3Used: false, s5Used: false }, "500190"],
+    ["s3Usedだけ持つ", { trap: { s3Used: true } }, { s3Used: true, s5Used: false }, "500191"],
+    ["trapが空", { trap: {} }, { s3Used: false, s5Used: false }, "500192"],
+  ])(
+    "罠フラグが%sの旧snapshotでも、両キーを揃えて復帰できる",
+    async (_name, overrides, expected, teamCode) => {
+      await save(teamCode, { commandId: id(teamCode.slice(3)), expectedRevision: 0 });
+      await writeLegacySnapshot(teamCode, "s5", overrides);
+
+      await expect(load(teamCode)).resolves.toMatchObject({
+        checkpoint: { body: { view: "s6", idsVersion: CHECKPOINT_IDS_VERSION, trap: expected } },
+      });
+    },
+  );
+
+  it("dataを持たない旧snapshotでも、空dataを補って復帰できる", async () => {
+    const teamCode = "500193";
+    await save(teamCode, { commandId: id("193"), expectedRevision: 0 });
+    await writeLegacySnapshot(teamCode, "s4", { data: undefined });
+
+    await expect(load(teamCode)).resolves.toMatchObject({
+      checkpoint: { body: { view: "s5", data: {} } },
+    });
+  });
+
+  it.each([
+    [1, "500194"],
+    ["2", "500195"],
+    [null, "500196"],
+  ])(
+    "版マーカーが %s のsnapshotは読み替えず、読み出しで不正として扱う",
+    async (idsVersion, teamCode) => {
+      await save(teamCode, { commandId: id(teamCode.slice(3)), expectedRevision: 0 });
+      await writeLegacySnapshot(teamCode, "s4", { idsVersion });
+
+      // schemaがz.literal(2)で弾き、DOのparseが例外になる＝Workerは503へ倒す。
+      const response = await handleCheckpointState(env, teamCode, now);
+      expect(response.status).toBe(503);
+    },
+  );
 
   it("読み替えた状態の上へ、新名の保存をそのまま重ねられる", async () => {
     const teamCode = "500173";
@@ -935,6 +982,60 @@ describe("チェックポイント: 旧UIのタブから届く旧形式のPOST",
     const { snapshot } = saveCheckpointResultSchema.parse(await resent.json());
     expect(snapshot.revision).toBe(1);
     expect(snapshot.body.view).toBe("s6");
+  });
+
+  it.each([
+    ["trapを持たない", "trap", { s3Used: false, s5Used: false }, "500185"],
+    ["s3Usedだけ持つ", { s3Used: true }, { s3Used: true, s5Used: false }, "500186"],
+    ["trapが空", {}, { s3Used: false, s5Used: false }, "500187"],
+  ])(
+    "罠フラグが%sの旧形式POSTでも、両キーを揃えて200で保存する",
+    async (_name, trap, expected, teamCode) => {
+      const raw: Record<string, unknown> = legacyPostBody("s5");
+      if (trap === "trap") delete raw.trap;
+      else raw.trap = trap;
+
+      const response = await save(teamCode, {
+        commandId: id(teamCode.slice(3)),
+        expectedRevision: 0,
+        rawBody: raw,
+      });
+
+      expect(response.status).toBe(200);
+      await expect(load(teamCode)).resolves.toMatchObject({
+        checkpoint: { body: { view: "s6", idsVersion: CHECKPOINT_IDS_VERSION, trap: expected } },
+      });
+    },
+  );
+
+  it("dataを持たない旧形式POSTでも、空dataを補って200で保存する", async () => {
+    const raw: Record<string, unknown> = legacyPostBody("s4");
+    delete raw.data;
+
+    const response = await save("500188", {
+      commandId: id("188"),
+      expectedRevision: 0,
+      rawBody: raw,
+    });
+
+    expect(response.status).toBe(200);
+    await expect(load("500188")).resolves.toMatchObject({
+      checkpoint: { body: { view: "s5", data: {} } },
+    });
+  });
+
+  it.each([
+    [1, "500196"],
+    ["2", "500197"],
+    [null, "500198"],
+  ])("版マーカーが %s のPOSTは読み替えず400で弾く", async (idsVersion, teamCode) => {
+    const response = await save(teamCode, {
+      commandId: id(teamCode.slice(3)),
+      expectedRevision: 0,
+      rawBody: { ...legacyPostBody("s4"), idsVersion },
+    });
+
+    expect(response.status).toBe(400);
   });
 
   it("旧形式でも画面idそのものが未知なら従来どおり400で弾く", async () => {

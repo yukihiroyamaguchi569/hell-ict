@@ -53,48 +53,54 @@ const LEGACY_DATA_KEYS: readonly (readonly [string, string])[] = [
   ["s35Summary", "s4Summary"],
 ];
 
-/**
- * 新体系のbodyかどうか。判別は版マーカー（idsVersion）が主で、キーの形は補助。
- *
- * 補助を残すのは、マーカーを入れるより前に新名で保存されたbodyがありうるため
- * ——罠フラグが新名だけを持っていれば、それは振り直し後に書かれたものである。
- * 旧bodyは`trap.s4Used`を持つので、この条件には掛からない。
- */
-const isCurrentIdsBody = (body: Record<string, unknown>): boolean => {
-  if (body.idsVersion === CHECKPOINT_IDS_VERSION) return true;
-  const trap = body.trap;
-  return isRecord(trap) && "s5Used" in trap && !("s4Used" in trap);
-};
+/** 旧bodyの罠フラグ。両キーを必ず揃える——欠けたままだとstrictなschemaが落とし、
+ * 読み替えた意味が無くなる（そのチームは復帰できないままリセットを待つ）。既定はfalseで、
+ * 旧値があればそれで上書きする。値が真偽値でないなど壊れている場合はそのまま残す
+ * ——ここで握り潰すと、壊れた保存が黙って「罠は未発動」として通ってしまう。 */
+const legacyTrap = (trap: unknown): Record<string, unknown> => ({
+  s3Used: false,
+  s5Used: false,
+  ...(isRecord(trap) ? renameKey(trap, "s4Used", "s5Used") : {}),
+});
 
-/** 版マーカーを立てる。すでに立っていれば同じオブジェクトを返す（再適用で変化しない）。 */
-const withIdsVersion = (body: Record<string, unknown>): Record<string, unknown> =>
-  body.idsVersion === CHECKPOINT_IDS_VERSION
-    ? body
-    : { ...body, idsVersion: CHECKPOINT_IDS_VERSION };
+/** 旧bodyのdata。キーごと無ければ空で補い、あれば旧名のキーだけ付け替える。
+ * オブジェクトでない値は直さずそのまま返す（壊れた値はschemaに落とさせる）。 */
+const legacyData = (body: Record<string, unknown>): unknown => {
+  if (!("data" in body)) return {};
+  const data = body.data;
+  return isRecord(data)
+    ? LEGACY_DATA_KEYS.reduce((acc, [from, to]) => renameKey(acc, from, to), data)
+    : data;
+};
 
 /**
  * 旧名で保存されたチェックポイントのbodyを新名へ読み替える。
  *
- * 版マーカーが無ければ旧体系と決める。マーカーはこちらが書くものなので、書き忘れは
- * 「旧体系として読む」側へ倒れる——キーの有無だけで当てにいくと、旧bodyが罠フラグを
- * 欠いていた場合や将来trapの形が変わった場合に判別が黙って外れ、画面idが旧名のまま
- * strictなschemaへ渡って、そのチームが復帰できなくなる。
+ * 旧体系と見なすのは版マーカー（idsVersion）が無いときだけ。マーカーはこちらが書く
+ * ものなので、書き忘れは「旧体系として読む」側へ倒れる——キーの有無だけで当てにいくと、
+ * 旧bodyが罠フラグを欠いていた場合や将来trapの形が変わった場合に判別が黙って外れ、
+ * 画面idが旧名のままstrictなschemaへ渡って、そのチームが復帰できなくなる。
  *
- * 検証はしない。呼び出し側が従来どおりschemaへ通す——ここで直せない壊れた値は、
- * 読み替えても壊れたままであるべきで、この関数が握り潰す筋合いは無い。
+ * 逆に、マーカーが立っていれば値が2でなくても手を触れない。将来の版や壊れた値を
+ * 旧形式として読み替えると、知らない版のbodyを黙って作り替えてしまう——そのまま
+ * schemaへ渡し、`z.literal`に拒否させるのが正しい。
+ *
+ * 画面id・罠・dataの読み替え以外の検証はしない。呼び出し側が従来どおりschemaへ通す。
  */
 export const normalizeLegacyCheckpointBody = (body: unknown): unknown => {
-  if (!isRecord(body)) return body;
-  if (isCurrentIdsBody(body)) return withIdsVersion(body);
+  if (!isRecord(body) || body.idsVersion !== undefined) return body;
+  const trap = body.trap;
+  // マーカーを入れるより前に新名で保存されたbody。罠フラグが新名だけを持つことで分かる。
+  if (isRecord(trap) && "s5Used" in trap && !("s4Used" in trap))
+    return { ...body, idsVersion: CHECKPOINT_IDS_VERSION };
   const view = typeof body.view === "string" ? LEGACY_VIEW_SHIFT[body.view] : undefined;
-  return withIdsVersion({
+  return {
     ...body,
     ...(view === undefined ? {} : { view }),
-    ...(isRecord(body.trap) ? { trap: renameKey(body.trap, "s4Used", "s5Used") } : {}),
-    ...(isRecord(body.data)
-      ? { data: LEGACY_DATA_KEYS.reduce((acc, [from, to]) => renameKey(acc, from, to), body.data) }
-      : {}),
-  });
+    idsVersion: CHECKPOINT_IDS_VERSION,
+    trap: legacyTrap(trap),
+    data: legacyData(body),
+  };
 };
 
 /** `body`を1つ持つ包み（保存済みsnapshot、保存コマンド）の中身を読み替える。 */

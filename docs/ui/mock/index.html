@@ -3791,14 +3791,20 @@
      新名のはず——モックだけ先に配信された場合の受け皿として残す
      （packages/domain/src/legacy-ids.ts と同じ規則）。 */
   function normalizeLegacyCheckpointBody(b) {
-    if (!isPlainObject(b) || b.idsVersion === CHECKPOINT_IDS_VERSION) return b;
+    // マーカーが立っていれば値が 2 でなくても手を触れない。将来の版や壊れた値を
+    // 旧形式として読み替えると、知らない版の body を黙って作り替えてしまう。
+    if (!isPlainObject(b) || b.idsVersion !== undefined) return b;
     const trap = isPlainObject(b.trap) ? b.trap : null;
     const out = Object.assign({}, b, { idsVersion: CHECKPOINT_IDS_VERSION });
     // マーカーを入れる前に新名で保存された body は、罠フラグの形で新体系と分かる。
     if (trap && "s5Used" in trap && !("s4Used" in trap)) return out;
     if (typeof b.view === "string" && LEGACY_VIEW_SHIFT[b.view]) out.view = LEGACY_VIEW_SHIFT[b.view];
-    if (trap) out.trap = renameKey(trap, "s4Used", "s5Used");
-    if (isPlainObject(b.data)) {
+    // 罠フラグは両キーを必ず揃える——欠けたままだと isCheckpointBody が落とし、
+    // 読み替えた意味が無くなる（そのチームは復帰できないまま入室で止まる）。
+    out.trap = Object.assign({ s3Used: false, s5Used: false },
+      trap ? renameKey(trap, "s4Used", "s5Used") : null);
+    if (!("data" in b)) out.data = {};
+    else if (isPlainObject(b.data)) {
       out.data = renameKey(renameKey(b.data, "s4Penalty", "s5Penalty"), "s35Summary", "s4Summary");
     }
     return out;

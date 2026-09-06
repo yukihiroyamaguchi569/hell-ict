@@ -109,8 +109,10 @@ export const checkpointBodySchema = z
     // 既知の画面idだけを受ける。自由文字列だと表示用の列がPIIの抜け道になる。
     view: viewIdSchema,
     // 画面idの体系の版。省略は「読み替え済み」として版2で埋める——ここへ届く前に
-    // normalizeLegacyCheckpointBodyを通す約束なので、素の旧bodyがこの既定に
-    // 救われることはない（旧bodyは罠フラグの新名を持たず、この後で必ず落ちる）。
+    // normalizeLegacyCheckpointBodyを通す約束で、あちらはマーカーの無いbodyを必ず
+    // 旧体系として直したうえでマーカーを立てるので、素の旧bodyがこの既定に
+    // 救われることはない。2以外の値（将来の版、壊れた値）はここで拒否する
+    // ——読み替え側もマーカーが立っているbodyには手を触れない。
     idsVersion: z.literal(CHECKPOINT_IDS_VERSION).default(CHECKPOINT_IDS_VERSION),
     pos: z.number().int().min(0).max(7),
     elapsedMs: z.number().int().nonnegative().max(CHECKPOINT_ELAPSED_MAX_MS),
