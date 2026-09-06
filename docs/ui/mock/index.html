@@ -808,6 +808,11 @@
    どの棚がどの病棟のものかは棚の見出しが持つ。 */
 .bottles .wname { font-size: 11px; font-weight: 700; letter-spacing: .08em; color: var(--fg-muted); margin-bottom: 4px; }
 .bottles .row { display: grid; grid-template-columns: repeat(20, 1fr); gap: 6px; }
+/* 追加分が湧いた瞬間だけ、その病棟の棚を滑り込ませる。再描画のたびに繰り返さない
+   ——付け外しは s3FreshWard（later() で落とす）が持つ。prefers-reduced-motion では
+   later() が即時に走るので、結果として動かない。 */
+.bottles .ward.fresh { animation: wardIn .45s ease both; }
+@keyframes wardIn { from { opacity: 0; transform: translateY(-12px); } to { opacity: 1; transform: none; } }
 .bottles button {
   position: relative;
   aspect-ratio: 1 / 1.7; background: var(--bg); border: 1px solid var(--rule);
@@ -840,6 +845,9 @@
    文言は追加分が湧いたときに .t だけ差し替わるので、イラストは差し替えに巻き込まれない。 */
 .lock .note.icon { display: flex; align-items: center; gap: 12px; }
 .lock .note.icon img { flex: 0 0 auto; height: 54px; width: auto; }
+/* 追加分が湧いたとき、文言の差し替えだけでは気づかれない。1度だけ色を振る。 */
+.lock .note.flash { animation: noteFlash 1.1s ease 1; }
+@keyframes noteFlash { 0%, 100% { color: var(--fg); } 22%, 62% { color: var(--warn); } }
 /* 注記と進み具合を1行に並べる。棚の高さを稼ぐためでもあるが、主目的は
    「全◯本」が 20→30→40 と増えるのを注記のすぐ隣で見せること——追加分の到着を
    文言と数字の両方で示す。 */
@@ -2460,6 +2468,10 @@
      40回鳴るので音量は他より明確に控えめにする——補充より音が主役になってしまう。 */
   const S3_BOTTLE_SFX = "decision1";
   const S3_BOTTLE_SFX_VOL = 0.22;
+  /* 追加分が湧いたときの音。罠の一撃（don-1）とも急変の帯（emergency-alert1）とも
+     別のものにする——湧いた追加分は「あと少しが折られる」ので、差し戻しと同じ音でよい。 */
+  const S3_BOTTLE_WAVE_SFX = "cancel";
+  const S3_BOTTLE_WAVE_FLASH_MS = 1200;   // 注記の点滅・新しい棚のスライドインの長さ
 
   /* 旧: 苅部さんの1段目トリガーは時限（S3_KARUBE_DELAY秒後に自動発火）だった。
      2026-08-22 ユーザー決定で廃止——時限トリガーは、チームが罠を踏む前に警告が
@@ -6529,6 +6541,9 @@
   let s3KarubeAutoNudged = false;
   let s3Bottles = [];        // 拡大対応業務のボトル { ward, state: todo|filling|done }
   let s3BottleWaves = [];    // まだ湧いていない追加分（S3_BOTTLE_WAVES の残り。湧いたら取り除く）
+  // 湧いたばかりの病棟。drawBottles() は毎回作り直すので、スライドインを1度で
+  // 終わらせるにはDOMではなくここで持つ必要がある（later() で落とす）。
+  let s3FreshWard = null;
 
   function s3Stop() {
     // 苅部さんの1段目トリガーは later()（clearLater() で回収される）ので、
@@ -6747,6 +6762,7 @@
     s3Bottles = [];
     for (let i = 0; i < S3_BOTTLES_5A; i++) s3Bottles.push({ ward: "5A", state: "todo" });
     s3BottleWaves = S3_BOTTLE_WAVES.slice();
+    s3FreshWard = null;
 
     // 見出しは Stage 4 の罰（startS4Penalty）が同じ器を書き換えるので、毎回セットし直す。
     $("lock-hd").textContent = "拡大対応業務：🧴 消毒液ボトルの補充";
@@ -6803,7 +6819,7 @@
       w.items.push({ b, i });
     });
     host.innerHTML = wards.map((w) =>
-      '<div class="ward">' +
+      '<div class="ward' + (w.ward === s3FreshWard ? " fresh" : "") + '">' +
       '<div class="wname">' + esc(w.ward) + "病棟</div>" +
       '<div class="row">' + w.items.map(({ b, i }) =>
         '<button data-i="' + i + '" class="' + (b.state === "todo" ? "" : b.state) + '"' +
@@ -6839,6 +6855,18 @@
         for (let k = 0; k < wave.count; k++) s3Bottles.push({ ward: wave.ward, state: "todo" });
         const n = $("penalty-host") && $("penalty-host").querySelector(".note .t");
         if (n) n.textContent = wave.ward + "病棟からも依頼が来ています。あわせて補充してください。";
+        // 文言の差し替えだけでは気づかれない（棚を見ている）。注記を1度だけ振り、
+        // 湧いた棚を滑り込ませ、音を鳴らす——気づかせるのが目的で、慰めではない。
+        sfx(S3_BOTTLE_WAVE_SFX);
+        const note = $("bottle-note");
+        if (note) note.classList.add("flash");
+        s3FreshWard = wave.ward;
+        later(() => {
+          if (!$("bottles")) return;
+          if ($("bottle-note")) $("bottle-note").classList.remove("flash");
+          s3FreshWard = null;
+          drawBottles();
+        }, S3_BOTTLE_WAVE_FLASH_MS);
       }
       drawBottles();
       // 全部詰め終わったらそれで終わり。補充は補充であって、継ぎ足しではない——
@@ -6855,6 +6883,7 @@
     $("penalty-host").innerHTML = "";
     $("penalty-host").classList.remove("shelf");
     s3Bottles = [];
+    s3FreshWard = null;
     if (view !== "s3") return;   // 判断C
     // Stage 3 の提出フォームへ復帰。入力は保持する（Stage 2 §NG時と同じ理由）。
     $("s3-verdict").innerHTML = "";
