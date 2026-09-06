@@ -93,6 +93,8 @@ CIでは `pnpm verify` を、コードに影響しうる変更を含む全PRで�
 
 優先順位は、`docs/企画書.md`、通奏低音、各ステージのscenario/uiの順とする。
 
+> 📌 **UI改修フェーズはモックが正典**（2026-09-06 ユーザー決定）。`docs/ui/mock/index.html` を直すとき、`docs/企画書.md`、`docs/scenario/`、`docs/ui/*.md`、`docs/character/`、`docs/materials/README.md` は**更新も整合確認もしない**。モックと文書の食い違いはレビューでも指摘しない。上記の優先順位は、本番実装で設計を読み直す段になってから再び適用する。
+
 | やること | 読むもの |
 |---|---|
 | 本番基盤・技術構成 | `docs/企画書.md` §7〜9 |
