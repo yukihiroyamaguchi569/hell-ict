@@ -2,10 +2,12 @@ import { env, exports } from "cloudflare:workers";
 import { createExecutionContext, listDurableObjectIds, runInDurableObject } from "cloudflare:test";
 import {
   chatSnapshotSchema,
+  createThreadFingerprint,
   createThreadResultSchema,
   httpErrorSchema,
   leaderboardSnapshotSchema,
 } from "@hell-ict/domain";
+import type { ChatThreadKind } from "@hell-ict/domain";
 import { FakeAiGateway } from "@hell-ict/domain/fakes";
 import type { FakeAiOutcome } from "@hell-ict/domain/fakes";
 import { describe, expect, it, vi } from "vitest";
@@ -646,20 +648,70 @@ describe("スレッド数の上限", () => {
     return chatSnapshotSchema.parse(await response.json()).threads.length;
   };
 
+  /**
+   * スレッドの作成を`count`回、DOの中で回す。返すのは各回で実際にスレッドが
+   * 増えたか（本番の`createThread`が返すcreatedフラグ）。
+   *
+   * 呼ぶのはWorkerのHTTPハンドラが呼ぶのと同じ`createThread`で、上限判定も
+   * 同titleのstage抑止も冪等台帳もそのまま通る。違うのはDOの中でループを回す点だけで、
+   * Workerとの往復は1回で済む。上限（manual 25本、stage 8本）ぶんHTTPで作って枠を
+   * 埋めると、1テストの所要時間が本番の定数に比例して積み上がり、遅いランナーでは
+   * vitestの既定タイムアウト（5秒）へ近づいてフレークになる。
+   */
+  const createThreadsInDurableObject = (
+    teamCode: string,
+    kind: ChatThreadKind,
+    count: number,
+    titleOf: (index: number) => string,
+  ): Promise<boolean[]> =>
+    runInDurableObject(env.TEAM_ROOM.getByName(teamCode), async (instance) => {
+      const created: boolean[] = [];
+      for (let index = 0; index < count; index += 1) {
+        const title = titleOf(index);
+        const outcome = await instance.createThread(
+          teamCode,
+          { type: "create-thread", commandId: crypto.randomUUID(), title, kind },
+          await createThreadFingerprint({ title, kind }),
+        );
+        // 上限超過・conflict・世代不一致はここでは想定外。黙って枠が埋まらないまま
+        // 進むと、境界を見ているつもりのテストが別の場所を見ることになる。
+        if (!("created" in outcome)) {
+          throw new Error(`スレッドを作成できませんでした（#${String(index)}）。`);
+        }
+        created.push(outcome.created);
+      }
+      return created;
+    });
+
+  /** `kind`の枠を`count`本ぶん消費した状態にする。実際に増えたことまで確かめる。 */
+  const fillThreadBudget = async (
+    teamCode: string,
+    kind: ChatThreadKind,
+    count: number,
+  ): Promise<void> => {
+    const created = await createThreadsInDurableObject(
+      teamCode,
+      kind,
+      count,
+      (index) => `枠埋め${String(index)}`,
+    );
+    expect(created).toEqual(Array.from({ length: count }, () => true));
+  };
+
   it("手動スレッドは上限まで作れ、超えた分は409でDOに保存しない", async () => {
     await session("500040");
     // 入室時点のメインスレッドはkindを持たない＝manualとして数える。
     const initial = await threadsOf("500040");
     expect(initial).toBe(1);
 
-    for (let index = initial; index < MAX_MANUAL_THREADS_PER_TEAM; index += 1) {
-      const response = await createThread(
-        "500040",
-        messageCommandId(2000 + index),
-        `副${String(index)}`,
-      );
-      expect(response.status, `#${String(index)}`).toBe(200);
-    }
+    // HTTP経路の作成でもmanual枠が減ることを1本目で押さえる。
+    const first = await createThread("500040", messageCommandId(2000), "副0");
+    expect(first.status).toBe(200);
+    // 残りはDOの中でまとめて埋め、上限の1本手前で止める。
+    await fillThreadBudget("500040", "manual", MAX_MANUAL_THREADS_PER_TEAM - initial - 2);
+    // 上限ちょうどの1本はまだ作れる。境界の手前側。
+    const last = await createThread("500040", messageCommandId(2001), "副last");
+    expect(last.status).toBe(200);
 
     const blocked = await createThread("500040", messageCommandId(2100), "あふれる");
     expect(blocked.status).toBe(409);
@@ -672,9 +724,7 @@ describe("スレッド数の上限", () => {
   it("手動を使い切ってもステージ用スレッドは作れる（枠は独立）", async () => {
     await session("500042");
     const initial = await threadsOf("500042");
-    for (let index = initial; index < MAX_MANUAL_THREADS_PER_TEAM; index += 1) {
-      await createThread("500042", messageCommandId(2500 + index), `副${String(index)}`);
-    }
+    await fillThreadBudget("500042", "manual", MAX_MANUAL_THREADS_PER_TEAM - initial);
     expect((await createThread("500042", messageCommandId(2600), "あふれる")).status).toBe(409);
 
     // 手動が満杯でも、ステージ進行は止まらない。
@@ -685,15 +735,13 @@ describe("スレッド数の上限", () => {
 
   it("ステージ用スレッドは上限を超えると409で、文言が手動と違う", async () => {
     await session("500043");
-    for (let index = 0; index < MAX_STAGE_THREADS_PER_TEAM; index += 1) {
-      const response = await createThread(
-        "500043",
-        messageCommandId(2700 + index),
-        `Stage ${String(index)}`,
-        "stage",
-      );
-      expect(response.status, `#${String(index)}`).toBe(200);
-    }
+    const first = await createThread("500043", messageCommandId(2700), "Stage 0", "stage");
+    expect(first.status).toBe(200);
+    // 残りのステージ枠はDOの中で埋め、上限の1本手前で止める。
+    await fillThreadBudget("500043", "stage", MAX_STAGE_THREADS_PER_TEAM - 2);
+    // 上限ちょうどの1本はまだ作れる。境界の手前側。
+    const last = await createThread("500043", messageCommandId(2701), "Stage last", "stage");
+    expect(last.status).toBe(200);
 
     const blocked = await createThread("500043", messageCommandId(2800), "Stage 9", "stage");
     expect(blocked.status).toBe(409);
@@ -710,16 +758,15 @@ describe("スレッド数の上限", () => {
     await session("500044");
     const created = await createThread("500044", messageCommandId(2900), "副");
     expect(created.status).toBe(200);
-    // manual枠だけが減っているので、ステージ枠は満額残っている。
-    for (let index = 0; index < MAX_STAGE_THREADS_PER_TEAM; index += 1) {
-      const response = await createThread(
-        "500044",
-        messageCommandId(2910 + index),
-        `Stage ${String(index)}`,
-        "stage",
-      );
-      expect(response.status, `#${String(index)}`).toBe(200);
-    }
+    // manual枠だけが減っているので、ステージ枠は満額残っている。上限の1本手前まで
+    // DOの中で埋め、最後の1本がHTTPで通ることを境界の手前側として見る。
+    await fillThreadBudget("500044", "stage", MAX_STAGE_THREADS_PER_TEAM - 1);
+    const last = await createThread("500044", messageCommandId(2910), "Stage last", "stage");
+    expect(last.status).toBe(200);
+    // ここで初めて満杯になる。kindを送らない作成がステージ枠を1つでも食っていれば、
+    // 直前の1本が409になっていたはずである。
+    const blocked = await createThread("500044", messageCommandId(2911), "Stage 9", "stage");
+    expect(blocked.status).toBe(409);
   });
 
   it("同じcommandIdで別のタイトルのスレッドを作ると409 conflict", async () => {
@@ -777,15 +824,18 @@ describe("スレッド数の上限", () => {
 
   it("同titleのstageを重ねてもstage枠は1本しか消費しない", async () => {
     await session("500048");
-    for (let index = 0; index < MAX_STAGE_THREADS_PER_TEAM + 3; index += 1) {
-      const response = await createThread(
-        "500048",
-        messageCommandId(3300 + index),
-        "Stage 1",
-        "stage",
-      );
-      expect(response.status, `#${String(index)}`).toBe(200);
-    }
+    const first = await createThread("500048", messageCommandId(3300), "Stage 1", "stage");
+    expect(first.status).toBe(200);
+
+    // 同じtitleを、ステージ枠を超える回数だけ重ねる。1本も増えないので、createdは
+    // すべてfalseになる。1回でも増えていれば枠を食い、この後の1本が409になる。
+    const repeats = MAX_STAGE_THREADS_PER_TEAM + 2;
+    const created = await createThreadsInDurableObject("500048", "stage", repeats, () => "Stage 1");
+    expect(created).toEqual(Array.from({ length: repeats }, () => false));
+
+    // 枠が減っていないので、HTTP経路の作成も409にならない。
+    const again = await createThread("500048", messageCommandId(3301), "Stage 1", "stage");
+    expect(again.status).toBe(200);
     // 入室時のメイン1本＋Stage 1の1本だけ。
     await expect(threadsOf("500048")).resolves.toBe(2);
   });
@@ -799,9 +849,7 @@ describe("スレッド数の上限", () => {
     const firstBody = await firstResponse.json();
 
     const initial = await threadsOf("500041");
-    for (let index = initial; index < MAX_MANUAL_THREADS_PER_TEAM; index += 1) {
-      await createThread("500041", messageCommandId(2300 + index), `副${String(index)}`);
-    }
+    await fillThreadBudget("500041", "manual", MAX_MANUAL_THREADS_PER_TEAM - initial);
     expect((await createThread("500041", messageCommandId(2400), "あふれる")).status).toBe(409);
 
     // 上限に達した後でも、既に処理したcommandIdの再送は409にせず同じ結果を返す。
