@@ -70,6 +70,18 @@ pnpm verify:full
    - **`teamMax`が配布したチーム番号の最大以上であること。** `"invalid"`なら`TEAM_MAX`の書き損じで全チームが入室できない。既定のまま運用するなら`100`と出る。
 5. **`EVENT_NO`と一致するコード（当日の開催回が第2回なら`020001`）で実際に入室できることを確認する。** healthは開催回の値を出さないので、設定した値が合っているかはこれでしか分からない。あわせて、別の開催回のコード（`010001`など）や上限を超えるチーム番号が404で弾かれることも確認する。素の`curl -X POST https://<worker>/api/session -d '{"teamCode":"100001"}'`はOriginが無いので403になるが、これはガードが配線されている確認であって防御の強さの確認ではない（`-H "Origin: https://<worker>"`を付ければ通る。上の注記を参照）。
 
+6. **リハーサルが終わった後、本番の直前にD1の記録テーブルを空にする。** リハーサルの行が残ったまま本番へ入ると、`GET /api/progress/summary`が毎回その分まで読み、無料プランのD1 rows read（500万/日）を余計に削る（[Issue #125](https://github.com/yukihiroyamaguchi569/hell-ict/issues/125)）。空にするのはリハーサルの後・本番の入室前の1回だけで、**本番の進行中は絶対に実行しない**（当日の記録が消え、ダッシュボードから全チームが消える）。
+
+   ```sh
+   cd apps/worker
+   pnpm exec wrangler d1 execute hell-ict-testplay --remote --command "DELETE FROM progress_events"
+   pnpm exec wrangler d1 execute hell-ict-testplay --remote --command "DELETE FROM activity_events"
+   ```
+
+   rows readを削っているのは`progress_events`だけで、`activity_events`はサマリーが読まない——こちらは本番のログにリハーサル分が混ざらないようにするための削除である。**リハーサルのログを分析に使うなら、消す前に[ログ分析手順](testplay/ログ分析手順.md)でエクスポートしておく。**
+
+   `migrations`テーブルは消さない（消しても害はないが、PII伏せ字化の移行がもう一度走るだけである）。**GMのリセット世代（下記）はDurable Object側が持っており、この削除では戻らない。** `progress_events`の`reset`行が消えるので集計の下限は0へ戻るが、以後に積まれる行の世代はDOが持つ現在の世代（0以上）なので、位置の集計は正しく動く。リハーサルでリセットを使った端末は、本番前にどのみちリロードが要る。
+
 ### デプロイの流れ
 
 **`main`へマージすると、GitHub Actions（`.github/workflows/deploy.yml`）が`pnpm verify`を通したうえで本番Worker（`hell-ict`）へ自動でデプロイする。** 手元で`wrangler deploy`を打つ必要はない。`docs/`だけの変更でも走る——配信するモックHTMLは`docs/ui/mock/index.html`にあり、`pnpm build:testplay`がそれを取り込むためである。
