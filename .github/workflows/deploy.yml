@@ -1,0 +1,85 @@
+name: 本番デプロイ
+
+# mainへマージしたら本番Worker（hell-ict）へ自動でデプロイする。
+# paths-ignoreは付けない——配信するモックは docs/ui/mock/index.html にあり、
+# docs配下だけの変更でもデプロイが要る（scripts/build-testplay.shが取り込む）。
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+# 同時に複数のデプロイを走らせない。後から来たものを捨てると古い版が本番に残るので、
+# キャンセルはせず順番に流す。
+concurrency:
+  group: deploy-production
+  cancel-in-progress: false
+
+jobs:
+  # 検証を通ってからデプロイする。verify.ymlのverifyジョブと同じ手順。
+  verify:
+    name: pnpm verify
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          persist-credentials: false
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 11.22.0
+      - uses: actions/setup-node@v6
+        with:
+          node-version: 24
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm exec playwright install --with-deps chromium
+      - run: pnpm verify
+
+  deploy:
+    name: wrangler deploy
+    needs: verify
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          persist-credentials: false
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 11.22.0
+      - uses: actions/setup-node@v6
+        with:
+          node-version: 24
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      # 配信するモックHTML・画像・ダッシュボードを apps/worker/public/ へ生成する。
+      # wrangler.jsoncのassets.directoryがこのディレクトリを指している。
+      - run: pnpm build:testplay
+      - uses: cloudflare/wrangler-action@v4
+        with:
+          apiToken: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          accountId: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+          workingDirectory: apps/worker
+          # packageManagerを明示するのは、actionのlockfile検出が
+          # workingDirectory直下しか見ず（pnpm-lock.yamlはリポジトリ直下）、
+          # 既定のnpmへ倒れてwranglerを別途インストールしてしまうため。
+          # pnpmを指定すると`pnpm exec wrangler`で既存の版を見つけ、
+          # apps/worker/package.jsonのdevDependencyがそのまま使われる
+          # （wranglerVersionを指定しないことが「既存を使う」条件）。
+          packageManager: pnpm
+          command: deploy
+      # デプロイ後、入口ガードが本番の設定で立ち上がっているかを確かめる。
+      # eventNoがfalse（EVENT_NO未設定）や"invalid"（書き損じ）なら失敗させる。
+      # 反映に少し間があるので数回だけ待って再試行する。
+      - name: /api/health を確認
+        run: |
+          for i in 1 2 3 4 5; do
+            body=$(curl -fsS https://hell-ict.yukihiroyamaguchi.workers.dev/api/health) && \
+              echo "$body" | jq -e '.status == "ok" and .guards.eventNo == true' >/dev/null && \
+              echo "health ok: $body" && exit 0
+            echo "health not ready (attempt $i): ${body:-<no response>}"
+            sleep 5
+          done
+          echo "::error::/api/health が status=ok / guards.eventNo=true になりません"
+          exit 1
