@@ -615,7 +615,7 @@ describe("活動ログ", () => {
     it("PIIを含む本文はtextを捨て、piiRedactedを立てて記録だけ残す", async () => {
       const response = await postJson(
         "/api/teams/500104/activity",
-        activity({ kind: "submit.s4", view: "s4", text: "渡辺 三郎さんの一覧を提出します" }),
+        activity({ kind: "submit.s5", view: "s5", text: "渡辺 三郎さんの一覧を提出します" }),
       );
       expect(response.status).toBe(200);
 
@@ -631,8 +631,8 @@ describe("活動ログ", () => {
       const response = await postJson(
         "/api/teams/500108/activity",
         activity({
-          kind: "submit.s4",
-          view: "s4",
+          kind: "submit.s5",
+          view: "s5",
           text: "匿名化した一覧を提出します",
           meta: { verdict: "fail", contact: "090-1234-5678" },
         }),
@@ -894,10 +894,25 @@ describe("活動ログ", () => {
     it("既知の画面idは受け付ける", async () => {
       const response = await postJson("/api/teams/500119/activity", {
         ...activity(),
-        view: "s35",
+        view: "s4",
       });
       expect(response.status).toBe(200);
       await expect(rows("500119")).resolves.toHaveLength(1);
+    });
+
+    it("旧UIのタブが送る旧名s35の画面idは、新名s4へ直して受け付ける", async () => {
+      // 1行まるごと捨てると、旧タブのチームの記録だけが分析から抜け落ちる。
+      // kindは値だけでは新旧を判別できないので読み替えない（分析側で時刻で切る）。
+      const response = await postJson("/api/teams/500120/activity", {
+        ...activity(),
+        kind: "verdict.s4",
+        view: "s35",
+      });
+      expect(response.status).toBe(200);
+      const saved = await rows("500120");
+      expect(saved).toHaveLength(1);
+      expect(saved[0]?.view).toBe("s4");
+      expect(saved[0]?.kind).toBe("verdict.s4");
     });
 
     it("上限以内の本文はこれまでどおり処理される", async () => {

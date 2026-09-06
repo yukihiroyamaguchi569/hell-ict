@@ -1,0 +1,280 @@
+import { describe, expect, it } from "vitest";
+
+import { CHECKPOINT_IDS_VERSION, checkpointBodySchema } from "../src/schemas/checkpoint.js";
+import {
+  normalizeLegacyCheckpointBody,
+  normalizeLegacyCheckpointCommand,
+  normalizeLegacyCheckpointSnapshot,
+  normalizeLegacyViewField,
+  normalizeLegacyViewId,
+} from "../src/legacy-ids.js";
+
+/** 2026-09-06の振り直しより前に保存されたbody。版マーカー（idsVersion）を持たない。 */
+const legacyBody = (view: string, data: Record<string, unknown> = {}) => ({
+  view,
+  pos: 5,
+  elapsedMs: 60_000,
+  trap: { s3Used: true, s4Used: true },
+  dataRevision: 3,
+  data,
+});
+
+/** 振り直し後のbody。版マーカーを持つ。 */
+const currentBody = (view: string, data: Record<string, unknown> = {}) => ({
+  view,
+  idsVersion: CHECKPOINT_IDS_VERSION,
+  pos: 5,
+  elapsedMs: 60_000,
+  trap: { s3Used: false, s5Used: false },
+  dataRevision: 3,
+  data,
+});
+
+describe("normalizeLegacyViewId", () => {
+  it("新体系に存在しないs35だけを新名へ読み替える", () => {
+    expect(normalizeLegacyViewId("s35")).toBe("s4");
+  });
+
+  it.each(["entry", "welcome", "inbox", "s1", "s2", "unlock", "s3", "s4", "s5", "s6", "final"])(
+    "新名の%sは素通りさせる",
+    (view) => {
+      expect(normalizeLegacyViewId(view)).toBe(view);
+    },
+  );
+
+  it("s4・s5は新旧どちらの体系にもあるので、値だけではずらさない", () => {
+    // 一律にずらすと、振り直し後に書かれた行まで1つ後ろへ動いてしまう。
+    expect(normalizeLegacyViewId("s4")).toBe("s4");
+    expect(normalizeLegacyViewId("s5")).toBe("s5");
+  });
+
+  it("画面idでない文字列も落とさずそのまま返す（判定は呼び出し側のschemaに任せる）", () => {
+    expect(normalizeLegacyViewId("")).toBe("");
+    expect(normalizeLegacyViewId("s99")).toBe("s99");
+  });
+});
+
+describe("normalizeLegacyViewField", () => {
+  it("viewを持つオブジェクトの旧名だけを直し、他のキーは触らない", () => {
+    expect(
+      normalizeLegacyViewField({ teamCode: "123456", view: "s35", kind: "clear", pos: 4 }),
+    ).toEqual({ teamCode: "123456", view: "s4", kind: "clear", pos: 4 });
+  });
+
+  it("判別できないs4・s5はそのまま通す", () => {
+    expect(normalizeLegacyViewField({ view: "s4" })).toEqual({ view: "s4" });
+    expect(normalizeLegacyViewField({ view: "s5" })).toEqual({ view: "s5" });
+  });
+
+  it.each([null, undefined, "s35", 42, [], { view: 7 }, {}])(
+    "viewを持たない・形が想定外の入力は手を触れずに返す（%s）",
+    (input) => {
+      expect(normalizeLegacyViewField(input)).toEqual(input);
+    },
+  );
+});
+
+describe("normalizeLegacyCheckpointBody", () => {
+  it.each([
+    ["s35", "s4"],
+    ["s4", "s5"],
+    ["s5", "s6"],
+  ])("版マーカーが無ければ旧体系として画面id %s を %s へずらす", (before, after) => {
+    const normalized = normalizeLegacyCheckpointBody(legacyBody(before));
+    expect(checkpointBodySchema.parse(normalized).view).toBe(after);
+  });
+
+  it.each(["entry", "welcome", "inbox", "s1", "s2", "unlock", "s3", "final"])(
+    "振り直しの対象外である%sは旧bodyでも動かさない",
+    (view) => {
+      const normalized = normalizeLegacyCheckpointBody(legacyBody(view));
+      expect(checkpointBodySchema.parse(normalized).view).toBe(view);
+    },
+  );
+
+  it("読み替えたbodyには版マーカーが立つ", () => {
+    const normalized = checkpointBodySchema.parse(normalizeLegacyCheckpointBody(legacyBody("s4")));
+    expect(normalized.idsVersion).toBe(CHECKPOINT_IDS_VERSION);
+  });
+
+  it("罠フラグのキーを新名へ移し、値と他のキーは保つ", () => {
+    const normalized = checkpointBodySchema.parse(normalizeLegacyCheckpointBody(legacyBody("s4")));
+    expect(normalized.trap).toEqual({ s3Used: true, s5Used: true });
+    expect(normalized.pos).toBe(5);
+    expect(normalized.elapsedMs).toBe(60_000);
+    expect(normalized.dataRevision).toBe(3);
+  });
+
+  it("dataのステージ名キーも新名へ移す（値は不透明なまま）", () => {
+    const normalized = normalizeLegacyCheckpointBody(
+      legacyBody("s4", { s3Penalty: "done", s4Penalty: "in-progress", s35Summary: "done" }),
+    );
+    expect(checkpointBodySchema.parse(normalized).data).toEqual({
+      s3Penalty: "done",
+      s5Penalty: "in-progress",
+      s4Summary: "done",
+    });
+  });
+
+  it("旧キーを残さない（strictなschemaが弾く形にしない）", () => {
+    const normalized = normalizeLegacyCheckpointBody(legacyBody("s4", { s4Penalty: "done" }));
+    expect(checkpointBodySchema.safeParse(normalized).success).toBe(true);
+  });
+
+  it("dataが空でも落ちず、画面idと罠だけを直す", () => {
+    const normalized = checkpointBodySchema.parse(normalizeLegacyCheckpointBody(legacyBody("s5")));
+    expect(normalized).toMatchObject({
+      view: "s6",
+      trap: { s3Used: true, s5Used: true },
+      data: {},
+    });
+  });
+
+  /** 罠フラグが欠けた旧body。両キーが揃わないとstrictなschemaが落とす。 */
+  const legacyBodyWithTrap = (trap: unknown): Record<string, unknown> => {
+    const base = { ...legacyBody("s5") } as Record<string, unknown>;
+    if (trap === undefined) delete base.trap;
+    else base.trap = trap;
+    return base;
+  };
+
+  it.each([
+    ["trapごと無い", undefined, { s3Used: false, s5Used: false }],
+    ["s3Usedだけ持つ", { s3Used: true }, { s3Used: true, s5Used: false }],
+    ["空オブジェクト", {}, { s3Used: false, s5Used: false }],
+    ["s4Usedだけ持つ", { s4Used: true }, { s3Used: false, s5Used: true }],
+  ])("罠フラグが%sの旧bodyでも、両キーを揃えてschemaを通す", (_name, trap, expected) => {
+    const normalized = normalizeLegacyCheckpointBody(legacyBodyWithTrap(trap));
+    const parsed = checkpointBodySchema.parse(normalized);
+    expect(parsed.trap).toEqual(expected);
+    expect(parsed.view).toBe("s6");
+    expect(parsed.idsVersion).toBe(CHECKPOINT_IDS_VERSION);
+  });
+
+  it.each([
+    ["null", null],
+    ["配列", []],
+    ["文字列", "trap"],
+    ["数値", 0],
+  ])(
+    "trapが%s（存在するがオブジェクトでない）ならそのまま残し、schemaに拒否させる",
+    (_name, trap) => {
+      // 既定値へ置き換えると、壊れた保存が黙って「罠は未発動」として通ってしまう。
+      const normalized = normalizeLegacyCheckpointBody(legacyBodyWithTrap(trap));
+      expect(normalized).toMatchObject({ view: "s6", trap });
+      expect(checkpointBodySchema.safeParse(normalized).success).toBe(false);
+    },
+  );
+
+  it("罠フラグの値が壊れていたら握り潰さず、schemaに落とさせる", () => {
+    // falseで埋め直すと「罠は未発動」として黙って通り、払ったはずの罰が消える。
+    const normalized = normalizeLegacyCheckpointBody(legacyBodyWithTrap({ s4Used: "yes" }));
+    expect(checkpointBodySchema.safeParse(normalized).success).toBe(false);
+  });
+
+  it("旧bodyがdataを持たなくても、空dataを補ってschemaを通す", () => {
+    const withoutData = { ...legacyBody("s4") } as Record<string, unknown>;
+    delete withoutData.data;
+    const parsed = checkpointBodySchema.parse(normalizeLegacyCheckpointBody(withoutData));
+    expect(parsed).toMatchObject({ view: "s5", trap: { s3Used: true, s5Used: true }, data: {} });
+  });
+
+  it.each([
+    ["s4", "s4"],
+    ["s5", "s5"],
+    ["s6", "s6"],
+  ])("版マーカー付きの%sは読み替えず、そのまま同じオブジェクトを返す", (view) => {
+    const body = currentBody(view, { s5Penalty: "none", s4Summary: "none" });
+    expect(normalizeLegacyCheckpointBody(body)).toBe(body);
+  });
+
+  it("マーカー付きbodyへの再適用は何も変えない", () => {
+    const once = normalizeLegacyCheckpointBody(legacyBody("s35"));
+    expect(normalizeLegacyCheckpointBody(once)).toBe(once);
+  });
+
+  it("マーカーを入れる前に新名で保存されたbodyは、罠フラグの形で新体系と見なす", () => {
+    // trapが新名だけを持つ＝振り直し後に書かれたbody。マーカーだけ足して中身は触らない。
+    const body = {
+      view: "s4",
+      pos: 4,
+      elapsedMs: 0,
+      trap: { s3Used: false, s5Used: false },
+      dataRevision: 0,
+      data: {},
+    };
+    expect(normalizeLegacyCheckpointBody(body)).toEqual({
+      ...body,
+      idsVersion: CHECKPOINT_IDS_VERSION,
+    });
+  });
+
+  it.each([1, "2", null, 3, {}])(
+    "版マーカーが %s のbodyは読み替えず、schemaに拒否させる",
+    (idsVersion) => {
+      const body = { ...legacyBody("s4"), idsVersion };
+      // 手を触れない（同じオブジェクトを返す）ので、旧番号のまま拒否される。
+      expect(normalizeLegacyCheckpointBody(body)).toBe(body);
+      expect(checkpointBodySchema.safeParse(body).success).toBe(false);
+    },
+  );
+
+  it.each([null, undefined, 42, "s4", [], { trap: null }, { trap: [] }, { view: "s4" }])(
+    "bodyの形が想定外なら画面idの読み替えだけを試みて落ちない（%s）",
+    (input) => {
+      expect(() => normalizeLegacyCheckpointBody(input)).not.toThrow();
+    },
+  );
+
+  it.each([null, undefined, 42, "s4", []])("recordでない入力はそのまま返す（%s）", (input) => {
+    expect(normalizeLegacyCheckpointBody(input)).toEqual(input);
+  });
+
+  it("dataがオブジェクトでなくても落ちない", () => {
+    const normalized = normalizeLegacyCheckpointBody({ ...legacyBody("s5"), data: "壊れた値" });
+    expect(normalized).toMatchObject({ view: "s6", data: "壊れた値" });
+    expect(checkpointBodySchema.safeParse(normalized).success).toBe(false);
+  });
+});
+
+describe("normalizeLegacyCheckpointSnapshot / Command", () => {
+  it("snapshotのbodyだけを読み替え、外側はそのまま返す", () => {
+    const snapshot = {
+      teamCode: "123456",
+      revision: 7,
+      savedAt: "2026-08-23T01:00:00.000Z",
+      body: legacyBody("s5"),
+    };
+    expect(normalizeLegacyCheckpointSnapshot(snapshot)).toMatchObject({
+      teamCode: "123456",
+      revision: 7,
+      savedAt: "2026-08-23T01:00:00.000Z",
+      body: { view: "s6", trap: { s3Used: true, s5Used: true } },
+    });
+  });
+
+  it("保存コマンドのbodyも同じ規則で読み替える（旧タブからのPOST）", () => {
+    const command = {
+      type: "save-checkpoint",
+      commandId: "00000000-0000-4000-8000-000000000001",
+      expectedRevision: 1,
+      generation: 0,
+      body: legacyBody("s35", { s35Summary: "submitted" }),
+    };
+    expect(normalizeLegacyCheckpointCommand(command)).toMatchObject({
+      type: "save-checkpoint",
+      expectedRevision: 1,
+      body: {
+        view: "s4",
+        idsVersion: CHECKPOINT_IDS_VERSION,
+        trap: { s3Used: true, s5Used: true },
+        data: { s4Summary: "submitted" },
+      },
+    });
+  });
+
+  it.each([null, "壊れた値", 0])("形が想定外なら手を触れずに返す（%s）", (input) => {
+    expect(normalizeLegacyCheckpointSnapshot(input)).toEqual(input);
+    expect(normalizeLegacyCheckpointCommand(input)).toEqual(input);
+  });
+});

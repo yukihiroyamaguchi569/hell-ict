@@ -2,10 +2,11 @@ import { env, exports } from "cloudflare:workers";
 import { runInDurableObject } from "cloudflare:test";
 import {
   CHECKPOINT_ELAPSED_MAX_MS,
+  CHECKPOINT_IDS_VERSION,
   checkpointStateSchema,
   httpErrorSchema,
   saveCheckpointResultSchema,
-  stage4Patient,
+  stage5Patient,
 } from "@hell-ict/domain";
 import type { CheckpointBody, CheckpointState } from "@hell-ict/domain";
 import { describe, expect, it } from "vitest";
@@ -18,9 +19,10 @@ const later = "2026-09-03T10:05:00.000Z";
 
 const body = (overrides: Partial<CheckpointBody> = {}): CheckpointBody => ({
   view: "s3",
+  idsVersion: CHECKPOINT_IDS_VERSION,
   pos: 2,
   elapsedMs: 60_000,
-  trap: { s3Used: false, s4Used: false },
+  trap: { s3Used: false, s5Used: false },
   dataRevision: 0,
   data: { answer: "A" },
   ...overrides,
@@ -207,13 +209,13 @@ describe("チェックポイントAPI", () => {
     await save("500006", {
       commandId: id("106"),
       expectedRevision: 0,
-      body: { trap: { s3Used: true, s4Used: false } },
+      body: { trap: { s3Used: true, s5Used: false } },
     });
 
     const regression = await save("500006", {
       commandId: id("107"),
       expectedRevision: 1,
-      body: { pos: 6, trap: { s3Used: false, s4Used: false } },
+      body: { pos: 6, trap: { s3Used: false, s5Used: false } },
     });
 
     expect(regression.status).toBe(409);
@@ -222,7 +224,7 @@ describe("チェックポイントAPI", () => {
     expect(rejected.code).toBe("trap-regression");
     const state = await load("500006");
     expect(state.checkpoint?.revision).toBe(1);
-    expect(state.checkpoint?.body.trap).toEqual({ s3Used: true, s4Used: false });
+    expect(state.checkpoint?.body.trap).toEqual({ s3Used: true, s5Used: false });
     expect(state.checkpoint?.body.pos).toBe(2);
   });
 
@@ -310,7 +312,7 @@ describe("チェックポイントAPI", () => {
     await save("500007", {
       commandId: id("108"),
       expectedRevision: 0,
-      body: { trap: { s3Used: true, s4Used: false } },
+      body: { trap: { s3Used: true, s5Used: false } },
     });
 
     const next = await save(
@@ -318,7 +320,7 @@ describe("チェックポイントAPI", () => {
       {
         commandId: id("109"),
         expectedRevision: 1,
-        body: { pos: 3, trap: { s3Used: true, s4Used: true } },
+        body: { pos: 3, trap: { s3Used: true, s5Used: true } },
       },
       later,
     );
@@ -359,7 +361,7 @@ describe("チェックポイントAPI", () => {
 
   it("JSONにならない数値（1e400）を含む保存は400で拒否し、保存されない", async () => {
     // JSON.stringifyでは作れない値なので、本文を生のJSONテキストで組み立てる。
-    const raw = `{"type":"save-checkpoint","commandId":"${id("125")}","expectedRevision":0,"body":{"view":"s3","pos":2,"elapsedMs":60000,"trap":{"s3Used":false,"s4Used":false},"data":{"score":1e400}}}`;
+    const raw = `{"type":"save-checkpoint","commandId":"${id("125")}","expectedRevision":0,"body":{"view":"s3","pos":2,"elapsedMs":60000,"trap":{"s3Used":false,"s5Used":false},"data":{"score":1e400}}}`;
     const response = await handleSaveCheckpoint(
       new Request("https://example.test/api/teams/500021/checkpoint", {
         method: "POST",
@@ -594,7 +596,7 @@ describe("チェックポイントAPI", () => {
       const response = await save(teamCode, {
         commandId: id("130"),
         expectedRevision: 0,
-        body: { data: { memo: { deep: `${stage4Patient.name}さんの件` } } },
+        body: { data: { memo: { deep: `${stage5Patient.name}さんの件` } } },
       });
 
       expect(response.status).toBe(422);
@@ -609,7 +611,7 @@ describe("チェックポイントAPI", () => {
       const response = await save(teamCode, {
         commandId: id("131"),
         expectedRevision: 0,
-        body: { data: { [`${stage4Patient.name}さん`]: "A" } },
+        body: { data: { [`${stage5Patient.name}さん`]: "A" } },
       });
 
       expect(response.status).toBe(422);
@@ -640,7 +642,7 @@ describe("チェックポイントAPI", () => {
       const first = await save(teamCode, {
         commandId: id("140"),
         expectedRevision: 0,
-        body: { pos: 3, elapsedMs: 5000, trap: { s3Used: false, s4Used: false } },
+        body: { pos: 3, elapsedMs: 5000, trap: { s3Used: false, s5Used: false } },
       });
       expect(first.status).toBe(200);
 
@@ -648,7 +650,7 @@ describe("チェックポイントAPI", () => {
       const flushed = await save(teamCode, {
         commandId: id("141"),
         expectedRevision: 0,
-        body: { pos: 2, elapsedMs: 1000, trap: { s3Used: true, s4Used: false } },
+        body: { pos: 2, elapsedMs: 1000, trap: { s3Used: true, s5Used: false } },
         flush: true,
       });
 
@@ -657,7 +659,7 @@ describe("チェックポイントAPI", () => {
       expect(state.checkpoint).toMatchObject({
         revision: 2,
         // 罠は残り、posとelapsedMsは後退しない。
-        body: { pos: 3, elapsedMs: 5000, trap: { s3Used: true, s4Used: false } },
+        body: { pos: 3, elapsedMs: 5000, trap: { s3Used: true, s5Used: false } },
       });
     });
 
@@ -668,7 +670,7 @@ describe("チェックポイントAPI", () => {
       const flushed = await save(teamCode, {
         commandId: flushId,
         expectedRevision: 0,
-        body: { trap: { s3Used: true, s4Used: false } },
+        body: { trap: { s3Used: true, s5Used: false } },
         flush: true,
       });
       expect(flushed.status).toBe(200);
@@ -676,7 +678,7 @@ describe("チェックポイントAPI", () => {
       const resent = await save(teamCode, {
         commandId: flushId,
         expectedRevision: 0,
-        body: { trap: { s3Used: true, s4Used: false } },
+        body: { trap: { s3Used: true, s5Used: false } },
         flush: true,
       });
       expect(resent.status).toBe(200);
@@ -712,7 +714,7 @@ describe("チェックポイントAPI", () => {
           view: "s3",
           pos: 2,
           elapsedMs: 1000,
-          trap: { s3Used: false, s4Used: false },
+          trap: { s3Used: false, s5Used: false },
           data: {},
         },
       });
@@ -783,5 +785,298 @@ describe("チェックポイントAPI", () => {
         checkpoint: { body: { dataRevision: 9, data: { s3Penalty: "done" } } },
       });
     });
+  });
+});
+
+/**
+ * 2026-09-06の内部名振り直し（Issue #118）より前に保存されたsnapshotが、
+ * Durable Objectの読み出しで新名へ読み替えられることを見る。旧名のままstrictな
+ * schemaへ渡すと例外になり、そのチームは復帰できないままリセットを待つことになる。
+ */
+describe("チェックポイント: 旧名で保存された行の読み出し", () => {
+  /** 保存済みJSONを、振り直し前の形（trap.s4Used・data.s35Summary）へ差し替える。 */
+  const writeLegacySnapshot = (
+    teamCode: string,
+    view: string,
+    overrides: Record<string, unknown> = {},
+  ): Promise<void> =>
+    runInDurableObject(env.TEAM_ROOM.getByName(teamCode), (_instance, state) => {
+      state.storage.sql.exec(
+        "UPDATE checkpoint_state SET snapshot = ? WHERE id = 1",
+        JSON.stringify({
+          teamCode,
+          revision: 1,
+          savedAt: now,
+          body: {
+            view,
+            pos: 4,
+            elapsedMs: 60_000,
+            trap: { s3Used: true, s4Used: true },
+            dataRevision: 2,
+            data: { s3Penalty: "done", s4Penalty: "in-progress", s35Summary: "done" },
+            ...overrides,
+          },
+        }),
+      );
+    });
+
+  it.each([
+    ["s35", "s4", "500170"],
+    ["s4", "s5", "500171"],
+    ["s5", "s6", "500172"],
+  ])("旧 %s のチェックポイントを新 %s として返す", async (before, after, teamCode) => {
+    await save(teamCode, { commandId: id(teamCode.slice(3)), expectedRevision: 0 });
+    await writeLegacySnapshot(teamCode, before);
+
+    await expect(load(teamCode)).resolves.toMatchObject({
+      checkpoint: {
+        body: {
+          view: after,
+          trap: { s3Used: true, s5Used: true },
+          data: { s3Penalty: "done", s5Penalty: "in-progress", s4Summary: "done" },
+        },
+      },
+    });
+  });
+
+  it.each([
+    ["trapを持たない", { trap: undefined }, { s3Used: false, s5Used: false }, "500190"],
+    ["s3Usedだけ持つ", { trap: { s3Used: true } }, { s3Used: true, s5Used: false }, "500191"],
+    ["trapが空", { trap: {} }, { s3Used: false, s5Used: false }, "500192"],
+  ])(
+    "罠フラグが%sの旧snapshotでも、両キーを揃えて復帰できる",
+    async (_name, overrides, expected, teamCode) => {
+      await save(teamCode, { commandId: id(teamCode.slice(3)), expectedRevision: 0 });
+      await writeLegacySnapshot(teamCode, "s5", overrides);
+
+      await expect(load(teamCode)).resolves.toMatchObject({
+        checkpoint: { body: { view: "s6", idsVersion: CHECKPOINT_IDS_VERSION, trap: expected } },
+      });
+    },
+  );
+
+  it.each([
+    ["null", null, "500200"],
+    ["配列", [], "500201"],
+    ["文字列", "trap", "500202"],
+  ])(
+    "trapが%s（存在するがオブジェクトでない）旧snapshotは補完せず、読み出しで不正として扱う",
+    async (_name, trap, teamCode) => {
+      await save(teamCode, { commandId: id(teamCode.slice(3)), expectedRevision: 0 });
+      await writeLegacySnapshot(teamCode, "s5", { trap });
+
+      const response = await handleCheckpointState(env, teamCode, now);
+      expect(response.status).toBe(503);
+    },
+  );
+
+  it("dataを持たない旧snapshotでも、空dataを補って復帰できる", async () => {
+    const teamCode = "500193";
+    await save(teamCode, { commandId: id("193"), expectedRevision: 0 });
+    await writeLegacySnapshot(teamCode, "s4", { data: undefined });
+
+    await expect(load(teamCode)).resolves.toMatchObject({
+      checkpoint: { body: { view: "s5", data: {} } },
+    });
+  });
+
+  it.each([
+    [1, "500194"],
+    ["2", "500195"],
+    [null, "500196"],
+  ])(
+    "版マーカーが %s のsnapshotは読み替えず、読み出しで不正として扱う",
+    async (idsVersion, teamCode) => {
+      await save(teamCode, { commandId: id(teamCode.slice(3)), expectedRevision: 0 });
+      await writeLegacySnapshot(teamCode, "s4", { idsVersion });
+
+      // schemaがz.literal(2)で弾き、DOのparseが例外になる＝Workerは503へ倒す。
+      const response = await handleCheckpointState(env, teamCode, now);
+      expect(response.status).toBe(503);
+    },
+  );
+
+  it("読み替えた状態の上へ、新名の保存をそのまま重ねられる", async () => {
+    const teamCode = "500173";
+    await save(teamCode, { commandId: id("280"), expectedRevision: 0 });
+    await writeLegacySnapshot(teamCode, "s35");
+
+    // 読み替えたのはキーだけでなく値も。発動済みの罠をfalseへ戻す保存は弾かれる。
+    const regression = await save(
+      teamCode,
+      { commandId: id("282"), expectedRevision: 1, body: { view: "s5", pos: 5 } },
+      later,
+    );
+    expect(regression.status).toBe(409);
+    expect(httpErrorSchema.parse(await regression.json()).code).toBe("trap-regression");
+
+    const response = await save(
+      teamCode,
+      {
+        commandId: id("281"),
+        expectedRevision: 1,
+        body: {
+          view: "s5",
+          pos: 5,
+          trap: { s3Used: true, s5Used: true },
+          dataRevision: 3,
+          data: { s3Penalty: "done", s5Penalty: "done", s4Summary: "done" },
+        },
+      },
+      later,
+    );
+
+    expect(response.status).toBe(200);
+    // 読み替えた罠フラグはそのまま不変条件の基準になる（発動済みは保存要求で戻せない）。
+    await expect(load(teamCode)).resolves.toMatchObject({
+      checkpoint: { revision: 2, body: { view: "s5", trap: { s3Used: true, s5Used: true } } },
+    });
+  });
+});
+
+/**
+ * デプロイ後も開いたままの旧タブ（旧UI）からのPOST。旧UIは保存の失敗を通知せず進むので、
+ * 400で弾くとリロードでデプロイ前の状態まで巻き戻る。入口で新体系へ直して受理する。
+ */
+describe("チェックポイント: 旧UIのタブから届く旧形式のPOST", () => {
+  /** 版マーカーを持たない、振り直し前の形のbody。 */
+  const legacyPostBody = (view: string) => ({
+    view,
+    pos: 4,
+    elapsedMs: 60_000,
+    trap: { s3Used: true, s4Used: false },
+    dataRevision: 1,
+    data: { s3Penalty: "done", s4Penalty: "in-progress", s35Summary: "submitted" },
+  });
+
+  it.each([
+    ["s35", "s4", "500180"],
+    ["s4", "s5", "500181"],
+    ["s5", "s6", "500182"],
+  ])(
+    "旧形式のbody（view %s）を200で受理し、新名 %s で読み戻せる",
+    async (before, after, teamCode) => {
+      const response = await save(teamCode, {
+        commandId: id(teamCode.slice(3)),
+        expectedRevision: 0,
+        rawBody: legacyPostBody(before),
+      });
+
+      expect(response.status).toBe(200);
+      await expect(load(teamCode)).resolves.toMatchObject({
+        checkpoint: {
+          revision: 1,
+          body: {
+            view: after,
+            idsVersion: CHECKPOINT_IDS_VERSION,
+            trap: { s3Used: true, s5Used: false },
+            data: { s3Penalty: "done", s5Penalty: "in-progress", s4Summary: "submitted" },
+          },
+        },
+      });
+    },
+  );
+
+  it("同じ旧形式のbodyの再送は、指紋が一致して状態を進めない", async () => {
+    const teamCode = "500183";
+    const commandId = id("183");
+    const first = await save(teamCode, {
+      commandId,
+      expectedRevision: 0,
+      rawBody: legacyPostBody("s5"),
+    });
+    expect(first.status).toBe(200);
+
+    const resent = await save(teamCode, {
+      commandId,
+      expectedRevision: 0,
+      rawBody: legacyPostBody("s5"),
+    });
+
+    expect(resent.status).toBe(200);
+    const { snapshot } = saveCheckpointResultSchema.parse(await resent.json());
+    expect(snapshot.revision).toBe(1);
+    expect(snapshot.body.view).toBe("s6");
+  });
+
+  it.each([
+    ["trapを持たない", "trap", { s3Used: false, s5Used: false }, "500185"],
+    ["s3Usedだけ持つ", { s3Used: true }, { s3Used: true, s5Used: false }, "500186"],
+    ["trapが空", {}, { s3Used: false, s5Used: false }, "500187"],
+  ])(
+    "罠フラグが%sの旧形式POSTでも、両キーを揃えて200で保存する",
+    async (_name, trap, expected, teamCode) => {
+      const raw: Record<string, unknown> = legacyPostBody("s5");
+      if (trap === "trap") delete raw.trap;
+      else raw.trap = trap;
+
+      const response = await save(teamCode, {
+        commandId: id(teamCode.slice(3)),
+        expectedRevision: 0,
+        rawBody: raw,
+      });
+
+      expect(response.status).toBe(200);
+      await expect(load(teamCode)).resolves.toMatchObject({
+        checkpoint: { body: { view: "s6", idsVersion: CHECKPOINT_IDS_VERSION, trap: expected } },
+      });
+    },
+  );
+
+  it.each([
+    ["null", null, "500203"],
+    ["配列", [], "500204"],
+    ["文字列", "trap", "500205"],
+  ])(
+    "trapが%s（存在するがオブジェクトでない）旧形式POSTは補完せず400で弾く",
+    async (_name, trap, teamCode) => {
+      const response = await save(teamCode, {
+        commandId: id(teamCode.slice(3)),
+        expectedRevision: 0,
+        rawBody: { ...legacyPostBody("s5"), trap },
+      });
+
+      expect(response.status).toBe(400);
+    },
+  );
+
+  it("dataを持たない旧形式POSTでも、空dataを補って200で保存する", async () => {
+    const raw: Record<string, unknown> = legacyPostBody("s4");
+    delete raw.data;
+
+    const response = await save("500188", {
+      commandId: id("188"),
+      expectedRevision: 0,
+      rawBody: raw,
+    });
+
+    expect(response.status).toBe(200);
+    await expect(load("500188")).resolves.toMatchObject({
+      checkpoint: { body: { view: "s5", data: {} } },
+    });
+  });
+
+  it.each([
+    [1, "500196"],
+    ["2", "500197"],
+    [null, "500198"],
+  ])("版マーカーが %s のPOSTは読み替えず400で弾く", async (idsVersion, teamCode) => {
+    const response = await save(teamCode, {
+      commandId: id(teamCode.slice(3)),
+      expectedRevision: 0,
+      rawBody: { ...legacyPostBody("s4"), idsVersion },
+    });
+
+    expect(response.status).toBe(400);
+  });
+
+  it("旧形式でも画面idそのものが未知なら従来どおり400で弾く", async () => {
+    const response = await save("500184", {
+      commandId: id("184"),
+      expectedRevision: 0,
+      rawBody: { ...legacyPostBody("s99"), view: "s99" },
+    });
+
+    expect(response.status).toBe(400);
   });
 });

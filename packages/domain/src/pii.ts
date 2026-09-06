@@ -4,7 +4,7 @@
  * 別々の場所にあり片方だけ直して静かに壊れる事態（Stage 3が踏んだ負債）を避けるため。
  * 教材との一致は test/materials/materials.test.ts で固定する。
  */
-export const stage4Patient = {
+export const stage5Patient = {
   name: "渡辺 三郎",
   id: "005",
   dob: "1952年3月14日",
@@ -33,7 +33,7 @@ const namesToPattern = (fullNames: readonly string[]): RegExp =>
  * 名簿を変えたらここも変える。
  */
 const feverLinelistPatientNames = [
-  stage4Patient.name,
+  stage5Patient.name,
   "田島 早苗",
   "大久保 誠",
   "三好 千鶴",
@@ -50,7 +50,7 @@ const feverLinelistPatientNames = [
 ] as const;
 
 /**
- * 教材の生年月日（`stage4Patient.dob`）を、表記ゆれを吸収した正規表現へ組み立てる。
+ * 教材の生年月日（`stage5Patient.dob`）を、表記ゆれを吸収した正規表現へ組み立てる。
  * 「YYYY年M月D日」に加え、記号区切り（1952/3/14・1952-03-14・1952.3.14）と
  * 月日のゼロ詰め（3ではなく03）を許容する。前後を数字境界で挟み、長い数値列の
  * 途中から切り出して一致することを防ぐ。
@@ -78,7 +78,7 @@ const dobToPattern = (dob: string): RegExp => {
 
 /**
  * 電話番号は固有情報の書式一致ではなく汎用パターンで拾う——
- * 参加者が値を手で書き写した場合も検知するため（docs/ui/mock/index.html §S4_PII）。
+ * 参加者が値を手で書き写した場合も検知するため（docs/ui/mock/index.html §S5_PII）。
  *
  * 院内ID単独（例: 患者ID「005」）は検知対象に含めない（2026-08-22 ユーザー決定）。
  * Stage 2のラインリストは匿名化教材であり、患者IDだけを含む——氏名列を持たない
@@ -93,7 +93,7 @@ const dobToPattern = (dob: string): RegExp => {
  * 1. 区切り文字は`[-\s]`ではなく、半角ハイフン・半角スペース・全角スペース（U+3000）
  *    だけを許容する。`\s`は改行にも一致するため、改行区切りのID一覧
  *    （「005\n006\n008…」）が電話番号として誤検知されていた
- *    （2026-08-22 モック側S4_PII検証で発見）。
+ *    （2026-08-22 モック側S5_PII検証で発見）。
  * 2. 前後を数字境界（`(?<!\d)`・`(?!\d)`）で挟み、長い数値列の途中から切り出さない。
  * 3. 末尾の加入者番号を4桁固定にする。携帯（090-1234-5678）も固定電話
  *    （市外局番1〜4桁＋市内局番＋4桁）も末尾は4桁で、合計10〜11桁になる。旧パターンの
@@ -102,9 +102,9 @@ const dobToPattern = (dob: string): RegExp => {
  */
 export const piiPatterns = [
   { label: "患者氏名", re: namesToPattern(feverLinelistPatientNames) },
-  { label: "生年月日", re: dobToPattern(stage4Patient.dob) },
+  { label: "生年月日", re: dobToPattern(stage5Patient.dob) },
   { label: "電話番号", re: /(?<!\d)0\d{1,3}[- \u3000]?\d{2,4}[- \u3000]?\d{4}(?!\d)/ },
-  { label: "ご家族の氏名", re: nameToPattern(stage4Patient.familyName) },
+  { label: "ご家族の氏名", re: nameToPattern(stage5Patient.familyName) },
 ] as const satisfies readonly PiiPattern[];
 
 export type PiiLabel = (typeof piiPatterns)[number]["label"];

@@ -76,6 +76,7 @@ export {
   CHECKPOINT_DATA_MAX_DEPTH,
   CHECKPOINT_DATA_TOO_LARGE_MESSAGE,
   CHECKPOINT_ELAPSED_MAX_MS,
+  CHECKPOINT_IDS_VERSION,
   CHECKPOINT_REJECTION_REASONS,
   checkpointBodySchema,
   checkpointRejectionReasonSchema,
@@ -111,9 +112,16 @@ export {
   PII_REDACTION,
   piiPatterns,
   redactPii,
-  stage4Patient,
+  stage5Patient,
 } from "./pii.js";
 export type { PiiLabel } from "./pii.js";
 export { VIEW_IDS, viewIdSchema } from "./schemas/view.js";
 export type { ViewId } from "./schemas/view.js";
+export {
+  normalizeLegacyCheckpointBody,
+  normalizeLegacyCheckpointCommand,
+  normalizeLegacyCheckpointSnapshot,
+  normalizeLegacyViewField,
+  normalizeLegacyViewId,
+} from "./legacy-ids.js";
 export type { AiGateway, AiMessage, AiRequest, AiResponse } from "./ports/ai-gateway.js";

@@ -9,9 +9,10 @@ JS 構造そのものは資産ではない。単一ファイル・フレーム�
 > モック側を直すか、企画書の改訂として上げる（CLAUDE.md の読む地図どおり）。
 >
 > 📌 **画面表示のステージ番号は2026-08-22にS6まで振り直した**（旧 Stage 3.5＝新 **Stage 4**、旧 Stage 4＝新 **Stage 5**、
-> 旧 Stage 5＝新 **Stage 6**）。**変わったのは表示文字列だけ**で、内部ID（`view` 名 `s35`/`s4`/`s5`、URLハッシュ
-> `#s35`/`#s4`/`#s5`）・定数プレフィックス（`S35_*`/`S4_*`/`S5_*`）・関数名・`docs/` のファイル名は旧番号のまま。
-> 以下の記述も旧番号で読む。
+> 旧 Stage 5＝新 **Stage 6**）。**内部IDも2026-09-06に新番号へ揃えた**（Issue #118）——`view` 名 `s4`/`s5`/`s6`、
+> URLハッシュ `#s4`/`#s5`/`#s6`、定数プレフィックス `S4_*`/`S5_*`/`S6_*`、関数名のいずれも表示番号と一致する。
+> 据え置いたのは `docs/` の設計ドキュメントのファイル名（`04_Stage3_5_*.md` など）と教材・画像のファイル名だけで、
+> 以下の記述に出てくる「Stage 3.5」も設計上の呼称（＝表示上の Stage 4）である。
 >
 > ⚠️ **行番号は目安。** 本ファイルは別プロセスによる実装が進行中の一時点（2026-08-23テストプレイ
 > 向けブランチ `feat/testplay-live-ai`）で実測したもの。継続して変更が入るファイルなので、
@@ -59,7 +60,7 @@ JS 構造そのものは資産ではない。単一ファイル・フレーム�
   ——受信トレイの一覧（`.mail .from` `.subj` `.attach`）と共有フォルダ（`.docitem`）・メール本文（`.reader`
   `.legacy`）・課題文（`.stage-title` `.brief`）・提出フォーム・判定文・AIの吹き出しと入力欄・院内連絡先
   （`.phs`、呼び出しバー `.phs .bar` のラベルを含む）・添付ビューア本文・オーバーレイで依頼者が課題を告げる文
-  （`.briefing .say` `.briefing .notice`・`.callin .say`＝`#ov-s3notice` `#ov-s35-director` 等が共用・`.s1res` の本文）
+  （`.briefing .say` `.briefing .notice`・`.callin .say`＝`#ov-s3notice` `#ov-s4-director` 等が共用・`.s1res` の本文）
   ——に限る。ヘッダー・リーダーボード帯・
   ペインの固定幅・ボタンの寸法・提出グリッドの表には掛けない（配置と横幅を段階で動かさないため）。状態は
   `localStorage.hellFontStep` に残す。設計の正典は
@@ -71,7 +72,7 @@ JS 構造そのものは資産ではない。単一ファイル・フレーム�
 
 | 範囲 | 内容 |
 |---|---|
-| 4-778 | `<style>`。テーマトークン（`data-mode="peace/alert/crisis"`）、2003年書式（`.legacy` `.reader`）、オーバーレイのCSS一式（`.blackout`/`.lock`/`.alarm`/`.callin`/`.goal`/Stage 3.5専用の `.s35-clear`・`.s35-talk` を含む） |
+| 4-778 | `<style>`。テーマトークン（`data-mode="peace/alert/crisis"`）、2003年書式（`.legacy` `.reader`）、オーバーレイのCSS一式（`.blackout`/`.lock`/`.alarm`/`.callin`/`.goal`/Stage 3.5専用の `.s4-clear`・`.s4-talk` を含む） |
 | 779-1174 | HTML。`#screen` 配下は中央ペイン以外ほぼ静的マークアップ＋オーバーレイの器 |
 | 1175-5567 | `<script>`（IIFE, `"use strict"`） |
 
@@ -85,13 +86,13 @@ JS 構造そのものは資産ではない。単一ファイル・フレーム�
   メール本文を出せないため、一覧に残る3通をここでビューアへ回す（それまでは押しても無反応の死んだ行
   だった。伏線＝夜勤師長メールの「原因不明の発熱」を後から読み返せることを優先し、一覧から消す案は
   採らなかった）。`table` を持つものだけが列選択コピーを出す（下記 Stage 4）。
-- **`hideOverlays()`**（2128-）— オーバーレイIDの配列を舐めて閉じる。新しいオーバーレイを足したらこの配列に追加。Stage 3.5 の `#ov-s35-report` もここに入っている（`#ov-s35-kanbu` は2026-09-05に廃止・Issue #88）。
+- **`hideOverlays()`**（2128-）— オーバーレイIDの配列を舐めて閉じる。新しいオーバーレイを足したらこの配列に追加。Stage 3.5 の `#ov-s4-report` もここに入っている（`#ov-s4-kanbu` は2026-09-05に廃止・Issue #88）。
 - **`transition()`**（5125-）— 急変（Stage 1→2 の転調）専用。`go()` を経由しない。
 - **自動遷移は3か所ある**（2026-08-22追加。それまではファシリテーターがdevbarで送っていた）。
   Prologue→Stage 1（`inboxStartAuto()`/`inboxNoteRead()`——3通とも開封で7秒後、または入室から
   2分で `go("s1")`）、Stage 2クリア→Stage 3（`unlockSequence()` 末尾）、Stage 4クリア→Stage 5
-  （`stage4UnlockSequence()` 末尾）。既存の Stage 3→3.5（`stage3UnlockSequence()`）と合わせ、
-  Prologue から Final 手前までが繋がる。**3.5→4（`stage35UnlockSequence()`）だけは自動ではなく、
+  （`stage5UnlockSequence()` 末尾）。既存の Stage 3→3.5（`stage3UnlockSequence()`）と合わせ、
+  Prologue から Final 手前までが繋がる。**3.5→4（`stage4UnlockSequence()`）だけは自動ではなく、
   クリアカードの［確認した（次へ）］ボタンが引き金**（2026-08-22変更）——演出を読み切る前に画面が
   変わるという指摘への対応で、遷移そのものは残っている。
   **Prologueのタイマーだけは `later()` ではなく素の `setTimeout`** を使う——`later()` は
@@ -117,7 +118,7 @@ JS 構造そのものは資産ではない。単一ファイル・フレーム�
 
 - `LIVE=true` かつ入室成功後（`liveState` が埋まった後）は、Stage 3・3.5・4 の `sendAI()`
   が `sendAiLive()` 経由で実Worker API（`/api/teams/:code/chat/messages` 等）を叩く
-  （`liveTurn` の対象は `s3`・`s35`・`s4` の3つだけ。**Final は入らない**——右ペインごと畳むので送る導線が無い）。
+  （`liveTurn` の対象は `s3`・`s4`・`s5` の3つだけ。**Final は入らない**——右ペインごと畳むので送る導線が無い）。
   `promptProfile`（Stage 3 のときだけ `"s3"`、それ以外は
   `"default"`）・422（`pii_blocked`）のStage 4ゲート処理は、この経路にのみ存在する。
   **会話は今のステージの1本だけ**（2026-09-05変更）：タブと＋ボタンは廃止し、参加者が会話を選ぶ・足す
@@ -155,7 +156,7 @@ JS 構造そのものは資産ではない。単一ファイル・フレーム�
   汎用AIチャットではなく専用フロー（返信欄の［AIに下書きさせる］）のままだが、送り先は実APIで、
   失敗時はボタン文言を一時的に差し替えて必ず再クリックできる状態へ戻す。scripted時だけ固定文の
   下書き（`draftCtx`/`draftPlain`）に落ちる。
-- Stage 5 はLIVE時も画像生成APIを呼ばない。`s5Generate()` が事前生成の候補画像をプロンプトの
+- Stage 5 はLIVE時も画像生成APIを呼ばない。`s6Generate()` が事前生成の候補画像をプロンプトの
   タグ一致で出し分ける従来どおりの専用フローのまま。
 - **422 の扱いは `code` で分ける**（2026-09-04追加）。`pii_blocked`（送信前ゲート／未保存）のときだけ
   再送用の `commandId` を破棄する。`history_pii`・`ai_refusal` は**ユーザー発言が保存済み**（AI未応答）なので
@@ -182,7 +183,7 @@ JS 構造そのものは資産ではない。単一ファイル・フレーム�
   （秒が読めなければ秒数を落とす）。**自動再送はしない**——待っている間に画面が勝手に動くより、
   参加者が待ち時間を読んで自分で押し直せる方がよい。
 - scripted時（`file://` 等）は、Stage 3・4の `sendAI()` が台本応答（`S3_TRAP_LIE`/
-  `S4_AI_REPLY`）を返す従来どおりの挙動になる。**Final に台本応答は無い**（旧
+  `S5_AI_REPLY`）を返す従来どおりの挙動になる。**Final に台本応答は無い**（旧
   `F_REQUEST_TRIGGER`→`F_AI_REPLY` は削除済み）——トリガー不一致時と同じ既定応答
   「（このモックでは応答しません）」へ合流する。
 
@@ -220,7 +221,7 @@ JS 構造そのものは資産ではない。単一ファイル・フレーム�
   出し、welcome へは進めない。判定は形まで見る——`checkpoint` キーが**存在して** `null` か完全な snapshot
   （`revision` / `savedAt` / `body` 一式、`body.dataRevision` を含む）であること、`serverNow` が ISO 日時である
   ことを必須にする（200 の `{}` を「初回入室」と誤認しない）。中身も見る——`view` は `STEPS` の id、
-  `pos` は 0〜7、`elapsedMs` は非負整数、`teamCode` は6桁、`data` の `s3Penalty`/`s4Penalty` は
+  `pos` は 0〜7、`elapsedMs` は非負整数、`teamCode` は6桁、`data` の `s3Penalty`/`s5Penalty` は
   `none|in-progress|done`（あれば）。チャットの snapshot も同様に `teamCode`・`revision`（整数・**必須**）・
   各スレッドの `threadId`/`title`/`kind`（あれば `stage|manual`）/`messages`（各要素の `messageId`・
   `role`(user|assistant)・`text`・`createdAt`）まで確かめる。保存応答（POST 200）も同じ形で検証し、
@@ -230,7 +231,7 @@ JS 構造そのものは資産ではない。単一ファイル・フレーム�
   保存される。`POS_TO_VIEW`（STEPSの並び順から作る停留所→ステージ先頭viewの表）で `pos` から view を
   導き、保存済みviewが `pos` と同じか後ろのときだけそれを使う。戻る先はステージの先頭で、
   ステージ固有の状態（グリッドの中身・生成済みポスター）は復元しない。
-  **`data` に入るのは罰ゲームの進行だけ**（2026-09-04追加）——`data.s3Penalty` と `data.s4Penalty` が
+  **`data` に入るのは罰ゲームの進行だけ**（2026-09-04追加）——`data.s3Penalty` と `data.s5Penalty` が
   `"none" | "in-progress" | "done"`。罠は1回で発動済みになるのに罰のUIはリロードで消えるので、これが無いと
   「罠を踏んだ直後にリロードすれば罰だけ踏み倒せる」。`in-progress` は**罠が確定した保存で同時に立てる**——罠の確定から
   `startPenalty()` までは暗転と叱責で数秒あり、その間にリロードされると「罠は発動済み・罰は未実施」という
@@ -251,7 +252,7 @@ JS 構造そのものは資産ではない。単一ファイル・フレーム�
   サーバ値を採用して再送しない）。
   経過時計はリロード中も止めず、`savedAt`→`serverNow` の実時間を加算する（レースなので、
   リロードで時間を取り戻せる抜け道を作らない）。罠のフラグは `go()` の後に戻す
-  ——`renderStage3()`/`renderStage4()` が入場のたびにリセットするため。
+  ——`renderStage3()`/`renderStage5()` が入場のたびにリセットするため。
 - **活動ログ**（`logActivity()`）と**全チームの帯**。提出・判定・罠・復帰を
   `POST /api/teams/:code/activity` へ fire-and-forget で積み（Stage 4のPII罠と保健所提出だけは
   本文を送らない）、`GET /api/progress/summary?teamCode=自分のコード` を（入室済みのときだけ）10秒ごとにポーリングして
@@ -270,9 +271,9 @@ JS 構造そのものは資産ではない。単一ファイル・フレーム�
 | Stage 2（火の手） | `renderStage2Excel()`（3378） | `s2Grid` / `s2Hot` / `s2T0` 等、モジュール変数に散在 |
 | Stage 2（二正面） | `renderStage2()`（5110） | **実装済みだがどこからも呼ばれない＝未配置**（企画書§5「未配置の素材」） |
 | Stage 3（暫定） | `renderStage3()`（3881） | **疥癬（かいせん）版に更新済み**（旧：ノロウイルス版は廃止）。3欄のテキストエリア。判定は `checkStage3()`（3926）、罠発火は `triggerTrap()`（4014）→`startPenalty()`（4030）。苅部さんの3段トリガーは2段に簡略化（`phsS3Pending`） |
-| Stage 3.5（新情報の解釈） | `renderStage35()`（4164） | **実装済み**。Stage 3クリア→自動遷移（`stage3UnlockSequence()`→`go("s35")`）。要約判定 `checkS35Summary()`（4200）→院長の一往復（`s35ShowDirectorTalk()`/`runS35ActionVerdict()`。2026-09-05に中央ペインへ埋め込む形へ変更・Issue #88）→クリアカード（`s35ShowClearCard()`4277）→カードの［確認した（次へ）］を押すとStage 4へ遷移（`stage35UnlockSequence()`4297が`go("s4")`を呼ぶ、他ステージのクリアは状態更新のみで留まるのと異なる特例。2026-08-22に自動タイマーからボタン起動へ変更） |
-| Stage 4（回答） | `renderStage4()`（4386） | 1欄のテキストエリア。判定は `checkStage4()`。罠は提出フォームではなく **`sendAI()` 内の送信前ゲート**にあり、検知すると `triggerLeak()`→`startS4Penalty()`。回答期限超過で近藤さんの着信ポップアップが割り込む。苅部さんは1段のみ（`phsS4Pending`） |
-| Stage 5（掲示） | `renderStage5()`（4680） | **判定あり**（旧：判定そのものが無い設計から変更）。提出フォームはテキストエリアではなく**画像候補の枠**（`#s5-cand`）。判定は `checkStage5()`（4715）——差し戻しのみ・罠なし・罰なし・回数無制限 |
+| Stage 3.5（新情報の解釈） | `renderStage4()`（4164） | **実装済み**。Stage 3クリア→自動遷移（`stage3UnlockSequence()`→`go("s4")`）。要約判定 `checkS4Summary()`（4200）→院長の一往復（`s4ShowDirectorTalk()`/`runS4ActionVerdict()`。2026-09-05に中央ペインへ埋め込む形へ変更・Issue #88）→クリアカード（`s4ShowClearCard()`4277）→カードの［確認した（次へ）］を押すとStage 4へ遷移（`stage4UnlockSequence()`4297が`go("s5")`を呼ぶ、他ステージのクリアは状態更新のみで留まるのと異なる特例。2026-08-22に自動タイマーからボタン起動へ変更） |
+| Stage 4（回答） | `renderStage5()`（4386） | 1欄のテキストエリア。判定は `checkStage5()`。罠は提出フォームではなく **`sendAI()` 内の送信前ゲート**にあり、検知すると `triggerLeak()`→`startS5Penalty()`。回答期限超過で近藤さんの着信ポップアップが割り込む。苅部さんは1段のみ（`phsS5Pending`） |
+| Stage 5（掲示） | `renderStage6()`（4680） | **判定あり**（旧：判定そのものが無い設計から変更）。提出フォームはテキストエリアではなく**画像候補の枠**（`#s6-cand`）。判定は `checkStage6()`（4715）——差し戻しのみ・罠なし・罰なし・回数無制限 |
 | Final（振り返り） | `renderFinal()`（5975） | **判定そのものが無い**（旧：4欄判定 `checkFinal()`/`F_ORDER` は廃止・削除済み）。中央は成果物タイル6枚の振り返りボード（`F_BOARD_TILES`→`fLightTiles()`）＋空白ピースの一言入力（`fSubmitLine()`6082・空欄拒否のみ）。記すとエンディングへ：幹部の労いリレー（`fStartRelay()`6120・`#ov-f-relay`）→**感謝状**（`fStartHandover()`6167/`fShowHandover()`6177・`#ov-f-handover`）。感謝状はゲームの最終状態で閉じる導線が無く、`fEnded` が立った後は `#final` 再入場のたびに直接復元する |
 
 > **参加者に見えるステージ名は「暫定」「新情報の解釈」「回答」「掲示」「振り返り」**（Final は2026-08-22改修で「会見」から改称）。「嘘」「情報漏洩」「記者会見」は設計ドキュメント上の呼称で、
@@ -280,7 +281,7 @@ JS 構造そのものは資産ではない。単一ファイル・フレーム�
 > Stage 5・Final に罠は無いので予告の心配自体は無いが、呼称の流儀（体言止め）を Stage 3・4 に揃えてある
 > （[../06_Stage5.md](../06_Stage5.md) 冒頭 ⚠️・[../07_Final.md](../07_Final.md) 冒頭 ⚠️）。`unlock` オーバーレイの副題も同じ理由で罠の名前を書かない。
 
-文言・教材データの定数は 1200-2200 あたりの帯にまとまっている（`MAILS`/`MAIL_S1` 等、ステージ別プレフィックス。Stage 3 は `S3_*`、Stage 3.5 は `S35_*`、Stage 4 は `S4_*`、Stage 5 は `S5_*`、Final は `F_*`）。
+文言・教材データの定数は 1200-2200 あたりの帯にまとまっている（`MAILS`/`MAIL_S1` 等、ステージ別プレフィックス。Stage 3 は `S3_*`、Stage 3.5 は `S4_*`、Stage 4 は `S5_*`、Stage 5 は `S6_*`、Final は `F_*`）。
 
 ## Stage 1：3ラウンド構成と常駐メモ（`S1_MEMO`2565 / `S1_MAILS_R1`2588 / `S1_MAILS_R2`2616 / `S1_MAILS_R3`2650 / `s1Init`2702 / `s1RoundComplete`3125）
 
@@ -337,11 +338,11 @@ Stage 2 のグリッド機構とは**もう一切関わらない**——1本ク�
 15本目で 5B病棟の6本が湧き（`S3_BOTTLES_TRIGGER`）、全数終わると `revealNotice()` が掲示と師長の一言を出して全数破棄する。
 
 > **`#ov-lock` の数字は「残り」ではなく「経過」**（2026-08-22改修・`startPenaltyClock()`/`stopPenaltyClock()`）。
-> 旧実装は `S3_PENALTY`/`S4_PENALTY`（各40秒）のカウントダウンだったが、この罰は作業を終えたときに
+> 旧実装は `S3_PENALTY`/`S5_PENALTY`（各40秒）のカウントダウンだったが、この罰は作業を終えたときに
 > 終わるもので残り時間とは無関係に進み、詰め終わっても「00:16」を表示したまま閉じていた（時間切れで
 > 解放される、という誤解を生む表示だった）。**罰は時間で払う**（企画書§6）という設計はそのままに、
 > 実際に払った時間を数え上げる表示へ変え、`.lock .tlab`（「この対応に費やしている時間」）を添えた。
-> 時計は Stage 3・4 が同じ `#ov-lock` を共有するのに合わせて1つだけ持ち、`s3Stop()`/`s4Stop()` の
+> 時計は Stage 3・4 が同じ `#ov-lock` を共有するのに合わせて1つだけ持ち、`s3Stop()`/`s5Stop()` の
 > 両方が `stopPenaltyClock()` を呼ぶ。
 
 > **旧実装（接触者リストの整形）は全面削除した。** Stage 2 の `drawGrid()` を間借りするために
@@ -349,86 +350,86 @@ Stage 2 のグリッド機構とは**もう一切関わらない**——1本ク�
 > `S2_COLS` の直接参照に戻してある。`s2GridBackup`/`s2HotBackup`/`checkContactsGrid()` と
 > `docs/materials/stage3_contacts.tsv` も削除済み。**Stage 2 側にはもうStage 3のための仕掛けが無い。**
 
-## Stage 3.5：新情報の解釈（`renderStage35`4164 / `checkS35Summary`4200 / `runS35ActionVerdict`4244）
+## Stage 3.5：新情報の解釈（`renderStage4`4164 / `checkS4Summary`4200 / `runS4ActionVerdict`4244）
 
 **実装済み**（`docs/scenario/04_Stage3_5_新情報の解釈.md`・`docs/ui/04_Stage3_5_新情報の解釈.md` が
-正典）。Stage 3クリア（`stage3UnlockSequence()`3995）→自動で `go("s35")`→Stage 3.5クリア
-→クリアカードの［確認した（次へ）］（`stage35UnlockSequence()`4297）→`go("s4")` という一本道で、
-devbar・URLハッシュからの単体起動（`#s35`）も可能。
+正典）。Stage 3クリア（`stage3UnlockSequence()`3995）→自動で `go("s4")`→Stage 3.5クリア
+→クリアカードの［確認した（次へ）］（`stage4UnlockSequence()`4297）→`go("s5")` という一本道で、
+devbar・URLハッシュからの単体起動（`#s4`）も可能。
 
-- **院長の一往復は中央ペインの要約提出の下へ差し込む**（`s35ShowDirectorTalk()`。2026-09-05・Issue #88）。
-  以前は専用モーダル（`#ov-s35-kanbu`）だったが、そこから抜けられず要約も論文も見返せなかった
-  （2026-08-23テストプレイ課題12）ので**モーダルごと廃止**した。器は `.s35-talk`——常駐する相談窓口
+- **院長の一往復は中央ペインの要約提出の下へ差し込む**（`s4ShowDirectorTalk()`。2026-09-05・Issue #88）。
+  以前は専用モーダル（`#ov-s4-kanbu`）だったが、そこから抜けられず要約も論文も見返せなかった
+  （2026-08-23テストプレイ課題12）ので**モーダルごと廃止**した。器は `.s4-talk`——常駐する相談窓口
   （`#phs`）は増やさず、書式（緑のタイトルバー・白背景・2003年風）だけを借りる。要約の提出欄は
-  読み取り専用にして残し、論文ビューア（`#ov-s35-report`）も対話中に開ける。
-- **要約提出済みはチェックポイントの `data.s35Summary` に預ける**（`"none"`／`"submitted"`）。
-  LIVE時、要約提出後にリロードして再入室すると `resumeS35Talk()` が院長の一往復を差し戻す。
+  読み取り専用にして残し、論文ビューア（`#ov-s4-report`）も対話中に開ける。
+- **要約提出済みはチェックポイントの `data.s4Summary` に預ける**（`"none"`／`"submitted"`）。
+  LIVE時、要約提出後にリロードして再入室すると `resumeS4Talk()` が院長の一往復を差し戻す。
   要約の**本文は預けない**（`data` に個人情報を入れない規約）ので、提出欄は空のまま戻る。
 - **リーダーボードの停留所はStage 3と共有する。** `TEAMS[2].pos` はStage 3.5クリア時（Stage 4解錠時）
   にのみ進み、Stage 3.5専用の停留所は追加しない——帯の外・クロスステージ影響のための判断。
-- ヘッダーの発熱表示（9→14）はStage 3.5開始演出の自前フラッシュ（`s35FlashSurge()`）が担い、
+- ヘッダーの発熱表示（9→14）はStage 3.5開始演出の自前フラッシュ（`s4FlashSurge()`）が担い、
   共通の `transition()` は使わない。
-- AIチャットは無し（判定は提出文字列に対するルールベースのみ）でも `#s35` 単体で通せる。
+- AIチャットは無し（判定は提出文字列に対するルールベースのみ）でも `#s4` 単体で通せる。
 
 ## Stage 4：送信前ゲートと黒塗り
 
 Stage 3 と違い、**罠は提出フォームではなく AIチャットの送信前ゲートにある**。`sendAI()`（2379）が
-Stage 4 のときだけ `S4_PII` で入力を検査し、ヒットすれば自分の吹き出しを出さずに `triggerLeak()`
-→ `startS4Penalty()` へ進む。ヒットしなければ従来どおり吹き出しを出し、`S4_REQUEST_TRIGGER`
-にマッチする内容だけ `S4_AI_REPLY` の台本を返す（Stage 3 の `S3_TRAP_TRIGGER` と同じ思想）。
+Stage 4 のときだけ `S5_PII` で入力を検査し、ヒットすれば自分の吹き出しを出さずに `triggerLeak()`
+→ `startS5Penalty()` へ進む。ヒットしなければ従来どおり吹き出しを出し、`S5_REQUEST_TRIGGER`
+にマッチする内容だけ `S5_AI_REPLY` の台本を返す（Stage 3 の `S3_TRAP_TRIGGER` と同じ思想）。
 LIVE時はStage 4の送信も実Worker APIへ通り、422（`pii_blocked`）が返れば同じ `triggerLeak()` へ合流する
 （`handleLiveGateHit()`2286付近）。
 
-- **`S4_PATIENT` が唯一の情報源。** 検知パターン（`S4_PII`）・カルテ抜粋（`S4_CHART_TEXT`）・
-  黒塗り下書き（`S4_REPORT`）の3箇所とも、ここから作った値だけを参照する。Stage 3 の負債（教材の文言と
+- **`S5_PATIENT` が唯一の情報源。** 検知パターン（`S5_PII`）・カルテ抜粋（`S5_CHART_TEXT`）・
+  黒塗り下書き（`S5_REPORT`）の3箇所とも、ここから作った値だけを参照する。Stage 3 の負債（教材の文言と
   判定の正規表現が別々の場所にあり片方だけ直すと静かに壊れる）を Stage 4 で繰り返さないための構成。
-- **罰ゲームは黒塗り（`drawRedact()`/`toggleRedact()`/`submitReport()`）。** `S4_REPORT` は
+- **罰ゲームは黒塗り（`drawRedact()`/`toggleRedact()`/`submitReport()`）。** `S5_REPORT` は
   `{ t, pii }` の配列——`pii: true` が塗るべきトークン、`pii: false` が塗ってはいけない一般語のトークン、
   `pii` キー無しはクリックできない地の文。
-- **AI使用ロックが罰の本体。** `startS4Penalty()` が `paneR.classList.add("locked")` を付け、
-  `finishS4Penalty()`と `hideOverlays()` の両方で外す。
+- **AI使用ロックが罰の本体。** `startS5Penalty()` が `paneR.classList.add("locked")` を付け、
+  `finishS5Penalty()`と `hideOverlays()` の両方で外す。
 - **添付ビューアに列選択コピーがある**（2026-08-22追加・`#viewer-cols`）。`VIEWERS[*].table` を持つ
-  添付（現状は `s4list` の発熱患者一覧だけ）を開くと列ごとのチェックボックスが出て、
+  添付（現状は `s5list` の発熱患者一覧だけ）を開くと列ごとのチェックボックスが出て、
   ［選んだ列をコピー］でその列だけのTSVをクリップボードへ書く（`renderViewerCols()`/
   `selectedColumnsText()`）。**既定は全列ON**で、ツールバーの［コピー］（全文コピー）も残してある
   ——「全部渡す」が最短ルートである点は変えていないので、氏名ごとAIへ渡す罠は生きている。どの列が
   個人情報かの判断は参加者に残す（氏名列を既定でOFFにするような先回りはしない）。旧実装はコピー時に
   苅部さんの着信を前倒ししていたが、**2026-08-22にこのステージから苅部さんを全面撤去した**ので
-  コピーは何も起こさない（`S4_KARUBE_*`・`phsS4Pending`・`s4NudgeKarube()` ごと削除）。
-- **回答期限（`S4_DEADLINE`＝2分）は Stage 4 だけ実際のカウントダウンにしてある。** 超過すると
-  `s4ShowCall()` が全画面オーバーレイ `#ov-s4call`（患者相談窓口・近藤さんの着信）を開く。
+  コピーは何も起こさない（`S5_KARUBE_*`・`phsS5Pending`・`s5NudgeKarube()` ごと削除）。
+- **回答期限（`S5_DEADLINE`＝2分）は Stage 4 だけ実際のカウントダウンにしてある。** 超過すると
+  `s5ShowCall()` が全画面オーバーレイ `#ov-s5call`（患者相談窓口・近藤さんの着信）を開く。
 
-## Stage 5：判定あり・文脈継承・累積プロンプト判定（`renderStage5`4680 / `checkStage5`4715 / `s5Generate`4608）
+## Stage 5：判定あり・文脈継承・累積プロンプト判定（`renderStage6`4680 / `checkStage6`4715 / `s6Generate`4608）
 
 > ⚠️ **設計変更**: 旧設計は「判定そのものが無い（提出で即座に解錠）」だったが、**判定を導入した**
 > （2026-08-23テストプレイの確定事項）。ただし罠・罰・回数制限は無く、差し戻しのみ・回数無制限。
 
-Stage 5 に罠は無く、`sendAI()`（2379）は `view === "s5"` のとき `S4_PII` の検査を素通りし、自分の
-吹き出しを出したあと `s5Generate()` へ渡す——Stage 3・4 の「罠 → 台本応答」ではなく「プロンプト →
+Stage 5 に罠は無く、`sendAI()`（2379）は `view === "s6"` のとき `S5_PII` の検査を素通りし、自分の
+吹き出しを出したあと `s6Generate()` へ渡す——Stage 3・4 の「罠 → 台本応答」ではなく「プロンプト →
 候補画像」という別の分岐にしてある。
 
-- **モックは gpt-image-1 を呼ばない。** `S5_POSTERS` の `tag` 正規表現とプロンプト文字列を
-  照合し、最初に一致した候補を返す。どれにも一致しなければ `S5_POSTER_DEFAULT`。
-  生成待ちは `S5_GEN_MS`（仮値2.5秒）の `later()` で、実際にAPIを叩いているように見せる。
+- **モックは gpt-image-1 を呼ばない。** `S6_POSTERS` の `tag` 正規表現とプロンプト文字列を
+  照合し、最初に一致した候補を返す。どれにも一致しなければ `S6_POSTER_DEFAULT`。
+  生成待ちは `S6_GEN_MS`（仮値2.5秒）の `later()` で、実際にAPIを叩いているように見せる。
 - **タグに一致しない差分指示は、直前候補の様式（`type`）を継承する。** 「マスクも入れて」のような
   タグ無し指示のたびに標準案へ巻き戻ると、実際のAIチャット（文脈を保持する）と挙動が食い違い、
   参加者が同じ様式の差し戻しループにハマる——2026-08-21のテストプレイでテスターが実際に踏んだ
   事故を踏まえた設計。
-- **`checkStage5(cand)`（4715）は2段で見る。** ①候補の種類が `textheavy`/`default` なら
-  無条件で `S5_REJECT_TYPE` の台詞を返す。②それ以外は、**このステージでAIへ送った指示の累積
-  （`s5PromptLog`）**に対して `S5_REQUIRED`（マスク・面会時間の言及）を検査する。
+- **`checkStage6(cand)`（4715）は2段で見る。** ①候補の種類が `textheavy`/`default` なら
+  無条件で `S6_REJECT_TYPE` の台詞を返す。②それ以外は、**このステージでAIへ送った指示の累積
+  （`s6PromptLog`）**に対して `S6_REQUIRED`（マスク・面会時間の言及）を検査する。
   **判定を選択候補のプロンプト単体ではなく累積で見る**のは、参加者が差分で指示を重ねるのが自然な
   一方、単体で全要件を要求すると要素を足すたび前の要素が落ちて永遠ループするため
   （2026-08-21のテストプレイで実際に発生した不具合）。
-- **`S5_REQUIRED` の正規表現は自然な言い回しを広く拾う。** 「面会は14時から16時まで」のように
+- **`S6_REQUIRED` の正規表現は自然な言い回しを広く拾う。** 「面会は14時から16時まで」のように
   「面会時間」という文字列そのものが無い書き方を誤って弾いた実例（2026-08-21）を踏まえ、
   `面会.{0,20}(時間|制限|\d{1,2}\s*時|分以内)` 等へ広げてある。
 - **差し戻しは無罰・回数無制限。** 候補・生成済み画像はそのまま残り、選び直し・再提出に何度でも
-  戻れる。`runStage5Verdict()`（`checkStage5`の少し後）は、差し戻し時は `.warn` を付けて再提出を
+  戻れる。`runStage6Verdict()`（`checkStage6`の少し後）は、差し戻し時は `.warn` を付けて再提出を
   促すだけで `alarm`/`lock`/`blackout` は一度も呼ばない。
-- **生成回数の上限（`S5_GEN_LIMIT`）に達すると、生成せずに苅部さんの2段目が光る。** 上限後も、
-  それまでに生成した候補（`s5Candidates`）はいつでも選んで提出できる——詰みを作らない。
-- **クリア時は `unlock` ではなく `goalSequence()`（`#ov-goal`）を開く（`stage5GoalSequence()`）。**
+- **生成回数の上限（`S6_GEN_LIMIT`）に達すると、生成せずに苅部さんの2段目が光る。** 上限後も、
+  それまでに生成した候補（`s6Candidates`）はいつでも選んで提出できる——詰みを作らない。
+- **クリア時は `unlock` ではなく `goalSequence()`（`#ov-goal`）を開く（`stage6GoalSequence()`）。**
   レースのゴールは Stage 5 クリアなので、`goalSequence()` は Stage 5 専用の共有関数になった
   ——Final 自身はもう呼ばない。`#ov-goal` の［振り返りへ進む］が `go("final")` で Final を開く。
 - **画像アセットは `<img onerror>` でフォールバックする。** `assets/images/production/` に
@@ -469,29 +470,29 @@ Stage 5 に罠は無く、`sendAI()`（2379）は `view === "s5"` のとき `S4_
 - **リーダーボード帯は、実データが取れているときだけ全チームを描く**（2026-09-03変更）。2026-08-22 に自チームだけへ絞ったのは、ダミーの他班を並べると入室時にチーム自身が入力した名前（ヘッダーのチップ・感謝状には反映済み）と食い違う嘘が帯だけに残るためで、`GET /api/progress/summary` から実際の位置が取れるようになった今はその理由が消えている。scripted時（実データ無し）は従来どおり自チームだけ。ラベルは `teamName`、未入室・devbar直行時は `TEAMS[2].nm`（"B班"）へフォールバックする（感謝状 `fShowHandover()` と同じ流儀。チーム自身の入力なので `esc()` を通す）。同じ停留所に並んだチームは3段まで縦に積み、溢れた分は「ほかNチーム」へまとめる（`drawMarks()`）。仕様の正典は [`../00_共通シェルと通奏低音.md`](../00_共通シェルと通奏低音.md) §5 の ⚠️。
 - **Enterで何かが起きる入力欄には、必ず `imeComposing(e)` ガードを入れる**（2026-08-22・実プレイで踏んだ）。日本語の変換確定Enterが送信・移動として発火し、書きかけの文がAIへ飛んでいた。現在のガード対象は3つ——`#ai-input`（送信）・グリッドのセル（下へ移動）・`#f-line-input`（一言の確定）。**Enterハンドラを足すときは同じガードから書き始めること**（参加者は全員が日本語入力）。
 - `#fever`（院内状況インジケータ）の直接代入も同様に散在。Stage 4・5・Final は値を動かさない（14のまま）が、リセット処理では他の値に戻す必要があり、結局同じ場所に手を入れることになる。
-- `unlock` オーバーレイの文言は、表示する側（`unlockSequence()`/`stage3UnlockSequence()`/`stage35UnlockSequence()`/`stage4UnlockSequence()`/`stage5UnlockSequence()`）が**毎回明示的にセットし直す**形にした。**`#ov-lock` の見出し（`#lock-hd`）も Stage 4 追加時に同じ流儀に揃えた**——HTMLの初期値に頼ると、どちらが先に使われたかで文言が化ける。次のステージを足す時もこの流儀を踏襲すること（Stage 5・Final は罠・罰が無いので `#ov-lock` 自体を触らない）。
+- `unlock` オーバーレイの文言は、表示する側（`unlockSequence()`/`stage3UnlockSequence()`/`stage4UnlockSequence()`/`stage5UnlockSequence()`/`stage6UnlockSequence()`）が**毎回明示的にセットし直す**形にした。**`#ov-lock` の見出し（`#lock-hd`）も Stage 4 追加時に同じ流儀に揃えた**——HTMLの初期値に頼ると、どちらが先に使われたかで文言が化ける。次のステージを足す時もこの流儀を踏襲すること（Stage 5・Final は罠・罰が無いので `#ov-lock` 自体を触らない）。
 - `data-mode="crisis"` は Stage 3 で初めて使われるようになった。Stage 3.5・4・5・Final も `crisis` のまま（転調は起きない）。
-- 右ペインのAIチャットが応答を返す `view` は `sendAI()` がガードしており、**LIVE時とscripted時で範囲が違う**。LIVE時（`liveState` 確立済み）は `s3`・`s35`・`s4` を実APIへ通す（`liveTurn`）。台本応答を返すのは `s2`・`s3`・`s4`・`s35`・`s5`。**`final` はどちらにも入らない**——`sendAI()` の入口ガードで即 return するので、Final のAIチャットは応答を返さない。**`s2` はLIVE・scriptedのどちらでも台本固定**（`s2ScriptedTable()`。2026-08-22 ユーザー決定。理由は上の「実AI接続」節）——旧 `devNotice`（「実AI接続時に有効になります」の案内バブル）はこの変更で不要になり削除した。**Stage 1 は右ペインを持たない**が、中央ペインの「AIに下書きさせる」ボタンが `s1DraftLive()` で実APIを呼ぶ（`promptProfile: "s1"`）ので、**Stage 1もLIVE時は実AIを使う**。Stage 5 だけは台本の文章応答ではなく `s5Generate()` へ分岐する（LIVE時も同じ——実APIを呼ばない）。**Final は台本応答も実API接続も持たない**（`F_REQUEST_TRIGGER`/`F_AI_REPLY` は 2026-08-22 に削除。`sendAI()` のガードにも `final` は無い）。
+- 右ペインのAIチャットが応答を返す `view` は `sendAI()` がガードしており、**LIVE時とscripted時で範囲が違う**。LIVE時（`liveState` 確立済み）は `s3`・`s4`・`s5` を実APIへ通す（`liveTurn`）。台本応答を返すのは `s2`・`s3`・`s5`・`s4`・`s6`。**`final` はどちらにも入らない**——`sendAI()` の入口ガードで即 return するので、Final のAIチャットは応答を返さない。**`s2` はLIVE・scriptedのどちらでも台本固定**（`s2ScriptedTable()`。2026-08-22 ユーザー決定。理由は上の「実AI接続」節）——旧 `devNotice`（「実AI接続時に有効になります」の案内バブル）はこの変更で不要になり削除した。**Stage 1 は右ペインを持たない**が、中央ペインの「AIに下書きさせる」ボタンが `s1DraftLive()` で実APIを呼ぶ（`promptProfile: "s1"`）ので、**Stage 1もLIVE時は実AIを使う**。Stage 5 だけは台本の文章応答ではなく `s6Generate()` へ分岐する（LIVE時も同じ——実APIを呼ばない）。**Final は台本応答も実API接続も持たない**（`F_REQUEST_TRIGGER`/`F_AI_REPLY` は 2026-08-22 に削除。`sendAI()` のガードにも `final` は無い）。
 - **右ペイン（`.pane-r`）の幅は `flex: 0 0 380px` だけでは決まり切らない。** flex要素の既定 `min-width: auto` が flex-basis を上書きするため、中身の min-content が 380px を超えるとペインが勝手に広がる。かつてステージ入場ごとに増えていたスレッドタブがこれを踏み、Stage 5（メイン＋5ステージ＝6枚）でペインが約478pxまで広がって、右端から400pxに置いてある院内連絡先（`.phs`）がAIの入力欄に重なっていた（2026-08-22・実プレイで報告、同日修正）。`min-width: 0`／`max-width: 380px` で塞いである（タブ自体は2026-09-05に廃止した）。**左ペインや今後増えるペインでも同じ罠がある。**
 - `wait()`（Promise版タイマー）は `clearLater()` でキャンセルされない。Stage 3・3.5・4・5・Final の新設シーケンスは要所に `if (view !== "sX") return;` の軽いガードを入れて緩和したが、**根本修正はしていない**。
-- **動的に注入した要素は必ず後始末する。** `startPenalty()`/`startS4Penalty()` は `#penalty-host` の中身を都度生成するので、`finishPenalty()`/`finishS4Penalty()` と `hideOverlays()` の両方で空にしている。**Stage 4 は `pane-r.locked` という別種の後始末も増えた**（同じく `finishS4Penalty()` と `hideOverlays()` の両方で外す）。**Stage 3.5・5・Final は罰ゲームが無いので `#penalty-host`/`pane-r.locked` の後始末は不要**——Stage 5 は代わりに `#s5-gen`（残り生成回数の表示）を `go()` の共通リセットで毎回 `hide` に戻し `renderStage5()` だけが外す、という独自の器を持つ。
-- **教材の文言と判定の正規表現が別々の場所にある。** Stage 3 は教材 `S3_MANUAL_TEXT`/`S3_CONTAMINATED_TEXT`/`S3_TRAP_LIE` と判定 `S3_REQUIRED`/`S3_TRAP` が別々。片方だけ直すと静かに壊れる（罠が発火しない／正解が通らない）。**Stage 4 はこの負債を踏まない設計にした**（`S4_PATIENT` を単一情報源にして検知パターン・黒塗り下書きの両方に参照させる）。**Stage 5 は判定を導入したが、`S5_POSTERS` の `tag`（出し分け専用）と `S5_REQUIRED`（判定）は別の正規表現**——出し分けタグを変えても判定は自動追従しない点に注意。**Final はこの負債と無縁**——判定そのものが無い（旧4欄判定の `F_WRONG`/`F_REQUIRED` は削除済み）。
-- **`go()` の分岐がステージ数ぶんに増えた。** `entry/welcome/inbox`・`s1`・`s2`・`unlock`・`s3`・`s35`・`s4`・`s5`・`final` の各ブロックが後続ステージのメールフラグを手書きで消す構造がそのまま続いている——新しいステージ（あれば）を足すときも同じ作業が要る。
+- **動的に注入した要素は必ず後始末する。** `startPenalty()`/`startS5Penalty()` は `#penalty-host` の中身を都度生成するので、`finishPenalty()`/`finishS5Penalty()` と `hideOverlays()` の両方で空にしている。**Stage 4 は `pane-r.locked` という別種の後始末も増えた**（同じく `finishS5Penalty()` と `hideOverlays()` の両方で外す）。**Stage 3.5・5・Final は罰ゲームが無いので `#penalty-host`/`pane-r.locked` の後始末は不要**——Stage 5 は代わりに `#s6-gen`（残り生成回数の表示）を `go()` の共通リセットで毎回 `hide` に戻し `renderStage6()` だけが外す、という独自の器を持つ。
+- **教材の文言と判定の正規表現が別々の場所にある。** Stage 3 は教材 `S3_MANUAL_TEXT`/`S3_CONTAMINATED_TEXT`/`S3_TRAP_LIE` と判定 `S3_REQUIRED`/`S3_TRAP` が別々。片方だけ直すと静かに壊れる（罠が発火しない／正解が通らない）。**Stage 4 はこの負債を踏まない設計にした**（`S5_PATIENT` を単一情報源にして検知パターン・黒塗り下書きの両方に参照させる）。**Stage 5 は判定を導入したが、`S6_POSTERS` の `tag`（出し分け専用）と `S6_REQUIRED`（判定）は別の正規表現**——出し分けタグを変えても判定は自動追従しない点に注意。**Final はこの負債と無縁**——判定そのものが無い（旧4欄判定の `F_WRONG`/`F_REQUIRED` は削除済み）。
+- **`go()` の分岐がステージ数ぶんに増えた。** `entry/welcome/inbox`・`s1`・`s2`・`unlock`・`s3`・`s4`・`s5`・`s6`・`final` の各ブロックが後続ステージのメールフラグを手書きで消す構造がそのまま続いている——新しいステージ（あれば）を足すときも同じ作業が要る。
 
 ## 残りの宿題
 
 - **苅部さんの3段トリガーが2段のまま**（`S3_KARUBE_LINES` は2行）。設計上は3段目＝最終セーフティ（規定時間 or 2回目の罠発火で詰み防止）。
 - **各種タイマー定数は仮値。** `S1_LIMIT`（60秒）/`S1_SAFETY`（240秒）/`S3_KARUBE_DELAY`（40秒）/
-  `S3_BOTTLE_FILL_MS`（700ms）/`S4_GATE_MS`（450ms）/`S4_DEADLINE`（2分）/
-  `S5_KARUBE_DELAY`（40秒）/`S5_GEN_LIMIT`（5回）/`S5_GEN_MS`（2.5秒）/
+  `S3_BOTTLE_FILL_MS`（700ms）/`S5_GATE_MS`（450ms）/`S5_DEADLINE`（2分）/
+  `S6_KARUBE_DELAY`（40秒）/`S6_GEN_LIMIT`（5回）/`S6_GEN_MS`（2.5秒）/
   `INBOX_AUTO_MS`（2分）/`INBOX_READ_GRACE_MS`（7秒。[../01_Prologue.md](../01_Prologue.md) §実装上の注意
   「3通そろってから7秒」と一致させてある）は、いずれも2026-08-23テストプレイ向けの仮値。
-  当日朝の通しプレイで較正した値に置き換える（`S4_DEADLINE`は特に実測の裏付けが要る）。
-  **罰ゲームの長さを決める定数はもう無い**（`S3_PENALTY`/`S4_PENALTY` は削除）——終わるのは作業を
+  当日朝の通しプレイで較正した値に置き換える（`S5_DEADLINE`は特に実測の裏付けが要る）。
+  **罰ゲームの長さを決める定数はもう無い**（`S3_PENALTY`/`S5_PENALTY` は削除）——終わるのは作業を
   終えたときなので、狙いの1分に近づけるにはボトルの本数（`S3_BOTTLES_5A`/`5B`）と1本あたりの
   所要（`S3_BOTTLE_FILL_MS`）で較正する。**実測は自動操作で21秒**（人間でも30〜40秒の見込み）で、
   現状の値では狙いに届かない可能性が高い。
 - **Final のゴール演出（`#ov-goal`）に音が無い。** `docs/ui/07_Final.md` §4 のとおり、モックは意図的に無音のまま実装してある。Stage 5 が流用する完走演出も同じく無音。本番でファンファーレを付ける際、他のオーバーレイに音を実装するタイミングと合わせて対応する。
-- **ライブAPI接続はStage 5の画像生成には及んでいない。** `s5Generate()` はLIVE時も事前生成の候補を
+- **ライブAPI接続はStage 5の画像生成には及んでいない。** `s6Generate()` はLIVE時も事前生成の候補を
   タグで出し分けるだけで、gpt-image-1 は呼ばない。**Stage 1の下書きは接続済み**（`s1DraftLive()`・
   `promptProfile: "s1"`）。

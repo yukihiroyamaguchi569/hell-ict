@@ -7,6 +7,7 @@ import {
   createThreadCommandSchema,
   createThreadFingerprint,
   detectPii,
+  normalizeLegacyCheckpointCommand,
   saveCheckpointCommandSchema,
   saveCheckpointResultSchema,
   sendMessageCommandSchema,
@@ -440,7 +441,11 @@ type ParsedCheckpointCommand =
  */
 const parseSaveCheckpointCommand = (input: unknown): ParsedCheckpointCommand => {
   try {
-    const parsed = saveCheckpointCommandSchema.safeParse(input);
+    // デプロイ後も開いたままの旧タブは、旧番号のbody（view "s35"、trap.s4Used）を
+    // 送ってくる。strictなschemaはこれを400で弾き、旧UIは保存の失敗を通知しないまま
+    // 進むので、リロードでデプロイ前の状態まで巻き戻る。schemaの手前で新体系へ直す
+    // ——指紋もこの正規化後のbodyから採るので、同じ状態の再送は同じ指紋になる。
+    const parsed = saveCheckpointCommandSchema.safeParse(normalizeLegacyCheckpointCommand(input));
     if (parsed.success) return { ok: true, command: parsed.data };
     const tooLarge = parsed.error.issues.some(
       (issue) => issue.message === CHECKPOINT_DATA_TOO_LARGE_MESSAGE,

@@ -1,6 +1,8 @@
 import { z } from "zod";
 
 import {
+  normalizeLegacyViewField,
+  normalizeLegacyViewId,
   PII_REDACTION,
   publicTeamId,
   redactPii,
@@ -306,7 +308,10 @@ export const handleProgressPost = async (request: Request, env: Env): Promise<Re
     (caught: unknown) => ({ ok: false as const, caught }),
   );
   if (!read.ok) return bodyErrorResponse(read.caught, "進捗イベントの形式が不正です。");
-  const parsed = progressEventSchema.safeParse(read.body);
+  // デプロイ後も開いたままの旧タブは旧番号の画面id（s35）を送ってくる。enumで弾くと
+  // その端末の位置がダッシュボードから消えるので、schemaの手前で新名へ直す
+  // （判別できないs4・s5は素通り。Issue #118）。
+  const parsed = progressEventSchema.safeParse(normalizeLegacyViewField(read.body));
   if (!parsed.success) return error("進捗イベントの形式が不正です。", 400);
 
   const event = parsed.data;
@@ -408,13 +413,20 @@ const toPublicRow = async <Row extends { teamCode: string; teamName: string }>(
     : { ...base, publicId };
 };
 
-/** eventsはviewも表示用テキストなので同じ伏せ字化を通す（enum化より前の行のため）。 */
+/**
+ * eventsはviewも表示用テキストなので同じ伏せ字化を通す（enum化より前の行のため）。
+ * あわせて、2026-09-06の内部名振り直し（Issue #118）より前に積んだ行の画面idを
+ * 新名へ読み替える——D1の過去行は書き換えない方針なので、読む側で吸収する。
+ */
 const toPublicEventRow = async (
   row: z.infer<typeof eventRowSchema>,
   context: PublicRowContext,
 ): Promise<Omit<z.infer<typeof eventRowSchema>, "teamCode"> & { publicId: string }> => {
   const publicRow = await toPublicRow(row, context);
-  return { ...publicRow, view: redactDisplayText(row.view, context.rule) };
+  return {
+    ...publicRow,
+    view: normalizeLegacyViewId(redactDisplayText(row.view, context.rule)),
+  };
 };
 
 /**

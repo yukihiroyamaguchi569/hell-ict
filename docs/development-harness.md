@@ -93,6 +93,8 @@ pnpm verify:full
 
 **`main`へマージすると、GitHub Actions（`.github/workflows/deploy.yml`）が`pnpm verify`を通したうえで本番Worker（`hell-ict`）へ自動でデプロイする。** 手元で`wrangler deploy`を打つ必要はない。`docs/`だけの変更でも走る——配信するモックHTMLは`docs/ui/mock/index.html`にあり、`pnpm build:testplay`がそれを取り込むためである。
 
+**参加者が進行中のあいだはデプロイしない。デプロイしたら全端末をリロードさせる。** 開いたままの旧タブは旧いモックのまま動き続け、サーバとの取り決め（画面id・チェックポイントの形）が食い違いうる。サーバ側は旧形式を受け取れるよう読み替えを入れてあるが（`packages/domain/src/legacy-ids.ts`）、旧UIは保存が拒否されても参加者に何も伝えず進むので、拒否されるとリロードした時点でデプロイ前の状態まで巻き戻る。リロードの伝え方はGMリセットの手順（後述）と同じでよい。
+
 必要なGitHub Secrets（リポジトリの Settings &gt; Secrets and variables &gt; Actions）は2つ。
 
 | Secret | 作り方 |

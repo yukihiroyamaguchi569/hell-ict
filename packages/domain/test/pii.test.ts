@@ -1,13 +1,13 @@
 import { describe, expect, it } from "vitest";
 
-import { containsPii, detectPii, PII_REDACTION, redactPii, stage4Patient } from "../src/pii.js";
+import { containsPii, detectPii, PII_REDACTION, redactPii, stage5Patient } from "../src/pii.js";
 
 describe("送信前PIIゲート", () => {
   it.each([
-    ["患者氏名", `${stage4Patient.name}さんについて教えてください`],
-    ["生年月日", `${stage4Patient.dob}生まれの方です`],
-    ["電話番号", `連絡先は${stage4Patient.phone}です`],
-    ["ご家族の氏名", `ご長男の${stage4Patient.familyName}様より`],
+    ["患者氏名", `${stage5Patient.name}さんについて教えてください`],
+    ["生年月日", `${stage5Patient.dob}生まれの方です`],
+    ["電話番号", `連絡先は${stage5Patient.phone}です`],
+    ["ご家族の氏名", `ご長男の${stage5Patient.familyName}様より`],
   ])("%sを検知する", (label, text) => {
     expect(detectPii(text)).toBe(label);
   });
@@ -31,9 +31,9 @@ describe("送信前PIIゲート", () => {
   // ラベル付き「患者ID: 005」であっても、氏名・生年月日など直接識別子を
   // 伴わない限り検知しない。
   it.each([
-    `患者ID ${stage4Patient.id} の件です`,
-    `患者ID: ${stage4Patient.id}`,
-    stage4Patient.id,
+    `患者ID ${stage5Patient.id} の件です`,
+    `患者ID: ${stage5Patient.id}`,
+    stage5Patient.id,
     "患者ID 006・008の3名です",
   ])("院内ID単独「%s」は検知しない", (text) => {
     expect(detectPii(text)).toBeNull();
@@ -50,7 +50,7 @@ describe("送信前PIIゲート", () => {
     expect(detectPii("008\t5B\t7.5\t陰性\t37.8℃\tあり")).toBeNull();
   });
 
-  // 2026-08-22 モック側S4_PII検証で発見: 電話番号regexの区切りに`\s`（改行を含む）
+  // 2026-08-22 モック側S5_PII検証で発見: 電話番号regexの区切りに`\s`（改行を含む）
   // を使うと、改行区切りの数値列（Stage 4正解経路でAIに渡す発熱患者ID一覧）が
   // 電話番号として誤検知されてしまう。区切りを半角ハイフン・半角スペース・
   // 全角スペース（U+3000）のみへ絞ったことの回帰確認。
@@ -110,7 +110,7 @@ describe("送信前PIIゲート", () => {
 
   // 2026-08-22 実測: 旧パターン（汎用の`\d{4}年\d{1,2}月\d{1,2}日`）は、研修当日の
   // 日付を書いただけの依頼をブロックしていた。生年月日の検知は教材の値
-  // （stage4Patient.dob）だけを情報源にする。
+  // （stage5Patient.dob）だけを情報源にする。
   it.each([
     "2026年8月22日の研修内容をまとめて",
     "2026年8月23日の報告をまとめて",
@@ -142,20 +142,20 @@ describe("送信前PIIゲート", () => {
   });
 
   it("同じ入力を繰り返し判定しても結果が変わらない", () => {
-    const text = `${stage4Patient.name}さんの件です`;
+    const text = `${stage5Patient.name}さんの件です`;
     expect(detectPii(text)).toBe("患者氏名");
     expect(detectPii(text)).toBe("患者氏名");
   });
 
   it("複数該当時はパターン順で先に定義したラベルを返す", () => {
-    const text = `${stage4Patient.name}さん（${stage4Patient.dob}生）の件です`;
+    const text = `${stage5Patient.name}さん（${stage5Patient.dob}生）の件です`;
     expect(detectPii(text)).toBe("患者氏名");
   });
 
   // Stage 4のカルテ本文はID単独ではなく、氏名・生年月日を同じ文中に含むため、
   // ID検知を外しても実際の漏洩シナリオは引き続き検知される（回帰確認）。
   it("Stage 4カルテの経過欄相当（ID＋氏名＋生年月日が同居する文）は引き続き検知する", () => {
-    const text = `7/3 患者ID ${stage4Patient.id}、${stage4Patient.name}さん（${stage4Patient.dob}生、74歳）が受診。`;
+    const text = `7/3 患者ID ${stage5Patient.id}、${stage5Patient.name}さん（${stage5Patient.dob}生、74歳）が受診。`;
     expect(detectPii(text)).toBe("患者氏名");
   });
 });
@@ -172,21 +172,21 @@ describe("containsPii", () => {
   });
 
   it("入れ子の値に混ざったPIIを拾う", () => {
-    expect(containsPii({ memo: `${stage4Patient.name}さんの件` })).toBe(true);
-    expect(containsPii({ a: { b: { c: [`連絡先は${stage4Patient.phone}`] } } })).toBe(true);
-    expect(containsPii([["深い配列", { dob: `${stage4Patient.dob}生まれ` }]])).toBe(true);
+    expect(containsPii({ memo: `${stage5Patient.name}さんの件` })).toBe(true);
+    expect(containsPii({ a: { b: { c: [`連絡先は${stage5Patient.phone}`] } } })).toBe(true);
+    expect(containsPii([["深い配列", { dob: `${stage5Patient.dob}生まれ` }]])).toBe(true);
   });
 
   it("キーに置かれたPIIも拾う", () => {
     // 値ではなくキー側へ置く経路を塞ぐ（チェックポイントのdataはキーが自由文字列）。
-    expect(containsPii({ [`${stage4Patient.name}さん`]: 1 })).toBe(true);
-    expect(containsPii({ outer: { [stage4Patient.phone]: "x" } })).toBe(true);
+    expect(containsPii({ [`${stage5Patient.name}さん`]: 1 })).toBe(true);
+    expect(containsPii({ outer: { [stage5Patient.phone]: "x" } })).toBe(true);
   });
 
   it("1つの値に収まったPIIも、分割されたJSON全体の並びも見る", () => {
     // 個別の値だけを見るのでは足りず、JSON全体だけを見るのでも足りないので両方掛ける。
-    expect(containsPii({ text: `${stage4Patient.name}さん` })).toBe(true);
-    expect(containsPii([`${stage4Patient.familyName}様`])).toBe(true);
+    expect(containsPii({ text: `${stage5Patient.name}さん` })).toBe(true);
+    expect(containsPii([`${stage5Patient.familyName}様`])).toBe(true);
   });
 
   it("文字列以外のプリミティブはそれ自体では反応しない", () => {
@@ -199,7 +199,7 @@ describe("containsPii", () => {
     // 活動ログのmetaは平坦なrecord）。ここではその範囲を十分に超える深さでも
     // 最下層まで届くことだけを固定する。
     const deep = Array.from({ length: 20 }).reduce<unknown>((inner) => ({ nested: inner }), {
-      memo: `${stage4Patient.name}さん`,
+      memo: `${stage5Patient.name}さん`,
     });
     expect(containsPii(deep)).toBe(true);
   });
@@ -212,25 +212,25 @@ describe("redactPii", () => {
   });
 
   it("既知のパターンを伏せ字へ置き換える", () => {
-    const redacted = redactPii(`${stage4Patient.name}さんの件`);
-    expect(redacted).not.toContain(stage4Patient.name);
+    const redacted = redactPii(`${stage5Patient.name}さんの件`);
+    expect(redacted).not.toContain(stage5Patient.name);
     expect(redacted).toContain(PII_REDACTION);
     expect(redacted).toContain("さんの件");
   });
 
   it("同じ本文に複数回出てきても全部置き換える", () => {
     const redacted = redactPii(
-      `${stage4Patient.name}さんと${stage4Patient.name}さん、連絡先は${stage4Patient.phone}`,
+      `${stage5Patient.name}さんと${stage5Patient.name}さん、連絡先は${stage5Patient.phone}`,
     );
     expect(detectPii(redacted)).toBeNull();
   });
 
   it("置換後のテキストはdetectPiiに反応しない", () => {
     for (const source of [
-      `${stage4Patient.name}さんについて`,
-      `${stage4Patient.dob}生まれの方です`,
-      `連絡先は${stage4Patient.phone}です`,
-      `ご長男の${stage4Patient.familyName}様より`,
+      `${stage5Patient.name}さんについて`,
+      `${stage5Patient.dob}生まれの方です`,
+      `連絡先は${stage5Patient.phone}です`,
+      `ご長男の${stage5Patient.familyName}様より`,
     ]) {
       expect(detectPii(redactPii(source)), source).toBeNull();
     }

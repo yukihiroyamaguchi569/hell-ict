@@ -20,7 +20,7 @@ const body = (overrides: Partial<CheckpointBody> = {}): CheckpointBody =>
     view: "s3",
     pos: 2,
     elapsedMs: 1000,
-    trap: { s3Used: false, s4Used: false },
+    trap: { s3Used: false, s5Used: false },
     data: { answer: "A" },
     ...overrides,
   });
@@ -89,18 +89,18 @@ describe("チェックポイントの純粋関数", () => {
   it.each([
     {
       label: "s3",
-      current: { s3Used: true, s4Used: false },
-      next: { s3Used: false, s4Used: false },
+      current: { s3Used: true, s5Used: false },
+      next: { s3Used: false, s5Used: false },
     },
     {
-      label: "s4",
-      current: { s3Used: false, s4Used: true },
-      next: { s3Used: false, s4Used: false },
+      label: "s5",
+      current: { s3Used: false, s5Used: true },
+      next: { s3Used: false, s5Used: false },
     },
     {
       label: "両方",
-      current: { s3Used: true, s4Used: true },
-      next: { s3Used: false, s4Used: false },
+      current: { s3Used: true, s5Used: true },
+      next: { s3Used: false, s5Used: false },
     },
   ])("$labelの罠フラグをfalseへ戻す保存を拒否する", ({ current, next }) => {
     const result = applyCheckpoint(snapshot(1, { trap: current }), command(1, { trap: next }), {
@@ -112,16 +112,16 @@ describe("チェックポイントの純粋関数", () => {
 
   it("罠フラグをfalseからtrueへ進める保存は許可する", () => {
     const result = applyCheckpoint(
-      snapshot(1, { trap: { s3Used: false, s4Used: false } }),
-      command(1, { trap: { s3Used: true, s4Used: true } }),
+      snapshot(1, { trap: { s3Used: false, s5Used: false } }),
+      command(1, { trap: { s3Used: true, s5Used: true } }),
       { teamCode: "000000", now },
     );
     if (!result.ok) throw new Error("unexpected");
-    expect(result.snapshot.body.trap).toEqual({ s3Used: true, s4Used: true });
+    expect(result.snapshot.body.trap).toEqual({ s3Used: true, s5Used: true });
   });
 
   it("発動済みの罠を保ったままの保存は許可する", () => {
-    const trap = { s3Used: true, s4Used: false };
+    const trap = { s3Used: true, s5Used: false };
     const result = applyCheckpoint(snapshot(1, { trap }), command(1, { trap }), {
       teamCode: "000000",
       now,
@@ -169,8 +169,8 @@ describe("チェックポイントの純粋関数", () => {
 
   it("罠後退とelapsedMs後退が同時に成立する場合は罠を優先する", () => {
     const result = applyCheckpoint(
-      snapshot(1, { trap: { s3Used: true, s4Used: false }, elapsedMs: 60_000 }),
-      command(1, { trap: { s3Used: false, s4Used: false }, elapsedMs: 0 }),
+      snapshot(1, { trap: { s3Used: true, s5Used: false }, elapsedMs: 60_000 }),
+      command(1, { trap: { s3Used: false, s5Used: false }, elapsedMs: 0 }),
       { teamCode: "000000", now },
     );
     expect(result).toEqual({ ok: false, reason: "trap-regression" });
@@ -222,8 +222,8 @@ describe("チェックポイントの純粋関数", () => {
 
   it("競合と罠後退が同時に成立する場合は競合を優先する", () => {
     const result = applyCheckpoint(
-      snapshot(1, { trap: { s3Used: true, s4Used: false } }),
-      command(0, { trap: { s3Used: false, s4Used: false } }),
+      snapshot(1, { trap: { s3Used: true, s5Used: false } }),
+      command(0, { trap: { s3Used: false, s5Used: false } }),
       { teamCode: "000000", now },
     );
     expect(result).toEqual({ ok: false, reason: "conflict" });
@@ -269,7 +269,7 @@ describe("チェックポイントのschema", () => {
   });
 
   it("trapに余分なキーがあれば拒否する", () => {
-    const trap = { s3Used: false, s4Used: false, s5Used: false };
+    const trap = { s3Used: false, s5Used: false, s6Used: false };
     expect(checkpointBodySchema.safeParse({ ...body(), trap }).success).toBe(false);
   });
 
@@ -372,28 +372,28 @@ describe("mergeCheckpoint（離脱時flushの単調合成）", () => {
     view: "s3",
     pos: 3,
     elapsedMs: 5000,
-    trap: { s3Used: true, s4Used: false },
+    trap: { s3Used: true, s5Used: false },
     data: { from: "current" },
   });
 
   it("trapはOR、posとelapsedMsはmaxで合成する", () => {
     const incoming = body({
-      view: "s4",
+      view: "s5",
       pos: 2,
       elapsedMs: 1000,
-      trap: { s3Used: false, s4Used: true },
+      trap: { s3Used: false, s5Used: true },
       data: { from: "incoming" },
     });
     const merged = mergeCheckpoint(current, incoming);
-    expect(merged.trap).toEqual({ s3Used: true, s4Used: true });
+    expect(merged.trap).toEqual({ s3Used: true, s5Used: true });
     expect(merged.pos).toBe(3);
     expect(merged.elapsedMs).toBe(5000);
   });
 
   it("viewとdataはposが大きい側を採る", () => {
-    const ahead = body({ view: "s4", pos: 5, data: { from: "incoming" } });
+    const ahead = body({ view: "s5", pos: 5, data: { from: "incoming" } });
     expect(mergeCheckpoint(current, ahead)).toMatchObject({
-      view: "s4",
+      view: "s5",
       pos: 5,
       data: { from: "incoming" },
     });
@@ -407,9 +407,9 @@ describe("mergeCheckpoint（離脱時flushの単調合成）", () => {
   });
 
   it("posが同値なら受信側を新しいとみなす", () => {
-    const same = body({ view: "s35", pos: 3, data: { from: "incoming" } });
+    const same = body({ view: "s4", pos: 3, data: { from: "incoming" } });
     expect(mergeCheckpoint(current, same)).toMatchObject({
-      view: "s35",
+      view: "s4",
       data: { from: "incoming" },
     });
   });
@@ -420,7 +420,7 @@ describe("applyCheckpointのflush", () => {
     view: "s3",
     pos: 3,
     elapsedMs: 5000,
-    trap: { s3Used: true, s4Used: false },
+    trap: { s3Used: true, s5Used: false },
   });
 
   const flushCommand = (expectedRevision: number, bodyOverrides: Partial<CheckpointBody> = {}) =>
@@ -436,7 +436,7 @@ describe("applyCheckpointのflush", () => {
     // keepaliveは応答を待てないので、CASで弾くと罠フラグが黙って消える。
     const result = applyCheckpoint(
       saved,
-      flushCommand(2, { trap: { s3Used: false, s4Used: true } }),
+      flushCommand(2, { trap: { s3Used: false, s5Used: true } }),
       {
         teamCode: "000000",
         now,
@@ -445,7 +445,7 @@ describe("applyCheckpointのflush", () => {
     expect(result.ok).toBe(true);
     if (!result.ok) throw new Error("unexpected");
     expect(result.snapshot.revision).toBe(8);
-    expect(result.snapshot.body.trap).toEqual({ s3Used: true, s4Used: true });
+    expect(result.snapshot.body.trap).toEqual({ s3Used: true, s5Used: true });
   });
 
   it("flushはposとelapsedMsを後退させない", () => {
@@ -507,10 +507,10 @@ describe("dataRevisionによるdataの前後関係", () => {
   });
 
   it("posが違えばdataRevisionによらずposの大きい側を採る", () => {
-    const ahead = body({ view: "s4", pos: 5, dataRevision: 1, data: { from: "ahead" } });
+    const ahead = body({ view: "s5", pos: 5, dataRevision: 1, data: { from: "ahead" } });
     expect(mergeCheckpoint(current, ahead)).toMatchObject({
       pos: 5,
-      view: "s4",
+      view: "s5",
       data: { from: "ahead" },
     });
     // dataRevisionはmaxなので、進んだ側が小さくても後退しない。
@@ -536,7 +536,7 @@ describe("dataRevisionの上限", () => {
       view: "s3",
       pos: 2,
       elapsedMs: 1000,
-      trap: { s3Used: false, s4Used: false },
+      trap: { s3Used: false, s5Used: false },
       data: {},
       dataRevision,
     });
@@ -596,12 +596,12 @@ describe("罰の進行状態は合成で巻き戻らない", () => {
     ).toEqual({ s3Penalty: "in-progress" });
   });
 
-  it("s4Penaltyも同じく巻き戻らない", () => {
+  it("s5Penaltyも同じく巻き戻らない", () => {
     const merged = mergeCheckpoint(
-      penaltyBody(3, 5, { s4Penalty: "done" }),
-      penaltyBody(5, 2, { s4Penalty: "none" }),
+      penaltyBody(3, 5, { s5Penalty: "done" }),
+      penaltyBody(5, 2, { s5Penalty: "none" }),
     );
-    expect(merged.data).toEqual({ s4Penalty: "done" });
+    expect(merged.data).toEqual({ s5Penalty: "done" });
   });
 
   it("片側にキーが無ければ、もう片側の既知の値が残る", () => {
