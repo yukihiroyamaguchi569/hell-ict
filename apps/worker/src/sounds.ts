@@ -44,8 +44,17 @@ const ALLOWED_SOUND_KEYS: ReadonlySet<string> = new Set(
   SOUND_NAMES.map((name) => `${name}.mp3`).filter((key) => SOUND_KEY_PATTERN.test(key)),
 );
 
-/** R2から取り出したオブジェクトのうち、配信に使う部分だけ。 */
-export type SoundObject = { readonly body: ReadableStream; readonly httpEtag: string };
+/**
+ * R2から取り出したオブジェクトのうち、配信に使う部分だけ。
+ *
+ * `ReadableStream`は型引数を省くと既定の`any`が入る（`R2ObjectBody.body`が
+ * まさにそれ）。`any`を持ち込まないよう、ここで要素型をバイト列に固定する。
+ * `ReadableStream<any>`はこの型へそのまま渡せるので、R2の実体も受けられる。
+ */
+export type SoundObject = {
+  readonly body: ReadableStream<Uint8Array>;
+  readonly httpEtag: string;
+};
 
 /**
  * R2バケットのうち、このモジュールが使う操作だけ。`R2Bucket`をそのまま受けずに
