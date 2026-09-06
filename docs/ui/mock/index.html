@@ -6556,6 +6556,10 @@
     // 苅部さんの1段目トリガーは later()（clearLater() で回収される）ので、
     // ここで止めるのは罰ゲームの時計だけ。Stage1/2の xStop() と命名を揃える。
     stopPenaltyClock();
+    // 追加棚のスライドインを解除する later() も clearLater() に回収されるので、
+    // 表示中にシーンを離れるとフラグだけが残る。次の startPenalty() が初期化する
+    // ので実害は出ないが、離脱時の後始末はここへ揃える。
+    s3FreshWard = null;
   }
 
   /* 開始演出：赤帯。#redband（Stage 1→2 の transition() 専用）・#s35-redband
@@ -6892,7 +6896,6 @@
     $("penalty-host").innerHTML = "";
     $("penalty-host").classList.remove("shelf");
     s3Bottles = [];
-    s3FreshWard = null;
     if (view !== "s3") return;   // 判断C
     // Stage 3 の提出フォームへ復帰。入力は保持する（Stage 2 §NG時と同じ理由）。
     $("s3-verdict").innerHTML = "";
