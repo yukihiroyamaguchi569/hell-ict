@@ -8402,7 +8402,7 @@
   }
   $("phs-send").addEventListener("click", phsSendReply);
   $("phs-input").addEventListener("keydown", (e) => {
-    if (e.key === "Enter" && !e.isComposing) phsSendReply();
+    if (e.key === "Enter" && !imeComposing(e)) phsSendReply();
   });
 
   /* ------------------------------------------------------------------ */
