@@ -211,12 +211,29 @@ const eventRowSchema = z.object({
  * 常に偽の条件を置く。
  */
 /**
+ * チームごとの最後のリセット世代を、1回のGROUP BYで畳むCTE。各クエリはこれを
+ * `LEFT JOIN gen ON gen.team_code = <alias>.team_code` で連結して使う。
+ * resetを一度もしていないチームはこのCTEに行が無く、COALESCE(gen.g, 0)で0になる
+ * ——「reset行が無ければ全件が今の世代」という従来の意味と同じ。
+ *
+ * 行ごとの相関サブクエリ（`SELECT MAX(generation) ... WHERE team_code = e.team_code`）を
+ * やめた理由はrows read。あの形は O(チーム数 × 1チームの行数²) で読むため、当日の
+ * ポーリングだけで無料プランの上限（D1 rows read 500万/日）を大きく超える
+ * （Issue #125。実測で1回あたり約18,000行→約1,570行）。返す結果は変えない。
+ */
+const RESET_GENERATION_CTE = `WITH gen AS (
+  SELECT team_code, MAX(generation) AS g FROM progress_events WHERE kind = 'reset' GROUP BY team_code
+)`;
+
+/**
  * その行が「今の世代」に属するかの述語。チームごとに、最後のreset行の世代以上の行だけを
  * 数える（resetを一度もしていないチームは0以上＝全件）。照合を通った後にリセットが
  * 入って積まれた古い行は、世代が小さいのでここで落ちる。
+ *
+ * 世代はRESET_GENERATION_CTEの`gen`から引く。この述語を使うクエリは必ず`gen`を
+ * LEFT JOINしていること（サブクエリの中から使う場合は、外側の結合行を参照する）。
  */
-const currentGeneration = (alias: string): string =>
-  `${alias}.generation >= COALESCE((SELECT MAX(r.generation) FROM progress_events r WHERE r.team_code = ${alias}.team_code AND r.kind = 'reset'), 0)`;
+const currentGeneration = (alias: string): string => `${alias}.generation >= COALESCE(gen.g, 0)`;
 
 /** 規則の絞り込みへ世代の述語をANDで足す。規則が無ければ世代だけのWHEREになる。 */
 const currentRowsFilter = (
@@ -247,7 +264,8 @@ const teamFilter = (
   };
 };
 
-const teamsSql = (filter: string): string => `SELECT
+const teamsSql = (filter: string): string => `${RESET_GENERATION_CTE}
+SELECT
   e.team_code AS teamCode,
   COALESCE((
     SELECT i.team_name FROM progress_events i
@@ -257,11 +275,13 @@ const teamsSql = (filter: string): string => `SELECT
   COALESCE(MAX(CASE WHEN e.kind NOT IN ('jump', 'resume', 'reset') THEN e.pos END), 0) AS pos,
   MAX(e.created_at) AS updatedAt
 FROM progress_events e
+LEFT JOIN gen ON gen.team_code = e.team_code
 ${filter}
 GROUP BY e.team_code
 ORDER BY pos DESC, updatedAt ASC`;
 
-const eventsSql = (filter: string): string => `SELECT
+const eventsSql = (filter: string): string => `${RESET_GENERATION_CTE}
+SELECT
   p.team_code AS teamCode,
   p.team_name AS teamName,
   p.pos,
@@ -269,6 +289,7 @@ const eventsSql = (filter: string): string => `SELECT
   p.kind,
   p.created_at AS createdAt
 FROM progress_events p
+LEFT JOIN gen ON gen.team_code = p.team_code
 ${filter}
 ORDER BY p.id DESC
 LIMIT 20`;
@@ -401,22 +422,30 @@ const selfTeamCode = (url: URL, rule: TeamCodeRule): string | null => {
   return isTeamCodeAllowed(parsed.data, rule) ? parsed.data : null;
 };
 
+/**
+ * サマリー1回が投げる2本（teams / events）。当日のD1 rows readはここが支配的なので、
+ * 同じ文をテストからも測れるよう公開する（test/progress.test.ts の rows read 回帰）。
+ */
+export const summaryStatements = (
+  db: D1Database,
+  rule: TeamCodeRule,
+): [D1PreparedStatement, D1PreparedStatement] => {
+  const teamsFilter = currentRowsFilter(rule, "e");
+  const eventsFilter = currentRowsFilter(rule, "p");
+  return [
+    db.prepare(teamsSql(teamsFilter.clause)).bind(...teamsFilter.params),
+    db.prepare(eventsSql(eventsFilter.clause)).bind(...eventsFilter.params),
+  ];
+};
+
 export const handleProgressSummary = async (env: Env, url: URL): Promise<Response> => {
   try {
     await ensureSchema(env.PROGRESS_DB);
     await migrateProgressPii(env.PROGRESS_DB);
     const rule = parseTeamCodeRule(env);
     const selfCode = selfTeamCode(url, rule);
-    const teamsFilter = currentRowsFilter(rule, "e");
-    const eventsFilter = currentRowsFilter(rule, "p");
-    const [teams, events] = await Promise.all([
-      env.PROGRESS_DB.prepare(teamsSql(teamsFilter.clause))
-        .bind(...teamsFilter.params)
-        .all(),
-      env.PROGRESS_DB.prepare(eventsSql(eventsFilter.clause))
-        .bind(...eventsFilter.params)
-        .all(),
-    ]);
+    const [teamsStatement, eventsStatement] = summaryStatements(env.PROGRESS_DB, rule);
+    const [teams, events] = await Promise.all([teamsStatement.all(), eventsStatement.all()]);
     const context: PublicRowContext = { selfCode, rule };
     return json({
       teams: await Promise.all(

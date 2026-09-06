@@ -3,7 +3,8 @@ import { beforeEach, describe, expect, it } from "vitest";
 import { PII_REDACTION, publicTeamId, stage4Patient } from "@hell-ict/domain";
 import { z } from "zod";
 
-import { progressSchemaSql } from "../src/progress.js";
+import { parseTeamCodeRule } from "../src/guard.js";
+import { progressSchemaSql, summaryStatements } from "../src/progress.js";
 import { get, postJson, TEST_ORIGIN } from "./support.js";
 
 // サマリーは生のチームコードを返さない。publicId（SHA-256の先頭8桁）と、
@@ -543,5 +544,211 @@ describe("進捗記録", () => {
     expect(result.events).toHaveLength(20);
     expect(result.events[0]?.view).toBe("v24");
     expect(result.events[19]?.view).toBe("v5");
+  });
+});
+
+/**
+ * ゲームマスターのリセット世代による絞り込み。相関サブクエリからCTE＋LEFT JOINへ
+ * 書き換えた（Issue #125のrows read対策）ので、書き換えの前後で結果が変わらないことを
+ * 固定する。resetが無い／複数回ある／reset後にイベントが無い、の3ケースを揃える。
+ *
+ * 行はPOSTを通さずD1へ直接入れる。kind=resetはクライアントから送れず（サーバだけが書く）、
+ * 世代の古い行が後のidで積まれる状況もPOST経由では作れないため。
+ */
+describe("進捗記録: リセット世代の絞り込み", () => {
+  beforeEach(async () => {
+    await env.PROGRESS_DB.exec(DROP_TABLE);
+    await env.PROGRESS_DB.exec(progressSchemaSql);
+  });
+
+  /** created_atも指定する（updatedAtと並び順の期待値を固定するため）。 */
+  type Row = {
+    teamCode: string;
+    teamName?: string;
+    pos?: number;
+    view?: string;
+    kind?: string;
+    generation?: number;
+    createdAt: string;
+  };
+
+  const insertRow = (row: Row): D1PreparedStatement =>
+    env.PROGRESS_DB.prepare(
+      `INSERT INTO progress_events (team_code, team_name, pos, view, kind, generation, client_at, created_at)
+       VALUES (?, ?, ?, ?, ?, ?, '', ?)`,
+    ).bind(
+      row.teamCode,
+      row.teamName ?? "",
+      row.pos ?? 0,
+      row.view ?? "welcome",
+      row.kind ?? "clear",
+      row.generation ?? 0,
+      row.createdAt,
+    );
+
+  /** サーバだけが書くリセット行。 */
+  const resetRow = (teamCode: string, generation: number, createdAt: string): D1PreparedStatement =>
+    insertRow({ teamCode, kind: "reset", generation, createdAt });
+
+  it("resetが1件も無いチームは、世代に関係なく全イベントを数える", async () => {
+    // reset行が無いチームの下限は0。世代が進んだ行（generation 2）も落とさない。
+    await env.PROGRESS_DB.batch([
+      insertRow({
+        teamCode: "100001",
+        teamName: "無リセット",
+        pos: 3,
+        view: "s3",
+        createdAt: "2026-08-23 01:00:00",
+      }),
+      insertRow({
+        teamCode: "100001",
+        pos: 5,
+        view: "s5",
+        generation: 2,
+        createdAt: "2026-08-23 01:00:05",
+      }),
+      insertRow({
+        teamCode: "100001",
+        pos: 7,
+        view: "final",
+        kind: "jump",
+        generation: 2,
+        createdAt: "2026-08-23 01:00:09",
+      }),
+    ]);
+
+    const result = await summary();
+    expect(result.teams).toMatchObject([
+      { publicId: await idOf("100001"), teamName: "無リセット", pos: 5 },
+    ]);
+    expect(result.teams[0]?.updatedAt).toBe("2026-08-23 01:00:09");
+    expect(result.events).toHaveLength(3);
+  });
+
+  it("resetが複数回あるチームは、最後のreset世代以降の行だけを数える", async () => {
+    // 世代1・2のresetを跨いだうえ、reset後に遅れて届いた古い世代の行（idは最大）も混ぜる。
+    // idではなくgenerationで落とすので、最後のリセット以降の2行だけが残る。
+    await env.PROGRESS_DB.batch([
+      insertRow({
+        teamCode: "100002",
+        teamName: "第一世代",
+        pos: 5,
+        view: "s5",
+        createdAt: "2026-08-23 01:00:00",
+      }),
+      resetRow("100002", 1, "2026-08-23 01:01:00"),
+      insertRow({
+        teamCode: "100002",
+        teamName: "第二世代",
+        pos: 6,
+        view: "s6",
+        generation: 1,
+        createdAt: "2026-08-23 01:02:00",
+      }),
+      resetRow("100002", 2, "2026-08-23 01:03:00"),
+      insertRow({
+        teamCode: "100002",
+        teamName: "第三世代",
+        pos: 2,
+        view: "s2",
+        generation: 2,
+        createdAt: "2026-08-23 01:04:00",
+      }),
+      insertRow({
+        teamCode: "100002",
+        teamName: "遅れて届いた",
+        pos: 7,
+        view: "final",
+        generation: 1,
+        createdAt: "2026-08-23 01:05:00",
+      }),
+    ]);
+
+    const result = await summary();
+    expect(result.teams).toMatchObject([
+      { publicId: await idOf("100002"), teamName: "第三世代", pos: 2 },
+    ]);
+    expect(result.teams[0]?.updatedAt).toBe("2026-08-23 01:04:00");
+    expect(result.events.map((event) => event.view)).toEqual(["s2", "welcome"]);
+  });
+
+  it("reset後にイベントが無いチームは、pos 0・チーム名なしへ戻る", async () => {
+    await env.PROGRESS_DB.batch([
+      insertRow({
+        teamCode: "100003",
+        teamName: "リセット前",
+        pos: 4,
+        view: "s4",
+        createdAt: "2026-08-23 01:00:00",
+      }),
+      resetRow("100003", 1, "2026-08-23 01:01:00"),
+    ]);
+
+    const result = await summary();
+    expect(result.teams).toMatchObject([{ publicId: await idOf("100003"), teamName: "", pos: 0 }]);
+    expect(result.teams[0]?.updatedAt).toBe("2026-08-23 01:01:00");
+    expect(result.events.map((event) => event.kind)).toEqual(["reset"]);
+  });
+
+  it("あるチームのリセットは、他チームの行を落とさない", async () => {
+    // 世代をチーム単位で畳んでいることの確認。全体のMAXで絞ると、リセットしていない
+    // チームの行（generation 0）まで消える。
+    await env.PROGRESS_DB.batch([
+      insertRow({
+        teamCode: "100004",
+        teamName: "リセット済",
+        pos: 6,
+        view: "s6",
+        createdAt: "2026-08-23 01:00:00",
+      }),
+      resetRow("100004", 3, "2026-08-23 01:01:00"),
+      insertRow({
+        teamCode: "100005",
+        teamName: "無関係",
+        pos: 4,
+        view: "s4",
+        createdAt: "2026-08-23 01:02:00",
+      }),
+    ]);
+
+    const result = await summary();
+    expect(result.teams).toMatchObject([
+      { publicId: await idOf("100005"), teamName: "無関係", pos: 4 },
+      { publicId: await idOf("100004"), teamName: "", pos: 0 },
+    ]);
+  });
+
+  it("サマリー1回のrows readは、行数の二乗にならない", async () => {
+    // 相関サブクエリ版は行ごとにMAX(generation)を引くためO(チーム数 × 1チームの行数²)で、
+    // 当日のポーリングだけで無料プランの上限（D1 rows read 500万/日）を超えていた
+    // （Issue #125）。10チーム×400行の同じデータで、相関サブクエリ版は約18,400行、
+    // CTE版は約2,060行を読む（実測）。行数に対して線形であることを固定する。
+    const rows = 400;
+    const teams = 10;
+    await env.PROGRESS_DB.batch(
+      Array.from({ length: rows }, (_unused, index) =>
+        insertRow({
+          teamCode: `1000${String(10 + (index % teams))}`,
+          teamName: "計測",
+          pos: index % 8,
+          view: "s1",
+          createdAt: "2026-08-23 01:00:00",
+        }),
+      ),
+    );
+
+    const [teamsStatement, eventsStatement] = summaryStatements(
+      env.PROGRESS_DB,
+      parseTeamCodeRule(env),
+    );
+    const measured = await Promise.all([teamsStatement.all(), eventsStatement.all()]);
+    const metaSchema = z.object({ rows_read: z.number() });
+    const rowsRead = measured.reduce(
+      (total, result) => total + metaSchema.parse(result.meta).rows_read,
+      0,
+    );
+
+    // 行数の数倍で収まること（二乗なら桁が変わる。相関サブクエリ版は46倍/行だった）。
+    expect(rowsRead).toBeLessThan(rows * 8);
   });
 });
