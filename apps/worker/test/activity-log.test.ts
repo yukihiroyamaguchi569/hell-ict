@@ -20,7 +20,7 @@ import {
   DEFAULT_CHAT_RATE_LIMIT,
   RATE_LIMIT_WINDOW_MS,
 } from "../src/guard.js";
-import { activitySchemaSql, handleActivityPost } from "../src/activity-log.js";
+import { activityEventId, activitySchemaSql, handleActivityPost } from "../src/activity-log.js";
 import { handleChatMessage, handleCreateThread } from "../src/index.js";
 import { postJson, session } from "./support.js";
 
@@ -155,6 +155,34 @@ describe("活動ログ", () => {
     await env.PROGRESS_DB.exec(activitySchemaSql);
   });
 
+  // event_idは入室ガードのEVENT_NOから導出する。開催回を持つ設定を1つに保つための
+  // 導出なので、規則（2桁数字ちょうど）が両者で食い違わないことをここで押さえる。
+  describe("開催回の識別子（event_id）", () => {
+    it("EVENT_NOが2桁数字ならその値をそのまま使う", () => {
+      expect(activityEventId({ EVENT_NO: "02" })).toBe("02");
+      // 入室ガードと同じく前後の空白は落とす。
+      expect(activityEventId({ EVENT_NO: " 02 " })).toBe("02");
+    });
+
+    it("未設定と2桁数字でない値は空文字へ倒す", () => {
+      for (const raw of [undefined, "2", "002", "abc", "", " ", "0a"]) {
+        expect(activityEventId({ EVENT_NO: raw })).toBe("");
+      }
+    });
+
+    it("EVENT_NO設定時、D1へ書かれた行のevent_idが開催回と一致する", async () => {
+      const saved = { EVENT_NO: env.EVENT_NO };
+      env.EVENT_NO = "50";
+      try {
+        const response = await postJson("/api/teams/500061/activity", activity());
+        expect(response.status).toBe(200);
+        expect((await rows()).map((row) => row.eventId)).toEqual(["50"]);
+      } finally {
+        Object.assign(env, saved);
+      }
+    });
+  });
+
   describe("サーバ側の自動記録", () => {
     it("1往復でchat.userとchat.assistantを各1行、ミリ秒精度の時刻付きで残す", async () => {
       const threadId = await mainThreadId("500001", "00000000-0000-4000-8000-000000000101");
@@ -177,7 +205,7 @@ describe("活動ログ", () => {
         ["chat.assistant", "assistant", "応答本文"],
       ]);
       for (const row of chatRows) {
-        expect(row.eventId).toBe("dev");
+        expect(row.eventId).toBe("");
         expect(row.teamCode).toBe("500001");
         expect(row.threadId).toBe(threadId);
         expect(row.commandId).toBe("00000000-0000-4000-8000-000000000102");
@@ -478,7 +506,7 @@ describe("活動ログ", () => {
       const stored = await rows();
       expect(stored).toHaveLength(1);
       expect(stored[0]).toMatchObject({
-        eventId: "dev",
+        eventId: "",
         teamCode: "500101",
         kind: "verdict.s1",
         view: "s1",

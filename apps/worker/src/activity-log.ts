@@ -1,7 +1,7 @@
 import { containsPii, detectPii, resetGenerationSchema, viewIdSchema } from "@hell-ict/domain";
 import { z } from "zod";
 
-import { ACTIVITY_RATE_LIMIT_PER_MINUTE } from "./guard.js";
+import { ACTIVITY_RATE_LIMIT_PER_MINUTE, parseEventNo } from "./guard.js";
 import {
   error,
   errorWithHeaders,
@@ -95,6 +95,15 @@ const INSERT_SQL = `INSERT OR IGNORE INTO activity_events
 const orEmpty = (value: string | undefined): string => value ?? "";
 
 /**
+ * 活動ログへ書く開催回の識別子。入室ガードと同じ`EVENT_NO`から導出する——開催回を
+ * 持つ変数を1つにして、当日の切り替え忘れが起きる場所を減らすためで、専用の変数は持たない。
+ * 未設定（開発環境のfail-open）と2桁数字でない値はどちらも空文字へ倒す。記録は
+ * ゲーム進行より優先度が低いので、値が無いことを理由に書き込みそのものは止めない。
+ */
+export const activityEventId = (env: Pick<Env, "EVENT_NO">): string =>
+  parseEventNo(env.EVENT_NO) ?? "";
+
+/**
  * 保存直前のPIIゲート。textだけでなくmetaも検査する——metaはクライアントが任意の
  * JSONを送れるうえ、サーバが作るmetaにも利用者入力（スレッドのtitle）が混ざるため、
  * textだけ見ていてはD1へPIIを残さない保証が破れる。
@@ -133,7 +142,7 @@ const insertActivity = async (env: Env, input: ActivityEvent): Promise<void> => 
   await ensureActivitySchema(env.PROGRESS_DB);
   await env.PROGRESS_DB.prepare(INSERT_SQL)
     .bind(
-      orEmpty(env.EVENT_ID),
+      activityEventId(env),
       event.teamCode,
       event.kind,
       orEmpty(event.view),
