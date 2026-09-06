@@ -129,6 +129,16 @@ export const MAX_TEAM_MAX = 9999;
 const EVENT_NO_PATTERN = /^\d{2}$/;
 
 /**
+ * `EVENT_NO`を開催回の値へ。前後の空白を落とし、2桁数字ちょうどでなければnullを返す。
+ * 入室ガードの規則（parseTeamCodeRule）と活動ログのevent_id（activity-log.tsの
+ * activityEventId）が同じ判定を共有するための唯一の入口で、2桁の規則をここ以外に書かない。
+ */
+export const parseEventNo = (raw: string | undefined): string | null => {
+  const eventNo = (raw ?? "").trim();
+  return EVENT_NO_PATTERN.test(eventNo) ? eventNo : null;
+};
+
+/**
  * `TEAM_MAX`を上限値へ。未設定は既定へ倒すが、設定されていて正の整数（1〜9999）でない
  * ものはnullを返してfail-closedにする——ここを既定へ倒すと、書き損じたまま
  * 「設定したつもりの上限」と違う範囲で当日が動く。
@@ -150,8 +160,8 @@ const parseTeamMax = (raw: string | undefined): number | null => {
  */
 export const parseTeamCodeRule = (env: Pick<Env, "EVENT_NO" | "TEAM_MAX">): TeamCodeRule => {
   if (env.EVENT_NO === undefined) return { kind: "open" };
-  const eventNo = env.EVENT_NO.trim();
-  if (!EVENT_NO_PATTERN.test(eventNo)) return { kind: "invalid", reason: "eventNo" };
+  const eventNo = parseEventNo(env.EVENT_NO);
+  if (eventNo === null) return { kind: "invalid", reason: "eventNo" };
   const teamMax = parseTeamMax(env.TEAM_MAX);
   if (teamMax === null) return { kind: "invalid", reason: "teamMax", eventNo };
   return { kind: "rule", eventNo, teamMax };

@@ -21,6 +21,8 @@
   //   上2桁が一致し下4桁が1〜TEAM_MAXのコードだけを通す（未設定なら6桁なら何でも
   //   入室できる）。2桁数字でない値は全コードを拒否する（fail-closed）。
   //   例: 第2回のチーム1は "020001"。事前登録は要らないので、予備は次の番号を配ればよい。
+  //   活動ログ（activity_events.event_id）にもこの値がそのまま書かれるので、開催回を
+  //   持つ設定はこれ1つだけである。
   // - TEAM_MAX: チーム番号の上限。未設定なら100。1〜9999の数字以外は全拒否（fail-closed）。
   //   設定できているかは GET /api/health の guards.eventNo と guards.teamMax で確認する。
   // - CHAT_RATE_LIMIT_PER_MINUTE: 1チームが1分あたりに送れるチャット数。未設定なら20。
@@ -29,12 +31,6 @@
     "OPENAI_BASE_URL": "https://api.openai.com/v1",
     "OPENAI_MODEL": "gpt-4o",
   },
-  // 活動ログ（activity_events.event_id）へ書く開催回の識別子EVENT_IDは、秘匿情報では
-  // ないがここ（`vars`）には置かず、`wrangler secret put EVENT_ID` で与える。
-  // `vars`に書くと`wrangler types`が生成する型が値そのものの文字列リテラルになり、
-  // 開催回ごとに値を変えるたびに worker-configuration.d.ts の再生成とcommitを
-  // 忘れるとCIのtypecheckが落ちる。型生成から切り離すのが目的である。
-  // ローカル開発とテストは apps/worker/.dev.vars へ `EVENT_ID=dev` と書けば入る。
   // テストプレイ用の静的配信。/api/* は必ずWorkerへ届かせ、それ以外の
   // パスだけAssetsから返す（scripts/build-testplay.shが生成するpublic/を配信対象とする）。
   "assets": {
