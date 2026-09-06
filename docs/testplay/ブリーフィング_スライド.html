@@ -1,0 +1,829 @@
+<!doctype html>
+<html lang="ja">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>地獄のICT ブリーフィング</title>
+    <!--
+      ゲーム開始前のブリーフィング（Issue #94）の投影用スライド。構成と話す内容の
+      正典は ブリーフィング_構成案.md であり、このファイルはその投影版である。
+      文言を直すときは構成案も併せて直す。
+
+      会場のネットに依存させないため、外部CDN・外部フォント・外部画像を一切使わない。
+      単一ファイルで、file:// から直接開いても動く。
+
+      操作: → / ← / Space / PageUp / PageDown / Home / End、画面クリック（右半分で
+      次、左半分で前）。URL末尾に ?notes を付けると話す内容が下部に出る（手元PC用）。
+      会場前面のディスプレイへは ?notes を付けずに開く。
+
+      色はモック（docs/ui/mock/index.html）の alert モードのトークンを参照した値だが、
+      モックへは依存していない（ここに直値で持つ）。
+    -->
+    <style>
+      :root {
+        --font-ui:
+          system-ui, -apple-system, "Hiragino Kaku Gothic ProN", "Yu Gothic Medium",
+          "Noto Sans JP", sans-serif;
+        --font-num: ui-monospace, SFMono-Regular, Menlo, "Courier New", monospace;
+
+        /* モック alert モード由来 */
+        --bg: #14171a;
+        --surface: #1e2226;
+        --surface-2: #272c31;
+        --fg: #e8ecef;
+        --fg-muted: #8d979f;
+        --accent: #c1121f;
+        --rule: #2c3238;
+        --ok: #3fa66b;
+        --warn: #d99a1f;
+      }
+
+      * {
+        box-sizing: border-box;
+      }
+
+      html,
+      body {
+        margin: 0;
+        height: 100%;
+        background: #000;
+        color: var(--fg);
+        font-family: var(--font-ui);
+        overflow: hidden;
+      }
+
+      /* 1280x720 の板を、ウィンドウに合わせて等比拡大する。中の寸法は px で
+         書けばよく、はみ出しは板の中だけで判断できる。 */
+      #stage {
+        position: absolute;
+        inset: 0;
+        display: grid;
+        place-items: center;
+      }
+
+      #deck {
+        width: 1280px;
+        height: 720px;
+        position: relative;
+        background: var(--bg);
+        transform-origin: center center;
+        overflow: hidden;
+      }
+
+      .slide {
+        position: absolute;
+        inset: 0;
+        display: none;
+        flex-direction: column;
+        padding: 64px 88px 76px;
+      }
+
+      .slide.on {
+        display: flex;
+      }
+
+      /* 表紙 */
+      .slide.cover {
+        justify-content: center;
+        align-items: center;
+        text-align: center;
+        background:
+          radial-gradient(ellipse at 50% 42%, #23282d 0%, var(--bg) 68%);
+      }
+
+      .cover .title {
+        font-size: 104px;
+        font-weight: 800;
+        letter-spacing: 0.06em;
+        line-height: 1.1;
+        margin: 0;
+      }
+
+      .cover .title em {
+        font-style: normal;
+        color: var(--accent);
+      }
+
+      .cover .sub {
+        margin-top: 28px;
+        font-size: 30px;
+        color: var(--fg-muted);
+        letter-spacing: 0.08em;
+      }
+
+      .cover .ict {
+        margin-top: 52px;
+        font-size: 26px;
+        color: var(--fg);
+        border: 1px solid var(--rule);
+        background: var(--surface);
+        padding: 16px 28px;
+        line-height: 1.6;
+      }
+
+      .cover .ict b {
+        color: var(--warn);
+      }
+
+      /* 通常スライド */
+      h2 {
+        margin: 0 0 8px;
+        font-size: 52px;
+        font-weight: 700;
+        line-height: 1.2;
+        letter-spacing: 0.02em;
+      }
+
+      h2 .mark {
+        color: var(--accent);
+        margin-right: 18px;
+      }
+
+      .lead {
+        margin: 0 0 26px;
+        font-size: 24px;
+        color: var(--fg-muted);
+        line-height: 1.5;
+      }
+
+      ul {
+        margin: 0;
+        padding: 0;
+        list-style: none;
+        display: flex;
+        flex-direction: column;
+        gap: 16px;
+      }
+
+      li {
+        font-size: 30px;
+        line-height: 1.45;
+        padding-left: 34px;
+        position: relative;
+      }
+
+      li::before {
+        content: "▸";
+        position: absolute;
+        left: 0;
+        top: 0;
+        color: var(--accent);
+      }
+
+      li.plain::before {
+        content: "";
+      }
+
+      li ul {
+        margin-top: 12px;
+        gap: 10px;
+      }
+
+      li li {
+        font-size: 24px;
+        color: var(--fg-muted);
+      }
+
+      li li::before {
+        content: "–";
+      }
+
+      b {
+        color: #fff;
+      }
+
+      .hi {
+        color: var(--warn);
+        font-weight: 700;
+      }
+
+      .danger {
+        color: var(--accent);
+        font-weight: 700;
+      }
+
+      /* 3列レイアウト（画面の見方） */
+      .cols {
+        display: grid;
+        grid-template-columns: 1fr 1fr 1fr;
+        gap: 18px;
+        margin-bottom: 22px;
+      }
+
+      .col {
+        background: var(--surface);
+        border: 1px solid var(--rule);
+        padding: 20px 22px;
+      }
+
+      .col .where {
+        font-size: 20px;
+        color: var(--fg-muted);
+        letter-spacing: 0.14em;
+      }
+
+      .col .what {
+        font-size: 30px;
+        font-weight: 700;
+        margin-top: 8px;
+        line-height: 1.3;
+      }
+
+      .col .note {
+        font-size: 19px;
+        color: var(--fg-muted);
+        margin-top: 12px;
+        line-height: 1.5;
+      }
+
+      /* 手順（入室） */
+      ol.steps {
+        margin: 0;
+        padding: 0;
+        list-style: none;
+        counter-reset: step;
+        display: flex;
+        flex-direction: column;
+        gap: 18px;
+      }
+
+      ol.steps li {
+        counter-increment: step;
+        font-size: 30px;
+        line-height: 1.4;
+        padding-left: 62px;
+      }
+
+      ol.steps li::before {
+        content: counter(step);
+        font-family: var(--font-num);
+        font-size: 22px;
+        width: 42px;
+        height: 42px;
+        line-height: 42px;
+        text-align: center;
+        background: var(--accent);
+        color: #fff;
+        border-radius: 50%;
+        top: -2px;
+      }
+
+      .blank {
+        display: inline-block;
+        min-width: 240px;
+        border-bottom: 2px dashed var(--fg-muted);
+        color: var(--fg-muted);
+        font-family: var(--font-num);
+        font-size: 24px;
+        text-align: center;
+      }
+
+      /* 締め */
+      .slide.closing {
+        justify-content: center;
+        align-items: center;
+        text-align: center;
+      }
+
+      .closing .big {
+        font-size: 76px;
+        font-weight: 800;
+        line-height: 1.25;
+      }
+
+      .closing .small {
+        margin-top: 30px;
+        font-size: 28px;
+        color: var(--fg-muted);
+      }
+
+      /* フッタ */
+      .foot {
+        position: absolute;
+        left: 88px;
+        right: 88px;
+        bottom: 26px;
+        display: flex;
+        align-items: center;
+        gap: 16px;
+        font-size: 17px;
+        color: var(--fg-muted);
+        border-top: 1px solid var(--rule);
+        padding-top: 14px;
+      }
+
+      .foot .grow {
+        flex: 1;
+      }
+
+      .foot .num {
+        font-family: var(--font-num);
+      }
+
+      .slide.cover .foot,
+      .slide.closing .foot {
+        border-top: none;
+      }
+
+      /* 進捗バー */
+      #bar {
+        position: absolute;
+        left: 0;
+        bottom: 0;
+        height: 4px;
+        background: var(--accent);
+        transition: width 0.18s ease;
+      }
+
+      /* 話す内容（?notes） */
+      #notes {
+        display: none;
+        position: absolute;
+        left: 0;
+        right: 0;
+        bottom: 0;
+        max-height: 34%;
+        overflow: auto;
+        background: rgba(8, 9, 10, 0.94);
+        border-top: 2px solid var(--accent);
+        color: var(--fg);
+        font-size: 15px;
+        line-height: 1.65;
+        padding: 14px 20px 18px;
+        white-space: pre-wrap;
+      }
+
+      body.notes #notes {
+        display: block;
+      }
+
+      #notes .hd {
+        color: var(--warn);
+        font-size: 12px;
+        letter-spacing: 0.16em;
+        margin-bottom: 6px;
+      }
+
+      /* 操作の手掛かり。会場前面へ映しっぱなしにはしたくないので、数秒で消す。 */
+      #help {
+        position: absolute;
+        right: 12px;
+        top: 10px;
+        font-size: 12px;
+        color: #4a5157;
+        font-family: var(--font-num);
+        animation: fade-help 6s ease forwards;
+      }
+
+      @keyframes fade-help {
+        0%,
+        70% {
+          opacity: 1;
+        }
+        100% {
+          opacity: 0;
+        }
+      }
+    </style>
+  </head>
+  <body>
+    <div id="stage">
+      <div id="deck">
+        <!-- 1 -->
+        <section
+          class="slide cover"
+          data-notes="名乗る。「これから2時間、地獄を見てもらいます」程度で入る。
+ICT は Infection and Communication Technology ではない。Infection Control Team、感染制御チーム。ここだけは笑いを取らずに1回言い切る。
+ゲームの中身の予告はしない。"
+        >
+          <h1 class="title">地獄の<em>ICT</em></h1>
+          <div class="sub">AIを相棒に、崩れかけた病院を生き延びろ</div>
+          <div class="ict">
+            ICT = <b>Infection Control Team</b>（感染制御チーム）<br />
+            情報通信技術のほうではありません。
+          </div>
+          <div class="foot">
+            <span class="grow">ブリーフィング</span><span class="num"></span>
+          </div>
+        </section>
+
+        <!-- 2 -->
+        <section
+          class="slide"
+          data-notes="今日やるのはゲームだが、目的はAIを仕事で使えるようになること。ゲームは手段。
+持ち帰ってほしいのは3つ（渡す・扱う・段取り）。
+講義はしない。説明を聞いて覚えるのではなく、やって身につける形にしてある。
+
+【線引き】「AIの出力を扱える」は検証の話へ踏み込まない。「疑え」「嘘をつく」と言うと罠の予告になる。
+学習目標の一覧は見せない。"
+        >
+          <h2><span class="mark">01</span>これは、AI研修です</h2>
+          <p class="lead">ゲームの形をしていますが、狙いはひとつです。</p>
+          <ul>
+            <li><b>AIに仕事を渡せる</b>——何が欲しいかを、言葉にして渡す</li>
+            <li><b>AIの出した物を扱える</b>——使うか、直すか、捨てるかを自分で決める</li>
+            <li><b>AIを前提に段取りが組める</b>——手でやるか、任せるかの判断</li>
+            <li class="plain">
+              <span class="hi">講義はしません。</span
+              ><span style="color: var(--fg-muted)"
+                >聞いて覚えるのではなく、やって身につけてもらいます。</span
+              >
+            </li>
+          </ul>
+          <div class="foot">
+            <span class="grow">これは、AI研修です</span><span class="num"></span>
+          </div>
+        </section>
+
+        <!-- 3 -->
+        <section
+          class="slide"
+          data-notes="振り返り §3-A の中心。ここを飛ばすと課題1（何をすべきか分からない）が再発する。
+難易度は下げていない。時間内に全部終わらないのが普通。
+「できていないのは自分たちだけではない」を必ず言う。
+理不尽の矛先は組織と状況へ。参加者の能力の話にしない。
+
+【線引き】どこで失敗するかは言わない（罠の位置の予告になる）。"
+        >
+          <h2><span class="mark">02</span>先に謝っておきます。これは難しいです</h2>
+          <p class="lead">「地獄のICT」という名前は、誇張ではありません。</p>
+          <ul>
+            <li><b>難易度は下げていません。</b>地獄のように大変です</li>
+            <li><b>時間内に全部終わらないのが普通です。</b>詰まる、間に合わない、失敗する</li>
+            <li>それも含めて、<span class="hi">このゲームの体験です</span></li>
+            <li><b>できていないのは、あなたたちだけではありません。</b>どのチームも止まっています</li>
+            <li class="plain">
+              <span style="color: var(--fg-muted)"
+                >だから、手を止めて悩むより、詰まったまま試し続けるほうが前に進みます。</span
+              >
+            </li>
+          </ul>
+          <div class="foot">
+            <span class="grow">これは難しいです</span><span class="num"></span>
+          </div>
+        </section>
+
+        <!-- 4 -->
+        <section
+          class="slide"
+          data-notes="聖クロノス総合病院。400床、地方の中核病院。電子カルテは2003年製。
+皆さんは前任ICNが急に辞めた穴を埋めるため、外部から派遣されたICT。今日が着任初日。
+「派遣」という立場は、この後の理不尽が組織の決めごととして刺さるための土台。落とさない。
+実在の病院ではない。登場人物も全員架空。
+
+【線引き】未知ウイルスに触れない。何のアウトブレイクが起きるかも言わない。"
+        >
+          <h2><span class="mark">03</span>舞台：聖クロノス総合病院</h2>
+          <p class="lead">400床・地方中核病院。電子カルテは2003年製です。</p>
+          <ul>
+            <li>
+              皆さんは、<b>前任のICNが急に辞めた穴を埋めるために外部から派遣された感染制御チーム</b>
+            </li>
+            <li><span class="hi">今日が着任初日です。</span>引き継ぎは、あまりありません</li>
+            <li>院内では、複数の火の手が同時に上がりかけています</li>
+            <li class="plain">
+              <span style="color: var(--fg-muted)"
+                >実在の病院ではありません。登場人物も、届くメールも、全員・全部が架空です。</span
+              >
+            </li>
+          </ul>
+          <div class="foot">
+            <span class="grow">舞台：聖クロノス総合病院</span><span class="num"></span>
+          </div>
+        </section>
+
+        <!-- 5 -->
+        <section
+          class="slide"
+          data-notes="3〜4人で1チーム、PCはチームに1台。個人PC・スマホは使わない。
+マウスは無い。トラックパッド運用は仕様（アンケートの要望は不採用）。
+役割は分けたほうが速い。固定せず、ステージごとに交代してよい。
+チーム名は入室画面で自分たちで決める。
+
+【線引き】「AIに投げる係を作れ」までは言わない（解法に近づく）。"
+        >
+          <h2><span class="mark">04</span>チームとPC</h2>
+          <p class="lead">3〜4人で1チーム。ゲームに使うPCは、チームに1台だけです。</p>
+          <ul>
+            <li><b>個人のPC・スマホは使いません。</b>1台を囲んでください</li>
+            <li>
+              <b>マウスはありません。トラックパッドで操作します。</b>
+              <span style="color: var(--fg-muted)">（これは仕様です）</span>
+            </li>
+            <li>
+              <b>役割を分けたほうが速い。</b>おすすめは——
+              <ul>
+                <li>打つ人 / 読む人 / 決める人</li>
+                <li>固定せず、ステージごとに交代する（全員がAIを触ったほうが得です）</li>
+              </ul>
+            </li>
+            <li>チーム名は、この後の入室画面でチームごとに決めてもらいます</li>
+          </ul>
+          <div class="foot"><span class="grow">チームとPC</span><span class="num"></span></div>
+        </section>
+
+        <!-- 6 -->
+        <section
+          class="slide"
+          data-notes="ステージ制。提出が通れば次が開く。通らなければ留まる。
+全チーム同時スタートのレース。最初にゴールしたチームが優勝。
+順位は会場前のディスプレイだけに出る。手元のPCには他チームの位置は出ない（2026-09-06の変更）。
+「手元には出ない」を明示しないと、探して時間を溶かすチームが出る。
+全チーム完走まで続ける。優勝以外の賞もある。
+
+【線引き】各ステージが何をする場所かは言わない。ステージ数を出すかは未決。"
+        >
+          <h2><span class="mark">05</span>進み方</h2>
+          <p class="lead">ステージ制のレースです。課題を提出して通れば、次が開きます。</p>
+          <ul>
+            <li><b>全チーム同時スタート。最初にゴールしたチームが優勝です</b></li>
+            <li>
+              <b>順位は、会場前のディスプレイに出ます。</b>
+              <ul>
+                <li><span class="danger">手元のPCには、他のチームの位置は出ません</span></li>
+                <li>気になったら、顔を上げてください</li>
+              </ul>
+            </li>
+            <li>全チームがゴールするまで続けます。優勝以外の賞もあります</li>
+            <li class="plain">
+              <span style="color: var(--fg-muted)"
+                >追い抜かれても、追い抜いても、やることは変わりません。</span
+              >
+            </li>
+          </ul>
+          <div class="foot"><span class="grow">進み方</span><span class="num"></span></div>
+        </section>
+
+        <!-- 7 -->
+        <section
+          class="slide"
+          data-notes="画面は3列。左＝受信トレイと共有フォルダ、中央＝今の課題と提出、右＝AIチャット。
+AIパネルは最初から出ているわけではない。言わないと「壊れている」と誤解されて手が止まる。
+ただし、いつ・なぜ出るかは言わない。
+右下の「メッセージ」は情シスの苅部さんからの連絡。着信でバッジが光る。
+返信はできるが相談窓口ではない——何を書いても定型で受け流される。これも言わないと「壊れている」と思われる。
+上のバーに時計と文字サイズ変更。小さければ上げてよい。
+
+【線引き】共有フォルダの中身に触れない。苅部さんが詰まったときに声をかけてくることも言わない。"
+        >
+          <h2><span class="mark">06</span>画面の見方</h2>
+          <div class="cols">
+            <div class="col">
+              <div class="where">左</div>
+              <div class="what">受信トレイ<br />共有フォルダ</div>
+              <div class="note">届いたメールと、置いてある資料。</div>
+            </div>
+            <div class="col">
+              <div class="where">中央</div>
+              <div class="what">今の課題と<br />提出するところ</div>
+              <div class="note">主戦場はここです。</div>
+            </div>
+            <div class="col">
+              <div class="where">右</div>
+              <div class="what">AIチャット</div>
+              <div class="note">
+                使えるようになった時点で現れます。<b>最初から出てはいません。</b>
+              </div>
+            </div>
+          </div>
+          <ul>
+            <li>
+              右下の<b>「メッセージ」</b>は、情シスの<b>苅部さん</b>からの連絡が来る場所です
+              <ul>
+                <li>
+                  <span class="danger">返信はできますが、相談窓口ではありません。</span
+                  >何を書いても「今、別病棟の対応中です」と返ってきます
+                </li>
+              </ul>
+            </li>
+            <li>
+              上のバーに<b>時計</b>と<b>文字サイズを変えるボタン</b>があります。小さければ上げてください
+            </li>
+            <li>
+              AIチャットは<b>今のステージの分だけ</b>——前のステージの会話は残りません
+            </li>
+          </ul>
+          <div class="foot"><span class="grow">画面の見方</span><span class="num"></span></div>
+        </section>
+
+        <!-- 8 -->
+        <section
+          class="slide"
+          data-notes="罰は減点ではない。時間で払う。
+何かを踏むと「罰ゲーム：〜」という見出しで作業が降ってきて、終えるまで先へ進めない。
+レースなので時間がいちばん痛い。
+ただし、罰を恐れて止まるより進んだほうが速い。
+
+【線引き】何が引き金かは絶対に言わない。「AIに変なものを送ると罰になる」も言わない（Stage 5 の予告になる）。"
+        >
+          <h2><span class="mark">07</span>時間と、罰</h2>
+          <p class="lead">このゲームに減点はありません。罰は、時間で払います。</p>
+          <ul>
+            <li>
+              何かを踏むと、画面に <span class="danger">「罰ゲーム：〜」</span> と出て、作業が降ってきます
+            </li>
+            <li><b>それを終えるまで、先へは進めません</b></li>
+            <li>レースですから、<span class="hi">時間がいちばん痛い</span>——それが罰です</li>
+            <li class="plain">
+              <span style="color: var(--fg-muted)"
+                >とはいえ、罰を恐れて止まっているほうが遅くなります。進んでください。</span
+              >
+            </li>
+          </ul>
+          <div class="foot"><span class="grow">時間と、罰</span><span class="num"></span></div>
+        </section>
+
+        <!-- 9 -->
+        <section
+          class="slide"
+          data-notes="詰まったときの順番：資料を読む → AIに何が欲しいか言葉にして渡す → 声に出して相談する。
+聞いてよいこと：操作、不具合、PCの調子、ルールの確認。
+答えないこと：課題の答えと、解き方。意地悪ではなく、そういう研修だから。
+
+【線引き】依頼文の例文は1つも見せない（Issue #94「伝えないこと」）。
+「まず資料を読む」を作法として言うか解法とみなすかは要検討。"
+        >
+          <h2><span class="mark">08</span>詰まったときは</h2>
+          <p class="lead">この順番で試してください。</p>
+          <ol class="steps">
+            <li><b>手元の資料を読む。</b>必要なものは、受信トレイと共有フォルダに置いてあります</li>
+            <li><b>AIに頼むときは、何が欲しいかを言葉にする。</b>「やって」ではなく「何を、どういう形で」</li>
+            <li><b>チームで声に出して相談する。</b>1台を囲んでいる意味はここにあります</li>
+          </ol>
+          <ul style="margin-top: 26px">
+            <li>
+              進行役に聞いてよいこと：<b>操作・不具合・PCの調子・ルールの確認</b>
+            </li>
+            <li>
+              進行役が答えないこと：<span class="danger">課題の答えと、解き方</span>
+              <span style="color: var(--fg-muted)">（意地悪ではなく、そういう研修です）</span>
+            </li>
+          </ul>
+          <div class="foot"><span class="grow">詰まったときは</span><span class="num"></span></div>
+        </section>
+
+        <!-- 10 -->
+        <section
+          class="slide"
+          data-notes="URLを読み上げる／ホワイトボードに書いておく。
+チームコードは必ず読み上げてから打たせる。先に打たせると全チームが同じ部屋へ入る事故になる。
+チーム名は12文字まで。用途（感謝状の宛名）に触れるかは未決。
+Enter か［入室する］で入室。入ったらそのまま待つ。全チーム揃ってから始める。"
+        >
+          <h2><span class="mark">09</span>入室の手順</h2>
+          <ol class="steps">
+            <li>ブラウザで <span class="blank">URL</span> を開く</li>
+            <li>
+              <b>6桁のチームコード</b>を入れる
+              <span class="danger">（読み上げます。それまで打たないでください）</span>
+            </li>
+            <li><b>チーム名</b>をチームで決めて入れる（12文字まで）</li>
+            <li><b>Enter</b> か ［入室する］ を押す</li>
+          </ol>
+          <ul style="margin-top: 28px">
+            <li class="plain">
+              <span class="hi">入ったら、そのまま待ってください。</span>
+              <span style="color: var(--fg-muted)">全チームが揃ってから、一斉に始めます。</span>
+            </li>
+          </ul>
+          <div class="foot"><span class="grow">入室の手順</span><span class="num"></span></div>
+        </section>
+
+        <!-- 11 -->
+        <section
+          class="slide"
+          data-notes="実在の患者・職員の個人情報は絶対に入力しない。ゲーム内のデータは全部架空。
+※ 罠と結びつけない。「個人情報を送ると罰になる」と言った時点で罠が死ぬ。同じ息で言わないこと。
+ブラウザは閉じない。閉じても同じチームコードで入り直せば戻れる。リロードも同じ。慌てて他のPCを触らない。
+音が出る。最初にどこかをクリックしてから鳴り出す。
+困ったら手を挙げる。
+
+【要確認】復帰の挙動は当日の実装を確認してから断言する。"
+        >
+          <h2><span class="mark">10</span>いくつかお願い</h2>
+          <ul>
+            <li>
+              <span class="danger">実在の患者さん・職員の個人情報は、絶対に入力しないでください</span>
+              <ul>
+                <li>ゲームの中に出てくる名前・データは、すべて架空のものです</li>
+              </ul>
+            </li>
+            <li>
+              <b>ブラウザは閉じないでください。</b>
+              <ul>
+                <li>うっかり閉じても、同じチームコードで入り直せば戻れます（リロードも同じ）</li>
+                <li>慌てて他のPCを触らないでください</li>
+              </ul>
+            </li>
+            <li><b>音が出ます。</b>最初にどこかをクリックしてから鳴り始めます</li>
+            <li><b>困ったら手を挙げてください。</b>直せるものは、直しに行きます</li>
+          </ul>
+          <div class="foot"><span class="grow">いくつかお願い</span><span class="num"></span></div>
+        </section>
+
+        <!-- 12 -->
+        <section
+          class="slide closing"
+          data-notes="「準備はいいですか」——質問を受ける最後のタイミングにする。
+「では、聖クロノス総合病院へようこそ。着任してください。」
+全チームの入室完了を確認してから合図を出す。
+ここから先はアプリの中の話。説明を足さない。"
+        >
+          <div class="big">では、<span style="color: var(--accent)">着任</span>してください。</div>
+          <div class="small">聖クロノス総合病院へ、ようこそ。</div>
+          <div class="foot"><span class="grow"></span><span class="num"></span></div>
+        </section>
+
+        <div id="bar"></div>
+      </div>
+    </div>
+
+    <div id="notes"><div class="hd">話す内容（?notes）</div><div id="notes-body"></div></div>
+    <div id="help">← → / click</div>
+
+    <script>
+      (function () {
+        "use strict";
+
+        var deck = document.getElementById("deck");
+        var slides = Array.prototype.slice.call(deck.querySelectorAll(".slide"));
+        var bar = document.getElementById("bar");
+        var notesBody = document.getElementById("notes-body");
+        var i = 0;
+
+        if (/(^|[?&])notes($|[=&])/.test(location.search)) {
+          document.body.classList.add("notes");
+        }
+
+        slides.forEach(function (s, n) {
+          var num = s.querySelector(".num");
+          if (num) num.textContent = n + 1 + " / " + slides.length;
+        });
+
+        function show(n) {
+          i = Math.max(0, Math.min(slides.length - 1, n));
+          slides.forEach(function (s, k) {
+            s.classList.toggle("on", k === i);
+          });
+          bar.style.width = ((i + 1) / slides.length) * 100 + "%";
+          notesBody.textContent = slides[i].getAttribute("data-notes") || "（メモなし）";
+          if (location.hash !== "#" + (i + 1)) {
+            history.replaceState(null, "", "#" + (i + 1));
+          }
+        }
+
+        /* 1280x720 の板を、ウィンドウへ等比で収める。?notes のときは下部の
+           メモぶんだけ高さを譲る。 */
+        function fit() {
+          var h = window.innerHeight * (document.body.classList.contains("notes") ? 0.66 : 1);
+          var scale = Math.min(window.innerWidth / 1280, h / 720);
+          deck.style.transform = "scale(" + scale + ")";
+          document.getElementById("stage").style.alignItems = "center";
+          document.getElementById("stage").style.height =
+            document.body.classList.contains("notes") ? h + "px" : "100%";
+        }
+
+        window.addEventListener("keydown", function (e) {
+          switch (e.key) {
+            case "ArrowRight":
+            case "PageDown":
+            case " ":
+            case "Enter":
+              show(i + 1);
+              e.preventDefault();
+              break;
+            case "ArrowLeft":
+            case "PageUp":
+            case "Backspace":
+              show(i - 1);
+              e.preventDefault();
+              break;
+            case "Home":
+              show(0);
+              e.preventDefault();
+              break;
+            case "End":
+              show(slides.length - 1);
+              e.preventDefault();
+              break;
+            case "n":
+              document.body.classList.toggle("notes");
+              fit();
+              break;
+          }
+        });
+
+        /* クリック送り。右半分で次、左半分で前——トラックパッドでも押しやすい。 */
+        document.getElementById("stage").addEventListener("click", function (e) {
+          show(e.clientX < window.innerWidth / 2 ? i - 1 : i + 1);
+        });
+
+        window.addEventListener("resize", fit);
+
+        var start = parseInt((location.hash || "").slice(1), 10);
+        show(isNaN(start) ? 0 : start - 1);
+        fit();
+      })();
+    </script>
+  </body>
+</html>
