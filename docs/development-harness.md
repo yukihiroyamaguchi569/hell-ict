@@ -85,7 +85,7 @@ Workerの運用値（`EVENT_NO`、`TEAM_MAX`、`ADMIN_TOKEN`など）はCloudfla
 
 - **手動で出す**: `pnpm build:testplay && cd apps/worker && pnpm exec wrangler deploy`。
 - **Actionsから出す**: Actions &gt; 「本番デプロイ」 &gt; Run workflow。マージを伴わずに出し直せる。**`main`以外のブランチを選んでも何もしない**——未マージのコードを本番へ出せないよう、両ジョブが`main`のときだけ走る。
-- **効果音（mp3）はデプロイに含まれない**: 音源は効果音ラボで再配布が規約で禁じられており、`.gitignore`で`assets/sounds/`ごと除外してあるため、クリーンチェックアウトで走る自動デプロイには入りようがない。**配信元はR2バケット`hell-ict-sounds`で、投入は手元から1回だけ**——`assets/sounds/`へ7点を置いて`bash scripts/upload-sounds.sh`を実行する（バケットが無ければ作るところからやる）。Workerは`GET /sounds/<name>.mp3`をこの7点に限ってR2から返す（`apps/worker/src/sounds.ts`）。**音源を差し替えたときとバケットを作り直したときだけ再実行すればよく、通常のデプロイでは何もしなくてよい。** 投入していなくても本番は落ちず、音が鳴らないだけで進行は変わらない。
+- **効果音（mp3）はデプロイに含まれない**: 音源は効果音ラボで再配布が規約で禁じられており、`.gitignore`で`assets/sounds/`ごと除外してあるため、クリーンチェックアウトで走る自動デプロイには入りようがない。**配信元はR2バケット`hell-ict-sounds`で、投入は手元から1回だけ**——`assets/sounds/`へ7点を置いて`bash scripts/upload-sounds.sh`を実行する（バケットが無ければ作るところからやる）。**その端末で初めてwranglerを使うときは、先に`cd apps/worker && pnpm exec wrangler login`で認証しておく**——未認証だとバケットの一覧取得の時点で失敗し、作成も投入もできない。Workerは`GET /sounds/<name>.mp3`をこの7点に限ってR2から返す（`apps/worker/src/sounds.ts`）。**音源を差し替えたときとバケットを作り直したときだけ再実行すればよく、通常のデプロイでは何もしなくてよい。** 投入していなくても本番は落ちず、音が鳴らないだけで進行は変わらない。
 - **失敗したとき**: Actionsのログでどのジョブ（`pnpm verify` / `wrangler deploy` / `/api/health` の確認）が落ちたかを見る。デプロイ後の確認ステップは`GET /api/health`が`status: "ok"`かつ`guards.eventNo: true`かつ`guards.teamMax`が数値であることを求めるので、`EVENT_NO`の設定漏れや書き損じに加え、`TEAM_MAX`の書き損じ（`"invalid"`＝全チームが404）もここで失敗する。デプロイ自体は成功しているので、secretを直して再実行する。
 
 ### ゲームマスターのリセット（`ADMIN_TOKEN`）
