@@ -793,9 +793,29 @@
   width: 100%; max-width: 880px; background: var(--surface); color: var(--fg);
   border: 1px solid var(--rule); padding: 14px; max-height: 56vh; overflow: auto;
 }
+/* ボトル棚のときだけ器を広げ、高さを 56vh ではなく px で止める。40本を1画面へ
+   収めるための寸法なので、ブラウザの高さで変わってはいけない——製品の画面は
+   1280×720 固定で、vh はモックのページ（見出し・開発用スイッチャ）の分だけ
+   ずれる。Stage 4 の報告書は文章なので 880px / 56vh のまま。 */
+.lock .box.shelf { max-width: 1040px; max-height: 470px; }
+/* 罰ゲームの器へ放り込まれた理由を1〜2文で置く。責める言い方はしない
+   （企画書§6。罰も業務として出す）。Stage 3・4 で毎回セットし直す。 */
+.lock .why { font-size: 13px; color: var(--fg-muted); max-width: 880px; text-align: center; }
 /* ボトル棚。単調な作業そのものが罰なので、見た目で達成感を出さない——
-   済んだ本数が増えるだけで、褒めも音も無い。 */
-.bottles { display: grid; grid-template-columns: repeat(10, 1fr); gap: 7px; padding: 12px 2px; }
+   済んだ本数が増えるだけで、褒めも音も無い。
+   40本（5A20＋5B10＋5C10）がスクロール無しで収まる寸法にしてある。はみ出すと
+   参加者は追加分が湧いたことに気づけず、「終わったのに閉じない」と読む
+   （2026-09-06 ユーザー決定）。 */
+.bottles { display: flex; flex-direction: column; gap: 9px; padding: 10px 2px 0; }
+/* 病棟ごとに区切る。タイルのタグは詰め終わると「済」に変わって病棟名が消えるので、
+   どの棚がどの病棟のものかは棚の見出しが持つ。 */
+.bottles .wname { font-size: 11px; font-weight: 700; letter-spacing: .08em; color: var(--fg-muted); margin-bottom: 4px; }
+.bottles .row { display: grid; grid-template-columns: repeat(20, 1fr); gap: 6px; }
+/* 追加分が湧いた瞬間だけ、その病棟の棚を滑り込ませる。再描画のたびに繰り返さない
+   ——付け外しは s3FreshWard（later() で落とす）が持つ。prefers-reduced-motion では
+   later() が即時に走るので、結果として動かない。 */
+.bottles .ward.fresh { animation: wardIn .45s ease both; }
+@keyframes wardIn { from { opacity: 0; transform: translateY(-12px); } to { opacity: 1; transform: none; } }
 .bottles button {
   position: relative;
   aspect-ratio: 1 / 1.7; background: var(--bg); border: 1px solid var(--rule);
@@ -827,8 +847,19 @@
 /* 指示文にいらすとやの消毒液イラストを添える（Stage 3 の罰だけ。Stage 4 の罰の .note は素のまま）。
    文言は追加分が湧いたときに .t だけ差し替わるので、イラストは差し替えに巻き込まれない。 */
 .lock .note.icon { display: flex; align-items: center; gap: 12px; }
-.lock .note.icon img { flex: 0 0 auto; height: 80px; width: auto; }
-.lock .stat { font-size: 12px; color: var(--fg-muted); padding: 6px 2px 0; font-variant-numeric: tabular-nums; }
+.lock .note.icon img { flex: 0 0 auto; height: 54px; width: auto; }
+/* 追加分が湧いたとき、文言の差し替えだけでは気づかれない。1度だけ色を振る。 */
+.lock .note.flash { animation: noteFlash 1.1s ease 1; }
+@keyframes noteFlash { 0%, 100% { color: var(--fg); } 22%, 62% { color: var(--warn); } }
+/* 注記と進み具合を1行に並べる。棚の高さを稼ぐためでもあるが、主目的は
+   「全◯本」が 20→30→40 と増えるのを注記のすぐ隣で見せること——追加分の到着を
+   文言と数字の両方で示す。 */
+.lock .ptop { display: flex; align-items: center; gap: 16px; }
+.lock .ptop .note { flex: 1 1 auto; }
+.lock .stat {
+  flex: 0 0 auto; font-size: 19px; font-weight: 700; color: var(--fg);
+  font-variant-numeric: tabular-nums; white-space: nowrap; letter-spacing: .02em;
+}
 
 /* Stage 4：個人情報インシデントの警報。blackout（Stage 3・暗転）と対で使う——
    逆に画面をフラッシュさせることで「事故の音」を表現する
@@ -1741,6 +1772,10 @@
              （unlockSequence() 系と同じ理由。docs/ui/mock/README.md 既知の設計負債）。
              #penalty-host は空のまま持ち、startPenalty()/startS4Penalty() が中身を注入する。 -->
         <div class="veil lock hide" id="ov-lock">
+          <!-- なぜこの画面に放り込まれたのか（1〜2文）。突然ボトルが並ぶと
+               「何をやらされているのか」が分からない。見出しと同じく毎回
+               セットし直す——前のステージの説明を残さない。 -->
+          <div class="why" id="lock-why"></div>
           <div class="hd" id="lock-hd">拡大対応業務：🧴 消毒液ボトルの補充</div>
           <!-- 2026-08-22改修：残り時間のカウントダウンをやめ、この業務に実際に
                費やしている時間を数え上げる（startPenaltyClock）。罰は作業を
@@ -2001,7 +2036,9 @@
   // ——同じ波形を重ねて再生すると振幅が加算されて割れる。
   const sfxCache = new Map();
 
-  function sfx(name) {
+  /* opts.volume は「同じ音源を別の用途で借りる」ときだけ渡す（SFX_VOL は音源ごとの
+     既定であって、用途ごとの音量ではない）。ボトルの補充音がこれにあたる。 */
+  function sfx(name, opts) {
     if (!sfxUnlocked || sfxMuted) return;
     let el = sfxCache.get(name);
     if (!el) {
@@ -2012,7 +2049,8 @@
       el.addEventListener("error", () => {}, { once: true });
       sfxCache.set(name, el);
     }
-    el.volume = SFX_VOL[name] || SFX_DEFAULT_VOL;
+    // 0 を渡されたら「無音で鳴らす」ではなく指定通り 0 にする（|| だと既定へ落ちる）。
+    el.volume = opts && typeof opts.volume === "number" ? opts.volume : SFX_VOL[name] || SFX_DEFAULT_VOL;
     try { el.currentTime = 0; } catch { /* 未ロード時のシークは無視してよい */ }
     const played = el.play();
     if (played && typeof played.catch === "function") played.catch(() => {});
@@ -2430,6 +2468,17 @@
     { ward: "5C", count: 10, afterWard: "5B", afterDone: 8 }
   ];
   const S3_BOTTLE_FILL_MS = 700;    // 1本あたりの補充時間（仮値・P0実測で確定）
+
+  /* ボトルを押した音。押した手応えが無いと「反応していないのでは」と読まれるので、
+     1本ごとに鳴らす。専用の音源がまだ無いので decision1 を借りており、専用の音を
+     足すときはこの定数の名前だけ差し替える（音量は下の定数が持つ）。
+     40回鳴るので音量は他より明確に控えめにする——補充より音が主役になってしまう。 */
+  const S3_BOTTLE_SFX = "decision1";
+  const S3_BOTTLE_SFX_VOL = 0.22;
+  /* 追加分が湧いたときの音。罠の一撃（don-1）とも急変の帯（emergency-alert1）とも
+     別のものにする——湧いた追加分は「あと少しが折られる」ので、差し戻しと同じ音でよい。 */
+  const S3_BOTTLE_WAVE_SFX = "cancel";
+  const S3_BOTTLE_WAVE_FLASH_MS = 1200;   // 注記の点滅・新しい棚のスライドインの長さ
 
   /* 旧: 苅部さんの1段目トリガーは時限（S3_KARUBE_DELAY秒後に自動発火）だった。
      2026-08-22 ユーザー決定で廃止——時限トリガーは、チームが罠を踏む前に警告が
@@ -3498,7 +3547,7 @@
     // DOM とリスナーが残り続けるので、シーンを離れるたびに必ず空にする
     // （finishPenalty()/finishS4Penalty() 経由でも別途空にする）。
     const host = $("penalty-host");
-    if (host) host.innerHTML = "";
+    if (host) { host.innerHTML = ""; host.classList.remove("shelf"); }
     // Stage 4 の罰（AI使用ロック）が付けた沈み込みも、シーンを離れたら必ず外す。
     paneR.classList.remove("locked");
   }
@@ -6499,11 +6548,18 @@
   let s3KarubeAutoNudged = false;
   let s3Bottles = [];        // 拡大対応業務のボトル { ward, state: todo|filling|done }
   let s3BottleWaves = [];    // まだ湧いていない追加分（S3_BOTTLE_WAVES の残り。湧いたら取り除く）
+  // 湧いたばかりの病棟。drawBottles() は毎回作り直すので、スライドインを1度で
+  // 終わらせるにはDOMではなくここで持つ必要がある（later() で落とす）。
+  let s3FreshWard = null;
 
   function s3Stop() {
     // 苅部さんの1段目トリガーは later()（clearLater() で回収される）ので、
     // ここで止めるのは罰ゲームの時計だけ。Stage1/2の xStop() と命名を揃える。
     stopPenaltyClock();
+    // 追加棚のスライドインを解除する later() も clearLater() に回収されるので、
+    // 表示中にシーンを離れるとフラグだけが残る。次の startPenalty() が初期化する
+    // ので実害は出ないが、離脱時の後始末はここへ揃える。
+    s3FreshWard = null;
   }
 
   /* 開始演出：赤帯。#redband（Stage 1→2 の transition() 専用）・#s35-redband
@@ -6717,17 +6773,23 @@
     s3Bottles = [];
     for (let i = 0; i < S3_BOTTLES_5A; i++) s3Bottles.push({ ward: "5A", state: "todo" });
     s3BottleWaves = S3_BOTTLE_WAVES.slice();
+    s3FreshWard = null;
 
-    // 見出しは Stage 4 の罰（startS4Penalty）が同じ器を書き換えるので、毎回セットし直す。
+    // 説明と見出しは Stage 4 の罰（startS4Penalty）が同じ器を書き換えるので、毎回セットし直す。
+    $("lock-why").textContent =
+      "皮膚科医の指摘を受け、ICTに追加業務が割り当てられました。すべて補充し終えるまで、方針の作業には戻れません。";
     $("lock-hd").textContent = "拡大対応業務：🧴 消毒液ボトルの補充";
     // 指示文（.t）とイラストを別要素に分ける。追加分が湧いたときに差し替えるのは .t だけで、
-    // イラストは残る（fillBottle 参照）。
+    // イラストは残る（fillBottle 参照）。進み具合（.stat）は注記の右隣に並べる。
     $("penalty-host").innerHTML =
-      '<div class="note icon">' +
+      '<div class="ptop">' +
+      '<div class="note icon" id="bottle-note">' +
       '<img src="../../../assets/images/production/stage3-penalty-sanitizer-irasutoya.png" alt="">' +
       '<span class="t">5A病棟の消毒液ボトルを補充してください。</span></div>' +
-      '<div class="bottles" id="bottles"></div>' +
-      '<div class="stat" id="bottle-stat"></div>';
+      '<div class="stat" id="bottle-stat"></div></div>' +
+      '<div class="bottles" id="bottles"></div>';
+    // 器（.box）はボトル棚のときだけ広くする。Stage 4 の報告書は文章なので外す。
+    $("penalty-host").classList.add("shelf");
     drawBottles();
 
     $("ov-lock").classList.remove("hide");
@@ -6758,26 +6820,40 @@
 
   function stopPenaltyClock() { clearInterval(penaltyClockTick); penaltyClockTick = null; }
 
+  /* 病棟ごとの棚に分けて描く。並び順は s3Bottles に現れた順（5A → 5B → 5C）で、
+     追加分は必ず末尾に積まれるので、湧いた棚は常に一番下に出る。 */
   function drawBottles() {
     const host = $("bottles");
     if (!host) return;
-    host.innerHTML = s3Bottles.map((b, i) =>
-      '<button data-i="' + i + '" class="' + (b.state === "todo" ? "" : b.state) + '"' +
-      (b.state === "todo" ? "" : " disabled") + ">" +
-      '<img src="../../../assets/images/production/stage3-penalty-bottle.svg" alt="">' +
-      '<span class="tag">' +
-      (b.state === "done" ? "済" : b.state === "filling" ? "…" : b.ward) + "</span></button>"
+    const wards = [];
+    s3Bottles.forEach((b, i) => {
+      let w = wards.find((x) => x.ward === b.ward);
+      if (!w) { w = { ward: b.ward, items: [] }; wards.push(w); }
+      w.items.push({ b, i });
+    });
+    host.innerHTML = wards.map((w) =>
+      '<div class="ward' + (w.ward === s3FreshWard ? " fresh" : "") + '">' +
+      '<div class="wname">' + esc(w.ward) + "病棟</div>" +
+      '<div class="row">' + w.items.map(({ b, i }) =>
+        '<button data-i="' + i + '" class="' + (b.state === "todo" ? "" : b.state) + '"' +
+        (b.state === "todo" ? "" : " disabled") + ">" +
+        '<img src="../../../assets/images/production/stage3-penalty-bottle.svg" alt="">' +
+        '<span class="tag">' +
+        (b.state === "done" ? "済" : b.state === "filling" ? "…" : b.ward) + "</span></button>"
+      ).join("") + "</div></div>"
     ).join("");
     host.querySelectorAll("button:not([disabled])").forEach((el) => {
       el.addEventListener("click", () => fillBottle(Number(el.dataset.i)));
     });
     const done = s3Bottles.filter((b) => b.state === "done").length;
-    $("bottle-stat").textContent = done + " / " + s3Bottles.length + " 本";
+    // 「全◯本」は追加分が湧くと増える。文言の差し替えを見落としても、数字で分かる。
+    $("bottle-stat").textContent = "済 " + done + " / 全 " + s3Bottles.length + " 本";
   }
 
   function fillBottle(i) {
     const b = s3Bottles[i];
-    if (!b || b.state !== "todo") return;
+    if (!b || b.state !== "todo") return;   // 済み・詰め中は鳴らさない（この return より後に鳴らすこと）
+    sfx(S3_BOTTLE_SFX, { volume: S3_BOTTLE_SFX_VOL });
     b.state = "filling";
     drawBottles();
     later(() => {
@@ -6792,6 +6868,18 @@
         for (let k = 0; k < wave.count; k++) s3Bottles.push({ ward: wave.ward, state: "todo" });
         const n = $("penalty-host") && $("penalty-host").querySelector(".note .t");
         if (n) n.textContent = wave.ward + "病棟からも依頼が来ています。あわせて補充してください。";
+        // 文言の差し替えだけでは気づかれない（棚を見ている）。注記を1度だけ振り、
+        // 湧いた棚を滑り込ませ、音を鳴らす——気づかせるのが目的で、慰めではない。
+        sfx(S3_BOTTLE_WAVE_SFX);
+        const note = $("bottle-note");
+        if (note) note.classList.add("flash");
+        s3FreshWard = wave.ward;
+        later(() => {
+          if (!$("bottles")) return;
+          if ($("bottle-note")) $("bottle-note").classList.remove("flash");
+          s3FreshWard = null;
+          drawBottles();
+        }, S3_BOTTLE_WAVE_FLASH_MS);
       }
       drawBottles();
       // 全部詰め終わったらそれで終わり。補充は補充であって、継ぎ足しではない——
@@ -6806,6 +6894,7 @@
     s3Stop();
     $("ov-lock").classList.add("hide");
     $("penalty-host").innerHTML = "";
+    $("penalty-host").classList.remove("shelf");
     s3Bottles = [];
     if (view !== "s3") return;   // 判断C
     // Stage 3 の提出フォームへ復帰。入力は保持する（Stage 2 §NG時と同じ理由）。
@@ -7359,7 +7448,12 @@
     s4PenaltyState = "in-progress";
     saveCheckpoint("s4-penalty-start", true);
     s4Masked = new Set();
+    // 説明・見出し・器の広さは Stage 3 の罰と共有なので、毎回セットし直す
+    // （前のステージの説明が残ると、黒塗りの画面にボトルの話が出る）。
+    $("lock-why").textContent =
+      "個人情報インシデントの後処理として、ICTに追加業務が割り当てられました。報告書を提出するまで、AIは使用できません。";
     $("lock-hd").textContent = "インシデント対応業務：報告書の作成";
+    $("penalty-host").classList.remove("shelf");
 
     $("penalty-host").innerHTML =
       '<div class="note">個人情報にあたる箇所を黒く塗り、提出してください。</div>' +
