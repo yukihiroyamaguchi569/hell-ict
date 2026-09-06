@@ -111,12 +111,36 @@ const sendChat = (
     { aiGateway: gateway, nowMs },
   );
 
+/**
+ * チャット送信の枠を`count`件ぶん消費した状態にする。
+ *
+ * 呼ぶのは本番と同じ`consumeChatAttempt`（PII拒否経路が使う枠消費）で、
+ * beginChatMessageと同じbucketを同じ関数で数える。違うのはDOの中でループを回す点だけで、
+ * Workerとの往復は1回で済む。上限（20件/分）ぶんHTTPで送って枠を埋めると、1テストの
+ * 所要時間が本番の定数に比例して積み上がり、遅いランナーではvitestの既定タイムアウト
+ * （5秒）を超えてフレークになる。
+ */
+const fillChatBudget = (teamCode: string, nowMs: number, count: number): Promise<void> =>
+  runInDurableObject(env.TEAM_ROOM.getByName(teamCode), async (instance) => {
+    for (let index = 0; index < count; index += 1) {
+      await instance.consumeChatAttempt(nowMs, DEFAULT_CHAT_RATE_LIMIT, 0);
+    }
+  });
+
+/**
+ * チャットの枠が実際に記録されるbucketキー。DOは用途ごとに接頭辞を付けて
+ * `chat:` / `activity:` と分けて数えるので、接頭辞を落とすと本番が読み書きしない
+ * 行を見ることになり、検証も細工も素通りする。
+ */
+const chatRateLimitBucket = (nowMs: number): string =>
+  `chat:${rateLimitBucket(nowMs, RATE_LIMIT_WINDOW_MS)}`;
+
 /** レート制限の判定で書き換わりうる3つの記録をまとめて数える（原子性の確認用）。 */
 const storageCountsOf = async (
   teamCode: string,
   nowMs: number,
 ): Promise<{ rateLimit: number; messages: number; pending: number }> => {
-  const bucket = rateLimitBucket(nowMs, RATE_LIMIT_WINDOW_MS);
+  const bucket = chatRateLimitBucket(nowMs);
   const messages = await messageCountOf(teamCode);
   return runInDurableObject(env.TEAM_ROOM.getByName(teamCode), (_instance, state) => {
     const rateLimit = state.storage.sql
@@ -792,16 +816,25 @@ describe("チャット送信のレート制限", () => {
 
   it("既定の上限まで通し、超えた分は429でAIを呼ばず保存もしない", async () => {
     const threadId = await prepareThread("500011", messageCommandId(1));
-    const gateway = new FakeAiGateway(successOutcomes(DEFAULT_CHAT_RATE_LIMIT));
-    for (let index = 0; index < DEFAULT_CHAT_RATE_LIMIT; index += 1) {
-      const response = await sendChat(
-        "500011",
-        { commandId: messageCommandId(100 + index), threadId, text: "本文" },
-        gateway,
-        windowStartMs,
-      );
-      expect(response.status).toBe(200);
-    }
+    const gateway = new FakeAiGateway(successOutcomes(2));
+    // 1件目の送信で枠が実際に減ることを確かめる。
+    const first = await sendChat(
+      "500011",
+      { commandId: messageCommandId(100), threadId, text: "本文" },
+      gateway,
+      windowStartMs,
+    );
+    expect(first.status).toBe(200);
+    // 残りの枠はDOの中でまとめて使い切る。
+    await fillChatBudget("500011", windowStartMs, DEFAULT_CHAT_RATE_LIMIT - 2);
+    // 上限ちょうどの1件はまだ通る。境界の手前側。
+    const last = await sendChat(
+      "500011",
+      { commandId: messageCommandId(101), threadId, text: "本文" },
+      gateway,
+      windowStartMs,
+    );
+    expect(last.status).toBe(200);
     const stored = await messageCountOf("500011");
 
     const blocked = await sendChat(
@@ -818,21 +851,14 @@ describe("チャット送信のレート制限", () => {
     await expect(blocked.json()).resolves.toMatchObject({
       message: "送信が多すぎます。少し待ってから再試行してください。",
     });
-    expect(gateway.requests).toHaveLength(DEFAULT_CHAT_RATE_LIMIT);
+    expect(gateway.requests).toHaveLength(2);
     await expect(messageCountOf("500011")).resolves.toBe(stored);
   });
 
   it("窓が変われば再び送れる", async () => {
     const threadId = await prepareThread("500012", messageCommandId(1));
-    const gateway = new FakeAiGateway(successOutcomes(DEFAULT_CHAT_RATE_LIMIT + 1));
-    for (let index = 0; index < DEFAULT_CHAT_RATE_LIMIT; index += 1) {
-      await sendChat(
-        "500012",
-        { commandId: messageCommandId(300 + index), threadId, text: "本文" },
-        gateway,
-        windowStartMs,
-      );
-    }
+    const gateway = new FakeAiGateway(successOutcomes(1));
+    await fillChatBudget("500012", windowStartMs, DEFAULT_CHAT_RATE_LIMIT);
     expect(
       (
         await sendChat(
@@ -855,15 +881,16 @@ describe("チャット送信のレート制限", () => {
 
   it("処理済みcommandIdの再送は枠を消費せず、同じ結果を返す", async () => {
     const threadId = await prepareThread("500013", messageCommandId(1));
-    const gateway = new FakeAiGateway(successOutcomes(DEFAULT_CHAT_RATE_LIMIT));
-    for (let index = 0; index < DEFAULT_CHAT_RATE_LIMIT; index += 1) {
-      await sendChat(
-        "500013",
-        { commandId: messageCommandId(500 + index), threadId, text: "本文" },
-        gateway,
-        windowStartMs,
-      );
-    }
+    const gateway = new FakeAiGateway(successOutcomes(1));
+    // あとで再送する1件だけ本物の送信で通し、残りの枠はDOの中で使い切る。
+    const first = await sendChat(
+      "500013",
+      { commandId: messageCommandId(500), threadId, text: "本文" },
+      gateway,
+      windowStartMs,
+    );
+    expect(first.status).toBe(200);
+    await fillChatBudget("500013", windowStartMs, DEFAULT_CHAT_RATE_LIMIT - 1);
 
     // 枠は使い切っているが、再送は「新しい送信」ではないので通り、AIも呼び直さない。
     const resent = await sendChat(
@@ -873,7 +900,7 @@ describe("チャット送信のレート制限", () => {
       windowStartMs,
     );
     expect(resent.status).toBe(200);
-    expect(gateway.requests).toHaveLength(DEFAULT_CHAT_RATE_LIMIT);
+    expect(gateway.requests).toHaveLength(1);
 
     // 一方で、新しいcommandIdは同じ窓の中では拒否されたままである。
     const fresh = await sendChat(
@@ -886,10 +913,11 @@ describe("チャット送信のレート制限", () => {
   });
   it("存在しないスレッドへの送信は枠を消費しない", async () => {
     const threadId = await prepareThread("500014", messageCommandId(1));
-    const gateway = new FakeAiGateway(successOutcomes(DEFAULT_CHAT_RATE_LIMIT));
-    // 上限と同じ回数だけ不正なthreadIdへ投げる。枠を消費していれば、このあとの
-    // 正当な送信が429になるはずである。
-    for (let index = 0; index < DEFAULT_CHAT_RATE_LIMIT; index += 1) {
+    const gateway = new FakeAiGateway(successOutcomes(1));
+    // 枠を残り1件まで詰めてから、不正なthreadIdへ繰り返し投げる。1件でも消費して
+    // いれば、このあとの正当な送信が429になるはずである。
+    await fillChatBudget("500014", windowStartMs, DEFAULT_CHAT_RATE_LIMIT - 1);
+    for (let index = 0; index < 3; index += 1) {
       const rejected = await sendChat(
         "500014",
         {
@@ -900,7 +928,7 @@ describe("チャット送信のレート制限", () => {
         gateway,
         windowStartMs,
       );
-      expect(rejected.status).toBe(404);
+      expect(rejected.status, `#${String(index)}`).toBe(404);
     }
 
     const accepted = await sendChat(
@@ -914,7 +942,10 @@ describe("チャット送信のレート制限", () => {
 
   it("同じcommandIdの並行再送でも枠は1つしか減らない", async () => {
     const threadId = await prepareThread("500015", messageCommandId(1));
-    const gateway = new FakeAiGateway(successOutcomes(DEFAULT_CHAT_RATE_LIMIT + 2));
+    const gateway = new FakeAiGateway(successOutcomes(4));
+    // 枠を残り2件にしておく。並行2本が2つとも数えられればここで使い切り、1つだけ
+    // なら1件ぶん残る——このあとの1件が通るかどうかで見分けられる。
+    await fillChatBudget("500015", windowStartMs, DEFAULT_CHAT_RATE_LIMIT - 2);
     // 判定とpending行の作成が1つのDO操作なので、並行2本でも数えられるのは1回だけ。
     await Promise.all([
       sendChat(
@@ -931,16 +962,14 @@ describe("チャット送信のレート制限", () => {
       ),
     ]);
 
-    // 枠が1つだけ減っているなら、残りはlimit-1通。そこまで通り、その次が429になる。
-    for (let index = 0; index < DEFAULT_CHAT_RATE_LIMIT - 1; index += 1) {
-      const response = await sendChat(
-        "500015",
-        { commandId: messageCommandId(1000 + index), threadId, text: "本文" },
-        gateway,
-        windowStartMs,
-      );
-      expect(response.status).toBe(200);
-    }
+    // 枠が1つだけ減っているなら、残りの1件は通り、その次が429になる。
+    const accepted = await sendChat(
+      "500015",
+      { commandId: messageCommandId(1000), threadId, text: "本文" },
+      gateway,
+      windowStartMs,
+    );
+    expect(accepted.status).toBe(200);
     const blocked = await sendChat(
       "500015",
       { commandId: messageCommandId(1100), threadId, text: "本文" },
@@ -952,16 +981,20 @@ describe("チャット送信のレート制限", () => {
 
   it("上限に達した送信は枠・snapshot・pendingのどれも変えない", async () => {
     const threadId = await prepareThread("500017", messageCommandId(1));
-    const gateway = new FakeAiGateway(successOutcomes(DEFAULT_CHAT_RATE_LIMIT));
-    for (let index = 0; index < DEFAULT_CHAT_RATE_LIMIT; index += 1) {
-      await sendChat(
-        "500017",
-        { commandId: messageCommandId(1400 + index), threadId, text: "本文" },
-        gateway,
-        windowStartMs,
-      );
-    }
+    const gateway = new FakeAiGateway(successOutcomes(1));
+    // snapshotに中身がある状態を作ってから、残りの枠をDOの中で使い切る。
+    const first = await sendChat(
+      "500017",
+      { commandId: messageCommandId(1400), threadId, text: "本文" },
+      gateway,
+      windowStartMs,
+    );
+    expect(first.status).toBe(200);
+    await fillChatBudget("500017", windowStartMs, DEFAULT_CHAT_RATE_LIMIT - 1);
     const before = await storageCountsOf("500017", windowStartMs);
+    // 枠を読めていること自体を先に押さえる。接頭辞を落としたbucketを見ていると
+    // 常に0が返り、このあとの「変わっていない」がそのまま素通りする。
+    expect(before.rateLimit).toBe(DEFAULT_CHAT_RATE_LIMIT);
 
     const blocked = await sendChat(
       "500017",
@@ -981,7 +1014,7 @@ describe("チャット送信のレート制限", () => {
     for (const [round, broken] of brokenValues.entries()) {
       // 窓ごとにカウンタを分けて、ラウンド間で枠を引き継がないようにする。
       const roundNowMs = windowStartMs + round * RATE_LIMIT_WINDOW_MS;
-      const roundBucket = rateLimitBucket(roundNowMs, RATE_LIMIT_WINDOW_MS);
+      const roundBucket = chatRateLimitBucket(roundNowMs);
       await runInDurableObject(env.TEAM_ROOM.getByName("500018"), (_instance, state) => {
         state.storage.sql.exec(
           "INSERT OR REPLACE INTO rate_limit (bucket, count) VALUES (?, ?)",
@@ -990,18 +1023,24 @@ describe("チャット送信のレート制限", () => {
         );
       });
 
-      const gateway = new FakeAiGateway(successOutcomes(DEFAULT_CHAT_RATE_LIMIT));
+      const gateway = new FakeAiGateway(successOutcomes(2));
       // 壊れた行は0扱いで上書きされるので、ここから上限ぶんちょうど通る。
       const base = 1600 + round * 100;
-      for (let index = 0; index < DEFAULT_CHAT_RATE_LIMIT; index += 1) {
-        const response = await sendChat(
-          "500018",
-          { commandId: messageCommandId(base + index), threadId, text: "本文" },
-          gateway,
-          roundNowMs,
-        );
-        expect(response.status, `${String(broken)}#${String(index)}`).toBe(200);
-      }
+      const first = await sendChat(
+        "500018",
+        { commandId: messageCommandId(base), threadId, text: "本文" },
+        gateway,
+        roundNowMs,
+      );
+      expect(first.status, `${String(broken)}#first`).toBe(200);
+      await fillChatBudget("500018", roundNowMs, DEFAULT_CHAT_RATE_LIMIT - 2);
+      const last = await sendChat(
+        "500018",
+        { commandId: messageCommandId(base + 1), threadId, text: "本文" },
+        gateway,
+        roundNowMs,
+      );
+      expect(last.status, `${String(broken)}#last`).toBe(200);
       const blocked = await sendChat(
         "500018",
         { commandId: messageCommandId(base + 50), threadId, text: "本文" },
@@ -1014,15 +1053,15 @@ describe("チャット送信のレート制限", () => {
 
   it("上限に達した送信はpending行を残さず、窓が明ければ同じcommandIdで再送できる", async () => {
     const threadId = await prepareThread("500016", messageCommandId(1));
-    const gateway = new FakeAiGateway(successOutcomes(DEFAULT_CHAT_RATE_LIMIT + 1));
-    for (let index = 0; index < DEFAULT_CHAT_RATE_LIMIT; index += 1) {
-      await sendChat(
-        "500016",
-        { commandId: messageCommandId(1200 + index), threadId, text: "本文" },
-        gateway,
-        windowStartMs,
-      );
-    }
+    const gateway = new FakeAiGateway(successOutcomes(2));
+    const first = await sendChat(
+      "500016",
+      { commandId: messageCommandId(1200), threadId, text: "本文" },
+      gateway,
+      windowStartMs,
+    );
+    expect(first.status).toBe(200);
+    await fillChatBudget("500016", windowStartMs, DEFAULT_CHAT_RATE_LIMIT - 1);
     const stored = await messageCountOf("500016");
 
     const blockedId = messageCommandId(1300);
