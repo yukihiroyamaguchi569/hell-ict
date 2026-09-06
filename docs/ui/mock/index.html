@@ -789,9 +789,6 @@
   font-family: var(--font-num); font-size: 46px; font-weight: 700; color: #fff;
   font-variant-numeric: tabular-nums; line-height: 1;
 }
-/* 数字が何の時間なのかを1行で言う。カウントダウンではなく経過時間なので、
-   これが無いと「あと何秒で解放されるのか」と読まれる。 */
-.lock .tlab { font-size: 12px; color: var(--fg-muted); letter-spacing: .08em; margin-top: -8px; }
 /* 作業面。内部の文字色は var(--fg) 等のテーマトークンに依存する（crisisモードでは
    明るい文字色）。ここを白い紙にすると文字が読めなくなるため、「病院から届いたファイル」
    （00_共通シェルと通奏低音.md §8）とは扱いを変え、アプリの面のまま見せる。 */
@@ -804,9 +801,9 @@
    1280×720 固定で、vh はモックのページ（見出し・開発用スイッチャ）の分だけ
    ずれる。Stage 4 の報告書は文章なので 880px / 56vh のまま。 */
 .lock .box.shelf { max-width: 1040px; max-height: 470px; }
-/* 罰ゲームの器へ放り込まれた理由を1〜2文で置く。責める言い方はしない
-   （企画書§6。罰も業務として出す）。Stage 3・4 で毎回セットし直す。 */
-.lock .why { font-size: 13px; color: var(--fg-muted); max-width: 880px; text-align: center; }
+/* 報告書のときも器を広げ、高さを px で止める（ボトル棚と同じ理由）。20箇所の
+   黒塗り対象を持つ本文が 1366×768 でスクロール無しに収まる寸法。 */
+.lock .box.paper { max-width: 1040px; max-height: 520px; }
 /* ボトル棚。単調な作業そのものが罰なので、見た目で達成感を出さない——
    済んだ本数が増えるだけで、褒めも音も無い。
    40本（5A20＋5B10＋5C10）がスクロール無しで収まる寸法にしてある。はみ出すと
@@ -879,7 +876,7 @@
 /* Stage 4：インシデント対応業務（黒塗り）。下書きの中から個人情報にあたる
    トークンだけをクリックして塗る——ボトル補充（Stage 3）と違い判断がいる
    （docs/ui/05_Stage4.md §4）。2003年書式で組む。 */
-.report { font-family: var(--font-legacy); font-size: 14px; line-height: 2.1; white-space: pre-wrap; }
+.report { font-family: var(--font-legacy); font-size: 13px; line-height: 1.7; white-space: pre-wrap; }
 .report .tok { border: 1px dashed var(--warn); padding: 0 3px; cursor: pointer; background: transparent; color: inherit; font: inherit; }
 .report .tok:hover { background: rgba(217,154,31,.14); }
 .report .tok.masked { background: #16181a; color: #16181a; border-color: #16181a; }
@@ -929,10 +926,6 @@
 /* Stage 3.5：クリア時の小さな報酬。全画面veilではなく中央ペイン（.work）に収め、
    --okの緑だけを使う——暗転（Stage 3）・警報（Stage 4）と見た目で区別する
    （docs/ui/04_Stage3_5_新情報の解釈.md §3）。 */
-.s35-clear { flex: 1; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 16px; text-align: center; padding: 20px; }
-.s35-clear-diagram { opacity: .9; }
-.s35-clear-t { font-size: 22px; font-weight: 700; color: var(--ok); letter-spacing: .03em; }
-.s35-clear-s { font-size: 15px; color: var(--fg-muted); max-width: 46ch; line-height: 1.8; }
 
 /* Stage 3.5：院長の一往復。2026-09-05（Issue #88）にポップアップ（旧
    #ov-s35-kanbu）から中央ペインへ移した器——モーダルだと要約と論文を見返せず、
@@ -1773,21 +1766,18 @@
         </div>
 
         <!-- Stage 3・4：罰ゲームの器。主役は残り時間の数字。
-             見出しに「罰ゲーム」と書かない——罰も業務として出す（企画書 §6）。
+             見出しは「罰ゲーム：〜」と名乗る（2026-09-06 ユーザー決定。旧実装は
+             「拡大対応業務」等の業務名で伏せていた）。理由の説明行（旧 #lock-why）は
+             同じ決定で両ステージとも削除した——直前の叱責が理由を言い終えている。
              見出しは #penalty-host と同じく「毎回明示的にセットし直す」流儀にする
              （unlockSequence() 系と同じ理由。docs/ui/mock/README.md 既知の設計負債）。
              #penalty-host は空のまま持ち、startPenalty()/startS4Penalty() が中身を注入する。 -->
         <div class="veil lock hide" id="ov-lock">
-          <!-- なぜこの画面に放り込まれたのか（1〜2文）。突然ボトルが並ぶと
-               「何をやらされているのか」が分からない。見出しと同じく毎回
-               セットし直す——前のステージの説明を残さない。 -->
-          <div class="why" id="lock-why"></div>
-          <div class="hd" id="lock-hd">拡大対応業務：🧴 消毒液ボトルの補充</div>
+          <div class="hd" id="lock-hd">罰ゲーム：🧴 消毒液ボトルの補充</div>
           <!-- 2026-08-22改修：残り時間のカウントダウンをやめ、この業務に実際に
                費やしている時間を数え上げる（startPenaltyClock）。罰は作業を
                終えたときに終わるのであって、秒数で解放されるわけではない。 -->
           <div class="timer" id="lock-timer">00:00</div>
-          <div class="tlab">この対応に費やしている時間</div>
           <div class="box" id="penalty-host"></div>
         </div>
 
@@ -2453,9 +2443,9 @@
      矛先は判断と状況へ——人格攻撃はしない（AGENTS.md トーンルール）。
      話者表記〔皮膚科医〕は付けない（2026-09-06 ユーザー決定で肖像付きの窓
      #ov-s3scold へ移したため）——肖像とキャプションが既に話者を示している
-     （S3_NOTICE_LINES・S35_DIRECTOR_LINES と同じ流儀）。 */
+     （S3_NOTICE_LINES・S35_DIRECTOR_PAGES と同じ流儀）。 */
   const S3_TRAP_DOCTOR_LINES = [
-    "誰です、全員に予防衣なんて指示を出したのは。通常疥癬ですよ。治療も終わってる。カルテは読みましたか。",
+    "誰です、全員に厳しい感染対策なんて指示を出したのは。通常疥癬ですよ。治療も終わってる。カルテは読みましたか。",
     "不要な隔離は患者を弱らせます。全部外してください。",
     "角化型と通常型を一緒くたにするから、こうなる。この3人は通常型です。次からは病型と治療の進み具合を先に見てください。"
   ];
@@ -2523,11 +2513,20 @@
   /* 矛先は組織の期待の圧に留め、人格は攻撃しない（AGENTS.md トーンルール）。*/
   /* 肖像あり文脈では話者表記〔〕を付けない（#ov-s3notice の S3_NOTICE_LINES・ */
   /* #ov-s4call の .say と同じ流儀。肖像が話者を示すので文中では不要）。       */
-  const S35_DIRECTOR_LINES = [
-    "14名も発熱者が増えているじゃないか！！",
-    "周辺国・東陵国で、原因不明の発熱クラスターが出ているそうだ。速報論文が届いている。",
-    "英語だ。要約して、私に上げなさい。",
-    "以上だ。期待している。"
+  /* 2画面に割る（2026-09-06 ユーザー決定）。1画面目は状況への苛立ちだけを           */
+  /* 投げ、［次へ］で間を作ってから2画面目でタスクを渡す。4行を一息に読ませると      */
+  /* 「英語だ。要約して」という肝心の指示が苛立ちに埋もれる。                        */
+  /* 窓（#ov-s35-director）は同じまま、本文とボタンの文言だけ差し替える。            */
+  const S35_DIRECTOR_PAGES = [
+    [
+      "14名も発熱者が増えているじゃないか！！",
+      "検査も全て陰性だというし、これはなんの病気なんだ！"
+    ],
+    [
+      "周辺国・東陵国で、原因不明の発熱クラスターが出ているそうだ。速報論文が届いている。",
+      "英語だ。要約して、私に上げなさい。",
+      "以上だ。期待している。"
+    ]
   ];
 
   /* 幹部からの転送メールは院長のタスク付与オーバーレイへ差し替えたため、
@@ -2593,7 +2592,7 @@
        「眩しく感じる」。距離を5文字に絞り、句読点をまたがせない。
 
      誤検知の下限は確認済み——教材の速報論文（S35_REPORT_TEXT）は全文英語、
-     院長の台詞（S35_DIRECTOR_LINES）と転送メール（MAIL_S35_DIRECTOR）にも
+     院長の台詞（S35_DIRECTOR_PAGES）と転送メール（MAIL_S35_DIRECTOR）にも
      「痛」「光」は一字も無い。眼症状に触れない要約や、論文・画面文言の丸写しが
      素通りすることはない。 */
   const S35_REQUIRED_SUMMARY =
@@ -2634,16 +2633,6 @@
   const S35_ACTION_PATIENT_REJECT =
     "〔院長〕調べさせた。患者は皆すでに発熱していて、眼痛を訴える者はいなかった。"
     + "……論文が言っているのは、熱が出る前の話だ。先回りできる相手は誰だ。";
-
-  /* クリア時の院長の結果報告と、小さな報酬の文言
-     （docs/ui/04_Stage3_5_新情報の解釈.md §3）。 */
-  const S35_RESULT_LINES = [
-    "〔院長〕分かった。夜勤者を確認させる。",
-    "〔院長〕……発熱はないが、眼痛を訴える応援看護師が一人いた。配置はこちらで変える。",
-    "〔院長〕上出来だ。"
-  ];
-  const S35_CLEAR_T = "接点をひとつ、減らした。";
-  const S35_CLEAR_S = "新情報を読み解き、これ以上の拡大を防ぎました。";
 
   /* ------------------------------------------------------------------ */
   /* Stage 4 の教材（配布版）                                            */
@@ -2795,26 +2784,79 @@
     { re: new RegExp(S4_PATIENT.familyName.replace(" ", "[\\s　]*")), label: "ご家族の氏名" }
   ];
 
+  /* 罰ゲーム（黒塗り）で使うダミー連絡先。**すべて実在しない値**にすること——
+     メールは RFC 2606 の example.com に統一（example.jp も予約済みだが、
+     一種類に揃えて説明を要らなくする）、住所は架空の市名（常盤野市）で統一する。
+     ここはAIチャットへ流れる経路が無い（罰ゲーム中は右ペインごとロックされる）が、
+     PII検知の設計原則どおり「実在しうる値をアプリの中に置かない」を守る。
+     氏名は S4_FEVER_ROWS の患者と姓を揃え、続柄の分かる家族として自然に読めるように
+     してある。 */
+  const S4_REPORT_KIN = [
+    // 架空番号。局番 0000 は日本の番号計画で割り当てられない帯。X 等の伏せ字は
+    // 使わない——「すでにマスク済み」と読まれ、黒塗りの課題として成立しなくなる。
+    { name: "渡辺 健一", rel: "長男", tel: "090-0000-0114", mail: "k.watanabe@example.com" },
+    { name: "田島 美和", rel: "長女", tel: "090-0000-0227", mail: "tajima.miwa@example.com" },
+    { name: "大久保 節子", rel: "妻",  tel: "090-0000-0338", mail: "okubo.setsuko@example.com" }
+  ];
+  const S4_REPORT_ADDRESSES = [
+    "常盤野市 朝比奈町3丁目12-4",
+    "常盤野市 双葉ヶ丘1-8-207",
+    "常盤野市 灘見西42-1"
+  ];
+
   /* インシデント報告書の下書き（罰ゲーム＝黒塗りの対象）。pii:true は
      塗るべきトークン、pii:false は塗ってはいけない一般語のトークン、
-     pii キー無しはクリックできない地の文。旧デザイン（患者005単体のカルテ
-     抜粋を送りかけた、という筋）から、新デザイン（14名分の発熱患者一覧を
-     丸ごと送りかけた、という筋）へ最小限書き換えた——ただし報告書に出す
-     具体例はプレイヤーが実際に目にした一覧の内容（氏名・ID・病棟）だけに
-     とどめ、一覧に無い生年月日・電話番号などは出さない（見ていない情報を
-     報告書に書かせない）。ID・病棟は単独では個人情報として扱わない
-     （S4_PIIの基準と同じ）ので pii:false——「番号や病棟名まで塗りすぎる」
-     過剰黒塗りの判断材料にする。 */
+     pii キー無しはクリックできない地の文。
+     2026-09-06 ユーザー決定で塗るべき対象を8個から20個へ増やし、氏名だけでなく
+     電話番号・メールアドレス・住所も混ぜた——氏名だけを狩る作業になっていて、
+     「何が個人情報か」を1種類しか判断していなかったため。増やしたぶんの筋は
+     「一覧と同じブックに家族連絡先シートと退院支援シートが同居していて、選択
+     範囲に巻き込まれた」——参加者が見ていない情報を報告書に書かせない原則は、
+     ここでは事故の内訳として報告書自身が説明する形で満たす。
+     ID・病棟・日付・体温は単独では個人情報として扱わない（S4_PIIの基準と同じ）
+     ので pii:false——「番号や病棟名まで塗りすぎる」過剰黒塗りの判断材料にする。
+     この4語は概要の地の文へ埋め、報告書自身には「単独では個人情報として扱わない」
+     という注釈を置かない（2026-09-06 ユーザー指摘）——注釈があると塗ってはいけない
+     語がその場で名指しされ、混在させて判断させるという罰の設計が成立しない。 */
   const S4_REPORT = [
     { t: "【インシデント報告書（下書き）】\n" },
-    { t: "発生日時：" }, { t: "8月22日 16:40", pii: false }, { t: "\n" },
+    { t: "発生日時：" }, { t: "8月22日 16:40", pii: false }, { t: "　" },
+    { t: "報告者：" }, { t: "感染制御チーム", pii: false }, { t: "\n" },
     { t: "対象：" }, { t: "保健所提出用・発熱患者一覧（14名分）", pii: false }, { t: "\n" },
-    { t: "報告者：" }, { t: "感染制御チーム", pii: false }, { t: "\n\n" },
-    { t: "概要：一覧をそのまま" }, { t: "外部AIサービス", pii: false }, { t: "へ貼り付けようとした。\n" },
-    { t: "氏名列には" }, { t: S4_FEVER_ROWS[0].name, pii: true }, { t: "様、" },
-    { t: S4_FEVER_ROWS[1].name, pii: true }, { t: "様など14名分の氏名が含まれていた。\n" },
-    { t: "患者ID（例：" }, { t: S4_FEVER_ROWS[0].id, pii: false }, { t: "）や病棟名（例：" },
-    { t: S4_FEVER_ROWS[0].ward, pii: false }, { t: "）は、単独では個人情報として扱わない。" }
+    { t: "概要：" }, { t: S4_FEVER_ROWS[0].ward, pii: false }, { t: "病棟の患者" },
+    { t: S4_FEVER_ROWS[0].id, pii: false }, { t: "（発熱確認日" },
+    { t: S4_FEVER_ROWS[0].date, pii: false }, { t: "・最高体温" },
+    { t: S4_FEVER_ROWS[0].temp, pii: false }, { t: "）をはじめとする14名分の一覧を、整形のためそのまま" },
+    { t: "外部AIサービス", pii: false },
+    { t: "へ貼り付けようとした。送信は直前で遮断されたが、選択範囲には次が含まれていた。\n\n" },
+
+    { t: "1. 氏名列（14名分）のうち：\n　" },
+    { t: S4_FEVER_ROWS[0].name, pii: true }, { t: "様　" },
+    { t: S4_FEVER_ROWS[1].name, pii: true }, { t: "様　" },
+    { t: S4_FEVER_ROWS[2].name, pii: true }, { t: "様　" },
+    { t: S4_FEVER_ROWS[3].name, pii: true }, { t: "様　" },
+    { t: S4_FEVER_ROWS[4].name, pii: true }, { t: "様　" },
+    { t: S4_FEVER_ROWS[5].name, pii: true }, { t: "様　" },
+    { t: S4_FEVER_ROWS[6].name, pii: true }, { t: "様　" },
+    { t: S4_FEVER_ROWS[7].name, pii: true }, { t: "様　ほか6名\n\n" },
+
+    { t: "2. 同じブックの「家族連絡先」シート（選択範囲に巻き込まれた）：\n　" },
+    { t: S4_REPORT_KIN[0].name, pii: true }, { t: "（" + S4_REPORT_KIN[0].rel + "）　" },
+    { t: S4_REPORT_KIN[0].tel, pii: true }, { t: "　" },
+    { t: S4_REPORT_KIN[0].mail, pii: true }, { t: "\n　" },
+    { t: S4_REPORT_KIN[1].name, pii: true }, { t: "（" + S4_REPORT_KIN[1].rel + "）　" },
+    { t: S4_REPORT_KIN[1].tel, pii: true }, { t: "　" },
+    { t: S4_REPORT_KIN[1].mail, pii: true }, { t: "\n　" },
+    { t: S4_REPORT_KIN[2].name, pii: true }, { t: "（" + S4_REPORT_KIN[2].rel + "）　" },
+    { t: S4_REPORT_KIN[2].tel, pii: true }, { t: "　" },
+    { t: S4_REPORT_KIN[2].mail, pii: true }, { t: "\n\n" },
+
+    { t: "3. 同じブックの「退院支援」シートの住所欄：\n　" },
+    { t: S4_REPORT_ADDRESSES[0], pii: true }, { t: "　" },
+    { t: S4_REPORT_ADDRESSES[1], pii: true }, { t: "　" },
+    { t: S4_REPORT_ADDRESSES[2], pii: true }, { t: "\n\n" },
+
+    { t: "以上について、外部への送信は成立していないが、選択範囲に含まれていたため報告する。" }
   ];
 
   /* 着弾メール1通。事務長が保健所からの依頼を転送し、そのまま一覧を添付する
@@ -2847,8 +2889,7 @@
 
   /* クリア時の一言（2026-08-22 ユーザー指示で追加）。話者は依頼主であり督促役
      でもある事務長——ここで別の幹部を出すと、この一件の担当が誰なのか濁る。
-     Stage 3.5 の院長の結果報告（S35_RESULT_LINES）と同じ器（提出判定の verdict）へ
-     出し、新しいオーバーレイは増やさない。
+     提出判定の verdict へ出し、新しいオーバーレイは増やさない。
      罠（PIIインシデント）を踏んだかどうかで分岐させない——踏んだチームにだけ
      違う台詞を出すと、隣の画面を覗いた時点で罠の存在が割れる。
      成功を認めるが、労いにはしない。事務長は最後まで組織の顔のままでいる。 */
@@ -6808,10 +6849,8 @@
     s3BottleWaves = S3_BOTTLE_WAVES.slice();
     s3FreshWard = null;
 
-    // 説明と見出しは Stage 4 の罰（startS4Penalty）が同じ器を書き換えるので、毎回セットし直す。
-    $("lock-why").textContent =
-      "皮膚科医の指摘を受け、ICTに追加業務が割り当てられました。すべて補充し終えるまで、方針の作業には戻れません。";
-    $("lock-hd").textContent = "拡大対応業務：🧴 消毒液ボトルの補充";
+    // 見出しは Stage 5 の罰（startS4Penalty）が同じ器を書き換えるので、毎回セットし直す。
+    $("lock-hd").textContent = "罰ゲーム：🧴 消毒液ボトルの補充";
     // 指示文（.t）とイラストを別要素に分ける。追加分が湧いたときに差し替えるのは .t だけで、
     // イラストは残る（fillBottle 参照）。進み具合（.stat）は注記の右隣に並べる。
     $("penalty-host").innerHTML =
@@ -6823,6 +6862,7 @@
       '<div class="bottles" id="bottles"></div>';
     // 器（.box）はボトル棚のときだけ広くする。Stage 4 の報告書は文章なので外す。
     $("penalty-host").classList.add("shelf");
+    $("penalty-host").classList.remove("paper");
     drawBottles();
 
     $("ov-lock").classList.remove("hide");
@@ -6969,6 +7009,22 @@
      要約の本文そのものは預けない——data に個人情報を入れない規約（checkpointData()
      のコメント）を守り、参加者が書いた自由記述をサーバへ増やさないため。 */
   let s35SummaryState = "none";
+  /* 院長のオーバーレイの表示中のページ（S35_DIRECTOR_PAGES の添字）。
+     チェックポイントへは預けない——復帰時はこの窓を畳む（resumeS35Talk）か、
+     入場演出からやり直して1画面目から始まるかのどちらかで、途中のページを
+     復元する経路は無い。 */
+  let s35DirectorPage = 0;
+
+  /* 院長のオーバーレイの本文とボタンを、指定ページの内容へ描き直す。
+     窓・肖像・キャプションは据え置き、差し替えるのは本文とボタン文言だけ。 */
+  function showS35DirectorPage(page) {
+    s35DirectorPage = page;
+    const lines = S35_DIRECTOR_PAGES[page];
+    $("s35director-body").innerHTML =
+      lines.map((t) => '<div class="say">' + esc(t) + "</div>").join("");
+    $("btn-s35director-close").textContent =
+      page < S35_DIRECTOR_PAGES.length - 1 ? "次へ" : "了解しました";
+  }
 
   /* 罠も罰も無いので、他ステージの xStop() のように止めるタイマーは本来無い
      （later() は clearLater() が回収する）。go() からの呼び出し規約
@@ -7033,8 +7089,7 @@
     s35FlashSurge();
     later(() => {
       if (view !== "s35") return;   // 判断C：赤帯の間にシーンを離れていたら一報を出さない
-      $("s35director-body").innerHTML =
-        S35_DIRECTOR_LINES.map((t) => '<div class="say">' + esc(t) + "</div>").join("");
+      showS35DirectorPage(0);
       $("ov-s35-director").classList.remove("hide");
     }, 2600);
   }
@@ -7158,64 +7213,10 @@
 
     $("s35-action-box").classList.add("hide");
     $("btn-s35-action-submit").classList.add("hide");
-    // 2026-08-22 ユーザー決定。以前は 2.2 秒の自動タイマーでこの窓を閉じて
-    // クリアカードへ送っていたが、実プレイで院長の3行を読み切る前に消えると
-    // 指摘された。Stage 1 の結果ウィンドウ（s1ShowResultWin）・S3.5 の
-    // クリアカードと同じく、参加者が押すまで出したままにする。
-    // 3行は一度に全部出し、その下にOKボタンを置く。
-    v.innerHTML = '<div class="verdict">' +
-      S35_RESULT_LINES.slice(0, -1).map((l) => '<div class="lead">' + l + "</div>").join("") +
-      '<div class="done">' + S35_RESULT_LINES[S35_RESULT_LINES.length - 1] + "</div>" +
-      '<div class="row-end" style="margin-top:14px"><button class="btn" id="s35-result-ok">確認した（次へ）</button></div>' +
-      "</div>";
     s35ActionVerdicting = false;
-    s35ScrollTalkIntoView();   // 結果報告と［確認した（次へ）］を画面内へ
-    // { once: true } で二重登録を防ぎ、押した瞬間に disabled にして連打も止める
-    // （s1ShowResultWin・s35ShowClearCard と同じ流儀）。押す前に devbar・JUMP で
-    // 他シーンへ飛んだ場合に備えて view も見る（判断C）。
-    const resOkBtn = $("s35-result-ok");
-    resOkBtn.addEventListener("click", () => {
-      resOkBtn.disabled = true;
-      if (view !== "s35") return;
-      // 差し込んだ .s35-talk は paneC ごと作り直されて消える（Issue #88 以前は
-      // オーバーレイを閉じていた箇所）。
-      s35ShowClearCard();
-    }, { once: true });
-  }
-
-  /* クリアの小さな報酬。全画面veilではなく中央ペインに収め、--okの緑だけを
-     使う——暗転（Stage 3）・警報（Stage 4）と見た目で区別する
-     （docs/ui/04_Stage3_5_新情報の解釈.md §3）。 */
-  function s35ShowClearCard() {
-    if (view !== "s35") return;
-    paneC.innerHTML =
-      '<div class="work"><div class="s35-clear">' +
-        '<svg class="s35-clear-diagram" viewBox="0 0 220 90" width="220" height="90" aria-hidden="true">' +
-          '<text x="4" y="14" font-size="10" fill="var(--fg-muted)">応援看護師</text>' +
-          '<text x="176" y="14" font-size="10" fill="var(--fg-muted)">5A病棟</text>' +
-          '<text x="176" y="60" font-size="10" fill="var(--fg-muted)">5B病棟</text>' +
-          '<text x="2" y="88" font-size="10" fill="var(--ok)">代替担当</text>' +
-          '<line x1="10" y1="20" x2="210" y2="20" style="stroke:var(--fg-muted);stroke-width:1.5" />' +
-          '<line x1="10" y1="20" x2="210" y2="50" style="stroke:var(--fg-muted);stroke-width:1.5;stroke-dasharray:3 4;opacity:.5" />' +
-          '<text x="95" y="38" font-size="12" fill="var(--fg-muted)">×</text>' +
-          '<line x1="10" y1="75" x2="210" y2="50" style="stroke:var(--ok);stroke-width:2" />' +
-        "</svg>" +
-        '<div class="s35-clear-t">' + S35_CLEAR_T + "</div>" +
-        '<div class="s35-clear-s">' + S35_CLEAR_S + "</div>" +
-        '<div class="row-end" style="margin-top:6px"><button class="btn" id="s35-clear-ok">確認した（次へ）</button></div>' +
-      "</div></div>";
-    // 2026-08-22 ユーザー決定。以前は 2.6 秒の自動タイマーで次へ送っていたが、
-    // カードと院長の結果報告を読み切る前に画面が変わるという指摘を受け、
-    // 参加者自身が押して進む形にした（Stage 1 の結果ウィンドウと同じ流儀）。
-    // { once: true } で二重登録を防ぎ、押した瞬間に disabled にして連打も止める。
-    // 押す前に devbar・JUMP で他シーンへ飛んだ場合は paneC ごと作り直されて
-    // このボタンは消えるが、念のため view も見て二重遷移を防ぐ。
-    const okBtn = $("s35-clear-ok");
-    okBtn.addEventListener("click", () => {
-      okBtn.disabled = true;
-      if (view !== "s35") return;
-      stage35UnlockSequence();
-    }, { once: true });
+    // 結果演出（院長の結果報告3行 → クリアカード）は 2026-09-06 ユーザー決定で削除。
+    // 通過したら、他ステージと同じクリア画面（#ov-unlock）へそのまま送る。
+    stage35UnlockSequence();
   }
 
   async function stage35UnlockSequence() {
@@ -7240,6 +7241,11 @@
   // 同じく一度だけ配線する。院長の一往復の［送信する］は中央ペインへ都度差し込む
   // 要素なので、ここではなく s35ShowDirectorTalk() の中で配線する（Issue #88）。
   $("btn-s35director-close").addEventListener("click", () => {
+    // 最後の画面でなければ、窓は開けたまま次のページへ送る。
+    if (s35DirectorPage < S35_DIRECTOR_PAGES.length - 1) {
+      showS35DirectorPage(s35DirectorPage + 1);
+      return;
+    }
     $("ov-s35-director").classList.add("hide");
     // ここでAIを出したり通常画面を再構築したりしない——中身（メール・提出フォーム）
     // は renderStage35() で既に揃っている（Stage 3 の btn-s3notice-close と同じ流儀）。
@@ -7481,12 +7487,11 @@
     s4PenaltyState = "in-progress";
     saveCheckpoint("s4-penalty-start", true);
     s4Masked = new Set();
-    // 説明・見出し・器の広さは Stage 3 の罰と共有なので、毎回セットし直す
-    // （前のステージの説明が残ると、黒塗りの画面にボトルの話が出る）。
-    $("lock-why").textContent =
-      "個人情報インシデントの後処理として、ICTに追加業務が割り当てられました。報告書を提出するまで、AIは使用できません。";
-    $("lock-hd").textContent = "インシデント対応業務：報告書の作成";
+    // 見出しと器の広さは Stage 3 の罰と共有なので、毎回セットし直す
+    // （前のステージの寸法が残ると、報告書がボトル棚の器で出る）。
+    $("lock-hd").textContent = "罰ゲーム：報告書の作成";
     $("penalty-host").classList.remove("shelf");
+    $("penalty-host").classList.add("paper");
 
     $("penalty-host").innerHTML =
       '<div class="note">個人情報にあたる箇所を黒く塗り、提出してください。</div>' +
