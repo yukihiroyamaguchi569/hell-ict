@@ -1,3 +1,4 @@
+import { CHECKPOINT_IDS_VERSION } from "./schemas/checkpoint.js";
 import type {
   CheckpointBody,
   CheckpointRejectionReason,
@@ -114,6 +115,8 @@ export const mergeCheckpoint = (
   const source = newerSide(current, incoming);
   return {
     view: source.view,
+    // 合成した結果はいま書くbodyなので、版は常に最新を名乗る。
+    idsVersion: CHECKPOINT_IDS_VERSION,
     data: mergePenalties(current, incoming, source),
     pos: Math.max(current.pos, incoming.pos),
     elapsedMs: Math.max(current.elapsedMs, incoming.elapsedMs),

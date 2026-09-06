@@ -900,6 +900,21 @@ describe("活動ログ", () => {
       await expect(rows("500119")).resolves.toHaveLength(1);
     });
 
+    it("旧UIのタブが送る旧名s35の画面idは、新名s4へ直して受け付ける", async () => {
+      // 1行まるごと捨てると、旧タブのチームの記録だけが分析から抜け落ちる。
+      // kindは値だけでは新旧を判別できないので読み替えない（分析側で時刻で切る）。
+      const response = await postJson("/api/teams/500120/activity", {
+        ...activity(),
+        kind: "verdict.s4",
+        view: "s35",
+      });
+      expect(response.status).toBe(200);
+      const saved = await rows("500120");
+      expect(saved).toHaveLength(1);
+      expect(saved[0]?.view).toBe("s4");
+      expect(saved[0]?.kind).toBe("verdict.s4");
+    });
+
     it("上限以内の本文はこれまでどおり処理される", async () => {
       // 上限判定がバイト数で行われ、通常の本文を巻き込まないことの確認。
       const response = await postJson("/api/teams/500117/activity", activity());

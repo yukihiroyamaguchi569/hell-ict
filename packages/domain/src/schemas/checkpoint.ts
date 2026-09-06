@@ -89,6 +89,18 @@ export const CHECKPOINT_REJECTION_REASONS = [
 
 export const checkpointRejectionReasonSchema = z.enum(CHECKPOINT_REJECTION_REASONS);
 
+/**
+ * 画面idの体系の版。2026-09-06（Issue #118）に内部名を表示番号へ揃えたのが版2で、
+ * それより前に保存されたbodyはこのキーを持たない——読む側は「マーカーが無ければ旧番号」
+ * とだけ見て判別する（罠フラグのキーの有無のような間接的な手掛かりに頼らない。
+ * 旧bodyがtrapを欠いていた場合や、将来trapの形が変わった場合に判別が黙って崩れる）。
+ *
+ * 既定値を持たせてあるのは、読み替えを通ったbodyが次の保存で版2として書き戻され、
+ * 以後は判別そのものが要らなくなるようにするため。番号を振り直すことがあれば、
+ * この値を上げて legacy-ids.ts の対応表を足す。
+ */
+export const CHECKPOINT_IDS_VERSION = 2;
+
 /** 罠の発動済みフラグ。Stage 3・Stage 5のどちらも1回だけ発動する（企画書§6）。 */
 export const checkpointTrapSchema = z.object({ s3Used: z.boolean(), s5Used: z.boolean() }).strict();
 
@@ -96,6 +108,10 @@ export const checkpointBodySchema = z
   .object({
     // 既知の画面idだけを受ける。自由文字列だと表示用の列がPIIの抜け道になる。
     view: viewIdSchema,
+    // 画面idの体系の版。省略は「読み替え済み」として版2で埋める——ここへ届く前に
+    // normalizeLegacyCheckpointBodyを通す約束なので、素の旧bodyがこの既定に
+    // 救われることはない（旧bodyは罠フラグの新名を持たず、この後で必ず落ちる）。
+    idsVersion: z.literal(CHECKPOINT_IDS_VERSION).default(CHECKPOINT_IDS_VERSION),
     pos: z.number().int().min(0).max(7),
     elapsedMs: z.number().int().nonnegative().max(CHECKPOINT_ELAPSED_MAX_MS),
     trap: checkpointTrapSchema,

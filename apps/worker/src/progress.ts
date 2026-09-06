@@ -1,6 +1,7 @@
 import { z } from "zod";
 
 import {
+  normalizeLegacyViewField,
   normalizeLegacyViewId,
   PII_REDACTION,
   publicTeamId,
@@ -307,7 +308,10 @@ export const handleProgressPost = async (request: Request, env: Env): Promise<Re
     (caught: unknown) => ({ ok: false as const, caught }),
   );
   if (!read.ok) return bodyErrorResponse(read.caught, "進捗イベントの形式が不正です。");
-  const parsed = progressEventSchema.safeParse(read.body);
+  // デプロイ後も開いたままの旧タブは旧番号の画面id（s35）を送ってくる。enumで弾くと
+  // その端末の位置がダッシュボードから消えるので、schemaの手前で新名へ直す
+  // （判別できないs4・s5は素通り。Issue #118）。
+  const parsed = progressEventSchema.safeParse(normalizeLegacyViewField(read.body));
   if (!parsed.success) return error("進捗イベントの形式が不正です。", 400);
 
   const event = parsed.data;

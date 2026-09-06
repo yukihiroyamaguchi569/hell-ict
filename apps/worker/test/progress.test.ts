@@ -534,6 +534,15 @@ describe("進捗記録", () => {
     expect(result.events[0]?.view).toBe("s4");
   });
 
+  it("旧UIのタブが送る旧名s35のPOSTを400で弾かず、新名s4で保存する", async () => {
+    // 旧UIは保存の失敗を通知しないので、弾くとその端末の位置が帯から消えたままになる。
+    const response = await postJson("/api/progress", event({ pos: 4, view: "s35" }));
+
+    expect(response.status).toBe(200);
+    const result = await summary();
+    expect(result.events[0]?.view).toBe("s4");
+  });
+
   it("teamsはpos降順、同順位は最終更新が古い順に並ぶ", async () => {
     const insert = env.PROGRESS_DB.prepare(
       `INSERT INTO progress_events (team_code, team_name, pos, view, kind, client_at, created_at)

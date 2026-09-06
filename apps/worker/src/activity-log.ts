@@ -1,4 +1,10 @@
-import { containsPii, detectPii, resetGenerationSchema, viewIdSchema } from "@hell-ict/domain";
+import {
+  containsPii,
+  detectPii,
+  normalizeLegacyViewField,
+  resetGenerationSchema,
+  viewIdSchema,
+} from "@hell-ict/domain";
 import { z } from "zod";
 
 import { ACTIVITY_RATE_LIMIT_PER_MINUTE, parseEventNo } from "./guard.js";
@@ -281,7 +287,10 @@ export const handleActivityPost = async (
       ? error("活動ログの本文が大きすぎます。", 413)
       : error("活動ログの形式が不正です。", 400);
   }
-  const parsed = clientActivitySchema.safeParse(body);
+  // 旧タブが送ってくる旧番号の画面id（s35）で1行まるごと捨てない（Issue #118）。
+  // kindは値だけでは新旧を判別できないので読み替えない——旧タブの数分だけ旧kindが
+  // 混ざりうる前提で、分析側が時刻で切り分ける（docs/testplay/ログ分析手順.md）。
+  const parsed = clientActivitySchema.safeParse(normalizeLegacyViewField(body));
   if (!parsed.success) return error("活動ログの形式が不正です。", 400);
 
   // 回数制限。無いと1チームがD1のactivity_eventsを無制限に増やせる。チャットとは

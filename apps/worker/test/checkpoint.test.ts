@@ -2,6 +2,7 @@ import { env, exports } from "cloudflare:workers";
 import { runInDurableObject } from "cloudflare:test";
 import {
   CHECKPOINT_ELAPSED_MAX_MS,
+  CHECKPOINT_IDS_VERSION,
   checkpointStateSchema,
   httpErrorSchema,
   saveCheckpointResultSchema,
@@ -18,6 +19,7 @@ const later = "2026-09-03T10:05:00.000Z";
 
 const body = (overrides: Partial<CheckpointBody> = {}): CheckpointBody => ({
   view: "s3",
+  idsVersion: CHECKPOINT_IDS_VERSION,
   pos: 2,
   elapsedMs: 60_000,
   trap: { s3Used: false, s5Used: false },
@@ -867,5 +869,81 @@ describe("チェックポイント: 旧名で保存された行の読み出し",
     await expect(load(teamCode)).resolves.toMatchObject({
       checkpoint: { revision: 2, body: { view: "s5", trap: { s3Used: true, s5Used: true } } },
     });
+  });
+});
+
+/**
+ * デプロイ後も開いたままの旧タブ（旧UI）からのPOST。旧UIは保存の失敗を通知せず進むので、
+ * 400で弾くとリロードでデプロイ前の状態まで巻き戻る。入口で新体系へ直して受理する。
+ */
+describe("チェックポイント: 旧UIのタブから届く旧形式のPOST", () => {
+  /** 版マーカーを持たない、振り直し前の形のbody。 */
+  const legacyPostBody = (view: string) => ({
+    view,
+    pos: 4,
+    elapsedMs: 60_000,
+    trap: { s3Used: true, s4Used: false },
+    dataRevision: 1,
+    data: { s3Penalty: "done", s4Penalty: "in-progress", s35Summary: "submitted" },
+  });
+
+  it.each([
+    ["s35", "s4", "500180"],
+    ["s4", "s5", "500181"],
+    ["s5", "s6", "500182"],
+  ])(
+    "旧形式のbody（view %s）を200で受理し、新名 %s で読み戻せる",
+    async (before, after, teamCode) => {
+      const response = await save(teamCode, {
+        commandId: id(teamCode.slice(3)),
+        expectedRevision: 0,
+        rawBody: legacyPostBody(before),
+      });
+
+      expect(response.status).toBe(200);
+      await expect(load(teamCode)).resolves.toMatchObject({
+        checkpoint: {
+          revision: 1,
+          body: {
+            view: after,
+            idsVersion: CHECKPOINT_IDS_VERSION,
+            trap: { s3Used: true, s5Used: false },
+            data: { s3Penalty: "done", s5Penalty: "in-progress", s4Summary: "submitted" },
+          },
+        },
+      });
+    },
+  );
+
+  it("同じ旧形式のbodyの再送は、指紋が一致して状態を進めない", async () => {
+    const teamCode = "500183";
+    const commandId = id("183");
+    const first = await save(teamCode, {
+      commandId,
+      expectedRevision: 0,
+      rawBody: legacyPostBody("s5"),
+    });
+    expect(first.status).toBe(200);
+
+    const resent = await save(teamCode, {
+      commandId,
+      expectedRevision: 0,
+      rawBody: legacyPostBody("s5"),
+    });
+
+    expect(resent.status).toBe(200);
+    const { snapshot } = saveCheckpointResultSchema.parse(await resent.json());
+    expect(snapshot.revision).toBe(1);
+    expect(snapshot.body.view).toBe("s6");
+  });
+
+  it("旧形式でも画面idそのものが未知なら従来どおり400で弾く", async () => {
+    const response = await save("500184", {
+      commandId: id("184"),
+      expectedRevision: 0,
+      rawBody: { ...legacyPostBody("s99"), view: "s99" },
+    });
+
+    expect(response.status).toBe(400);
   });
 });
