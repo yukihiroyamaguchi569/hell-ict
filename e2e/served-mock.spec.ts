@@ -59,6 +59,9 @@ test.describe("配信版モック", () => {
       await expect(page.locator(selector)).toBeHidden();
     }
 
+    // 起動時例外は /api/health プローブの応答後にも起きうる（LIVE判定・入室の配線）。
+    // ［入室する］はプローブが終わるまでdisabledなので、enabledを待ってから数える。
+    await expect(page.getByRole("button", { name: "入室する" })).toBeEnabled();
     expect(pageErrors).toEqual([]);
   });
 
@@ -69,6 +72,16 @@ test.describe("配信版モック", () => {
     await expect(page.locator(".masthead")).toBeVisible();
     // 同じ操作を何度でも繰り返せるよう、押した後にハッシュを捨てる。
     await expect.poll(() => page.evaluate(() => location.hash)).toBe("");
+
+    // ファシリテーターの実運用はリロード無しのトグル（アドレスバー末尾へ付けてEnter）。
+    // 初回ロードの分岐だけを見ると、hashchangeの配線が外れても緑になる。
+    for (const expected of [false, true]) {
+      await page.evaluate(() => {
+        location.hash = "#devbar";
+      });
+      await expect(page.locator(".devbar")).toBeVisible({ visible: expected });
+      await expect.poll(() => page.evaluate(() => location.hash)).toBe("");
+    }
   });
 
   test("ステージ指定のハッシュで開いても、先に入室してから指定ステージへ飛ぶ", async ({ page }) => {
@@ -114,5 +127,7 @@ test.describe("配信版モック", () => {
       `${SERVED_MOCK}assets/images/production/stage1-administrative-director.png`,
     );
     expect(image.status()).toBe(200);
+    // 200だけでは足りない——見つからないパスへHTMLを返す構成でも200になる。
+    expect(image.headers()["content-type"]).toMatch(/^image\/png/);
   });
 });
