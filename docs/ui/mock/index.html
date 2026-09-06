@@ -783,9 +783,6 @@
   font-family: var(--font-num); font-size: 46px; font-weight: 700; color: #fff;
   font-variant-numeric: tabular-nums; line-height: 1;
 }
-/* 数字が何の時間なのかを1行で言う。カウントダウンではなく経過時間なので、
-   これが無いと「あと何秒で解放されるのか」と読まれる。 */
-.lock .tlab { font-size: 12px; color: var(--fg-muted); letter-spacing: .08em; margin-top: -8px; }
 /* 作業面。内部の文字色は var(--fg) 等のテーマトークンに依存する（crisisモードでは
    明るい文字色）。ここを白い紙にすると文字が読めなくなるため、「病院から届いたファイル」
    （00_共通シェルと通奏低音.md §8）とは扱いを変え、アプリの面のまま見せる。 */
@@ -799,8 +796,10 @@
    ずれる。Stage 4 の報告書は文章なので 880px / 56vh のまま。 */
 .lock .box.shelf { max-width: 1040px; max-height: 470px; }
 /* 罰ゲームの器へ放り込まれた理由を1〜2文で置く。責める言い方はしない
-   （企画書§6。罰も業務として出す）。Stage 3・4 で毎回セットし直す。 */
+   （企画書§6）。Stage 3・4 で毎回セットし直す——Stage 3 は空にするので
+   （2026-09-06 ユーザー決定）、:empty で行そのものを畳んで gap を残さない。 */
 .lock .why { font-size: 13px; color: var(--fg-muted); max-width: 880px; text-align: center; }
+.lock .why:empty { display: none; }
 /* ボトル棚。単調な作業そのものが罰なので、見た目で達成感を出さない——
    済んだ本数が増えるだけで、褒めも音も無い。
    40本（5A20＋5B10＋5C10）がスクロール無しで収まる寸法にしてある。はみ出すと
@@ -1767,7 +1766,8 @@
         </div>
 
         <!-- Stage 3・4：罰ゲームの器。主役は残り時間の数字。
-             見出しに「罰ゲーム」と書かない——罰も業務として出す（企画書 §6）。
+             見出しは「罰ゲーム：〜」と名乗る（2026-09-06 ユーザー決定。旧実装は
+             「拡大対応業務」等の業務名で伏せていた）。
              見出しは #penalty-host と同じく「毎回明示的にセットし直す」流儀にする
              （unlockSequence() 系と同じ理由。docs/ui/mock/README.md 既知の設計負債）。
              #penalty-host は空のまま持ち、startPenalty()/startS4Penalty() が中身を注入する。 -->
@@ -1776,12 +1776,11 @@
                「何をやらされているのか」が分からない。見出しと同じく毎回
                セットし直す——前のステージの説明を残さない。 -->
           <div class="why" id="lock-why"></div>
-          <div class="hd" id="lock-hd">拡大対応業務：🧴 消毒液ボトルの補充</div>
+          <div class="hd" id="lock-hd">罰ゲーム：🧴 消毒液ボトルの補充</div>
           <!-- 2026-08-22改修：残り時間のカウントダウンをやめ、この業務に実際に
                費やしている時間を数え上げる（startPenaltyClock）。罰は作業を
                終えたときに終わるのであって、秒数で解放されるわけではない。 -->
           <div class="timer" id="lock-timer">00:00</div>
-          <div class="tlab">この対応に費やしている時間</div>
           <div class="box" id="penalty-host"></div>
         </div>
 
@@ -6776,9 +6775,11 @@
     s3FreshWard = null;
 
     // 説明と見出しは Stage 4 の罰（startS4Penalty）が同じ器を書き換えるので、毎回セットし直す。
-    $("lock-why").textContent =
-      "皮膚科医の指摘を受け、ICTに追加業務が割り当てられました。すべて補充し終えるまで、方針の作業には戻れません。";
-    $("lock-hd").textContent = "拡大対応業務：🧴 消毒液ボトルの補充";
+    // Stage 3 は説明文を置かない（2026-09-06 ユーザー決定）——直前の皮膚科医の窓が
+    // 理由を言い終えているので、同じことをもう一度読ませない。空にするのは Stage 4 の
+    // 説明が残らないようにするため。
+    $("lock-why").textContent = "";
+    $("lock-hd").textContent = "罰ゲーム：🧴 消毒液ボトルの補充";
     // 指示文（.t）とイラストを別要素に分ける。追加分が湧いたときに差し替えるのは .t だけで、
     // イラストは残る（fillBottle 参照）。進み具合（.stat）は注記の右隣に並べる。
     $("penalty-host").innerHTML =
@@ -7452,7 +7453,7 @@
     // （前のステージの説明が残ると、黒塗りの画面にボトルの話が出る）。
     $("lock-why").textContent =
       "個人情報インシデントの後処理として、ICTに追加業務が割り当てられました。報告書を提出するまで、AIは使用できません。";
-    $("lock-hd").textContent = "インシデント対応業務：報告書の作成";
+    $("lock-hd").textContent = "罰ゲーム：報告書の作成";
     $("penalty-host").classList.remove("shelf");
 
     $("penalty-host").innerHTML =
