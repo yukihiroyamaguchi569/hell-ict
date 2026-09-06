@@ -697,7 +697,13 @@
 @keyframes bandOut { from { transform: translateX(0); opacity: 1; } to { transform: translateX(0); opacity: 0; } }
 
 /* 解錠 */
-.unlock { background: rgba(8,9,10,.72); flex-direction: column; gap: 14px; }
+.unlock { background: rgba(8,9,10,.72); }
+.unlock .panel {
+  display: flex; flex-direction: column; align-items: center; gap: 14px;
+  padding: 34px 56px 30px; border-radius: 12px;
+  background: rgba(12,14,16,.88); border: 1px solid rgba(255,255,255,.12);
+  box-shadow: 0 18px 48px rgba(0,0,0,.5);
+}
 .unlock .bar {
   height: 4px; width: 0; background: var(--ok);
   animation: sweep .5s ease-out forwards;
@@ -1526,9 +1532,13 @@
         </div>
 
         <div class="veil unlock hide" id="ov-unlock">
-          <div class="bar"></div>
-          <div class="t">Stage 2 をクリアしました</div>
-          <div class="s">方針 — 転院患者の対応</div>
+          <!-- 文字の背後に半透明のパネルを敷く（2026-09-06 ユーザー指示）。全面の
+               薄暗い幕だけだと、下の画面の文字と重なって読みにくかった。 -->
+          <div class="panel">
+            <div class="bar"></div>
+            <div class="t">Stage 2 をクリアしました</div>
+            <div class="s">方針 — 転院患者の対応</div>
+          </div>
         </div>
 
         <!-- レースのゴール（Stage 5 クリア）。#ov-unlock とは別の器で
