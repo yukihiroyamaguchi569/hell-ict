@@ -41,12 +41,16 @@ JS 構造そのものは資産ではない。単一ファイル・フレーム�
   事務長ブリーフィングを飛ばす（devbar の「Stage 1（説明を飛ばす）」ボタンと同じ経路）。
 - **効果音のmp3はリポジトリに入っていない**（2026-08-22追加）。音源は効果音ラボで、規約が素材の
   再配布を禁じており、このリポジトリは公開だから——`.gitignore` で `assets/sounds/` ごと除外してある。
-  鳴らすには各自が `assets/sounds/` へ7点（`emergency-alert1` `mobile-phone-ringtone1` `decision1`
-  `don-1` `cancel` `success1` `hall-clapping-hands1`）を `.mp3` で置き、`pnpm build:testplay` を走らせる
-  ——`scripts/build-testplay.sh` が `apps/worker/public/sounds/` へコピーし、モックは相対パス
-  `sounds/<name>.mp3` で参照する（`.DS_Store` は拡張子で絞って除外）。**ディレクトリごと無くても
-  ビルドは失敗せず、音が鳴らないだけでモックの進行は一切変わらない**（`sfx()` が再生失敗を握りつぶす）。
-  `file://` で直接開いた場合も同じ理由で無音になる。場面と音の対応・ミュート仕様の正典は
+  **配信元はR2バケット `hell-ict-sounds`**（2026-09-06変更）。各自が `assets/sounds/` へ7点
+  （`emergency-alert1` `mobile-phone-ringtone1` `decision1` `don-1` `cancel` `success1`
+  `hall-clapping-hands1`）を `.mp3` で置き、`bash scripts/upload-sounds.sh` で投入する。Workerは
+  `GET /sounds/<name>.mp3` をこの7点に限ってR2から返し（`apps/worker/src/sounds.ts`）、モックは
+  相対パス `sounds/<name>.mp3` で参照する。**`pnpm build:testplay` は効果音を扱わない**——mp3が
+  リポジトリに無い以上、クリーンチェックアウトで走る自動デプロイには必ず欠けるためである
+  （2026-09-06以前は `apps/worker/public/sounds/` へコピーしていたが、本番で全て404になっていた）。
+  **投入していなくてもビルドもデプロイも失敗せず、音が鳴らないだけでモックの進行は一切変わらない**
+  （`sfx()` が再生失敗を握りつぶす）。`file://` で直接開いた場合も同じ理由で無音になる。
+  場面と音の対応・ミュート仕様の正典は
   [`../00_共通シェルと通奏低音.md`](../00_共通シェルと通奏低音.md) §11。
   **⚠️ 効果音を自由に鳴らせるUI（サウンドテスト画面）は規約上作らない。** ヘッダーの🔊/🔇トグル
   （`#btn-mute`・状態は `localStorage.hellSfxMuted`）は会場で音を切るためのスイッチに限る。
