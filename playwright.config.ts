@@ -22,8 +22,11 @@ export default defineConfig({
     },
     {
       name: "worker",
+      // 配信版モック（e2e/served-mock.spec.ts）はWorkerのAssets（apps/worker/public/）
+      // から配られる。build:testplayを前段に置かないとpublic/が.gitkeepだけの空になり、
+      // クリーンチェックアウトのCIでは配信版を一度も開かないまま緑になる。
       command:
-        "pnpm --filter @hell-ict/worker exec wrangler dev --local --ip 127.0.0.1 --port 8787 --var OPENAI_BASE_URL:http://127.0.0.1:8789",
+        "bash scripts/build-testplay.sh && pnpm --filter @hell-ict/worker exec wrangler dev --local --ip 127.0.0.1 --port 8787 --var OPENAI_BASE_URL:http://127.0.0.1:8789",
       url: "http://127.0.0.1:8787/api/health",
       reuseExistingServer: false,
     },
