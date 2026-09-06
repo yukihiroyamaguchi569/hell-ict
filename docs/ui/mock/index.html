@@ -3537,6 +3537,11 @@
   /* プローブの結果。"pending"（確認中）／"live"（API有り）／"scripted"（file://）／
      "failed"（http(s)なのに繋がらない）。 */
   let liveProbeState = "pending";
+
+  /* 開発用URLハッシュ（#s35 など）の行き先を、入室を挟むあいだ預けておく場所。
+     LIVEかどうかはプローブの完了を待たないと決まらないので、http(s)で開いた
+     ときは即ジャンプせずここへ入れる（消費はファイル末尾の consumePendingBoot）。 */
+  let pendingBootView = null;
   /* 1.5秒では本番のコールドスタート（DO・D1の初回起動）に届かないことがある。
      短すぎるタイムアウトは「黙ってscriptedで開始し、入室も保存も全部台本」という
      いちばん気づきにくい事故を生むので、待つ側へ倒す。 */
@@ -3607,6 +3612,9 @@
       clearTimeout(timer);
     }
     updateEntryProbeUi();
+    // APIが居ないと分かった時点で、従来どおりの開発用ジャンプへ戻す
+    // （入室を挟む意味があるのはLIVEのときだけ）。
+    if (!LIVE) consumePendingBoot();
   }
 
   // 宛先は状況で変わる——プローブ失敗なら再プローブ、入室手続きが途中で
@@ -3630,6 +3638,7 @@
     // disabled が残り、台本モードを選んだのに入室できない。
     clearEntryBlock();
     updateEntryProbeUi();
+    consumePendingBoot();   // 台本モードで進む＝LIVEでないと確定した瞬間
   });
 
   probeLive();
@@ -8788,6 +8797,9 @@
     if (snapshot) liveState.checkpointRevision = snapshot.revision;
     adoptDataRevision(snapshot);   // 別タブが進めていれば、その先から番号を振り直す
     pollSummary();   // 帯を10秒待たずに一度埋める（以後は setInterval が回す）
+    // 開発用ハッシュで開いていたら、サーバの進行に基づく復帰先より優先する
+    // （狙った画面をLIVEのまま開くための指定なので、上書きされては意味がない）。
+    if (consumePendingBoot()) return;
     // Prologue圏（entry/welcome/inbox）までしか進んでいないチームは、初回入室と
     // 同じ扱いでよい——ここを pos で判定しないのは、go() がこの3画面にも
     // pos=1（S1の停留所）を振るため。ステージにはまだ入っていない。
@@ -9001,9 +9013,28 @@
   // 開発用：ヘッドレスChromeなどで特定画面を直接開けるよう、URLハッシュで
   // 初期画面を選べるようにしておく（例: #s1、ブリーフィングを飛ばすなら #s1-nobrief）。
   // 製品には持ち込まない（本番はサーバのステージ進行が初期画面を決める）。
+  function gotoBootView(id) {
+    if (id === "s1-nobrief") { s1SkipBrief = true; go("s1"); s1SkipBrief = false; return; }
+    go(id);
+  }
+  /* 預けたハッシュを1回だけ使う。2回目以降は何もしない——以後の画面遷移
+     （罰から戻る、ゴール後に進む）へ影響を残さないため。 */
+  function consumePendingBoot() {
+    if (!pendingBootView) return false;
+    const target = pendingBootView;
+    pendingBootView = null;
+    gotoBootView(target);
+    return true;
+  }
   const boot = location.hash.slice(1);
-  if (boot === "s1-nobrief") { s1SkipBrief = true; go("s1"); s1SkipBrief = false; }
-  else if (STEPS.some((s) => s.id === boot)) go(boot);
+  const bootView = boot === "s1-nobrief" || STEPS.some((s) => s.id === boot) ? boot : null;
+  // LIVEになりうる場（http(s)）では、ハッシュ指定でも入室を飛ばさない。飛ばすと
+  // liveState が null のまま進み、AIチャットが台本応答へ落ちて「実APIが同じ訳しか
+  // 返さない」に見える（2026-09-06 テスト中に実際に取り違えが起きた）。プローブの
+  // 完了は待たずに entry を出し、行き先は預けておく——LIVEなら入室成功後、
+  // そうでないとプローブが答えたらその時点で飛ぶ。
+  if (bootView && liveProbeState !== "scripted") { pendingBootView = bootView; go("entry"); }
+  else if (bootView) gotoBootView(bootView);   // file://（プローブそのものをしない）は従来どおり即ジャンプ
   else go("entry");
 })();
 </script>
