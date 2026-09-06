@@ -10,7 +10,7 @@ import {
   redactSnapshotPii,
 } from "../src/chat.js";
 import { CHAT_MESSAGE_MAX_CHARS, chatMessageSchema } from "../src/schemas/chat.js";
-import { detectPii, PII_REDACTION, stage4Patient } from "../src/pii.js";
+import { detectPii, PII_REDACTION, stage5Patient } from "../src/pii.js";
 
 const mainThreadId = "00000000-0000-4000-8000-000000000001";
 const otherThreadId = "00000000-0000-4000-8000-000000000002";
@@ -205,18 +205,18 @@ describe("redactSnapshotPii", () => {
   });
 
   it("全メッセージの本文を伏せ字化する", () => {
-    const snapshot = withMessages([`${stage4Patient.name}さんの件`, "無関係な本文"]);
+    const snapshot = withMessages([`${stage5Patient.name}さんの件`, "無関係な本文"]);
     const redacted = redactSnapshotPii(snapshot);
     expect(redacted).not.toBe(snapshot);
     const texts = redacted.threads.flatMap((thread) => thread.messages).map((m) => m.text);
-    expect(texts[0]).not.toContain(stage4Patient.name);
+    expect(texts[0]).not.toContain(stage5Patient.name);
     expect(texts[0]).toContain(PII_REDACTION);
     // 変化しなかったメッセージはそのまま。
     expect(texts[1]).toBe("無関係な本文");
   });
 
   it("伏せ字化した結果はdetectPiiに反応しない", () => {
-    const snapshot = withMessages([`連絡先は${stage4Patient.phone}`]);
+    const snapshot = withMessages([`連絡先は${stage5Patient.phone}`]);
     const texts = redactSnapshotPii(snapshot)
       .threads.flatMap((thread) => thread.messages)
       .map((m) => m.text);

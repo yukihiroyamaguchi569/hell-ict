@@ -13,7 +13,7 @@ export type CheckpointResult =
 
 /** 発動済み（true）の罠フラグをfalseへ戻そうとしているかを判定する。 */
 const regressesTrap = (current: CheckpointTrap, next: CheckpointTrap): boolean =>
-  (current.s3Used && !next.s3Used) || (current.s4Used && !next.s4Used);
+  (current.s3Used && !next.s3Used) || (current.s5Used && !next.s5Used);
 
 /**
  * 保存済みのチェックポイントに対して後退している項目を返す。罠・経過時間・進行位置は
@@ -73,7 +73,7 @@ const newerSide = (current: CheckpointBody, incoming: CheckpointBody): Checkpoin
  * 低い）の離脱時flushが、もう一方のタブでin-progress/doneになっていた罰をnoneへ戻せる。
  * 2キーだけをここで単調に合成し、それ以外のステージ状態は従来どおり不透明に扱う。
  */
-const PENALTY_KEYS = ["s3Penalty", "s4Penalty"] as const;
+const PENALTY_KEYS = ["s3Penalty", "s5Penalty"] as const;
 
 /** 罰の進行順。左ほど手前で、合成では常に右（進んだ側）が勝つ。 */
 const PENALTY_ORDER = ["none", "in-progress", "done"] as const;
@@ -120,7 +120,7 @@ export const mergeCheckpoint = (
     dataRevision: Math.max(current.dataRevision, incoming.dataRevision),
     trap: {
       s3Used: current.trap.s3Used || incoming.trap.s3Used,
-      s4Used: current.trap.s4Used || incoming.trap.s4Used,
+      s5Used: current.trap.s5Used || incoming.trap.s5Used,
     },
   };
 };

@@ -89,8 +89,8 @@ export const CHECKPOINT_REJECTION_REASONS = [
 
 export const checkpointRejectionReasonSchema = z.enum(CHECKPOINT_REJECTION_REASONS);
 
-/** 罠の発動済みフラグ。Stage 3・Stage 4のどちらも1回だけ発動する（企画書§6）。 */
-export const checkpointTrapSchema = z.object({ s3Used: z.boolean(), s4Used: z.boolean() }).strict();
+/** 罠の発動済みフラグ。Stage 3・Stage 5のどちらも1回だけ発動する（企画書§6）。 */
+export const checkpointTrapSchema = z.object({ s3Used: z.boolean(), s5Used: z.boolean() }).strict();
 
 export const checkpointBodySchema = z
   .object({

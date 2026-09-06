@@ -18,9 +18,9 @@ export const VIEW_IDS = [
   "s2",
   "unlock",
   "s3",
-  "s35",
   "s4",
   "s5",
+  "s6",
   "final",
 ] as const;
 

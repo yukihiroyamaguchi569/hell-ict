@@ -111,9 +111,14 @@ export {
   PII_REDACTION,
   piiPatterns,
   redactPii,
-  stage4Patient,
+  stage5Patient,
 } from "./pii.js";
 export type { PiiLabel } from "./pii.js";
 export { VIEW_IDS, viewIdSchema } from "./schemas/view.js";
 export type { ViewId } from "./schemas/view.js";
+export {
+  normalizeLegacyCheckpointBody,
+  normalizeLegacyCheckpointSnapshot,
+  normalizeLegacyViewId,
+} from "./legacy-ids.js";
 export type { AiGateway, AiMessage, AiRequest, AiResponse } from "./ports/ai-gateway.js";
