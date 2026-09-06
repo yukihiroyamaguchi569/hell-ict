@@ -2,12 +2,16 @@
 # テストプレイ用に、モックHTML（docs/ui/mock/index.html）とproduction画像を
 # apps/worker/public/ へコピーする。wranglerのAssets配信（apps/worker/wrangler.jsonc）が
 # このディレクトリを配信する。生成物はコミットしない（.gitignore対象）。
+#
+# 効果音mp3はここでは扱わない。再配布禁止のためリポジトリに入っておらず、クリーン
+# チェックアウトで走る自動デプロイ（.github/workflows/deploy.yml）では必ず欠ける。
+# 配信元はR2（apps/worker/src/sounds.ts）に一本化してあり、投入は
+# `bash scripts/upload-sounds.sh` で別に行う。
 set -euo pipefail
 
 repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 mock_html="${repo_root}/docs/ui/mock/index.html"
 assets_src="${repo_root}/assets/images/production"
-sounds_src="${repo_root}/assets/sounds"
 dashboard_html="${repo_root}/apps/worker/dashboard/index.html"
 public_dir="${repo_root}/apps/worker/public"
 
@@ -62,25 +66,6 @@ HTML
 # "-R ... /." + 宛先末尾の"/"で、将来サブディレクトリが増えてもset -eで
 # 止まらずに再帰コピーする（"*"グロブは深い階層を素通りしてしまう）。
 cp -R "${assets_src}"/. "${public_dir}/assets/images/production/"
-
-# 効果音（効果音ラボ）。mp3は.gitignoreでリポジトリから除外してあるので、
-# クリーンチェックアウトや音源を置いていない環境ではディレクトリごと存在しない。
-# 音が鳴らないだけでモックは動く（モック側 sfx() が再生失敗を握りつぶす）ため、
-# 無くてもビルドは失敗させない。モックは "sounds/<name>.mp3" で参照する。
-# .DS_Store を持ち込まないよう、拡張子で明示的に絞ってコピーする。
-if [ -d "${sounds_src}" ]; then
-  mkdir -p "${public_dir}/sounds"
-  # nullglob 相当：一致が無いときにグロブ文字列そのものをcpへ渡さない。
-  found=0
-  for f in "${sounds_src}"/*.mp3; do
-    [ -e "${f}" ] || continue
-    cp "${f}" "${public_dir}/sounds/"
-    found=$((found + 1))
-  done
-  echo "sounds: ${found} file(s)"
-else
-  echo "sounds: skipped (${sounds_src} not found)"
-fi
 
 # 会場前面ディスプレイ用の進捗ボード（/dashboard.html）。public_dirは毎回rm -rfするので、
 # ソースはapps/worker/dashboard/に置き、生成のたびにコピーする。
