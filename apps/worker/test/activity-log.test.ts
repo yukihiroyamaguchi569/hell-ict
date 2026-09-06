@@ -54,11 +54,44 @@ const ROWS_SQL = `SELECT
   meta,
   client_at AS clientAt,
   created_at AS createdAt
-FROM activity_events
-ORDER BY id`;
+FROM activity_events`;
 
-const rows = async (): Promise<Row[]> => {
-  const result = await env.PROGRESS_DB.prepare(ROWS_SQL).all();
+/**
+ * activity_eventsの行を、指定したチームのぶんだけ読む。
+ *
+ * 全件を読むとテスト同士が独立しない。vitestはタイムアウトした（あるいは途中で
+ * 失敗した）テストの非同期処理を止められないため、中断したテストの書き込みが
+ * 後続のテストの最中にD1へ届く。beforeEachのDROP後に届いた行は白紙のはずの
+ * テーブルに残り、1本の失敗が芋づる式に他を落とす。チームで絞れば、他のテストの
+ * 取りこぼしが自分の検証へ混ざらない。
+ */
+const rows = async (teamCode: string, ...moreTeamCodes: string[]): Promise<Row[]> => {
+  const teamCodes = [teamCode, ...moreTeamCodes];
+  const placeholders = teamCodes.map(() => "?").join(", ");
+  const result = await env.PROGRESS_DB.prepare(
+    `${ROWS_SQL} WHERE team_code IN (${placeholders}) ORDER BY id`,
+  )
+    .bind(...teamCodes)
+    .all();
+  return z.array(rowSchema).parse(result.results);
+};
+
+/**
+ * commandIdでチームを横断して行を読む。
+ *
+ * 「拒否したら行を増やさない」の検証をチームで絞ると、誤って別チームのteam_codeで
+ * 書いてしまう不具合を見逃す（絞る前の全件読みはこれを捕まえていた）。commandIdは
+ * リクエストが載せた値なので、どのチームへ書かれても見つけられる。中断した他の
+ * テストが漏らすPOSTは別のcommandIdを使うため、全件読みと違って連鎖もしない。
+ */
+const rowsByCommandId = async (commandId: string, ...moreCommandIds: string[]): Promise<Row[]> => {
+  const commandIds = [commandId, ...moreCommandIds];
+  const placeholders = commandIds.map(() => "?").join(", ");
+  const result = await env.PROGRESS_DB.prepare(
+    `${ROWS_SQL} WHERE command_id IN (${placeholders}) ORDER BY id`,
+  )
+    .bind(...commandIds)
+    .all();
   return z.array(rowSchema).parse(result.results);
 };
 
@@ -129,9 +162,38 @@ const activity = (overrides: Record<string, unknown> = {}): Record<string, unkno
   ...overrides,
 });
 
+/**
+ * 400を期待する入力のcommandId。反復ごとに別の値にする——it.eachで1つのIDを共有すると、
+ * ある反復が漏らした書き込みを後続の反復が自分のものとして拾い、連鎖防止が崩れる。
+ * activity()の既定のcommandIdは多くのテストが共有していて識別子にならないので使わない。
+ */
+const rejectedInputCommandId = (index: number): string =>
+  `00000000-0000-4000-8000-00000000a5${String(index).padStart(2, "0")}`;
+
+/** [説明, 本文の組み立て, 横断検索で見るcommandId（省略時は反復ごとのID）]。 */
+type RejectedInputCase = readonly [
+  label: string,
+  build: (commandId: string) => unknown,
+  searchCommandId?: string,
+];
+
 /** 連番からUUID形式のcommandIdを作る（活動ログのschemaはUUIDを要求する）。 */
 const uniqueCommandId = (index: number): string =>
   `00000000-0000-4000-8000-${String(index).padStart(12, "0")}`;
+
+/**
+ * 活動ログの枠を`count`件ぶん消費した状態にする。
+ *
+ * 本番と同じ`consumeActivityAttempt`を通すが、DOの中でループを回すのでWorkerとの
+ * 往復は1回で済む。上限（120件/分）ぶんHTTPを叩いて枠を埋めると、往復がそのまま
+ * 上限の数だけ積み上がり、遅いランナーでvitestの既定タイムアウトを超える。
+ */
+const fillActivityBudget = (teamCode: string, nowMs: number, count: number): Promise<void> =>
+  runInDurableObject(env.TEAM_ROOM.getByName(teamCode), async (instance) => {
+    for (let index = 0; index < count; index += 1) {
+      await instance.consumeActivityAttempt(nowMs, ACTIVITY_RATE_LIMIT_PER_MINUTE, 0);
+    }
+  });
 
 const jsonBytes = (value: unknown): number =>
   new TextEncoder().encode(JSON.stringify(value)).length;
@@ -176,7 +238,7 @@ describe("活動ログ", () => {
       try {
         const response = await postJson("/api/teams/500061/activity", activity());
         expect(response.status).toBe(200);
-        expect((await rows()).map((row) => row.eventId)).toEqual(["50"]);
+        expect((await rows("500061")).map((row) => row.eventId)).toEqual(["50"]);
       } finally {
         Object.assign(env, saved);
       }
@@ -199,7 +261,7 @@ describe("活動ログ", () => {
       );
       expect(response.status).toBe(200);
 
-      const chatRows = (await rows()).filter((row) => row.kind.startsWith("chat."));
+      const chatRows = (await rows("500001")).filter((row) => row.kind.startsWith("chat."));
       expect(chatRows.map((row) => [row.kind, row.role, row.text])).toEqual([
         ["chat.user", "user", "質問本文"],
         ["chat.assistant", "assistant", "応答本文"],
@@ -227,7 +289,7 @@ describe("活動ログ", () => {
       await chat("500002", command, gateway);
       await chat("500002", command, gateway);
 
-      const chatRows = (await rows()).filter((row) => row.kind.startsWith("chat."));
+      const chatRows = (await rows("500002")).filter((row) => row.kind.startsWith("chat."));
       expect(chatRows.map((row) => row.kind)).toEqual(["chat.user", "chat.assistant"]);
     });
 
@@ -243,11 +305,11 @@ describe("活動ログ", () => {
         text: "本文",
       };
       expect((await chat("500003", command, gateway)).status).toBe(503);
-      const failureRows = (await rows()).filter((row) => row.kind.startsWith("chat."));
+      const failureRows = (await rows("500003")).filter((row) => row.kind.startsWith("chat."));
       expect(failureRows.map((row) => row.kind)).toEqual(["chat.user", "chat.failure"]);
 
       expect((await chat("500003", command, gateway)).status).toBe(200);
-      const retriedRows = (await rows()).filter((row) => row.kind.startsWith("chat."));
+      const retriedRows = (await rows("500003")).filter((row) => row.kind.startsWith("chat."));
       expect(retriedRows.map((row) => row.kind)).toEqual([
         "chat.user",
         "chat.failure",
@@ -270,7 +332,7 @@ describe("活動ログ", () => {
       expect(response.status).toBe(422);
       expect(gateway.requests).toHaveLength(0);
 
-      const chatRows = (await rows()).filter((row) => row.kind.startsWith("chat."));
+      const chatRows = (await rows("500004")).filter((row) => row.kind.startsWith("chat."));
       expect(chatRows.map((row) => row.kind)).toEqual(["chat.pii_blocked"]);
       expect(chatRows[0]?.text).toBe("");
       expect(metaOf(chatRows[0])).toEqual({ promptProfile: "default", length: 21 });
@@ -290,7 +352,7 @@ describe("活動ログ", () => {
       );
       expect(response.status).toBe(200);
 
-      const chatRows = (await rows()).filter((row) => row.kind.startsWith("chat."));
+      const chatRows = (await rows("500008")).filter((row) => row.kind.startsWith("chat."));
       expect(chatRows.map((row) => row.kind)).toEqual(["chat.user", "chat.assistant"]);
       // ユーザー本文はPIIを含まないのでそのまま残る。
       expect(chatRows[0]?.text).toBe("本文");
@@ -319,7 +381,7 @@ describe("活動ログ", () => {
       );
       expect(blocked.status).toBe(422);
 
-      const piiRows = (await rows()).filter((row) => row.kind === "chat.pii_blocked");
+      const piiRows = (await rows("500019")).filter((row) => row.kind === "chat.pii_blocked");
       expect(piiRows).toHaveLength(1);
       expect(piiRows[0]?.text).toBe("");
     });
@@ -363,10 +425,10 @@ describe("活動ログ", () => {
       );
       expect(response.status).toBe(200);
 
-      const kinds = (await rows()).map((row) => row.kind);
+      const kinds = (await rows("500005")).map((row) => row.kind);
       expect(kinds).not.toContain("chat.history_pii");
       // 活動ログへ渡る本文にも平文は残らない。
-      const stored = JSON.stringify(await rows());
+      const stored = JSON.stringify(await rows("500005"));
       expect(stored).not.toContain("渡辺 三郎");
     });
 
@@ -380,7 +442,7 @@ describe("活動ログ", () => {
       );
       const { snapshot } = createThreadResultSchema.parse(await created.json());
 
-      const threadRows = (await rows()).filter((row) => row.kind === "thread.create");
+      const threadRows = (await rows(teamCode)).filter((row) => row.kind === "thread.create");
       expect(threadRows).toHaveLength(1);
       expect(threadRows[0]?.threadId).toBe(snapshot.threads.at(-1)?.threadId);
       expect(metaOf(threadRows[0])).toEqual({ title: "Stage 3" });
@@ -416,7 +478,7 @@ describe("活動ログ", () => {
       // 入室時からあるメインスレッドを含めて3本。Stage 3 は増えていない。
       expect(replay.snapshot.threads).toHaveLength(3);
 
-      const threadRows = (await rows()).filter((row) => row.kind === "thread.create");
+      const threadRows = (await rows(teamCode)).filter((row) => row.kind === "thread.create");
       // 記録は実際に増えた2本ぶんだけ。3本目（重複抑止）は積まれない。
       expect(threadRows).toHaveLength(2);
       expect(threadRows.map((row) => row.threadId)).toContain(created);
@@ -429,7 +491,7 @@ describe("活動ログ", () => {
       await session(teamCode);
       await createThread(teamCode, "00000000-0000-4000-8000-000000000901", "渡辺 三郎さんの件");
 
-      const threadRows = (await rows()).filter((row) => row.kind === "thread.create");
+      const threadRows = (await rows(teamCode)).filter((row) => row.kind === "thread.create");
       expect(threadRows).toHaveLength(1);
       expect(metaOf(threadRows[0])).toEqual({ piiRedacted: true });
       // titleを捨てても、いつスレッドが増えたかは追える。
@@ -453,7 +515,7 @@ describe("活動ログ", () => {
       expect(response.status).toBe(200);
       expect(gateway.requests).toHaveLength(1);
       await env.PROGRESS_DB.exec(activitySchemaSql);
-      expect(await rows()).toEqual([]);
+      expect(await rows("500007")).toEqual([]);
     });
   });
 
@@ -492,7 +554,7 @@ describe("活動ログ", () => {
         insert.bind("500180", commandId),
         insert.bind("500181", commandId),
       ]);
-      const stored = await rows();
+      const stored = await rows("500180", "500181");
       expect(stored.filter((row) => row.commandId === commandId)).toHaveLength(2);
     });
   });
@@ -503,7 +565,7 @@ describe("活動ログ", () => {
       expect(response.status).toBe(200);
       await expect(response.json()).resolves.toEqual({ ok: true });
 
-      const stored = await rows();
+      const stored = await rows("500101");
       expect(stored).toHaveLength(1);
       expect(stored[0]).toMatchObject({
         eventId: "",
@@ -524,7 +586,7 @@ describe("活動ログ", () => {
       const repeated = await postJson("/api/teams/500102/activity", activity({ text: "書き直し" }));
       expect(repeated.status).toBe(200);
 
-      const stored = await rows();
+      const stored = await rows("500102");
       expect(stored).toHaveLength(1);
       expect(stored[0]?.text).toBe("判定に出した本文");
     });
@@ -536,7 +598,7 @@ describe("活動ログ", () => {
       const second = await postJson("/api/teams/500111/activity", activity());
       expect([first.status, second.status]).toEqual([200, 200]);
 
-      const stored = await rows();
+      const stored = await rows("500110", "500111");
       expect(stored.map((row) => row.teamCode)).toEqual(["500110", "500111"]);
       expect(new Set(stored.map((row) => row.commandId)).size).toBe(1);
     });
@@ -544,7 +606,10 @@ describe("活動ログ", () => {
     it("同じcommandIdでもkindが違えば別の行として残る", async () => {
       await postJson("/api/teams/500103/activity", activity({ kind: "submit.s1-reply" }));
       await postJson("/api/teams/500103/activity", activity({ kind: "verdict.s1" }));
-      expect((await rows()).map((row) => row.kind)).toEqual(["submit.s1-reply", "verdict.s1"]);
+      expect((await rows("500103")).map((row) => row.kind)).toEqual([
+        "submit.s1-reply",
+        "verdict.s1",
+      ]);
     });
 
     it("PIIを含む本文はtextを捨て、piiRedactedを立てて記録だけ残す", async () => {
@@ -554,7 +619,7 @@ describe("活動ログ", () => {
       );
       expect(response.status).toBe(200);
 
-      const stored = await rows();
+      const stored = await rows("500104");
       expect(stored).toHaveLength(1);
       expect(stored[0]?.text).toBe("");
       expect(metaOf(stored[0])).toEqual({ verdict: "pass", score: 82, piiRedacted: true });
@@ -574,7 +639,7 @@ describe("活動ログ", () => {
       );
       expect(response.status).toBe(200);
 
-      const stored = await rows();
+      const stored = await rows("500108");
       expect(stored).toHaveLength(1);
       // 一致したキーだけでなくmeta全体を置き換える（どのキーに入るか決められないため）。
       expect(metaOf(stored[0])).toEqual({ piiRedacted: true });
@@ -592,7 +657,7 @@ describe("活動ログ", () => {
         activity({ meta: { a: "090-1234", b: "-5678" } }),
       );
       expect(response.status).toBe(200);
-      expect(metaOf((await rows())[0])).toEqual({ a: "090-1234", b: "-5678" });
+      expect(metaOf((await rows("500112"))[0])).toEqual({ a: "090-1234", b: "-5678" });
     });
 
     // JSON全体の検査だけでは足りない実例。改行を含む値はJSON化で `\n` の2文字へ
@@ -604,7 +669,7 @@ describe("活動ログ", () => {
         activity({ meta: { note: "渡辺\n三郎さんの件" } }),
       );
       expect(response.status).toBe(200);
-      expect(metaOf((await rows())[0])).toEqual({ piiRedacted: true });
+      expect(metaOf((await rows("500114"))[0])).toEqual({ piiRedacted: true });
     });
 
     it("識別子として妥当なキー（英数字と_.-）は受け付ける", async () => {
@@ -613,7 +678,7 @@ describe("活動ログ", () => {
         activity({ meta: { "stage_2.ok": true, "k-1": 1, [`${"k".repeat(64)}`]: null } }),
       );
       expect(response.status).toBe(200);
-      expect(metaOf((await rows())[0])).toEqual({
+      expect(metaOf((await rows("500115"))[0])).toEqual({
         "stage_2.ok": true,
         "k-1": 1,
         [`${"k".repeat(64)}`]: null,
@@ -626,39 +691,59 @@ describe("活動ログ", () => {
         activity({ meta: { phone: "090-1234-5678" } }),
       );
       expect(response.status).toBe(200);
-      expect(metaOf((await rows())[0])).toEqual({ piiRedacted: true });
+      expect(metaOf((await rows("500113"))[0])).toEqual({ piiRedacted: true });
     });
 
-    it.each([
-      ["kindが列挙外", activity({ kind: "submit.unknown" })],
-      ["commandIdがUUIDでない", activity({ commandId: "not-a-uuid" })],
-      ["viewが空", activity({ view: "" })],
-      ["viewに大文字", activity({ view: "S1" })],
-      ["viewが33文字", activity({ view: "a".repeat(33) })],
-      ["textが上限超過", activity({ text: "あ".repeat(20001) })],
-      ["metaが4KB超", activity({ meta: sizedMeta("xx") })],
-      ["metaが配列", activity({ meta: [1, 2, 3] })],
+    const rejectedInputCases: readonly RejectedInputCase[] = [
+      ["kindが列挙外", (id) => activity({ commandId: id, kind: "submit.unknown" })],
+      // commandId自体が不正な場合だけは、その値のまま書かれていないかを見る。
+      ["commandIdがUUIDでない", () => activity({ commandId: "not-a-uuid" }), "not-a-uuid"],
+      ["viewが空", (id) => activity({ commandId: id, view: "" })],
+      ["viewに大文字", (id) => activity({ commandId: id, view: "S1" })],
+      ["viewが33文字", (id) => activity({ commandId: id, view: "a".repeat(33) })],
+      ["textが上限超過", (id) => activity({ commandId: id, text: "あ".repeat(20001) })],
+      ["metaが4KB超", (id) => activity({ commandId: id, meta: sizedMeta("xx") })],
+      ["metaが配列", (id) => activity({ commandId: id, meta: [1, 2, 3] })],
       // 平坦なrecordに限る——ネストや配列を許すと、PII検査が全てのstring値を
       // 漏れなく見て回る保証が持てない。
-      ["metaの値がネストしたobject", activity({ meta: { nested: { a: 1 } } })],
-      ["metaの値が配列", activity({ meta: { arr: [1, 2] } })],
-      ["metaの値が201文字", activity({ meta: { long: "x".repeat(201) } })],
+      [
+        "metaの値がネストしたobject",
+        (id) => activity({ commandId: id, meta: { nested: { a: 1 } } }),
+      ],
+      ["metaの値が配列", (id) => activity({ commandId: id, meta: { arr: [1, 2] } })],
+      ["metaの値が201文字", (id) => activity({ commandId: id, meta: { long: "x".repeat(201) } })],
       // キーは識別子に限る。自由文を許すと、値ではなくキー側にPIIを書けてしまう——
       // boolean値のキーは値の個別検査に掛からず、JSON全体の検査も改行のエスケープで
       // すり抜けるため、入口の書式制限が唯一の防波堤になる。
-      ["metaのキーが日本語（PII）", activity({ meta: { "渡辺\n三郎さん": true } })],
-      ["metaのキーに空白", activity({ meta: { "a b": 1 } })],
-      ["metaのキーが65文字", activity({ meta: { ["k".repeat(65)]: 1 } })],
-      ["clientAtが欠落", { commandId: activity().commandId, kind: "resume", view: "s1" }],
+      [
+        "metaのキーが日本語（PII）",
+        (id) => activity({ commandId: id, meta: { "渡辺\n三郎さん": true } }),
+      ],
+      ["metaのキーに空白", (id) => activity({ commandId: id, meta: { "a b": 1 } })],
+      ["metaのキーが65文字", (id) => activity({ commandId: id, meta: { ["k".repeat(65)]: 1 } })],
+      ["clientAtが欠落", (id) => ({ commandId: id, kind: "resume", view: "s1" })],
       // 任意文字列のままだとPIIゲートを通らない列が残る。書式で塞いだことを固定する。
-      ["clientAtが電話番号", activity({ clientAt: "090-1234-5678" })],
-      ["clientAtがISO 8601でない", activity({ clientAt: "2026年9月3日 11時" })],
-      ["bodyが配列", []],
-      ["bodyがnull", null],
-    ])("不正な入力(%s)は400で拒否し、行を増やさない", async (_label, body) => {
+      ["clientAtが電話番号", (id) => activity({ commandId: id, clientAt: "090-1234-5678" })],
+      [
+        "clientAtがISO 8601でない",
+        (id) => activity({ commandId: id, clientAt: "2026年9月3日 11時" }),
+      ],
+      ["bodyが配列", () => []],
+      ["bodyがnull", () => null],
+    ];
+
+    it.each(
+      rejectedInputCases.map(([label, build, searchCommandId], index) => {
+        const commandId = rejectedInputCommandId(index);
+        return [label, build(commandId), searchCommandId ?? commandId] as const;
+      }),
+    )("不正な入力(%s)は400で拒否し、行を増やさない", async (_label, body, commandId) => {
       const response = await postJson("/api/teams/500105/activity", body);
       expect(response.status).toBe(400);
-      await expect(rows()).resolves.toEqual([]);
+      // どのチームのteam_codeで書かれても捕まえる。
+      await expect(rowsByCommandId(commandId)).resolves.toEqual([]);
+      // 配列・nullの本文はcommandIdを持たないので、この経路はチームで見る。
+      await expect(rows("500105")).resolves.toEqual([]);
     });
 
     // `String.length`で測るとUTF-16のコード単位になり、日本語のmetaでは上限が
@@ -673,7 +758,7 @@ describe("活動ログ", () => {
         activity({ meta: sizedMeta("x") }),
       );
       expect(accepted.status).toBe(200);
-      await expect(rows()).resolves.toHaveLength(1);
+      await expect(rows("500109")).resolves.toHaveLength(1);
 
       const rejected = await postJson(
         "/api/teams/500109/activity",
@@ -683,33 +768,48 @@ describe("活動ログ", () => {
         }),
       );
       expect(rejected.status).toBe(400);
-      await expect(rows()).resolves.toHaveLength(1);
+      // 拒否した本文はどのチームにも書かれない。
+      await expect(rowsByCommandId("00000000-0000-4000-8000-0000000000a2")).resolves.toEqual([]);
+      await expect(rows("500109")).resolves.toHaveLength(1);
     });
 
     // schemaの検証は本文をJSONへ展開した後にしか効かない。展開前にバイト数で
     // 打ち切ることを、Content-Lengthを見る経路と実バイト数を測る経路の両方で固定する。
+    // commandIdは反復ごとに変える（1つを共有すると、ある反復が漏らした行を
+    // 後続の反復が自分のものとして拾ってしまう）。
     it.each([
-      ["Content-Lengthどおりの巨大な本文", {}],
+      ["Content-Lengthどおりの巨大な本文", {}, "00000000-0000-4000-8000-00000000a300"],
       // ヘッダは偽装できるので、小さく申告された巨大な本文も実バイト数で弾く。
-      ["Content-Lengthを小さく偽装した本文", { "Content-Length": "42" }],
-    ])("64KBを超える本文(%s)は413で拒否し、行を増やさない", async (_label, headers) => {
-      const huge = JSON.stringify({ ...activity(), pad: "x".repeat(65 * 1024) });
-      const response = await exports.default.fetch(
-        new Request("https://example.test/api/teams/500116/activity", {
-          method: "POST",
-          body: huge,
-          // 入口ガードを通すため、ブラウザと同じくOriginを付ける。
-          headers: { Origin: "https://example.test", ...headers },
-        }),
-      );
-      expect(response.status).toBe(413);
-      await expect(rows()).resolves.toEqual([]);
-    });
+      [
+        "Content-Lengthを小さく偽装した本文",
+        { "Content-Length": "42" },
+        "00000000-0000-4000-8000-00000000a301",
+      ],
+    ])(
+      "64KBを超える本文(%s)は413で拒否し、行を増やさない",
+      async (_label, headers, oversizedCommandId) => {
+        const huge = JSON.stringify({
+          ...activity({ commandId: oversizedCommandId }),
+          pad: "x".repeat(65 * 1024),
+        });
+        const response = await exports.default.fetch(
+          new Request("https://example.test/api/teams/500116/activity", {
+            method: "POST",
+            body: huge,
+            // 入口ガードを通すため、ブラウザと同じくOriginを付ける。
+            headers: { Origin: "https://example.test", ...headers },
+          }),
+        );
+        expect(response.status).toBe(413);
+        await expect(rowsByCommandId(oversizedCommandId)).resolves.toEqual([]);
+        await expect(rows("500116")).resolves.toEqual([]);
+      },
+    );
 
     it("上限を超えた活動ログは429で、D1に書かない", async () => {
       const teamCode = "500170";
       const windowStartMs = 1_756_300_000_000;
-      const post = (index: number): Promise<Response> =>
+      const post = (index: number, nowMs = windowStartMs): Promise<Response> =>
         handleActivityPost(
           new Request(`https://example.test/api/teams/${teamCode}/activity`, {
             method: "POST",
@@ -718,33 +818,31 @@ describe("活動ログ", () => {
           }),
           env,
           teamCode,
-          windowStartMs,
+          nowMs,
         );
 
-      for (let index = 0; index < ACTIVITY_RATE_LIMIT_PER_MINUTE; index += 1) {
-        expect((await post(index)).status, `#${String(index)}`).toBe(200);
-      }
-      const accepted = (await rows()).length;
-      expect(accepted).toBe(ACTIVITY_RATE_LIMIT_PER_MINUTE);
+      // 1件目で枠が実際に減ることを確かめる。
+      expect((await post(0)).status).toBe(200);
+      await expect(rows(teamCode)).resolves.toHaveLength(1);
 
-      const blocked = await post(ACTIVITY_RATE_LIMIT_PER_MINUTE);
+      // 残りの枠はDOの中でまとめて使い切る。上限ぶんPOSTを直列に投げると1テストで
+      // 121往復になり、テストの所要時間が本番の定数（120件/分）に引きずられる。
+      await fillActivityBudget(teamCode, windowStartMs, ACTIVITY_RATE_LIMIT_PER_MINUTE - 2);
+
+      // 上限ちょうどの1件はまだ通り、その次から断られる。境界の両側を押さえる。
+      expect((await post(1)).status).toBe(200);
+      await expect(rows(teamCode)).resolves.toHaveLength(2);
+
+      const blocked = await post(2);
       expect(blocked.status).toBe(429);
       expect(blocked.headers.get("Retry-After")).not.toBeNull();
-      await expect(rows()).resolves.toHaveLength(accepted);
+      await expect(rowsByCommandId(uniqueCommandId(2))).resolves.toEqual([]);
+      await expect(rows(teamCode)).resolves.toHaveLength(2);
 
       // 窓が明ければまた書ける。
-      const revived = await handleActivityPost(
-        new Request(`https://example.test/api/teams/${teamCode}/activity`, {
-          method: "POST",
-          headers: { Origin: "https://example.test" },
-          body: JSON.stringify({ ...activity(), commandId: uniqueCommandId(900) }),
-        }),
-        env,
-        teamCode,
-        windowStartMs + RATE_LIMIT_WINDOW_MS,
-      );
+      const revived = await post(900, windowStartMs + RATE_LIMIT_WINDOW_MS);
       expect(revived.status).toBe(200);
-      await expect(rows()).resolves.toHaveLength(accepted + 1);
+      await expect(rows(teamCode)).resolves.toHaveLength(3);
     });
 
     it("活動ログの枠はチャットの枠と独立している", async () => {
@@ -772,17 +870,26 @@ describe("活動ログ", () => {
       expect(response.status).toBe(200);
     });
 
+    // commandIdは反復ごとに変える（1つを共有すると、ある反復が漏らした行を
+    // 後続の反復が自分のものとして拾ってしまう）。
     it.each([
-      ["電話番号のような文字列", "090-1234-5678"],
-      ["未知の画面id", "stage3-manual"],
-      ["空文字", ""],
-    ])("viewが既知の画面idでない(%s)ときは400で拒否し、行を増やさない", async (_label, view) => {
-      // `/^[a-z0-9-]+$/`は電話番号を通してしまい、text・metaのPIIゲートを素通りして
-      // D1へ残る。画面idは有限なのでenumで固定する。
-      const response = await postJson("/api/teams/500118/activity", { ...activity(), view });
-      expect(response.status).toBe(400);
-      await expect(rows()).resolves.toEqual([]);
-    });
+      ["電話番号のような文字列", "090-1234-5678", "00000000-0000-4000-8000-00000000a400"],
+      ["未知の画面id", "stage3-manual", "00000000-0000-4000-8000-00000000a401"],
+      ["空文字", "", "00000000-0000-4000-8000-00000000a402"],
+    ])(
+      "viewが既知の画面idでない(%s)ときは400で拒否し、行を増やさない",
+      async (_label, view, unknownViewCommandId) => {
+        // `/^[a-z0-9-]+$/`は電話番号を通してしまい、text・metaのPIIゲートを素通りして
+        // D1へ残る。画面idは有限なのでenumで固定する。
+        const response = await postJson("/api/teams/500118/activity", {
+          ...activity({ commandId: unknownViewCommandId }),
+          view,
+        });
+        expect(response.status).toBe(400);
+        await expect(rowsByCommandId(unknownViewCommandId)).resolves.toEqual([]);
+        await expect(rows("500118")).resolves.toEqual([]);
+      },
+    );
 
     it("既知の画面idは受け付ける", async () => {
       const response = await postJson("/api/teams/500119/activity", {
@@ -790,14 +897,14 @@ describe("活動ログ", () => {
         view: "s35",
       });
       expect(response.status).toBe(200);
-      await expect(rows()).resolves.toHaveLength(1);
+      await expect(rows("500119")).resolves.toHaveLength(1);
     });
 
     it("上限以内の本文はこれまでどおり処理される", async () => {
       // 上限判定がバイト数で行われ、通常の本文を巻き込まないことの確認。
       const response = await postJson("/api/teams/500117/activity", activity());
       expect(response.status).toBe(200);
-      await expect(rows()).resolves.toHaveLength(1);
+      await expect(rows("500117")).resolves.toHaveLength(1);
     });
 
     it("D1が失敗したら503を返す", async () => {
@@ -816,7 +923,7 @@ describe("活動ログ", () => {
       const windowStartMs = 1_756_000_000_000;
       const gateway = new FakeAiGateway([]);
       const piiText = "渡辺 三郎さんの件で返信文を書いてください";
-      const before = (await rows()).length;
+      const before = (await rows(teamCode)).length;
 
       for (let index = 0; index < DEFAULT_CHAT_RATE_LIMIT; index += 1) {
         const response = await chat(
@@ -831,7 +938,7 @@ describe("活動ログ", () => {
         );
         expect(response.status, `#${String(index)}`).toBe(422);
       }
-      const afterLimit = (await rows()).length;
+      const afterLimit = (await rows(teamCode)).length;
       expect(afterLimit).toBe(before + DEFAULT_CHAT_RATE_LIMIT);
 
       const blocked = await chat(
@@ -848,7 +955,8 @@ describe("活動ログ", () => {
       expect(blocked.status).toBe(429);
       expect(blocked.headers.get("Retry-After")).not.toBeNull();
       // 429の経路はログを書かない。
-      await expect(rows()).resolves.toHaveLength(afterLimit);
+      await expect(rowsByCommandId("00000000-0000-4000-8000-000000005300")).resolves.toEqual([]);
+      await expect(rows(teamCode)).resolves.toHaveLength(afterLimit);
       expect(gateway.requests).toHaveLength(0);
     });
 
