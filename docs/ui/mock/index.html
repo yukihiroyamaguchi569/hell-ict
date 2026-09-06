@@ -827,22 +827,10 @@
 .bottles button:disabled { cursor: default; }
 .lock .note { font-size: 13px; color: var(--fg); padding: 0 2px; }
 /* 指示文にいらすとやの消毒液イラストを添える（Stage 3 の罰だけ。Stage 4 の罰の .note は素のまま）。
-   文言は 5B 追加のときに .t だけ差し替わるので、イラストは差し替えに巻き込まれない。 */
+   文言は追加分が湧いたときに .t だけ差し替わるので、イラストは差し替えに巻き込まれない。 */
 .lock .note.icon { display: flex; align-items: center; gap: 12px; }
 .lock .note.icon img { flex: 0 0 auto; height: 80px; width: auto; }
 .lock .stat { font-size: 12px; color: var(--fg-muted); padding: 6px 2px 0; font-variant-numeric: tabular-nums; }
-/* 全部詰め終わってから出る掲示。最初から棚に貼ってあったもの——
-   読まずに手を動かした、が Stage 3 の縮小再演になる（docs/ui/04_Stage3.md §罰ゲーム）。
-   見落としていたことが効くよう、院内掲示物らしい太枠・太字・大きめで出す
-   （2026-09-05。文言そのものは変えていない）。 */
-.lock .notice {
-  border: 3px solid var(--warn); color: var(--warn); background: rgba(217,154,31,.12);
-  font-family: var(--font-legacy); font-size: 19px; font-weight: 700; line-height: 1.8;
-  letter-spacing: .03em; text-align: center;
-  white-space: pre; padding: 18px 22px; margin: 8px 0 4px;
-}
-.lock .shicho { font-family: var(--font-legacy); font-size: 13px; color: var(--fg); padding: 2px; }
-.lock .discard { font-size: 13px; color: var(--fg-muted); padding: 2px; }
 
 /* Stage 4：個人情報インシデントの警報。blackout（Stage 3・暗転）と対で使う——
    逆に画面をフラッシュさせることで「事故の音」を表現する
@@ -2417,16 +2405,6 @@
     { ward: "5C", count: 10, afterWard: "5B", afterDone: 8 }
   ];
   const S3_BOTTLE_FILL_MS = 700;    // 1本あたりの補充時間（仮値・P0実測で確定）
-
-  /* 全部詰め終わってから示される掲示。棚には最初から貼ってあった。
-     継ぎ足しは残液の微生物汚染（緑膿菌・セラチア等）のリスクがあるため実際に禁止で、
-     **破棄の理由は正しい**——無駄な作業なのに正論、が効きどころ。
-     そして「手元に正しい情報があったのに読まずに手を動かした」という形が、
-     共有フォルダの早見表／マニュアルとまったく同じ構造になっている。 */
-  const S3_PENALTY_NOTICE = "※ 消毒薬の継ぎ足しは禁止\n　 容器は洗浄・乾燥のうえ交換すること";
-  /* 告げるのは師長。苅部さん（情シス）は感染対策の中身を知らない設計なので使えない
-     （docs/character/苅部さん.md §2）。責める調子にせず、事実だけ短く置く。 */
-  const S3_PENALTY_SHICHO = "〔師長〕あ、それ継ぎ足しですよね。全部捨ててください。";
 
   /* 旧: 苅部さんの1段目トリガーは時限（S3_KARUBE_DELAY秒後に自動発火）だった。
      2026-08-22 ユーザー決定で廃止——時限トリガーは、チームが罠を踏む前に警告が
@@ -6784,26 +6762,10 @@
         if (n) n.textContent = wave.ward + "病棟からも依頼が来ています。あわせて補充してください。";
       }
       drawBottles();
-      if (s3Bottles.every((x) => x.state === "done")) revealNotice();
+      // 全部詰め終わったらそれで終わり。補充は補充であって、継ぎ足しではない——
+      // 掲示も師長の一言も破棄も挟まず、そのまま罰ゲームを畳む（2026-09-06 ユーザー決定）。
+      if (s3Bottles.every((x) => x.state === "done")) finishPenalty();
     }, S3_BOTTLE_FILL_MS);
-  }
-
-  /* 全部詰め終わってから、棚に最初から貼ってあった掲示が示される。
-     責める文言は置かない——掲示と師長の一言、そして破棄の事実だけ。 */
-  async function revealNotice() {
-    const host = $("penalty-host");
-    if (!host) return;
-    host.innerHTML =
-      '<div class="notice">' + esc(S3_PENALTY_NOTICE) + "</div>" +
-      '<div class="shicho">' + esc(S3_PENALTY_SHICHO) + "</div>" +
-      '<div class="discard" id="discard-line"></div>';
-    await wait(1400);
-    if (view !== "s3") return;   // 判断C
-    const d = $("discard-line");
-    if (d) d.textContent = s3Bottles.length + "本を破棄しました。";
-    await wait(1800);
-    if (view !== "s3") return;
-    finishPenalty();
   }
 
   function finishPenalty() {
