@@ -855,6 +855,21 @@ describe("チェックポイント: 旧名で保存された行の読み出し",
     },
   );
 
+  it.each([
+    ["null", null, "500200"],
+    ["配列", [], "500201"],
+    ["文字列", "trap", "500202"],
+  ])(
+    "trapが%s（存在するがオブジェクトでない）旧snapshotは補完せず、読み出しで不正として扱う",
+    async (_name, trap, teamCode) => {
+      await save(teamCode, { commandId: id(teamCode.slice(3)), expectedRevision: 0 });
+      await writeLegacySnapshot(teamCode, "s5", { trap });
+
+      const response = await handleCheckpointState(env, teamCode, now);
+      expect(response.status).toBe(503);
+    },
+  );
+
   it("dataを持たない旧snapshotでも、空dataを補って復帰できる", async () => {
     const teamCode = "500193";
     await save(teamCode, { commandId: id("193"), expectedRevision: 0 });
@@ -1005,6 +1020,23 @@ describe("チェックポイント: 旧UIのタブから届く旧形式のPOST",
       await expect(load(teamCode)).resolves.toMatchObject({
         checkpoint: { body: { view: "s6", idsVersion: CHECKPOINT_IDS_VERSION, trap: expected } },
       });
+    },
+  );
+
+  it.each([
+    ["null", null, "500203"],
+    ["配列", [], "500204"],
+    ["文字列", "trap", "500205"],
+  ])(
+    "trapが%s（存在するがオブジェクトでない）旧形式POSTは補完せず400で弾く",
+    async (_name, trap, teamCode) => {
+      const response = await save(teamCode, {
+        commandId: id(teamCode.slice(3)),
+        expectedRevision: 0,
+        rawBody: { ...legacyPostBody("s5"), trap },
+      });
+
+      expect(response.status).toBe(400);
     },
   );
 

@@ -3800,10 +3800,13 @@
     if (trap && "s5Used" in trap && !("s4Used" in trap)) return out;
     if (typeof b.view === "string" && LEGACY_VIEW_SHIFT[b.view]) out.view = LEGACY_VIEW_SHIFT[b.view];
     // 罠フラグは両キーを必ず揃える——欠けたままだと isCheckpointBody が落とし、
-    // 読み替えた意味が無くなる（そのチームは復帰できないまま入室で止まる）。
-    out.trap = Object.assign({ s3Used: false, s5Used: false },
-      trap ? renameKey(trap, "s4Used", "s5Used") : null);
-    if (!("data" in b)) out.data = {};
+    // 読み替えた意味が無くなる（そのチームは復帰できないまま入室で止まる）。ただし
+    // 「存在するがオブジェクトでない」値（null・配列・文字列）は直さずそのまま残す
+    // ——既定値へ置き換えると、壊れた保存が黙って「罠は未発動」として通ってしまう。
+    if (b.trap === undefined) out.trap = { s3Used: false, s5Used: false };
+    else if (trap) out.trap = Object.assign({ s3Used: false, s5Used: false },
+      renameKey(trap, "s4Used", "s5Used"));
+    if (b.data === undefined) out.data = {};
     else if (isPlainObject(b.data)) {
       out.data = renameKey(renameKey(b.data, "s4Penalty", "s5Penalty"), "s35Summary", "s4Summary");
     }

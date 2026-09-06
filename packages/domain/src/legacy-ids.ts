@@ -53,20 +53,24 @@ const LEGACY_DATA_KEYS: readonly (readonly [string, string])[] = [
   ["s35Summary", "s4Summary"],
 ];
 
-/** 旧bodyの罠フラグ。両キーを必ず揃える——欠けたままだとstrictなschemaが落とし、
- * 読み替えた意味が無くなる（そのチームは復帰できないままリセットを待つ）。既定はfalseで、
- * 旧値があればそれで上書きする。値が真偽値でないなど壊れている場合はそのまま残す
- * ——ここで握り潰すと、壊れた保存が黙って「罠は未発動」として通ってしまう。 */
-const legacyTrap = (trap: unknown): Record<string, unknown> => ({
-  s3Used: false,
-  s5Used: false,
-  ...(isRecord(trap) ? renameKey(trap, "s4Used", "s5Used") : {}),
-});
+/** 旧bodyの罠フラグ。キーごと無ければ両キーを既定値で生成し、あれば旧名を付け替えたうえで
+ * 欠けたキーだけを既定値で埋める——揃わないままだとstrictなschemaが落とし、読み替えた意味が
+ * 無くなる（そのチームは復帰できないままリセットを待つ）。
+ * 存在するがオブジェクトでない値（null・配列・文字列）と、真偽値でないキーの値は直さず
+ * そのまま返す。ここで既定値へ置き換えると、壊れた保存が黙って「罠は未発動」として通り、
+ * 払ったはずの罰が消える。dataと同じ扱いで、壊れた値はschemaに拒否させる。 */
+const legacyTrap = (body: Record<string, unknown>): unknown => {
+  if (body.trap === undefined) return { s3Used: false, s5Used: false };
+  const trap = body.trap;
+  return isRecord(trap)
+    ? { s3Used: false, s5Used: false, ...renameKey(trap, "s4Used", "s5Used") }
+    : trap;
+};
 
 /** 旧bodyのdata。キーごと無ければ空で補い、あれば旧名のキーだけ付け替える。
  * オブジェクトでない値は直さずそのまま返す（壊れた値はschemaに落とさせる）。 */
 const legacyData = (body: Record<string, unknown>): unknown => {
-  if (!("data" in body)) return {};
+  if (body.data === undefined) return {};
   const data = body.data;
   return isRecord(data)
     ? LEGACY_DATA_KEYS.reduce((acc, [from, to]) => renameKey(acc, from, to), data)
@@ -98,7 +102,7 @@ export const normalizeLegacyCheckpointBody = (body: unknown): unknown => {
     ...body,
     ...(view === undefined ? {} : { view }),
     idsVersion: CHECKPOINT_IDS_VERSION,
-    trap: legacyTrap(trap),
+    trap: legacyTrap(body),
     data: legacyData(body),
   };
 };

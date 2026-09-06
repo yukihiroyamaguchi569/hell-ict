@@ -151,6 +151,21 @@ describe("normalizeLegacyCheckpointBody", () => {
     expect(parsed.idsVersion).toBe(CHECKPOINT_IDS_VERSION);
   });
 
+  it.each([
+    ["null", null],
+    ["配列", []],
+    ["文字列", "trap"],
+    ["数値", 0],
+  ])(
+    "trapが%s（存在するがオブジェクトでない）ならそのまま残し、schemaに拒否させる",
+    (_name, trap) => {
+      // 既定値へ置き換えると、壊れた保存が黙って「罠は未発動」として通ってしまう。
+      const normalized = normalizeLegacyCheckpointBody(legacyBodyWithTrap(trap));
+      expect(normalized).toMatchObject({ view: "s6", trap });
+      expect(checkpointBodySchema.safeParse(normalized).success).toBe(false);
+    },
+  );
+
   it("罠フラグの値が壊れていたら握り潰さず、schemaに落とさせる", () => {
     // falseで埋め直すと「罠は未発動」として黙って通り、払ったはずの罰が消える。
     const normalized = normalizeLegacyCheckpointBody(legacyBodyWithTrap({ s4Used: "yes" }));
