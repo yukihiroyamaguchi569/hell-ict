@@ -922,10 +922,6 @@
 /* Stage 3.5：クリア時の小さな報酬。全画面veilではなく中央ペイン（.work）に収め、
    --okの緑だけを使う——暗転（Stage 3）・警報（Stage 4）と見た目で区別する
    （docs/ui/04_Stage3_5_新情報の解釈.md §3）。 */
-.s35-clear { flex: 1; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 16px; text-align: center; padding: 20px; }
-.s35-clear-diagram { opacity: .9; }
-.s35-clear-t { font-size: 22px; font-weight: 700; color: var(--ok); letter-spacing: .03em; }
-.s35-clear-s { font-size: 15px; color: var(--fg-muted); max-width: 46ch; line-height: 1.8; }
 
 /* Stage 3.5：院長の一往復。2026-09-05（Issue #88）にポップアップ（旧
    #ov-s35-kanbu）から中央ペインへ移した器——モーダルだと要約と論文を見返せず、
@@ -2637,16 +2633,6 @@
     "〔院長〕調べさせた。患者は皆すでに発熱していて、眼痛を訴える者はいなかった。"
     + "……論文が言っているのは、熱が出る前の話だ。先回りできる相手は誰だ。";
 
-  /* クリア時の院長の結果報告と、小さな報酬の文言
-     （docs/ui/04_Stage3_5_新情報の解釈.md §3）。 */
-  const S35_RESULT_LINES = [
-    "〔院長〕分かった。夜勤者を確認させる。",
-    "〔院長〕……発熱はないが、眼痛を訴える応援看護師が一人いた。配置はこちらで変える。",
-    "〔院長〕上出来だ。"
-  ];
-  const S35_CLEAR_T = "接点をひとつ、減らした。";
-  const S35_CLEAR_S = "新情報を読み解き、これ以上の拡大を防ぎました。";
-
   /* ------------------------------------------------------------------ */
   /* Stage 4 の教材（配布版）                                            */
   /*                                                                    */
@@ -2849,8 +2835,7 @@
 
   /* クリア時の一言（2026-08-22 ユーザー指示で追加）。話者は依頼主であり督促役
      でもある事務長——ここで別の幹部を出すと、この一件の担当が誰なのか濁る。
-     Stage 3.5 の院長の結果報告（S35_RESULT_LINES）と同じ器（提出判定の verdict）へ
-     出し、新しいオーバーレイは増やさない。
+     提出判定の verdict へ出し、新しいオーバーレイは増やさない。
      罠（PIIインシデント）を踏んだかどうかで分岐させない——踏んだチームにだけ
      違う台詞を出すと、隣の画面を覗いた時点で罠の存在が割れる。
      成功を認めるが、労いにはしない。事務長は最後まで組織の顔のままでいる。 */
@@ -7150,64 +7135,10 @@
 
     $("s35-action-box").classList.add("hide");
     $("btn-s35-action-submit").classList.add("hide");
-    // 2026-08-22 ユーザー決定。以前は 2.2 秒の自動タイマーでこの窓を閉じて
-    // クリアカードへ送っていたが、実プレイで院長の3行を読み切る前に消えると
-    // 指摘された。Stage 1 の結果ウィンドウ（s1ShowResultWin）・S3.5 の
-    // クリアカードと同じく、参加者が押すまで出したままにする。
-    // 3行は一度に全部出し、その下にOKボタンを置く。
-    v.innerHTML = '<div class="verdict">' +
-      S35_RESULT_LINES.slice(0, -1).map((l) => '<div class="lead">' + l + "</div>").join("") +
-      '<div class="done">' + S35_RESULT_LINES[S35_RESULT_LINES.length - 1] + "</div>" +
-      '<div class="row-end" style="margin-top:14px"><button class="btn" id="s35-result-ok">確認した（次へ）</button></div>' +
-      "</div>";
     s35ActionVerdicting = false;
-    s35ScrollTalkIntoView();   // 結果報告と［確認した（次へ）］を画面内へ
-    // { once: true } で二重登録を防ぎ、押した瞬間に disabled にして連打も止める
-    // （s1ShowResultWin・s35ShowClearCard と同じ流儀）。押す前に devbar・JUMP で
-    // 他シーンへ飛んだ場合に備えて view も見る（判断C）。
-    const resOkBtn = $("s35-result-ok");
-    resOkBtn.addEventListener("click", () => {
-      resOkBtn.disabled = true;
-      if (view !== "s35") return;
-      // 差し込んだ .s35-talk は paneC ごと作り直されて消える（Issue #88 以前は
-      // オーバーレイを閉じていた箇所）。
-      s35ShowClearCard();
-    }, { once: true });
-  }
-
-  /* クリアの小さな報酬。全画面veilではなく中央ペインに収め、--okの緑だけを
-     使う——暗転（Stage 3）・警報（Stage 4）と見た目で区別する
-     （docs/ui/04_Stage3_5_新情報の解釈.md §3）。 */
-  function s35ShowClearCard() {
-    if (view !== "s35") return;
-    paneC.innerHTML =
-      '<div class="work"><div class="s35-clear">' +
-        '<svg class="s35-clear-diagram" viewBox="0 0 220 90" width="220" height="90" aria-hidden="true">' +
-          '<text x="4" y="14" font-size="10" fill="var(--fg-muted)">応援看護師</text>' +
-          '<text x="176" y="14" font-size="10" fill="var(--fg-muted)">5A病棟</text>' +
-          '<text x="176" y="60" font-size="10" fill="var(--fg-muted)">5B病棟</text>' +
-          '<text x="2" y="88" font-size="10" fill="var(--ok)">代替担当</text>' +
-          '<line x1="10" y1="20" x2="210" y2="20" style="stroke:var(--fg-muted);stroke-width:1.5" />' +
-          '<line x1="10" y1="20" x2="210" y2="50" style="stroke:var(--fg-muted);stroke-width:1.5;stroke-dasharray:3 4;opacity:.5" />' +
-          '<text x="95" y="38" font-size="12" fill="var(--fg-muted)">×</text>' +
-          '<line x1="10" y1="75" x2="210" y2="50" style="stroke:var(--ok);stroke-width:2" />' +
-        "</svg>" +
-        '<div class="s35-clear-t">' + S35_CLEAR_T + "</div>" +
-        '<div class="s35-clear-s">' + S35_CLEAR_S + "</div>" +
-        '<div class="row-end" style="margin-top:6px"><button class="btn" id="s35-clear-ok">確認した（次へ）</button></div>' +
-      "</div></div>";
-    // 2026-08-22 ユーザー決定。以前は 2.6 秒の自動タイマーで次へ送っていたが、
-    // カードと院長の結果報告を読み切る前に画面が変わるという指摘を受け、
-    // 参加者自身が押して進む形にした（Stage 1 の結果ウィンドウと同じ流儀）。
-    // { once: true } で二重登録を防ぎ、押した瞬間に disabled にして連打も止める。
-    // 押す前に devbar・JUMP で他シーンへ飛んだ場合は paneC ごと作り直されて
-    // このボタンは消えるが、念のため view も見て二重遷移を防ぐ。
-    const okBtn = $("s35-clear-ok");
-    okBtn.addEventListener("click", () => {
-      okBtn.disabled = true;
-      if (view !== "s35") return;
-      stage35UnlockSequence();
-    }, { once: true });
+    // 結果演出（院長の結果報告3行 → クリアカード）は 2026-09-06 ユーザー決定で削除。
+    // 通過したら、他ステージと同じクリア画面（#ov-unlock）へそのまま送る。
+    stage35UnlockSequence();
   }
 
   async function stage35UnlockSequence() {
