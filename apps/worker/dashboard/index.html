@@ -329,7 +329,9 @@
         "use strict";
 
         const STOPS = ["Prologue", "S1", "S2", "S3", "S4", "S5", "S6", "Final"];
-        const POLL_MS = 3000;
+        // 10秒。3秒だと10チーム×2時間の集計だけで無料プランのD1 rows read
+        // （500万/日）を使い切る（Issue #125）。会場前面の表示は10秒遅れで足りる。
+        const POLL_MS = 10000;
         const TIMEOUT_MS = 4000;
         const STALE_MS = 5 * 60 * 1000;
 
