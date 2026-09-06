@@ -7,12 +7,7 @@ on:
       - "docs/**"
       - "!docs/materials/**"
       - "*.md"
-  push:
-    branches: [main]
-    paths-ignore:
-      - "docs/**"
-      - "!docs/materials/**"
-      - "*.md"
+  # mainへのpushでは走らせない。deploy.ymlのverifyジョブが同じ検証を行うため二重になる。
   workflow_dispatch:
 
 permissions:

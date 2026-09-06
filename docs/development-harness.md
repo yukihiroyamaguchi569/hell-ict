@@ -63,12 +63,29 @@ pnpm verify:full
 本番デプロイ前の手順は次のとおり。
 
 1. 開催回を決め、チームコードを`[開催回2桁][チーム番号4桁]`で配る（第2回のチーム1なら`020001`）。**予備コードは登録不要で、次の番号（`020007`、`020008`…）をそのまま配ればよい。** 開催回を切り替えれば、前回開催やリハーサルのチームは入室も配信もできなくなる。
-2. `wrangler secret put EVENT_NO` で開催回を設定する（`apps/worker`で実行）。**あわせて`wrangler deploy --var TEAM_MAX:10`のように、配布数＋予備まで上限を下げる**（100を超えるチーム数のときだけ上げる）。Cloudflareダッシュボードの Workers &gt; 対象Worker &gt; Settings &gt; Variables から入れてもよい。
+2. `wrangler secret put EVENT_NO` で開催回を設定する（`apps/worker`で実行）。**あわせて`wrangler secret put TEAM_MAX`で、配布数＋予備まで上限を下げる**（100を超えるチーム数のときだけ上げる）。`ALLOWED_ORIGINS`と`CHAT_RATE_LIMIT_PER_MINUTE`を変えるときも同じく`wrangler secret put`を使う。**Cloudflareダッシュボードの Variables と `wrangler deploy --var` は使わない**——`wrangler deploy`は設定ファイルに無い通常の変数を消すので、自動デプロイ（次節）のたびに設定が失われる。secretは消えない。
 3. 配信版はモックHTMLをWorkerのAssetsから同一オリジンで配るため、`ALLOWED_ORIGINS`は未設定のままでよい。別オリジン配信へ切り替えたときだけ設定する。
 4. デプロイ後、`GET /api/health`の`guards`で設定が効いているか確認する。`{"status":"ok","guards":{"eventNo":true,"teamMax":100,"allowedOrigins":false,"chatRateLimitPerMinute":20}}`のように返るので、次の2つを必ず見る。**開催回そのものと許可オリジンの値は伏せてある**——healthはOrigin不問で誰でも読めるため、開催回が見えると通るコードの範囲が6桁全体から1万通りへ狭まる。
    - **`eventNo`が`true`であること。** `false`なら`EVENT_NO`の設定漏れで、6桁なら誰でも入れる状態のまま本番を迎えることになる。`"invalid"`なら値が壊れている（2桁数字でない）状態で、**全チームが404で入室できない**——書き損じをここで捕まえる。値そのものは出ないので、**設定した開催回が合っているかは次の手順（実際に入室してみる）で確かめる**。前回の開催回のままだと、当日配ったコードが全部404になる。
    - **`teamMax`が配布したチーム番号の最大以上であること。** `"invalid"`なら`TEAM_MAX`の書き損じで全チームが入室できない。既定のまま運用するなら`100`と出る。
 5. **`EVENT_NO`と一致するコード（当日の開催回が第2回なら`020001`）で実際に入室できることを確認する。** healthは開催回の値を出さないので、設定した値が合っているかはこれでしか分からない。あわせて、別の開催回のコード（`010001`など）や上限を超えるチーム番号が404で弾かれることも確認する。素の`curl -X POST https://<worker>/api/session -d '{"teamCode":"100001"}'`はOriginが無いので403になるが、これはガードが配線されている確認であって防御の強さの確認ではない（`-H "Origin: https://<worker>"`を付ければ通る。上の注記を参照）。
+
+### デプロイの流れ
+
+**`main`へマージすると、GitHub Actions（`.github/workflows/deploy.yml`）が`pnpm verify`を通したうえで本番Worker（`hell-ict`）へ自動でデプロイする。** 手元で`wrangler deploy`を打つ必要はない。`docs/`だけの変更でも走る——配信するモックHTMLは`docs/ui/mock/index.html`にあり、`pnpm build:testplay`がそれを取り込むためである。
+
+必要なGitHub Secrets（リポジトリの Settings &gt; Secrets and variables &gt; Actions）は2つ。
+
+| Secret | 作り方 |
+|---|---|
+| `CLOUDFLARE_API_TOKEN` | Cloudflareダッシュボードの My Profile &gt; API Tokens で「Edit Cloudflare Workers」テンプレートから作る |
+| `CLOUDFLARE_ACCOUNT_ID` | Workers &amp; Pages の画面右側、またはダッシュボードURLに出るアカウントID |
+
+Workerの運用値（`EVENT_NO`、`TEAM_MAX`、`ADMIN_TOKEN`など）はCloudflare側のsecretであり、GitHub Secretsとは別物である。自動デプロイで消えないので、登録は前節の`wrangler secret put`のまま1回でよい。
+
+- **手動で出す**: `pnpm build:testplay && cd apps/worker && pnpm exec wrangler deploy`。
+- **Actionsから出す**: Actions &gt; 「本番デプロイ」 &gt; Run workflow。マージを伴わずに出し直せる。**`main`以外のブランチを選んでも何もしない**——未マージのコードを本番へ出せないよう、両ジョブが`main`のときだけ走る。
+- **失敗したとき**: Actionsのログでどのジョブ（`pnpm verify` / `wrangler deploy` / `/api/health` の確認）が落ちたかを見る。デプロイ後の確認ステップは`GET /api/health`が`status: "ok"`かつ`guards.eventNo: true`かつ`guards.teamMax`が数値であることを求めるので、`EVENT_NO`の設定漏れや書き損じに加え、`TEAM_MAX`の書き損じ（`"invalid"`＝全チームが404）もここで失敗する。デプロイ自体は成功しているので、secretを直して再実行する。
 
 ### ゲームマスターのリセット（`ADMIN_TOKEN`）
 

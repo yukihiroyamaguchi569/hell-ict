@@ -20,7 +20,8 @@ export {};
 /**
  * ALLOWED_ORIGINS / TEAM_MAX / CHAT_RATE_LIMIT_PER_MINUTEは、秘匿情報ではないが
  * 会ごとに変わる運用値なので`wrangler.jsonc`の`vars`へ値を書かず、デプロイ前に
- * ダッシュボードまたは`wrangler deploy --var`で与える（未設定でも既定動作で動く）。
+ * `wrangler secret put`で与える（未設定でも既定動作で動く）。ダッシュボードの
+ * Variablesと`wrangler deploy --var`は、自動デプロイのたびに消えるので使わない。
  * 未設定を型で表すため`string | undefined`とし、guard.tsのパーサが既定へ倒す。
  */
 /**
