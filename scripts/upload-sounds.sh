@@ -38,10 +38,26 @@ fi
 # wranglerはapps/worker/wrangler.jsoncのbindingを読むので、そこで実行する。
 cd "${worker_dir}"
 
-# バケットが無ければ作る。既にあると wrangler は失敗するので、一覧で確かめてから作る。
-if ! pnpm exec wrangler r2 bucket list | grep -q "^name: *${bucket}\$"; then
-  echo "creating bucket: ${bucket}"
-  pnpm exec wrangler r2 bucket create "${bucket}"
+# バケットの確認・作成はリモートR2にだけ要る。--local が使う wrangler dev の
+# ローカルR2（.wrangler/state）はバケットを作る概念が無く、list と create は
+# --local を渡してもリモートのAPIを叩きに行ってしまう（＝認証が要るうえ、
+# ローカルのつもりで本番のバケットに触れる）。--local では触らない。
+if [ "${target}" = "--remote" ]; then
+  # 一覧を先に受け取ってから中身を見る。パイプで grep へ直結すると、認証切れや
+  # 通信断で一覧が取れなかった場合まで「バケットが無い」と読み違えて作成へ進む。
+  # 取れなかったのなら在否は確かめられていないので、その場で止める。
+  if ! bucket_list="$(pnpm exec wrangler r2 bucket list 2>&1)"; then
+    printf '%s\n' "${bucket_list}" >&2
+    echo "error: R2バケットの一覧を取得できない。未認証なら apps/worker で 'pnpm exec wrangler login' を実行する。" >&2
+    exit 1
+  fi
+  # 既にあるバケットへの create は失敗するので、無いと分かったときだけ作る。
+  if ! printf '%s\n' "${bucket_list}" | grep -q "^name: *${bucket}\$"; then
+    echo "creating bucket: ${bucket}"
+    pnpm exec wrangler r2 bucket create "${bucket}"
+  fi
+else
+  echo "local R2: バケットの確認・作成は行わない（リモートには触れない）"
 fi
 
 # .DS_Store を持ち込まないよう拡張子で絞る。一致が無いときにグロブ文字列そのものを
