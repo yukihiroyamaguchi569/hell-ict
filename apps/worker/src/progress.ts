@@ -31,6 +31,11 @@ import { isDuplicateColumn } from "./sqlite.js";
 export const progressSchemaSql = [
   "CREATE TABLE IF NOT EXISTS progress_events (id INTEGER PRIMARY KEY AUTOINCREMENT, team_code TEXT NOT NULL, team_name TEXT NOT NULL DEFAULT '', pos INTEGER NOT NULL, view TEXT NOT NULL DEFAULT '', kind TEXT NOT NULL, generation INTEGER NOT NULL DEFAULT 0, client_at TEXT NOT NULL DEFAULT '', created_at TEXT NOT NULL DEFAULT (datetime('now')));",
   "CREATE INDEX IF NOT EXISTS idx_progress_team ON progress_events(team_code, id);",
+  // リセット世代の集計（RESET_GENERATION_CTE）専用の部分インデックス。reset行は
+  // 全体のごく一部なので、これが無いとサマリーの2本が毎回テーブル全体を1回ずつ
+  // 余計に走査する（Issue #125）。列を(team_code, generation)の順に持たせて
+  // GROUP BY team_code / MAX(generation) をインデックスだけで賄う。
+  "CREATE INDEX IF NOT EXISTS idx_progress_reset ON progress_events(team_code, generation) WHERE kind = 'reset';",
   "CREATE TABLE IF NOT EXISTS migrations (name TEXT PRIMARY KEY);",
 ].join("\n");
 

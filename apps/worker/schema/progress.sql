@@ -12,5 +12,9 @@ CREATE TABLE IF NOT EXISTS progress_events (
   created_at TEXT NOT NULL DEFAULT (datetime('now'))
 );
 CREATE INDEX IF NOT EXISTS idx_progress_team ON progress_events(team_code, id);
+-- リセット世代の集計（src/progress.tsのRESET_GENERATION_CTE）専用の部分インデックス。
+-- reset行は全体のごく一部なので、これが無いとサマリーの2本が毎回テーブル全体を
+-- 1回ずつ余計に走査する。
+CREATE INDEX IF NOT EXISTS idx_progress_reset ON progress_events(team_code, generation) WHERE kind = 'reset';
 -- 一度きりの移行の完了印。名前だけを持つ。
 CREATE TABLE IF NOT EXISTS migrations (name TEXT PRIMARY KEY);
