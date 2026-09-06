@@ -111,12 +111,20 @@ const sendChat = (
     { aiGateway: gateway, nowMs },
   );
 
+/**
+ * チャットの枠が実際に記録されるbucketキー。DOは用途ごとに接頭辞を付けて
+ * `chat:` / `activity:` と分けて数えるので、接頭辞を落とすと本番が読み書きしない
+ * 行を見ることになり、検証も細工も素通りする。
+ */
+const chatRateLimitBucket = (nowMs: number): string =>
+  `chat:${rateLimitBucket(nowMs, RATE_LIMIT_WINDOW_MS)}`;
+
 /** レート制限の判定で書き換わりうる3つの記録をまとめて数える（原子性の確認用）。 */
 const storageCountsOf = async (
   teamCode: string,
   nowMs: number,
 ): Promise<{ rateLimit: number; messages: number; pending: number }> => {
-  const bucket = rateLimitBucket(nowMs, RATE_LIMIT_WINDOW_MS);
+  const bucket = chatRateLimitBucket(nowMs);
   const messages = await messageCountOf(teamCode);
   return runInDurableObject(env.TEAM_ROOM.getByName(teamCode), (_instance, state) => {
     const rateLimit = state.storage.sql
@@ -962,6 +970,9 @@ describe("チャット送信のレート制限", () => {
       );
     }
     const before = await storageCountsOf("500017", windowStartMs);
+    // 枠を読めていること自体を先に押さえる。接頭辞を落としたbucketを見ていると
+    // 常に0が返り、このあとの「変わっていない」がそのまま素通りする。
+    expect(before.rateLimit).toBe(DEFAULT_CHAT_RATE_LIMIT);
 
     const blocked = await sendChat(
       "500017",
@@ -981,7 +992,7 @@ describe("チャット送信のレート制限", () => {
     for (const [round, broken] of brokenValues.entries()) {
       // 窓ごとにカウンタを分けて、ラウンド間で枠を引き継がないようにする。
       const roundNowMs = windowStartMs + round * RATE_LIMIT_WINDOW_MS;
-      const roundBucket = rateLimitBucket(roundNowMs, RATE_LIMIT_WINDOW_MS);
+      const roundBucket = chatRateLimitBucket(roundNowMs);
       await runInDurableObject(env.TEAM_ROOM.getByName("500018"), (_instance, state) => {
         state.storage.sql.exec(
           "INSERT OR REPLACE INTO rate_limit (bucket, count) VALUES (?, ?)",
