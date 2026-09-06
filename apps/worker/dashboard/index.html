@@ -7,7 +7,7 @@
     <!--
       会場前面ディスプレイ用の進捗ボード。単一ファイル・依存ゼロ・外部CDNなし。
       scripts/build-testplay.sh が public/dashboard.html としてコピーし、
-      GET /api/progress/summary を3秒間隔でポーリングして描画する。
+      GET /api/progress/summary を10秒間隔でポーリングして描画する。
       参加者ではなくファシリテーターが見る画面なので、罠の種明かしは書かない。
     -->
     <style>
@@ -329,7 +329,9 @@
         "use strict";
 
         const STOPS = ["Prologue", "S1", "S2", "S3", "S4", "S5", "S6", "Final"];
-        const POLL_MS = 3000;
+        // 10秒。3秒だと10チーム×2時間の集計だけで無料プランのD1 rows read
+        // （500万/日）を使い切る（Issue #125）。会場前面の表示は10秒遅れで足りる。
+        const POLL_MS = 10000;
         const TIMEOUT_MS = 4000;
         const STALE_MS = 5 * 60 * 1000;
 
@@ -376,9 +378,9 @@
         let adminToken = readToken();
         let gmMode = location.hash === GM_HASH;
         let lastSummary = { teams: [], events: [] };
-        // publicId -> { text, at }。3秒ごとの再描画で消えないよう、結果はここへ残す。
+        // publicId -> { text, at }。ポーリングごとの再描画で消えないよう、結果はここへ残す。
         const resetNotes = new Map();
-        // 実行中の publicId。行ノードではなくここで持つ——3秒ごとのポーリングが行を
+        // 実行中の publicId。行ノードではなくここで持つ——ポーリングのたびに行を
         // 作り直すので、ボタンのdisabledをノードに預けると再描画で押せる状態に戻り、
         // 同じチームを二重にリセットできてしまう。
         const resetInFlight = new Set();
@@ -565,10 +567,11 @@
          * ネットワークエラー（try/catch）とHTTPエラー（!ok）の両方を落ちたものとして扱い、
          * 右上に「接続断」を出す。次に成功したら消す。
          *
-         * ポーリング間隔(3秒)よりタイムアウト(4秒)が長いので、前回が終わらないうちに
-         * 次の番が来る。多重に走らせると、遅れて返ってきた古い応答が新しい表示を
-         * 上書きしたり、古い失敗が成功後に「接続断」を点け直したりする。
-         * 実行中は次を見送り、1本だけが走るようにする。
+         * ポーリング間隔(10秒)はタイムアウト(4秒)より長いので、通常は前回が終わって
+         * から次の番が来る。それでも1本だけに絞るのは、背面タブから復帰したときの
+         * setIntervalのまとめ発火や、間隔を詰めたときに重なりうるため。多重に走ると、
+         * 遅れて返ってきた古い応答が新しい表示を上書きしたり、古い失敗が成功後に
+         * 「接続断」を点け直したりする。実行中は次を見送る。
          */
         let pollInFlight = false;
         const poll = async () => {

@@ -106,10 +106,11 @@ test("404はトークンの確認を促す", async ({ page }) => {
   await expect(page.getByText("トークンを確認してください")).toBeVisible();
 });
 
-test("実行中は3秒ごとの再描画を挟んでもボタンがdisabledのまま（二重実行しない）", async ({
-  page,
-}) => {
-  // ポーリング間隔（3秒）より長く応答を遅らせ、実行中に必ず再描画を挟ませる。
+test("実行中は再描画を挟んでもボタンがdisabledのまま（二重実行しない）", async ({ page }) => {
+  // 2026-09-06にポーリングを3秒→10秒へ広げた（D1のrows read対策）。リセットの
+  // タイムアウト（8秒）より間隔が長くなったので、実行中に定期ポーリングの再描画が
+  // 挟まることはもう無い。それでも再描画そのもの（render）が実行中のdisabledを
+  // 復元することは守る必要があるため、同じrenderを通るhashchangeで確かめる。
   const reset: ResetStub = { status: 200, calls: [], delayMs: 6000 };
   await openDashboard(page, "#gm", reset);
   const button = page.getByRole("button", { name: "リセット" });
@@ -120,13 +121,17 @@ test("実行中は3秒ごとの再描画を挟んでもボタンがdisabledの�
   await button.click();
   await expect(button).toBeDisabled();
 
-  // 再描画（3秒）を跨いでも押せる状態に戻らない。戻ると同じチームを二重にリセットできる。
-  await page.waitForTimeout(3500);
+  // 再描画を挟んでも押せる状態に戻らない。戻ると同じチームを二重にリセットできる。
+  await page.evaluate(() => {
+    window.dispatchEvent(new HashChangeEvent("hashchange"));
+  });
   await expect(button).toBeDisabled();
   await expect(page.getByText("実行中…")).toBeVisible();
 
-  // 完了すれば解除され、以後はまた押せる。
-  await expect(page.getByText("リセットしました")).toBeVisible({ timeout: 10_000 });
+  // 完了すれば解除され、以後はまた押せる。結果の文言は次の再描画で戻る
+  // ——再描画で行を作り直した後は、飛行中の要求が持つノードが画面から外れており、
+  // 結果はresetNotesから描き直される（次のポーリングは最長10秒後）。
+  await expect(page.getByText("リセットしました")).toBeVisible({ timeout: 15_000 });
   await expect(button).toBeEnabled();
   expect(reset.calls).toHaveLength(1);
 });

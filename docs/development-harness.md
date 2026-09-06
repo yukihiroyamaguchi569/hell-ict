@@ -66,9 +66,28 @@ pnpm verify:full
 2. `wrangler secret put EVENT_NO` で開催回を設定する（`apps/worker`で実行）。**あわせて`wrangler secret put TEAM_MAX`で、配布数＋予備まで上限を下げる**（100を超えるチーム数のときだけ上げる）。`ALLOWED_ORIGINS`と`CHAT_RATE_LIMIT_PER_MINUTE`を変えるときも同じく`wrangler secret put`を使う。**Cloudflareダッシュボードの Variables と `wrangler deploy --var` は使わない**——`wrangler deploy`は設定ファイルに無い通常の変数を消すので、自動デプロイ（次節）のたびに設定が失われる。secretは消えない。
 3. 配信版はモックHTMLをWorkerのAssetsから同一オリジンで配るため、`ALLOWED_ORIGINS`は未設定のままでよい。別オリジン配信へ切り替えたときだけ設定する。
 4. デプロイ後、`GET /api/health`の`guards`で設定が効いているか確認する。`{"status":"ok","guards":{"eventNo":true,"teamMax":100,"allowedOrigins":false,"chatRateLimitPerMinute":20}}`のように返るので、次の2つを必ず見る。**開催回そのものと許可オリジンの値は伏せてある**——healthはOrigin不問で誰でも読めるため、開催回が見えると通るコードの範囲が6桁全体から1万通りへ狭まる。
-   - **`eventNo`が`true`であること。** `false`なら`EVENT_NO`の設定漏れで、6桁なら誰でも入れる状態のまま本番を迎えることになる。`"invalid"`なら値が壊れている（2桁数字でない）状態で、**全チームが404で入室できない**——書き損じをここで捕まえる。値そのものは出ないので、**設定した開催回が合っているかは次の手順（実際に入室してみる）で確かめる**。前回の開催回のままだと、当日配ったコードが全部404になる。
+   - **`eventNo`が`true`であること。** `false`なら`EVENT_NO`の設定漏れで、6桁なら誰でも入れる状態のまま本番を迎えることになる。`"invalid"`なら値が壊れている（2桁数字でない）状態で、**全チームが404で入室できない**——書き損じをここで捕まえる。値そのものは出ないので、**設定した開催回が合っているかは手順6（実際に入室してみる）で確かめる**。前回の開催回のままだと、当日配ったコードが全部404になる。
    - **`teamMax`が配布したチーム番号の最大以上であること。** `"invalid"`なら`TEAM_MAX`の書き損じで全チームが入室できない。既定のまま運用するなら`100`と出る。
-5. **`EVENT_NO`と一致するコード（当日の開催回が第2回なら`020001`）で実際に入室できることを確認する。** healthは開催回の値を出さないので、設定した値が合っているかはこれでしか分からない。あわせて、別の開催回のコード（`010001`など）や上限を超えるチーム番号が404で弾かれることも確認する。素の`curl -X POST https://<worker>/api/session -d '{"teamCode":"100001"}'`はOriginが無いので403になるが、これはガードが配線されている確認であって防御の強さの確認ではない（`-H "Origin: https://<worker>"`を付ければ通る。上の注記を参照）。
+5. **リハーサルの痕跡は、本番の入室が始まる前に片付ける。** D1の行が残ったままだと`GET /api/progress/summary`が毎回その分まで読み、無料プランのD1 rows read（500万/日）を余計に削る（[Issue #125](https://github.com/yukihiroyamaguchi569/hell-ict/issues/125)）。それ以上に重要なのは、**D1を消してもDurable Object側（`TeamRoom`のチーム状態・チェックポイント・会話・リセット世代、`RaceLeaderboard`の行）は消えない**ことである——同じチームコードを本番で配り直すと、そのチームだけリハーサルの途中状態から復帰する。
+
+   - **推奨: 本番は未使用の開催回（`EVENT_NO`）で行う。** 手順1・2のとおり開催回を切り替えれば、リハーサルで使ったコードは入室そのものができなくなり、DO側の状態にも当たらない。リハーサル用と本番用で開催回を分けておくのがいちばん簡単で確実である。
+   - **同じ`EVENT_NO`を使い続ける場合は、リハーサルで使った全チームをGMリセット（下記）してから、D1を消す。** 先にD1を消してからリセットすると、リセットが積む`reset`行が本番のテーブルへ最初から残る（集計は正しく動くが、ダッシュボードの通信記録にリハーサルの後始末が並ぶ）。GMリセットは`/dashboard.html#gm`の各行のボタンか、`POST /api/gm/teams/:code/reset`で行う。
+
+   D1の削除は次のとおり（リハーサルの後・本番の入室前の1回だけ。**本番の進行中は絶対に実行しない**——当日の記録が消え、ダッシュボードから全チームが消える）。
+
+   ```sh
+   cd apps/worker
+   pnpm exec wrangler d1 execute hell-ict-testplay --remote --command "DELETE FROM progress_events"
+   pnpm exec wrangler d1 execute hell-ict-testplay --remote --command "DELETE FROM activity_events"
+   ```
+
+   **片付けは次の手順6（入室確認）より先に行う。** 確認で入室したチームにもDO側の状態とチェックポイントが残るので、順番が前後して確認の後に片付けたときは、**確認に使ったコードを本番で配らない**か、**そのコードをGMリセットしてから配る**。
+
+   rows readを削っているのは`progress_events`だけで、`activity_events`はサマリーが読まない——こちらは本番のログにリハーサル分が混ざらないようにするための削除である。**リハーサルのログを分析に使うなら、消す前に[ログ分析手順](testplay/ログ分析手順.md)でエクスポートしておく。**
+
+   `migrations`テーブルは消さない（消しても害はないが、PII伏せ字化の移行がもう一度走るだけである）。`progress_events`の`reset`行が消えるので集計の下限は0へ戻るが、以後に積まれる行の世代はDOが持つ現在の世代（0以上）なので、位置の集計は正しく動く。
+
+6. **`EVENT_NO`と一致するコード（当日の開催回が第2回なら`020001`）で実際に入室できることを確認する。** healthは開催回の値を出さないので、設定した値が合っているかはこれでしか分からない。あわせて、別の開催回のコード（`010001`など）や上限を超えるチーム番号が404で弾かれることも確認する。素の`curl -X POST https://<worker>/api/session -d '{"teamCode":"100001"}'`はOriginが無いので403になるが、これはガードが配線されている確認であって防御の強さの確認ではない（`-H "Origin: https://<worker>"`を付ければ通る。上の注記を参照）。**この確認に使ったコードは手順5の注記のとおり扱う**——本番で配らないか、配るならGMリセットしてから配る。
 
 ### デプロイの流れ
 
@@ -86,6 +105,13 @@ Workerの運用値（`EVENT_NO`、`TEAM_MAX`、`ADMIN_TOKEN`など）はCloudfla
 - **手動で出す**: `pnpm build:testplay && cd apps/worker && pnpm exec wrangler deploy`。
 - **Actionsから出す**: Actions &gt; 「本番デプロイ」 &gt; Run workflow。マージを伴わずに出し直せる。**`main`以外のブランチを選んでも何もしない**——未マージのコードを本番へ出せないよう、両ジョブが`main`のときだけ走る。
 - **効果音（mp3）はデプロイに含まれない**: 音源は効果音ラボで再配布が規約で禁じられており、`.gitignore`で`assets/sounds/`ごと除外してあるため、クリーンチェックアウトで走る自動デプロイには入りようがない。**配信元はR2バケット`hell-ict-sounds`で、投入は手元から1回だけ**——`assets/sounds/`へ7点を置いて`bash scripts/upload-sounds.sh`を実行する（バケットが無ければ作るところからやる）。**その端末で初めてwranglerを使うときは、先に`cd apps/worker && pnpm exec wrangler login`で認証しておく**——未認証だとバケットの一覧取得の時点で失敗し、作成も投入もできない。Workerは`GET /sounds/<name>.mp3`をこの7点に限ってR2から返す（`apps/worker/src/sounds.ts`）。**音源を差し替えたときとバケットを作り直したときだけ再実行すればよく、通常のデプロイでは何もしなくてよい。** 投入していなくても本番は落ちず、音が鳴らないだけで進行は変わらない。
+- **D1のスキーマ（テーブルとインデックス）に手作業の適用は要らない**: このリポジトリは`wrangler d1 migrations`を使わず、Workerが最初のリクエストで`ensureSchema`（`apps/worker/src/progress.ts`の`progressSchemaSql`）を1回流す。`CREATE ... IF NOT EXISTS`なので、既存のD1にも不足分（2026-09-06に足したreset用の部分インデックス`idx_progress_reset`など）だけが作られる。デプロイ後に`GET /api/progress/summary`を1回叩けば適用され、確認は次のとおり。
+
+  ```sh
+  cd apps/worker
+  pnpm exec wrangler d1 execute hell-ict-testplay --remote --command "SELECT name FROM sqlite_master WHERE type = 'index' AND tbl_name = 'progress_events'"
+  ```
+
 - **失敗したとき**: Actionsのログでどのジョブ（`pnpm verify` / `wrangler deploy` / `/api/health` の確認）が落ちたかを見る。デプロイ後の確認ステップは`GET /api/health`が`status: "ok"`かつ`guards.eventNo: true`かつ`guards.teamMax`が数値であることを求めるので、`EVENT_NO`の設定漏れや書き損じに加え、`TEAM_MAX`の書き損じ（`"invalid"`＝全チームが404）もここで失敗する。デプロイ自体は成功しているので、secretを直して再実行する。
 
 ### ゲームマスターのリセット（`ADMIN_TOKEN`）
