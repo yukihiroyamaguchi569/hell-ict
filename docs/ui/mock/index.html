@@ -831,6 +831,10 @@
 .bottles button.done .tag { text-shadow: 0 0 4px var(--surface-2, var(--surface)), 0 0 8px var(--surface-2, var(--surface)); }
 .bottles button:disabled { cursor: default; }
 .lock .note { font-size: 13px; color: var(--fg); padding: 0 2px; }
+/* 指示文にいらすとやの消毒液イラストを添える（Stage 3 の罰だけ。Stage 4 の罰の .note は素のまま）。
+   文言は 5B 追加のときに .t だけ差し替わるので、イラストは差し替えに巻き込まれない。 */
+.lock .note.icon { display: flex; align-items: center; gap: 12px; }
+.lock .note.icon img { flex: 0 0 auto; height: 80px; width: auto; }
 .lock .stat { font-size: 12px; color: var(--fg-muted); padding: 6px 2px 0; font-variant-numeric: tabular-nums; }
 /* 全部詰め終わってから出る掲示。最初から棚に貼ってあったもの——
    読まずに手を動かした、が Stage 3 の縮小再演になる（docs/ui/04_Stage3.md §罰ゲーム）。
@@ -6734,8 +6738,12 @@
 
     // 見出しは Stage 4 の罰（startS4Penalty）が同じ器を書き換えるので、毎回セットし直す。
     $("lock-hd").textContent = "拡大対応業務：🧴 消毒液ボトルの補充";
+    // 指示文（.t）とイラストを別要素に分ける。5B が湧いたときに差し替えるのは .t だけで、
+    // イラストは残る（fillBottle 参照）。
     $("penalty-host").innerHTML =
-      '<div class="note">5A病棟の消毒液ボトルを補充してください。</div>' +
+      '<div class="note icon">' +
+      '<img src="../../../assets/images/production/stage3-penalty-sanitizer-irasutoya.png" alt="">' +
+      '<span class="t">5A病棟の消毒液ボトルを補充してください。</span></div>' +
       '<div class="bottles" id="bottles"></div>' +
       '<div class="stat" id="bottle-stat"></div>';
     drawBottles();
@@ -6798,7 +6806,7 @@
       if (!s3BottlesExtraAdded && done >= S3_BOTTLES_TRIGGER) {
         s3BottlesExtraAdded = true;
         for (let k = 0; k < S3_BOTTLES_5B; k++) s3Bottles.push({ ward: "5B", state: "todo" });
-        const n = $("penalty-host") && $("penalty-host").querySelector(".note");
+        const n = $("penalty-host") && $("penalty-host").querySelector(".note .t");
         if (n) n.textContent = "5B病棟からも依頼が来ています。あわせて補充してください。";
       }
       drawBottles();
