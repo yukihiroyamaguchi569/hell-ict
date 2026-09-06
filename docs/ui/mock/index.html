@@ -804,15 +804,37 @@
    済んだ本数が増えるだけで、褒めも音も無い。 */
 .bottles { display: grid; grid-template-columns: repeat(10, 1fr); gap: 7px; padding: 12px 2px; }
 .bottles button {
+  position: relative;
   aspect-ratio: 1 / 1.7; background: var(--bg); border: 1px solid var(--rule);
   color: var(--fg-muted); font-family: var(--font-ui); font-size: 11px;
-  display: flex; align-items: center; justify-content: center;
+  display: flex; align-items: center; justify-content: center; padding: 0;
+}
+/* ボトルの絵（assets/images/production/stage3-penalty-bottle.svg。CC0）。
+   26個とも同一URLなので、ブラウザは1回しか取りに行かない。
+   状態は「濃さ」だけで示す——todo は棚に並んでいるだけの薄い影、filling で少し濃く、
+   done で実体化する。色を変えたり動かしたりしない（達成感を出さないため）。
+   SVG 自体を無彩色へ塗り替えてあるので grayscale フィルタは要らない。 */
+.bottles button img { width: 62%; height: 82%; object-fit: contain; opacity: .28; pointer-events: none; }
+.bottles button.filling img { opacity: .5; }
+.bottles button.done img { opacity: .85; }
+/* 状態の文字はボトルのラベル面へ重ねる。絵より文字が主で、絵は下敷きに徹する
+   （ラベルの英字は読めないノイズになるので SVG から削ってある）。 */
+.bottles button .tag {
+  /* 66% はボトルのラベル面の中心（マスの上下中央だとラベルの上端に乗って落ち着かない）。 */
+  position: absolute; left: 0; right: 0; top: 66%; transform: translateY(-50%);
+  text-align: center; font-size: 13px; font-weight: 700;
+  text-shadow: 0 0 3px var(--bg), 0 0 6px var(--bg);
 }
 .bottles button:hover:not(:disabled) { border-color: var(--warn); color: var(--fg); }
 .bottles button.filling { border-color: var(--warn); color: var(--warn); }
 .bottles button.done { background: var(--surface-2, var(--surface)); color: var(--ok); border-color: var(--ok); }
+.bottles button.done .tag { text-shadow: 0 0 4px var(--surface-2, var(--surface)), 0 0 8px var(--surface-2, var(--surface)); }
 .bottles button:disabled { cursor: default; }
 .lock .note { font-size: 13px; color: var(--fg); padding: 0 2px; }
+/* 指示文にいらすとやの消毒液イラストを添える（Stage 3 の罰だけ。Stage 4 の罰の .note は素のまま）。
+   文言は 5B 追加のときに .t だけ差し替わるので、イラストは差し替えに巻き込まれない。 */
+.lock .note.icon { display: flex; align-items: center; gap: 12px; }
+.lock .note.icon img { flex: 0 0 auto; height: 80px; width: auto; }
 .lock .stat { font-size: 12px; color: var(--fg-muted); padding: 6px 2px 0; font-variant-numeric: tabular-nums; }
 /* 全部詰め終わってから出る掲示。最初から棚に貼ってあったもの——
    読まずに手を動かした、が Stage 3 の縮小再演になる（docs/ui/04_Stage3.md §罰ゲーム）。
@@ -6716,8 +6738,12 @@
 
     // 見出しは Stage 4 の罰（startS4Penalty）が同じ器を書き換えるので、毎回セットし直す。
     $("lock-hd").textContent = "拡大対応業務：🧴 消毒液ボトルの補充";
+    // 指示文（.t）とイラストを別要素に分ける。5B が湧いたときに差し替えるのは .t だけで、
+    // イラストは残る（fillBottle 参照）。
     $("penalty-host").innerHTML =
-      '<div class="note">5A病棟の消毒液ボトルを補充してください。</div>' +
+      '<div class="note icon">' +
+      '<img src="../../../assets/images/production/stage3-penalty-sanitizer-irasutoya.png" alt="">' +
+      '<span class="t">5A病棟の消毒液ボトルを補充してください。</span></div>' +
       '<div class="bottles" id="bottles"></div>' +
       '<div class="stat" id="bottle-stat"></div>';
     drawBottles();
@@ -6756,7 +6782,9 @@
     host.innerHTML = s3Bottles.map((b, i) =>
       '<button data-i="' + i + '" class="' + (b.state === "todo" ? "" : b.state) + '"' +
       (b.state === "todo" ? "" : " disabled") + ">" +
-      (b.state === "done" ? "済" : b.state === "filling" ? "…" : b.ward) + "</button>"
+      '<img src="../../../assets/images/production/stage3-penalty-bottle.svg" alt="">' +
+      '<span class="tag">' +
+      (b.state === "done" ? "済" : b.state === "filling" ? "…" : b.ward) + "</span></button>"
     ).join("");
     host.querySelectorAll("button:not([disabled])").forEach((el) => {
       el.addEventListener("click", () => fillBottle(Number(el.dataset.i)));
@@ -6778,7 +6806,7 @@
       if (!s3BottlesExtraAdded && done >= S3_BOTTLES_TRIGGER) {
         s3BottlesExtraAdded = true;
         for (let k = 0; k < S3_BOTTLES_5B; k++) s3Bottles.push({ ward: "5B", state: "todo" });
-        const n = $("penalty-host") && $("penalty-host").querySelector(".note");
+        const n = $("penalty-host") && $("penalty-host").querySelector(".note .t");
         if (n) n.textContent = "5B病棟からも依頼が来ています。あわせて補充してください。";
       }
       drawBottles();
