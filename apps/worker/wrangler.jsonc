@@ -31,12 +31,27 @@
     "OPENAI_BASE_URL": "https://api.openai.com/v1",
     "OPENAI_MODEL": "gpt-4o",
   },
-  // テストプレイ用の静的配信。/api/* は必ずWorkerへ届かせ、それ以外の
+  // テストプレイ用の静的配信。/api/* と /sounds/* は必ずWorkerへ届かせ、それ以外の
   // パスだけAssetsから返す（scripts/build-testplay.shが生成するpublic/を配信対象とする）。
+  // /sounds/* をWorkerへ回すのは、効果音mp3の配信元がR2（下のr2_buckets）だからである。
+  // public/sounds/ はもう作らないので、Assetsを先に見ても404になるだけだが、
+  // 経路の所在をここで明示する。
   "assets": {
     "directory": "./public",
-    "run_worker_first": ["/api/*"],
+    "run_worker_first": ["/api/*", "/sounds/*"],
   },
+  // 効果音mp3（効果音ラボ）の配信元。素材の再配布が規約で禁じられており、
+  // このリポジトリは公開なので `.gitignore` で assets/sounds/ ごと除外してある。
+  // クリーンチェックアウトで走る自動デプロイ（.github/workflows/deploy.yml）は
+  // 音源を持たないため、静的アセットとして配ると本番で全て404になる。
+  // 投入は `bash scripts/upload-sounds.sh`（手元の assets/sounds/ から入れる）。
+  // 配信は src/sounds.ts が許可リスト7点に限って行う。
+  "r2_buckets": [
+    {
+      "binding": "SOUNDS",
+      "bucket_name": "hell-ict-sounds",
+    },
+  ],
   // テストプレイ当日の進捗記録・活動ログ用（2026-08-23に `wrangler d1 create hell-ict-testplay` で作成）。
   // スキーマは ./schema/progress.sql と ./schema/activity.sql。src/progress.tsと
   // src/activity-log.tsのensureSchemaが初回アクセス時にもCREATE TABLE IF NOT EXISTSを

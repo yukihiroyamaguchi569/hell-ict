@@ -56,6 +56,7 @@ import type { RequestScope } from "./http.js";
 import { createAiGateway, OpenAiRefusalError } from "./openai-gateway.js";
 import { handleProgressPost, handleProgressSummary } from "./progress.js";
 import { RaceLeaderboard } from "./race-leaderboard.js";
+import { handleSoundRequest, SOUNDS_PATH_PREFIX } from "./sounds.js";
 import { systemPromptFor } from "./stage-prompts.js";
 import { TeamRoom } from "./team-room.js";
 
@@ -610,6 +611,9 @@ const handleChatSnapshot = async (env: Env, teamCode: TeamCode, url: URL): Promi
 };
 
 const handleGet = (request: Request, env: Env, url: URL): Promise<Response> => {
+  // 効果音はR2から配る（src/sounds.ts）。`/api/*`ではないので入口ガードは通らない。
+  if (url.pathname.startsWith(SOUNDS_PATH_PREFIX))
+    return handleSoundRequest(env.SOUNDS, url.pathname);
   if (url.pathname === "/api/progress/summary") return handleProgressSummary(env, url);
   const teamCode = teamCodeFromPath(url.pathname, "/api/teams/", "/sync");
   if (teamCode !== null) return handleTeamSync(request, env, teamCode);
