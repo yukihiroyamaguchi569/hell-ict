@@ -547,6 +547,7 @@
 .phs .win .log { height: 232px; overflow-y: auto; padding: 12px; font-size: calc(14px * var(--fs-scale)); line-height: 1.85; }
 .phs .win .log p { margin: 0 0 10px; }
 .phs .win .log .wait { color: #6b736e; }
+.phs .win .log .me { text-align: right; }
 .phs .win .cmp { display: flex; border-top: 1px solid #cfd6d1; }
 .phs .win .cmp input { flex: 1; border: 0; padding: 10px; font-family: var(--font-legacy); font-size: calc(14px * var(--fs-scale)); background: #fff; color: #16181a; }
 .phs .win .cmp button { border: 0; border-left: 1px solid #cfd6d1; background: #eef3ef; color: #16181a; padding: 10px 15px; font-family: var(--font-legacy); font-size: 14px; }
@@ -1379,18 +1380,18 @@
           </div>
         </div>
 
-        <!-- 院内連絡先（別ウィンドウ） -->
+        <!-- メッセージ（苅部さん専用の別ウィンドウ。旧称「院内連絡先」） -->
         <div class="phs hide" id="phs">
           <div class="win hide" id="phs-win">
             <div class="who">情シス　苅部</div>
             <div class="log" id="phs-log"></div>
             <div class="cmp">
-              <input aria-label="院内連絡先への相談" placeholder="">
-              <button>送信</button>
+              <input aria-label="苅部さんへの返信" placeholder="" id="phs-input">
+              <button id="phs-send">送信</button>
             </div>
           </div>
           <button class="bar" id="phs-bar">
-            <span>📞</span><span class="grow">院内連絡先</span>
+            <span>💬</span><span class="grow">メッセージ</span>
             <span class="badge blink hide" id="phs-badge">1</span>
           </button>
         </div>
@@ -2349,7 +2350,7 @@
      だが、モックでは1段目・2段目を合体し2段に簡略化する。 */
   const S3_KARUBE_LINES = [
     "〔苅部〕その基準、どこ情報ですか。",
-    "〔苅部〕マニュアル、去年PDFにしたの私ですよ。読みました？"
+    "〔苅部〕マニュアル、去年PDFにしたのは、私なんですよ。マニュアル読みました？"
   ];
   const S3_KARUBE_AFTER_TRAP = "〔苅部〕……ああ、出ましたか。正典、読んでください。";
 
@@ -8304,6 +8305,8 @@
   // 罠ステージではないので、上限到達メッセージのほうを優先して見せる。
   let phsS5Pending = false;
   let phsS5LimitPending = false;
+  // どのトリガーも無いとき、および参加者の返信に対して返す、ステージ非依存の待ち文言。
+  const PHS_BUSY_LINE = "〔苅部〕今、別病棟の対応中です。手が空いたらこちらから鳴らします。";
   // Final 用のフラグは無い——苅部さんは Final に出ない（2026-08-22 ユーザー決定）。
   function phsRing() {
     $("phs").classList.remove("hide");
@@ -8378,7 +8381,28 @@
     // 出す——以前は PHS_LINES（Stage 2 の Excel トリガー専用の台詞）がここでも
     // 流れてしまい、Stage 2 以外で開いても師長のExcelの話が返る事故があった
     // （2026-08-22 レビュー指摘）。PHS_LINES 本体（phsAIPending 分岐）は変更しない。
-    log.innerHTML = '<p class="wait">〔苅部〕今、別病棟の対応中です。手が空いたらこちらから鳴らします。</p>';
+    log.innerHTML = '<p class="wait">' + PHS_BUSY_LINE + "</p>";
+  });
+
+  /* 参加者から苅部さんへの返信（2026-09-06 ユーザー決定）。彼は相談窓口ではなく
+     一方的に鳴らす側なので、何を送っても同じ定型（上のフォールバックと同じ待ち文言）
+     で受け流す。返信そのものは履歴に残す——送れたことだけは分かるようにする。 */
+  function phsSendReply() {
+    const input = $("phs-input");
+    const text = input.value.trim();
+    if (!text) return;
+    input.value = "";
+    const log = $("phs-log");
+    log.insertAdjacentHTML("beforeend", '<p class="me">〔あなた〕' + esc(text) + "</p>");
+    log.scrollTop = log.scrollHeight;
+    later(() => {
+      log.insertAdjacentHTML("beforeend", '<p class="wait">' + PHS_BUSY_LINE + "</p>");
+      log.scrollTop = log.scrollHeight;
+    }, 1500);
+  }
+  $("phs-send").addEventListener("click", phsSendReply);
+  $("phs-input").addEventListener("keydown", (e) => {
+    if (e.key === "Enter" && !imeComposing(e)) phsSendReply();
   });
 
   /* ------------------------------------------------------------------ */
