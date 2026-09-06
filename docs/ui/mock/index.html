@@ -360,7 +360,7 @@
    橙のまま——感嘆符もアイコンも音も付けない。「直せ」であって「間違えた」ではない。 */
 .grid td.hot { background: color-mix(in srgb, var(--warn) 22%, transparent); }
 .grid td.hot input { font-weight: 700; }
-/* ［グリッドへ送る］で流し込んだ直後の一瞬だけ光らせる。判定NGの .hot（橙）
+/* ［表に送る］で流し込んだ直後の一瞬だけ光らせる。判定NGの .hot（橙）
    は流用しない——あれは「直せ」の色で、取り込んだ全セルを橙にすると全部が
    間違いに見える。--ok の緑で「ここに入った」だけを指す（accent は alert 時に
    赤なので、成功の合図に使うと失敗に見える）。 */
@@ -380,21 +380,15 @@
   font-family: var(--font-num); font-size: 13px; padding: 7px 9px;
 }
 .grid tfoot button:hover { color: var(--fg); }
-/* 貼り付けの確認バー。AIの出力がここでグリッドに合流する。 */
+/* 貼り付けが表として読めなかった／壊れていたときの表示。読める表は確認を挟まず
+   即座に置き換えるので、このバーはエラーの理由を出すためだけに残っている。
+   橙止まりで、セルのNGハイライトと同じ色に揃える（--accent は急変専用）。 */
 .paste-bar {
   display: flex; align-items: center; gap: 12px;
   border-top: 1px solid var(--rule); padding: 9px 13px;
-  font-family: var(--font-num); font-size: 13px;
+  font-family: var(--font-num); font-size: 13px; color: var(--warn);
 }
 .paste-bar .grow { flex: 1; }
-.paste-bar button {
-  background: transparent; border: 1px solid var(--rule); color: var(--fg);
-  font-size: 13px; padding: 5px 13px;
-}
-.paste-bar button.go { background: var(--accent); border-color: var(--accent); color: #fff; font-weight: 700; }
-/* 貼り付けが表として読めなかった／壊れていたときの表示。橙止まりで、
-   セルのNGハイライトと同じ色に揃える（--accent は急変専用）。 */
-.paste-bar.err .grow { color: var(--warn); }
 /* 提出したらフォームを1行に畳む。1画面を全員で囲むので、
    判定結果を見るのにスクロールさせるわけにいかない。 */
 .folded {
@@ -484,7 +478,7 @@
   font-family: var(--font-num); font-size: 13px; line-height: 1.75;
   white-space: pre; overflow-x: auto; tab-size: 10; -moz-tab-size: 10;
 }
-/* 返答の表をそのままグリッドへ流し込むボタン。導入文の直後＝表の上に置く
+/* 返答の表をそのまま提出の表へ流し込むボタン。導入文の直後＝表の上に置く
    ——表が20〜30行あるので末尾に置くと吹き出しの下へ隠れて見つからない。
    nowrap は、横並びになる吹き出しの中でボタンが縦書きに潰れないため。 */
 .bubble .to-grid {
@@ -1530,7 +1524,7 @@
           <div class="win">
             <div class="tb">
               <span class="grow" id="viewer-name">5A病棟_MRSA_記録_最新版(2)_コピー.xlsx</span>
-              <button class="hide" id="btn-take">作業エリアに追加</button>
+              <button class="hide" id="btn-take">表に追加</button>
               <button id="btn-copy">コピー</button>
               <button>ダウンロード</button>
               <button id="btn-viewer-close">閉じる</button>
@@ -4703,10 +4697,10 @@
      行数の基準は expectedRows() と同じ s2AddLanded（「取り込んだか」ではなく
      「着弾したか」）に揃える。ここを s2AddTaken にすると、締切超過後にAIへ
      頼んだチームだけ20行の表を受け取り、30行を期待する判定と食い違う。
-     代わりに、着弾済みで未取り込みのチームはこの表を送る（貼る）だけで［作業エリアに
+     代わりに、着弾済みで未取り込みのチームはこの表を送る（貼る）だけで［表に
      追加］を踏まずに行数が揃う——締切超過の罰が薄まるが、当日の詰まりを
      避けるほうを優先した（罰の本体は、遅れたぶん整形対象が10行増えること）。 */
-  const S2_SCRIPTED_LEAD = "整形しました。「グリッドへ送る」で作業エリアに入ります。コピーして貼り付けることもできます。";
+  const S2_SCRIPTED_LEAD = "整形しました。「表に送る」で提出する表に入ります。";
   function s2ScriptedTable() {
     const src = S2_SHEET_ROWS.concat(s2AddLanded ? S2_ADDENDUM_ROWS : []);
     return [S2_COLS].concat(normalizeRows(src)).map((r) => r.join("\t")).join("\n");
@@ -4723,7 +4717,7 @@
     return d;
   }
   /* 末尾ではなく、その吹き出しの先頭が見える位置へログを送る。Stage 2 の返答は
-     20〜30行の表で右ペインより高く、末尾へ送ると先頭に置いた［グリッドへ送る］と
+     20〜30行の表で右ペインより高く、末尾へ送ると先頭に置いた［表に送る］と
      導入文が上へ隠れる（＝ボタンを見つけられない）。padding ぶん少し上に余白を残す。 */
   function scrollBubbleToTop(bubble) {
     const log = $("ai-log");
@@ -4811,7 +4805,7 @@
         // 素で足すと表の隣に細長い3列目ができる。表の後ろへ回すと、20〜30行の
         // 表の下へ流れて見つからない。
         scrollBubbleToTop(aiBubble("AI", "<div>" + esc(S2_SCRIPTED_LEAD)
-          + '<button class="to-grid" type="button">グリッドへ送る</button></div>'
+          + '<button class="to-grid" type="button">表に送る</button></div>'
           + '<pre class="tsv">' + esc(s2ScriptedTable()) + "</pre>"));
       } else if (view === "s3") {
         if (S3_TRAP_TRIGGER.test(text)) {
@@ -4834,7 +4828,7 @@
     }, 1100);
   }
   $("ai-send").addEventListener("click", sendAI);
-  // ［グリッドへ送る］はイベント委譲で拾う。吹き出しは aiBubble が innerHTML で
+  // ［表に送る］はイベント委譲で拾う。吹き出しは aiBubble が innerHTML で
   // 作るので、生成側へリスナー配線を持ち込まずに済む。
   $("ai-log").addEventListener("click", (e) => {
     const btn = e.target.closest(".to-grid");
@@ -5895,7 +5889,7 @@
   /* ------------------------------------------------------------------ */
   let s2Grid = [];        // グリッドの中身（6列の配列の配列）
   let s2Hot = [];         // 判定NGで光らせるセル（"行-列"）
-  let s2AddTaken = false; // 追加分を作業エリアに取り込んだか
+  let s2AddTaken = false; // 追加分を表に取り込んだか
   let s2AddLanded = false;// 追加分が着弾したか
   let s2T0 = 0, s2Timer = 0;
   // 列見出し。drawGrid()/updateRecog() はこの変数を見る（S2_COLS を直接見ない）。
@@ -5927,8 +5921,6 @@
           '<div class="grid" id="grid"></div>' +
           '<div class="paste-bar hide" id="paste-bar">' +
             '<span class="grow" id="paste-t"></span>' +
-            '<button class="go" id="btn-paste-go">取り込む</button>' +
-            '<button id="btn-paste-no">やめる</button>' +
           "</div>" +
           '<div class="recog" id="recog"></div>' +
         "</div>" +
@@ -5959,11 +5951,6 @@
       $("folded").classList.add("hide");
       $("verdict").innerHTML = "";
     });
-    $("btn-paste-go").addEventListener("click", () => {
-      if (pendingPaste) { s2Grid = pendingPaste; s2Hot = []; drawGrid(); }
-      closePasteBar();
-    });
-    $("btn-paste-no").addEventListener("click", closePasteBar);
     drawGrid();
     s2StartDeadline();
     // 苅部さんが早めに一声かけて、AIパネルの存在を思い出させる（右パネルの初出現）。
@@ -5971,37 +5958,39 @@
     later(() => { phsAIPending = true; phsRing(); }, S2_KARUBE_DELAY * 1000);
   }
 
-  function closePasteBar() {
-    pendingPaste = null;
+  /* エラーバーの開閉。読める表は確認を挟まず置き換えるので、このバーが出るのは
+     「複数行を貼ったが表として読めなかった」ときだけ。閉じるボタンは持たず、
+     次に表が入った時点（＝直った時点）で自動的に消える。 */
+  function showPasteError(why) {
+    if (!$("paste-bar")) return;
+    $("paste-t").textContent = why;
+    $("paste-bar").classList.remove("hide");
+  }
+  function hidePasteError() {
     if ($("paste-bar")) $("paste-bar").classList.add("hide");
-    if ($("paste-bar")) $("paste-bar").classList.remove("err");
-    if ($("btn-paste-go")) $("btn-paste-go").classList.remove("hide");
   }
 
-  /* AIの返答の表を［グリッドへ送る］で流し込む。コピー＆貼り戻しの工程を省く
-     だけで、読み取りは parseTable()、確認は貼り付け用の確認バーをそのまま使う
-     ——別のパーサや別の確認UIを作らない。 */
+  /* AIの返答の表を［表に送る］で流し込む経路と、表を直接貼り付ける経路の両方が
+     ここへ入る。読めたら確認を挟まず即座に置き換える——返答には必ず読める表と
+     ボタンが付き、手作業チームはセルを直接直すので、確認バーは二度手間にしか
+     ならなかった（2026-09-06）。読めなかったときだけエラーを出して止める。 */
   function s2SendTableToGrid(text) {
-    const parsed = parseTable(text);
-    if (!parsed || parsed.error) return;   // 台本の表は必ず読めるので、ここは保険
     const g = $("grid");
     if (!g) return;
+    const parsed = parseTable(text);
+    // 複数行なら、読めても読めなくてもセルへは流し込ませない——スペース整列の
+    // 表を貼ったとき、以前は parseTable の null で無言で素通しし、警告も出ない
+    // まま複数行がセルへ入っていた（実プレイで踏んだ）。
+    const error = parsed ? parsed.error : S2_PASTE_NO_DELIM;
+    if (error) { showPasteError(error); return; }
+    hidePasteError();
     g.scrollIntoView({ block: "nearest", behavior: "smooth" });
-    // 全セルが空＝失うものが無いときだけ即時反映。1文字でも手が入っていれば確認させる。
-    if (s2Grid.every((row) => row.every((v) => v.trim() === ""))) {
-      s2Grid = parsed.rows;
-      s2Hot = [];
-      drawGrid();
-      g.classList.remove("landed");
-      void g.offsetWidth;   // 連続で送ったときもアニメーションを頭から再生させる
-      g.classList.add("landed");
-      return;
-    }
-    pendingPaste = parsed.rows;
-    $("paste-t").textContent = "AIの表 " + parsed.rows.length + "行 × " + S2_COLS.length + "列 で置き換えます";
-    $("paste-bar").classList.remove("err");
-    $("btn-paste-go").classList.remove("hide");
-    $("paste-bar").classList.remove("hide");
+    s2Grid = parsed.rows;
+    s2Hot = [];
+    drawGrid();
+    g.classList.remove("landed");
+    void g.offsetWidth;   // 連続で送ったときもアニメーションを頭から再生させる
+    g.classList.add("landed");
   }
 
   /* --- グリッドの描画 ------------------------------------------------- */
@@ -6105,8 +6094,8 @@
   /* 戻り値は { rows } / { error } / null の3値。
      null＝表として読めない（1行貼り付け・区切りの無い複数行）。
      1行はセル貼り付けとして素通しするが、複数行の null は呼び出し側
-     （paste リスナー）が S2_PASTE_NO_DELIM で拒否する。
-     error＝表のつもりだが取り込めない→確認バーで理由を示し、取り込ませない。 */
+     （s2SendTableToGrid）が S2_PASTE_NO_DELIM で拒否する。
+     error＝表のつもりだが取り込めない→エラーバーで理由を示し、置き換えない。 */
   function parseTable(text) {
     let t = text.replace(/\r\n?/g, "\n").trim();
     t = t.replace(/^```[^\n]*\n/, "").replace(/\n```$/, "");   // コードフェンスを剥がす
@@ -6253,7 +6242,7 @@
     // 文章（メール本文・掲示物）は折り返す。タブ区切りの表は折り返すと列が
     // ずれて読めなくなるので、wrap を立てた項目だけを対象にする。
     $("sheet").classList.toggle("wrap", !!v.wrap);
-    // [作業エリアに追加] は追加分の添付にだけ置く。最初の添付は既にグリッドに
+    // [表に追加] は追加分の添付にだけ置く。最初の添付は既に表に
     // 入っているので不要だし、押せると二重取り込みが起きる。
     $("btn-take").classList.toggle("hide", !(which === "add") || s2AddTaken);
     // [コピー] は去年の掲示物（悪い実例）には置かない——罠ではないのでAIへ渡す
@@ -6296,35 +6285,13 @@
     return [pick(table.header)].concat(table.rows.map(pick)).join("\n");
   }
 
-  let pendingPaste = null;
   document.addEventListener("paste", (e) => {
     if (!$("grid") || !$("grid").contains(e.target)) return;
     const text = (e.clipboardData || window.clipboardData).getData("text");
     if (!text || !/\n/.test(text.trim())) return;   // 1行はセル貼り付けとして素通し
-    const parsed = parseTable(text);
-    // ここまで来た時点でテキストは複数行（1行は上のガードで素通し済み）。
-    // 複数行なら、読めても読めなくてもセルへは流し込ませない——スペース整列の
-    // 表を貼ったとき、以前は parseTable の null で無言で素通しし、バーも警告も
-    // 出ないまま複数行がセルへ入っていた（実プレイで踏んだ）。
+    // 複数行はセルへ流し込ませず、［表に送る］と同じ処理へ渡す。
     e.preventDefault();
-    const error = parsed ? parsed.error : S2_PASTE_NO_DELIM;
-    if (error) {
-      // 不正・過幅な表は取り込み確認まで進ませない。理由だけ示して[取り込む]は隠す。
-      pendingPaste = null;
-      $("paste-t").textContent = error;
-      $("paste-bar").classList.add("err");
-      $("btn-paste-go").classList.add("hide");
-      $("paste-bar").classList.remove("hide");
-      return;
-    }
-    pendingPaste = parsed.rows;
-    $("paste-t").textContent = parsed.rows.length + "行 × " + S2_COLS.length + "列 として取り込みます";
-    // 直前の貼り付けがエラー表示だったときの赤字と、隠した[取り込む]を戻す
-    // ——読めない表を1度貼ってから正しい表を貼り直すのが普通の直し方なので、
-    // ここで戻さないと2回目が赤字のまま取り込めない。
-    $("paste-bar").classList.remove("err");
-    $("btn-paste-go").classList.remove("hide");
-    $("paste-bar").classList.remove("hide");
+    s2SendTableToGrid(text);
   });
 
   /* ------------------------------------------------------------------ */
@@ -6366,8 +6333,8 @@
     // ④ 行数。期待値は追加分が着弾した時点で上がる。取り込みは必須。
     if (rows.length !== expectedRows()) {
       const why = s2AddLanded && !s2AddTaken
-        ? "追加分" + S2_ADDENDUM_ROWS.length + "行がまだ作業エリアに入っていません"
-          + "（師長のメールの添付を開いて［作業エリアに追加］）"
+        ? "追加分" + S2_ADDENDUM_ROWS.length + "行がまだ表に入っていません"
+          + "（師長のメールの添付を開いて［表に追加］）"
         : expectedRows() + "行のはずが " + rows.length + "行です";
       return { at: 3, why, hot: [] };
     }
@@ -6406,7 +6373,7 @@
     const v = $("verdict");
     if (!v || verdicting) return;   // 連打で判定が二重に走らないようにする
     verdicting = true;
-    closePasteBar();
+    hidePasteError();
     // 提出時点のグリッドをTSVで残す。判定より先に積む——判定が落ちても
     // 「何を出したか」は振り返りに要る（上限は logActivity 側で切る）。
     logActivity("submit.s2-grid", [S2_COLS].concat(s2Grid).map((r) => r.join("\t")).join("\n"),
