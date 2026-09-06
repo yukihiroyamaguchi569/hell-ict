@@ -764,13 +764,11 @@
 .goal #goal-next { background: #b8631f; border-color: #b8631f; color: #fff; }
 .goal #goal-next:hover { filter: brightness(1.1); }
 
-/* Stage 3：罠発火の暗転。白文字1行だけを残す。責める文言は置かない
+/* Stage 3：罠発火の暗転。文字は一切置かない（2026-09-06 ユーザー決定。
+   旧実装は事実の一文を白文字で出していた）——踏んだ音（don-1）を鳴らして
+   数秒暗くするだけの幕で、何が起きたかは続く皮膚科医の窓（#ov-s3scold）が言う
    （docs/ui/00_共通シェルと通奏低音.md §9・docs/ui/04_Stage3.md §3）。 */
-.blackout { background: #050607; flex-direction: column; gap: 10px; }
-.blackout .t {
-  font-size: 22px; font-weight: 700; color: #fff; letter-spacing: .02em;
-  text-align: center; max-width: 720px; line-height: 1.7;
-}
+.blackout { background: #050607; }
 
 /* Stage 3：拡大対応業務（消毒液ボトルの補充）。主役は残り時間の数字であって、
    叱責の文言ではない。--warn の斜線ハッチで覆い、中に作業面を内包する。 */
@@ -1662,10 +1660,9 @@
           <img id="lightbox-img" src="" alt="">
         </div>
 
-        <!-- Stage 3：罠発火の暗転。白文字1行だけ。事実の報告のみで、責める文言は無い。 -->
-        <div class="veil blackout hide" id="ov-blackout">
-          <div class="t" id="blackout-text"></div>
-        </div>
+        <!-- Stage 3：罠発火の暗転。文字は出さない——一撃の音と一緒に数秒暗くする
+             だけの幕で、事の次第は続く皮膚科医の窓（#ov-s3scold）が言う。 -->
+        <div class="veil blackout hide" id="ov-blackout"></div>
 
         <!-- Stage 3：開始直後の一報。3B病棟師長メール（詳細）より先に、看護部長が
              砕けた口調で噂話レベルの一報を告げる二段構え（詳細はメールで確認させる）。
@@ -1690,6 +1687,31 @@
               <div class="main" id="s3notice-body"></div>
             </div>
             <div class="ft"><button class="btn" id="btn-s3notice-close">了解しました</button></div>
+          </div>
+        </div>
+
+        <!-- Stage 3：暗転の直後に挟む、皮膚科医の叱責（2026-09-06追加）。
+             旧実装は台詞を暗転（#ov-blackout）へ白文字で流し、3.6秒で自動的に
+             罰へ進んでいた。器を Stage 3 冒頭の看護部長（#ov-s3notice）・Stage 4 の
+             事務長（#ov-s4scold）と揃え、読み終えてから自分で閉じる形にする。
+             肖像あり＝台詞に話者表記〔〕は付けない（S3_TRAP_DOCTOR_LINES 参照）。
+             呼ばれるのは罠を踏んだ後の後始末としてであって相談窓口ではないので、
+             一方向・1回きり（罠は s3TrapUsed のガードで1回しか発動しない）。
+             実在名は出さない流儀のため、キャプションは肩書のみ。 -->
+        <div class="veil sysdlg callin hide" id="ov-s3scold">
+          <div class="win">
+            <div class="tb">
+              <span class="grow">📞 内線 — 皮膚科</span>
+              <span class="ctl">□ ✕</span>
+            </div>
+            <div class="bd">
+              <div class="por">
+                <div class="frame"><img src="../../../assets/images/production/stage3-dermatologist.png" alt="皮膚科医"></div>
+                <div class="cap"><b>皮膚科医</b></div>
+              </div>
+              <div class="main" id="s3scold-body"></div>
+            </div>
+            <div class="ft"><button class="btn" id="btn-s3scold-close">了解しました</button></div>
           </div>
         </div>
 
@@ -2384,11 +2406,14 @@
      ——正解を知る人物を罠ステージに常駐させない原則（docs/character/00 §2①）は
      破らない。呼ばれるのは罠を踏んだ後の後始末としてであって、相談窓口ではない
      （台詞案は docs/materials/stage3_patients.md 実装メモ）。気難しいが正論、
-     矛先は判断と状況へ——人格攻撃はしない（AGENTS.md トーンルール）。 */
+     矛先は判断と状況へ——人格攻撃はしない（AGENTS.md トーンルール）。
+     話者表記〔皮膚科医〕は付けない（2026-09-06 ユーザー決定で肖像付きの窓
+     #ov-s3scold へ移したため）——肖像とキャプションが既に話者を示している
+     （S3_NOTICE_LINES・S35_DIRECTOR_LINES と同じ流儀）。 */
   const S3_TRAP_DOCTOR_LINES = [
-    "〔皮膚科医〕誰です、全員に予防衣なんて指示を出したのは。通常疥癬ですよ。治療も終わってる。カルテは読みましたか。",
-    "〔皮膚科医〕不要な隔離は患者を弱らせます。全部外してください。",
-    "〔皮膚科医〕角化型と通常型を一緒くたにするから、こうなる。この3人は通常型です。次からは病型と治療の進み具合を先に見てください。"
+    "誰です、全員に予防衣なんて指示を出したのは。通常疥癬ですよ。治療も終わってる。カルテは読みましたか。",
+    "不要な隔離は患者を弱らせます。全部外してください。",
+    "角化型と通常型を一緒くたにするから、こうなる。この3人は通常型です。次からは病型と治療の進み具合を先に見てください。"
   ];
 
   /* 拡大対応業務（罰ゲーム）：消毒液ボトルの補充。
@@ -3467,7 +3492,7 @@
   let view = "entry";
 
   function hideOverlays() {
-    ["ov-entry", "ov-brief", "ov-viewer", "ov-unlock", "ov-goal", "ov-s1res", "ov-blackout", "ov-s3notice", "ov-alarm", "ov-s4scold", "ov-lock", "ov-s4call", "ov-s35-director", "ov-s35-report", "ov-s5jimu-task", "ov-f-relay", "ov-f-handover", "ov-lightbox"].forEach((id) => $(id).classList.add("hide"));
+    ["ov-entry", "ov-brief", "ov-viewer", "ov-unlock", "ov-goal", "ov-s1res", "ov-blackout", "ov-s3notice", "ov-s3scold", "ov-alarm", "ov-s4scold", "ov-lock", "ov-s4call", "ov-s35-director", "ov-s35-report", "ov-s5jimu-task", "ov-f-relay", "ov-f-handover", "ov-lightbox"].forEach((id) => $(id).classList.add("hide"));
     // #ov-lock の中身（拡大対応業務のボトル棚／インシデント報告書）は
     // startPenalty()/startS4Penalty() が動的に注入したもの。.hide を付けるだけでは
     // DOM とリスナーが残り続けるので、シーンを離れるたびに必ず空にする
@@ -6656,23 +6681,30 @@
     go("s35");
   }
 
-  /* 罠発火：blackout → 皮膚科医の叱責 → lock。事実の報告に続けて、呼ばれた
-     皮膚科医が叱責する（後始末としての登場であって相談窓口ではない。
-     docs/character/00 §2①「正解を知る人物を罠ステージに常駐させない」は破らない
-     ——ここで初めて病型〈通常型〉を明かす。人格攻撃はしない）。 */
+  /* 罠発火：blackout（文字なし） → 皮膚科医の叱責（#ov-s3scold） → lock。
+     暗転は踏んだ音と発熱の増加のためだけに残し、何が起きたかは呼ばれた皮膚科医が
+     言う（後始末としての登場であって相談窓口ではない。docs/character/00 §2①
+     「正解を知る人物を罠ステージに常駐させない」は破らない——ここで初めて
+     病型〈通常型〉を明かす。人格攻撃はしない）。
+     叱責は [了解しました] を押すまで待ち、押した時点で view が s3 のままなら
+     罰（startPenalty）へ進む——シーンを離れていたら罰は始めない（判断C）。
+     Stage 4 の triggerLeak() と同じ流儀で、リスナーは { once: true } で登録する。 */
   async function triggerTrap() {
-    $("blackout-text").textContent = "あなたの提出した基準で、治療を終えた患者3名が不要な個室隔離下に置かれました。";
     $("ov-blackout").classList.remove("hide");
     sfx("don-1");   // 暗転と同時。罠が発火した一撃
     $("fever").textContent = "12"; $("fever").classList.add("bumped");
-    await wait(1800);
+    await wait(1400);
     $("fever").classList.remove("bumped");
     if (view !== "s3") return;   // 判断C
-    $("blackout-text").innerHTML = S3_TRAP_DOCTOR_LINES.map(esc).join("<br><br>");
-    await wait(3600);
-    if (view !== "s3") return;   // 判断C
     $("ov-blackout").classList.add("hide");
-    startPenalty();
+    $("s3scold-body").innerHTML =
+      S3_TRAP_DOCTOR_LINES.map((t) => '<div class="say">' + esc(t) + "</div>").join("");
+    $("ov-s3scold").classList.remove("hide");
+    $("btn-s3scold-close").addEventListener("click", () => {
+      $("ov-s3scold").classList.add("hide");
+      if (view !== "s3") return;   // 判断C：閉じる前にシーンを離れていたら罰を始めない
+      startPenalty();
+    }, { once: true });
   }
 
   /* 拡大対応業務：消毒液ボトルの補充。
