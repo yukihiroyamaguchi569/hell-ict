@@ -3544,6 +3544,12 @@
      "failed"（http(s)なのに繋がらない）。 */
   let liveProbeState = "pending";
 
+  /* プローブの世代。［台本モードで進む］を選んだときと、プローブをやり直すときに
+     進める。飛行中のプローブは自分の世代が古くなっていたら結果を捨てる——後から
+     200 が返って LIVE=true へ戻ると、liveState が null のまま「LIVEなのに未入室」
+     という、入室を挟んだ意味が消える状態になる。 */
+  let probeToken = 0;
+
   /* 開発用URLハッシュ（#s35 など）の行き先を、入室を挟むあいだ預けておく場所。
      LIVEかどうかはプローブの完了を待たないと決まらないので、http(s)で開いた
      ときは即ジャンプせずここへ入れる（消費はファイル末尾の consumePendingBoot）。 */
@@ -3596,6 +3602,7 @@
       updateEntryProbeUi();
       return;
     }
+    const token = ++probeToken;
     liveProbeState = "pending";
     clearEntryBlock();
     updateEntryProbeUi();
@@ -3609,13 +3616,15 @@
       const health = res.ok ? await res.json().catch(() => null) : null;
       const alive = !!health && health.status === "ok" &&
         !!health.guards && typeof health.guards === "object";
+      if (token !== probeToken) return;   // 待っている間に台本モードが選ばれた・やり直された
       LIVE = alive;
       liveProbeState = alive ? "live" : "failed";
     } catch {
+      if (token !== probeToken) return;
       LIVE = false;
       liveProbeState = "failed";
     } finally {
-      clearTimeout(timer);
+      clearTimeout(timer);   // returnで抜けてもここは通る
     }
     updateEntryProbeUi();
     // APIが居ないと分かった時点で、従来どおりの開発用ジャンプへ戻す
@@ -3632,6 +3641,9 @@
      ——「黙ってscriptedへ落ちる」のを避けるのが今回の趣旨で、選んだこと自体は
      参加者・ファシリテーターの意思決定として尊重する。 */
   $("btn-probe-offline").addEventListener("click", () => {
+    // 飛行中のプローブを無効化してから決める。中断だけでは足りない——中断は
+    // catch へ落ちて "failed" を書き戻すので、世代を進めて結果ごと捨てさせる。
+    probeToken++;
     LIVE = false;
     liveProbeState = "scripted";
     // 入室手続きの途中（進行状況の取得失敗）から選ばれた場合、liveState は
