@@ -909,11 +909,11 @@
 .callin .say + .say { margin-top: 10px; }
 .callin .por .frame { font-size: 56px; }
 
-/* Stage 3.5：クリア時の小さな報酬。全画面veilではなく中央ペイン（.work）に収め、
+/* Stage 4：クリア時の小さな報酬。全画面veilではなく中央ペイン（.work）に収め、
    --okの緑だけを使う——暗転（Stage 3）・警報（Stage 4）と見た目で区別する
    （docs/ui/04_Stage3_5_新情報の解釈.md §3）。 */
 
-/* Stage 3.5：院長の一往復。2026-09-05（Issue #88）にポップアップ（旧
+/* Stage 4：院長の一往復。2026-09-05（Issue #88）にポップアップ（旧
    #ov-s4-kanbu）から中央ペインへ移した器——モーダルだと要約と論文を見返せず、
    対話から抜けられなかった（2026-08-23テストプレイ課題12）。
    AIチャットの吹き出しとは共用しない（00_共通シェルと通奏低音.md §6）。
@@ -1305,7 +1305,7 @@
 
         <!-- 赤帯（急変時に3秒だけ出る） -->
         <div class="redband hide" id="redband">5A病棟より緊急連絡。MRSA疑い、拡大の可能性。</div>
-        <!-- Stage 3.5：開始演出専用の一報。#redband は Stage 1→2 の transition() が
+        <!-- Stage 4：開始演出専用の一報。#redband は Stage 1→2 の transition() が
              文言を直書きしたまま流用する器なので、テキストを差し替えると転調が壊れる。
              同じ .redband の見た目だけを借りる別の器（自前の軽い演出。s4FlashSurge()）。 -->
         <div class="redband hide" id="s4-redband">原因不明の発熱、一気に14人へ。</div>
@@ -1890,7 +1890,7 @@
           </div>
         </div>
 
-        <!-- Stage 3.5：開始演出のタスク付与。Stage 3 の #ov-s3notice（赤帯→肖像付き
+        <!-- Stage 4：開始演出のタスク付与。Stage 3 の #ov-s3notice（赤帯→肖像付き
              sysdlg→通常画面）と同じ流儀——先に赤帯（#s4-redband）が退場してから、
              この一報を出す（s4FlashSurge() の later(...,2600) 経由）。院長の肖像は
              assets/images/test/characters/director/ のバストアップ案を production/ へ
@@ -1913,9 +1913,9 @@
           </div>
         </div>
 
-        <!-- Stage 3.5：院長から転送された速報論文の添付ビューア。既存の #ov-viewer
+        <!-- Stage 4：院長から転送された速報論文の添付ビューア。既存の #ov-viewer
              （教材ビューア。Excel・PDF等）とは別の専用の器——VIEWERS/openViewer() は
-             Stage 1〜Finalの共有添付を切り替えるための仕組みで、S3.5 はそこに参加せず
+             Stage 1〜Finalの共有添付を切り替えるための仕組みで、Stage 4 はそこに参加せず
              自己完結する。表示は .reader/.legacy（院内システムの書式）を流用する。
              本文は docs/materials/stage3_5_foreign_report.md の英語本文（実装メモの
              節を除く）と全文一致させること——2026-08-22 の増補（229→549語・9見出し）
@@ -1962,7 +1962,7 @@
           </div>
         </div>
 
-        <!-- Stage 3.5：院長との一往復（旧 #ov-s4-kanbu）は 2026-09-05（Issue #88）に
+        <!-- Stage 4：院長との一往復（旧 #ov-s4-kanbu）は 2026-09-05（Issue #88）に
              ポップアップを廃止し、中央ペインへ差し込む形へ移した（s4ShowDirectorTalk()）。
              モーダルのままだと要約と論文を見返せず、対話から抜けられなかった
              （2026-08-23テストプレイ課題12）。常駐する「院内連絡先」（#phs・苅部さん専用）
@@ -2496,7 +2496,7 @@
      （S3_BOTTLES_5A・S3_BOTTLE_WAVES）と1本あたりの所要（S3_BOTTLE_FILL_MS）で較正すること。 */
 
   /* ------------------------------------------------------------------ */
-  /* Stage 3.5：新情報の解釈 —— AI要約を次の一手へ変える                    */
+  /* Stage 4：新情報の解釈 —— AI要約を次の一手へ変える                      */
   /*                                                                    */
   /* 正典は docs/scenario/04_Stage3_5_新情報の解釈.md ・                  */
   /* docs/ui/04_Stage3_5_新情報の解釈.md ・ docs/materials/               */
@@ -2507,7 +2507,7 @@
   /* 増やさないため（docs/character/00_お助けキャラの原則.md §0）。        */
   /* 2026-09-05（Issue #88）にポップアップ（#ov-s4-kanbu）から移した。    */
   /* Stage 3 クリアからの接続配線・リーダーボードの停留所追加は別作業      */
-  /* （S3.5 は S3 の停留所を共有する。このブロックでは TEAMS を動かさない）。*/
+  /* （停留所は振り直しで S4 として独立。TEAMS はここで動かさない）。   */
   /* 2026-08-22 ユーザー修正：登場人物を「幹部」から「院長」へ差し替え、    */
   /* 開始演出に肖像付きのタスク付与オーバーレイ（#ov-s4-director。         */
   /* Stage 3 の #ov-s3notice と同じ流儀）を追加。肖像は                    */
@@ -2655,7 +2655,7 @@
   /* 転記した写し——値を変えるときは必ず両方直す（teardown/materials.test.ts */
   /* が tsv 側の行数・列・005整合を固定する）。14名の氏名・IDは            */
   /* packages/domain/src/pii.ts の feverLinelistPatientNames とも完全一致  */
-  /* させること（相互参照・3箇所同時に変える）。この14名は Stage 3.5 で    */
+  /* させること（相互参照・3箇所同時に変える）。この14名は Stage 4 で      */
   /* 発熱指標が9→14へ急変した「14」の内訳そのもの（数字の登場人物化・     */
   /* docs/scenario/00 §3）。                                             */
   /*                                                                    */
@@ -3184,7 +3184,7 @@
   /* エンディング①：幹部の労いリレー（2026-08-22追加）。ボード完成の後、
      院長→看護部長→事務長の順に1人ずつ短い労いを見せる。全員、Stage 1・3で
      見せた人格そのままに態度だけ軟化させる——美談化・別人化はしない。
-     - 院長：Stage 3.5 の「分かった。」「上出来だ。」と同じ、威厳を保った短さ。
+     - 院長：Stage 4 の「分かった。」「上出来だ。」と同じ、威厳を保った短さ。
      - 看護部長：Stage 3 開始一報（S3_NOTICE_LINES）の「……あら、そんな顔
        しないで。感染対策の専門チームなんですもの、あなたたちなら対応は
        簡単でしょう？」という挑発を、同じ人物の口調のまま労いへ反転させる。
@@ -3764,17 +3764,55 @@
   const PENALTY_STATES = ["none", "in-progress", "done"];
   /* 罰の進行は3値。知らない値を採ると、復帰時に罰を出すか出さないかの判断が狂う。 */
   const isPenaltyState = (v) => v === undefined || PENALTY_STATES.indexOf(v) >= 0;
-  /* Stage 3.5 の要約提出済みは2値。知らない値を採ると、対話を差し込むか
+  /* Stage 4 の要約提出済みは2値。知らない値を採ると、対話を差し込むか
      どうかの判断が狂う（罰の3値と同じ扱い）。 */
   const S4_SUMMARY_STATES = ["none", "submitted"];
   const isS4SummaryState = (v) => v === undefined || S4_SUMMARY_STATES.indexOf(v) >= 0;
-  /* 2026-09-06（Issue #118）の内部名振り直しより前に保存された view を読み替える。
-     Worker も読み出しで同じ読み替えをするので、ここへ届く時点では新名のはず——
-     モックだけ先に配信され、古い Worker から拾ってしまった場合の受け皿として残す。
-     s35 は新体系に存在しないので必ず旧番号。s4・s5 は新旧どちらの体系にもあり
-     値だけでは判別できないので触らない（Worker の normalizeLegacyViewId と同じ理屈）。 */
-  function normalizeLegacyViewId(view) {
-    return view === "s35" ? "s4" : view;
+  /* 画面idの体系の版。2026-09-06（Issue #118）に内部名を表示番号へ揃えたのが版2で、
+     それより前に保存された body はこのキーを持たない。保存する body には必ず載せる
+     （packages/domain/src/schemas/checkpoint.ts の CHECKPOINT_IDS_VERSION と同じ値）。 */
+  const CHECKPOINT_IDS_VERSION = 2;
+  const LEGACY_VIEW_SHIFT = { s35: "s4", s4: "s5", s5: "s6" };
+
+  function renameKey(obj, from, to) {
+    if (!(from in obj)) return obj;
+    const out = {};
+    Object.keys(obj).forEach((k) => { if (k !== from) out[k] = obj[k]; });
+    out[to] = obj[from];
+    return out;
+  }
+
+  const isPlainObject = (v) => !!v && typeof v === "object" && !Array.isArray(v);
+
+  /* 振り直しより前に保存された body を新名へ読み替える。判別は版マーカーの有無で
+     決める——キーの形に頼ると、旧 body が trap を欠いていた場合に判別が黙って外れ、
+     旧名のまま isCheckpointBody に弾かれてそのチームが入室ごと止まる。
+     Worker も読み出し・保存の両方で同じ読み替えをするので、ここへ届く時点では
+     新名のはず——モックだけ先に配信された場合の受け皿として残す
+     （packages/domain/src/legacy-ids.ts と同じ規則）。 */
+  function normalizeLegacyCheckpointBody(b) {
+    if (!isPlainObject(b) || b.idsVersion === CHECKPOINT_IDS_VERSION) return b;
+    const trap = isPlainObject(b.trap) ? b.trap : null;
+    const out = Object.assign({}, b, { idsVersion: CHECKPOINT_IDS_VERSION });
+    // マーカーを入れる前に新名で保存された body は、罠フラグの形で新体系と分かる。
+    if (trap && "s5Used" in trap && !("s4Used" in trap)) return out;
+    if (typeof b.view === "string" && LEGACY_VIEW_SHIFT[b.view]) out.view = LEGACY_VIEW_SHIFT[b.view];
+    if (trap) out.trap = renameKey(trap, "s4Used", "s5Used");
+    if (isPlainObject(b.data)) {
+      out.data = renameKey(renameKey(b.data, "s4Penalty", "s5Penalty"), "s35Summary", "s4Summary");
+    }
+    return out;
+  }
+
+  /* GET /checkpoint の応答をまとめて読み替える。検証（isCheckpointState）は
+     読み替えた後に掛ける——検証器には新名だけを知らせておく。 */
+  function normalizeLegacyCheckpointState(state) {
+    if (!isPlainObject(state) || !isPlainObject(state.checkpoint)) return state;
+    return Object.assign({}, state, {
+      checkpoint: Object.assign({}, state.checkpoint, {
+        body: normalizeLegacyCheckpointBody(state.checkpoint.body),
+      }),
+    });
   }
   const isCheckpointData = (d) =>
     !!d && typeof d === "object" && isPenaltyState(d.s3Penalty) && isPenaltyState(d.s5Penalty) &&
@@ -3782,9 +3820,9 @@
   const isCheckpointBody = (b) =>
     !!b &&
     // view は go() が扱える画面idだけ。知らない画面を渡すと go() が STEPS[0] へ
-    // 落ちて、復帰したはずのチームが入室画面に戻る。旧名は読み替えてから見る
-    // ——ここで弾くと、旧名のチェックポイントを持つチームが入室ごと止まる。
-    STEPS.some((step) => step.id === normalizeLegacyViewId(b.view)) &&
+    // 落ちて、復帰したはずのチームが入室画面に戻る。旧名は
+    // normalizeLegacyCheckpointState が手前で新名へ直しているので、ここは新名だけを見る。
+    STEPS.some((step) => step.id === b.view) &&
     Number.isInteger(b.pos) && b.pos >= 0 && b.pos <= STOP_COUNT - 1 &&
     Number.isInteger(b.elapsedMs) && b.elapsedMs >= 0 && !!b.trap &&
     typeof b.trap.s3Used === "boolean" && typeof b.trap.s5Used === "boolean" &&
@@ -3906,7 +3944,7 @@
      罠は1回で発動済みになるのに罰のUIはリロードで消えるので、これが無いと
      「罠を踏んだ直後にリロードすれば罰だけ踏み倒せる」——罰は時間で払う設計
      （企画書§6）なので、払わずに済む抜け道は塞ぐ。
-     Stage 3.5 の要約提出済みフラグ（s4Summary）もここに置く（Issue #88）。
+     Stage 4 の要約提出済みフラグ（s4Summary）もここに置く（Issue #88）。
      院長の一往復を中央ペインへ差し込む形にしたので、これが無いと要約提出後に
      リロードしたチームだけ対話が消え、要約をもう一度書かされる。預けるのは
      "none" | "submitted" の一語だけで、要約の本文は入れない。
@@ -3920,6 +3958,7 @@
     const data = checkpointData();
     return {
       view: view,
+      idsVersion: CHECKPOINT_IDS_VERSION,
       pos: TEAMS[2].pos,
       elapsedMs: elapsed * 1000,
       trap: { s3Used: s3TrapUsed, s5Used: s5TrapUsed },
@@ -4011,7 +4050,7 @@
   /* 要約提出済みだけは、新しい世代の data を採るときも後退させない。
      罰の2キーと違い、こちらは「提出した」という一方向の事実で、none へ戻すと
      別タブで提出済みのチームが要約を書き直させられる（PR #90 codex 指摘）。
-     採った結果 Stage 3.5 を表示中なら、その場で院長の一往復を差し込む
+     採った結果 Stage 4 を表示中なら、その場で院長の一往復を差し込む
      ——本文は預けていないので、復帰と同じ restored の扱いにする。 */
   function adoptS4SummaryState(incoming) {
     if (incoming !== "submitted" || s4SummaryState === "submitted") return;
@@ -4072,8 +4111,9 @@
     const code = (res.body && typeof res.body.code === "string") ? res.body.code : null;
     const latest = await liveFetch("/api/teams/" + teamCode + "/checkpoint", { method: "GET" }, LIVE_RESTORE_TIMEOUT_MS);
     if (!liveState || liveState.teamCode !== teamCode) return;
-    if (!latest.ok || !isCheckpointState(latest.body)) return;
-    const snapshot = latest.body.checkpoint;
+    const latestState = normalizeLegacyCheckpointState(latest.body);
+    if (!latest.ok || !isCheckpointState(latestState)) return;
+    const snapshot = latestState.checkpoint;
     const serverRevision = snapshot ? snapshot.revision : 0;
     liveState.checkpointRevision = serverRevision;
     liveState.checkpointTrap = snapshot ? snapshot.body.trap : null;
@@ -6599,7 +6639,7 @@
   }
 
   /* 開始演出：赤帯。#redband（Stage 1→2 の transition() 専用）・#s4-redband
-     （Stage 3.5 の s4FlashSurge()）と同じ理由で自前の器（#s3-redband）を持つ
+     （Stage 4 の s4FlashSurge()）と同じ理由で自前の器（#s3-redband）を持つ
      ——見た目（.redband／bandIn・bandOut）だけを共用し、文言と出し引きのタイミングは
      自前（s4FlashSurge() と同じ 2200ms 保持 + 400ms フェード = 計2600msで hide）。
      共有 transition() は呼ばない。 */
@@ -6747,7 +6787,7 @@
     const d = document.createElement("div");
     // 見出しは「今クリアしたステージ」を言う（Issue #79。解錠は次のステージが
     // 開くという意味だが、参加者には自分が何を終えたのかを伝えるほうが分かりやすい）。
-    // 次に開くのは Stage 4 ではなく Stage 3.5「新情報の解釈」で、そちらは
+    // 次に開くのは Stage 4「新情報の解釈」で、そちらは
     // stage3UnlockSequence() の副題が言う。
     d.className = "done"; d.textContent = "Stage 3 をクリアしました";
     box.appendChild(d);
@@ -6756,7 +6796,7 @@
   }
 
   async function stage3UnlockSequence() {
-    // 参加者向け呼称は「新情報の解釈」（Stage 3.5 は設計上の番号。罠ステージでは
+    // 参加者向け呼称は「新情報の解釈」（設計ドキュメント上の呼称は Stage 3.5。罠ステージでは
     // ないので番号を出しても予告の心配は無い）。
     $("ov-unlock").querySelector(".t").textContent = "Stage 3 をクリアしました";
     $("ov-unlock").querySelector(".s").textContent = "新情報の解釈 — 海外速報";
@@ -6957,7 +6997,7 @@
   }
 
   /* ------------------------------------------------------------------ */
-  /* Stage 3.5：新情報の解釈 —— AI要約を次の一手へ変える（判定・演出）      */
+  /* Stage 4：新情報の解釈 —— AI要約を次の一手へ変える（判定・演出）        */
   /*                                                                    */
   /* 定数群は S3 の定数帯の末尾（Stage 4 の定数帯の直前）にある。          */
   /* renderStageN/checkStageN/runStageNVerdict/stageNUnlockSequence の    */
@@ -7203,7 +7243,7 @@
     TEAMS[2].pos = 5; reportProgress(5, "clear"); saveCheckpoint("stage-clear");
     // このステージだけ、クリア後に次のシーンへ実際に遷移する（devbar・URLハッシュ
     // 単体起動でも詰まないようにするため。docs/ui/mock/README.md の他ステージは
-    // 遷移せず状態更新のみで留まるが、S3.5→S4 の配線検証にはここが要る）。
+    // 遷移せず状態更新のみで留まるが、S4→S5 の配線検証にはここが要る）。
     go("s5");
   }
 
@@ -7494,7 +7534,7 @@
     // 割り込んで「出したのに催促される」が起きうる。
     s5StopDeadline();
     // 先に事務長の一言を出してから解錠を告げる（S5_CLEAR_LINES のコメント参照）。
-    // Stage 3.5 の院長の結果報告と同じ組み方——lead で台詞、done で解錠の事実。
+    // Stage 4 の院長の結果報告と同じ組み方——lead で台詞、done で解錠の事実。
     S5_CLEAR_LINES.forEach((line) => {
       const l = document.createElement("div");
       l.className = "lead"; l.textContent = line;
@@ -7507,7 +7547,7 @@
     box.appendChild(d);
     s5Verdicting = false;
     // 台詞を読む一拍を置いてから解錠オーバーレイへ。即座に覆うと、追加した
-    // 事務長の一言が出た瞬間に隠れて読めない（S3.5 の 2200ms と同じ間合い）。
+    // 事務長の一言が出た瞬間に隠れて読めない（Stage 4 の 2200ms と同じ間合い）。
     later(stage5UnlockSequence, 2200);
   }
 
@@ -8669,9 +8709,9 @@
     { id: "unlock",  label: "⑥ 解錠",       mode: "alert", note: "報酬は師長の承認だけ。スコアも星も出さない。同時に「発熱」が 3→5 に静かに変わる——解錠の喜びの陰で、誰も見ていない数字が増える。" },
     { id: "s3",      label: "⑦ Stage 3 方針", mode: "crisis", note: "本研修の心臓部（設計ドキュメント上の呼称は「嘘」だが、参加者に見える名は「方針」（旧称: 暫定。2026-08-22 ユーザー決定で改称）——ネタバレを避けるため）。器が alert から crisis へ落ち、院内状況インジケータが「発熱9」でクレッシェンド表示になる（他の平時指標が消える）。開始直後、看護部長の砕けた一報（オーバーレイ：「病棟に疥癬が出ているらしいわよ」）が入り、閉じると3B病棟看護師長のメール（治療完了済みの転院患者3名T-101〜103のサマリ添付）が届いている——これが本題。検査科メールは既知検査すべて陰性を確定通知し、Stage 2 の伏線3名（005/6/008）を患者IDで名指しして回収する謎の発熱の種で、疥癬とは無関係のまま残す。カワイさんのメールに汚染教材（疥癬対応早見表＝角化型向けの過剰対応を一律に適用する内容）が添付され、AIチャットも同じ4つの嘘（個室隔離・予防衣手袋常時着用・殺虫剤処理または熱処理・解除は当面継続、架空の出典）を返す。3欄（PPE・隔離／接触予防策の解除基準／環境整備・リネン）に提出し、罠キーワードのみで正解語（不要・標準予防策・治療完了・24時間）が伴わないと blackout→皮膚科医の叱責（ここで初めて「通常型」と病型が明かされる）→lock（罰ゲーム：消毒液ボトルの補充）へ。正典マニュアル（第5章・疥癬）は Prologue から左ペイン下部の「共有フォルダ」に常設済み——カワイさんが早見表を拾ったのと同じ棚に正典も入っている。気づいて先に読んだチームが報われる設計。" },
     { id: "s4",      label: "⑧ Stage 4 解釈", mode: "crisis", note: "参加者に見える名は「新情報の解釈」（Stage 3.5は設計上の呼称。docs/scenario/04_Stage3_5_新情報の解釈.md）。Stage 3 解錠直後、ヘッダーの発熱表示が9→14へ急増する一報（自前の軽い演出。共有 transition() は使わない）に続けて、院長が肖像付きのタスク付与オーバーレイ（Stage 3 の #ov-s3notice と同じ流儀）で速報論文の要約を命じ、閉じると通常画面（院長室からの転送メール添付＝東陵国の速報論文・英語）が現れる。中央ペインは要約の自由記述欄と［院長へ報告］だけで、抽出すべき症状はヒントとして出さない。判定1は要約に発熱へ先行する眼の症状が含まれるかだけを見る（含まなければ差し戻し、正解語は示さない）。2026-08-22、医学用語の完全一致から自然な言い換えまで拾うよう拡大した——実GPTが返す「眼の痛み」「光への過敏症」「まぶしさ」が落ちていたため（他部位の痛みは誤検知しないよう除いてある。S4_REQUIRED_SUMMARY のコメント参照）。通過すると院長が中央ペインの要約提出の下で一度だけ問い返し（「要約は読んだ」→「うちの発熱患者もこれかもしれないな」→「それで、これからどうする？」。2026-09-05・Issue #88でポップアップから中央ペインへ移した——モーダルだと対話から抜けられず要約と論文を見返せなかった）、対象（夜勤者等）と内容（眼痛の確認等）の両方が書けた行動提案で通過する（判定2）。判定2の差し戻しは2種類——眼症状は掴めていて相手だけが患者へ向いている提案には専用の一言（S4_ACTION_PATIENT_REJECT）で方向だけを指し、それ以外は従来の汎用の差し戻しを返す。どちらも正解語（夜勤者）は示さない。クリアすると院長が応援看護師の眼痛を発見した結果を告げ、中央ペインに小さな緑のクリアカード（配置線の作り替え図）を出す。クリア後の送りは二段のボタン待ちにしてある——院長の結果報告の［確認した（次へ）］でクリアカードが出て、カードの［確認した（次へ）］で次ステージ（Stage 5）が解錠される（2026-08-22、それぞれ2.2秒・2.6秒の自動タイマーから参加者の操作へ変更——演出を読み切る前に画面が変わるという指摘への対応）——罠・罰・alarm/lock/blackoutは一度も使わない（Stage 5・Finalと同じ構造）。リーダーボードの停留所は、2026-08-22の表示番号振り直しでS4として独立させた（旧実装はS3の停留所を共有していた。帯は Prologue/S1/S2/S3/S4/S5/S6/Final の8停留所）。台本AI応答は無く、判定は提出文字列に対するルールベースのみなのでAIチャット無しでも #s4 単体で通せる。Stage 3クリアで解錠され自動遷移する（s3→s4）。s4→s5 はクリアカードのボタン待ち。devbar・URLハッシュからの単体起動も可。" },
-    { id: "s5",      label: "⑨ Stage 5 報告", mode: "crisis", note: "参加者に見える名は「報告」（旧「回答」から変更。設計上の呼称「情報漏洩」は罠を予告するので出さない）。2026-08-22、「家族への返信文作成」から「保健所への発熱患者一覧の提出」へ再設計した——Stage 2のラインリスト（氏名列を削除して丸ごとAIに貼ってよい教材）とちょうど対句で、Stage 4のこちらは氏名列を残したまま「丸ごと貼ると個人名が外部AIへ流出する」罠にしてある。発熱インジケータは Stage 3.5 解錠時の14のまま動かない——この14人が今回の一覧の内訳そのもの（S5_FEVER_ROWS、Stage 2の患者005を含む、5A中心に3B/5B/6Aへ分散する14名。病棟はdocs/materials/stage4_fever_linelist.tsvとの整合確認でStage 2実データに合わせて5名を5Aへ調整済み）。開始演出は赤帯「保健所より連絡あり」（#s5-redband・2026-08-22追加）のみで、Stage 3のような追加の一報オーバーレイは挟まない。退場すると事務長が単一のメールで保健所からの依頼を転送し、日付・体温・備考の表記が汚い一覧（氏名列つき）を添付する。AIチャットへ整形を頼むと、台本応答が氏名列を落とした表（日付はISO1種類・体温は℃で統一）を返す——そのままコピーして提出欄へ貼れば整形チェックを通る（S5_AI_REPLY・s5ScriptedTable）。罠はStage 3と違い提出フォームではなく送信前ゲート（AIチャットの手前）にあり、一覧を丸ごと送信すると alarm→事務長の叱責（#ov-s5scold・2026-08-22追加。正論で行為の重大性を指すのみで人格攻撃はしない）→lock（罰ゲーム：インシデント報告書の黒塗り）へ。塗るべき氏名と塗ってはいけないID・病棟名が混在し、判断がいる罰にしてある。AIチャットは罰ゲーム中だけ入力不可（Stage 3の罰との差）。正解経路は氏名列を除いてAI（または手）で整形し、IDベースの一覧として提出すること——提出判定は14名分のIDの網羅→全角数字が残っていないか→日付の書き方が1種類か→体温の単位（℃・°C・゜C・度は同じ扱い）の付け方が揃っているか、の順に見て最初の1件だけを差し戻す（②〜④は一覧のデータ行＝患者IDが単独で現れ、かつ表として区切られている行だけを見るので、AIの前置きやMarkdown表の区切り行では落ちない）（2026-09-06、課題文が「表記を整えて提出」なのに汚い一覧が素通りしていたため整形チェックを追加。どの書式に揃えたかは問わない。氏名が残っていてもブロックしない）。提出期限超過は、旧デザインの患者相談窓口・近藤さんの着信から、依頼主である事務長自身の督促（内線）に差し替えた——近藤さんはStage 4に登場せず、Stage 5で初登場する。**苅部さんはこのステージに登場しない**（2026-08-22 ユーザー決定。旧実装は入場12秒後の着信と罰ゲーム明けの追いヒントを持っていたが、S5_KARUBE_* ・phsS5Pending・s5NudgeKarube() 一式ごと削除した）。" },
+    { id: "s5",      label: "⑨ Stage 5 報告", mode: "crisis", note: "参加者に見える名は「報告」（旧「回答」から変更。設計上の呼称「情報漏洩」は罠を予告するので出さない）。2026-08-22、「家族への返信文作成」から「保健所への発熱患者一覧の提出」へ再設計した——Stage 2のラインリスト（氏名列を削除して丸ごとAIに貼ってよい教材）とちょうど対句で、Stage 4のこちらは氏名列を残したまま「丸ごと貼ると個人名が外部AIへ流出する」罠にしてある。発熱インジケータは Stage 4 解錠時の14のまま動かない——この14人が今回の一覧の内訳そのもの（S5_FEVER_ROWS、Stage 2の患者005を含む、5A中心に3B/5B/6Aへ分散する14名。病棟はdocs/materials/stage4_fever_linelist.tsvとの整合確認でStage 2実データに合わせて5名を5Aへ調整済み）。開始演出は赤帯「保健所より連絡あり」（#s5-redband・2026-08-22追加）のみで、Stage 3のような追加の一報オーバーレイは挟まない。退場すると事務長が単一のメールで保健所からの依頼を転送し、日付・体温・備考の表記が汚い一覧（氏名列つき）を添付する。AIチャットへ整形を頼むと、台本応答が氏名列を落とした表（日付はISO1種類・体温は℃で統一）を返す——そのままコピーして提出欄へ貼れば整形チェックを通る（S5_AI_REPLY・s5ScriptedTable）。罠はStage 3と違い提出フォームではなく送信前ゲート（AIチャットの手前）にあり、一覧を丸ごと送信すると alarm→事務長の叱責（#ov-s5scold・2026-08-22追加。正論で行為の重大性を指すのみで人格攻撃はしない）→lock（罰ゲーム：インシデント報告書の黒塗り）へ。塗るべき氏名と塗ってはいけないID・病棟名が混在し、判断がいる罰にしてある。AIチャットは罰ゲーム中だけ入力不可（Stage 3の罰との差）。正解経路は氏名列を除いてAI（または手）で整形し、IDベースの一覧として提出すること——提出判定は14名分のIDの網羅→全角数字が残っていないか→日付の書き方が1種類か→体温の単位（℃・°C・゜C・度は同じ扱い）の付け方が揃っているか、の順に見て最初の1件だけを差し戻す（②〜④は一覧のデータ行＝患者IDが単独で現れ、かつ表として区切られている行だけを見るので、AIの前置きやMarkdown表の区切り行では落ちない）（2026-09-06、課題文が「表記を整えて提出」なのに汚い一覧が素通りしていたため整形チェックを追加。どの書式に揃えたかは問わない。氏名が残っていてもブロックしない）。提出期限超過は、旧デザインの患者相談窓口・近藤さんの着信から、依頼主である事務長自身の督促（内線）に差し替えた——近藤さんはStage 4に登場せず、Stage 5で初登場する。**苅部さんはこのステージに登場しない**（2026-08-22 ユーザー決定。旧実装は入場12秒後の着信と罰ゲーム明けの追いヒントを持っていたが、S5_KARUBE_* ・phsS5Pending・s5NudgeKarube() 一式ごと削除した）。" },
     { id: "s6",      label: "⑩ Stage 6 掲示", mode: "crisis", note: "参加者に見える名は「掲示」。設計上の呼称「ポスター工房」は罠が無いので出しても支障は無いが、Stage 3・4 の呼称の流儀（方針／回答）に揃える。罠疲れの後のご褒美ステージで、alarm/lock/blackoutを一度も使わない最初の本編ステージ（Final も同様）。発熱インジケータ・crisisモードは Stage 4 から継続。開始演出は肖像付きタスク付与オーバーレイ（#ov-s6jimu-task・2026-08-22追加）のみで赤帯は無い——ご褒美ステージなので緊迫演出を入れない、という設計と揃える。事務長が面会制限を正式なルールにする旨と、正式な掲示物の用意を口頭で依頼し（詳細要望は近藤からと予告）、閉じると同じ内容のメール（MAIL_S6_JIMU）が受信トレイにある通常画面へ進む。患者相談窓口 近藤（本編初登場。2026-08-22のStage 4再設計で「Stage 4と同一人物の再登場」設定は解消——Stage 4は保健所への発熱患者一覧提出へ作り替わり、近藤は登場しなくなったため）が多言語対応の理由と去年の悪い実例（字だらけで不評だった掲示物）を添えて登場する。AIチャットが初めて画像を返す——モックはAPIを呼ばず、プロンプトのタグ一致で事前生成した候補画像を出し分ける（S6_POSTERS）。生成回数には上限があり（従量課金という体で苅部さんが告げる）、上限後も生成済みの候補はいつでも提出できるので詰まない。提出時は差し戻しのみ・罠なし・罰なし・回数無制限の判定を行う——候補の種類（文章中心／未選択の標準案は無条件で差し戻し）→プロンプト文字列（マスク着用・面会時間の言及の有無）の順に見て、引っかかれば近藤さんの台詞で何が足りないかを具体的に告げる（checkStage6）。品質そのものはDebriefの「ポスター大賞」に譲る。苅部さんは門外漢で、観点だけ示しデザインの良し悪しは言わない。返信遅延はStage4だけの短縮を終え通常値に戻る。通過すると「解錠」ではなくgoalSequence（#ov-goal）でレース終了を示す——2026-08-22のFinal全面改修（判定なし振り返りボード化）に伴い「Finalは保留中」の扱いは終わり、#ov-goalに追加した「振り返りへ進む」ボタンを押すとエピローグ（#ov-epilogue・2026-09-06追加。院長が会見を終えて収束を告げる1枚。EPILOGUE_LINES）を挟み、その［振り返りへ］でgo(\"final\")でFinalの振り返りボードへ進む（devbarからのFinal単独起動の経路も残る——その場合エピローグは出ない）。" },
-    { id: "final",   label: "⑪ Final 振り返り",  mode: "peace", note: "2026-08-22 全面改修（ユーザー決定）。参加者に見える名は「会見」から「振り返り」へ改称した——旧実装は記者会見資料を作って提出する4欄フォームだったが、レースのゴールが Stage 5 クリアへ移ったことで「会見資料を作る」という前提のタスクではなくなったため、「振り返り」の方が画面の中身（対応の全体図＋一言）と一致する。旧4欄判定（checkFinal/F_ORDER/F_WRONG/F_REQUIRED、誤り→不足・Stage 3 と同じ順序）は削除した——判定そのものが無い。発熱インジケータと器のモードは、2026-09-06 の改修でここだけ収束後の状態へ戻す（旧: Stage 4・5 から crisis・14 のまま継続）——直前のエピローグ（#ov-epilogue）で院長が「新規の発熱は3日連続でゼロ」「いずれも収束した」と告げるので、赤い器と発熱14が残っていると画面が台詞と真正面から矛盾する。STEPS のこのエントリの mode を peace にし、go() の final 分岐で発熱を 0 に、.crescendo（発熱だけを強調する危機表示）を外して在院・空床・本日入院の平常表示へ戻す。ゴール演出（#ov-goal）までは 14・crisis のままで、落ちるのは Final へ入る瞬間だけ。チェックポイント復帰・devbar・URLハッシュのどの経路も go() の同じ分岐を通るので、表示は常に一致する。事務長・広報課からのメール2通は「資料を4点作れ」ではなく「振り返って一言を残せ」の前振りに書き換えた（聖クロノス熱（仮）の爆誕・記者クラブの質問リストは文言のみ調整して維持）。2026-09-06 にこの2通をさらに会見“後”の文面へ直した——エピローグで院長が「記者会見を終えた」と告げる以上、「明朝10時に会見」「会見に先立ち」のままでは受信トレイだけ時間が巻き戻る。広報課の追加質問は12件でエピローグの台詞と一致させること（片方だけ動かさない）。添付の質問リスト（final_press_questions.md）は会見“前”に届いていたものとして据え置く。中央ペインは振り返りボード——この研修で作った成果物のタイル6枚（S1メール対応／S2火の手・発熱の芽／S3疥癬の方針／S3.5眼痛の手がかり／S4保健所報告14名／S5面会制限ポスター）が0.4秒間隔（F_BOARD_LIGHT_MS）で順に点灯し（fLightTiles）、全点灯後に中央下の空白ピース「引き継ぎ」が開く（2026-08-22再設計・親裁定済み：当初の「記者会見」ラベル／「明日の記者会見で最初に伝える一言」だとICTの振り返りという主題からズレたため、Stage 1 の前任ICNの引き継ぎメモと対をなす「引き継ぎメモ」型に変更した）。ピースには「次にこの病院へ来るICTに引き継ぎをしましょう。次のチームに伝えたい一言をチームで相談して入力してください。」の入力欄（placeholder例「AIに渡す前に、名前を消す。」）と［記す］ボタンのみ——判定は空欄拒否（fSubmitLine）だけで内容は一切見ない。記すとボード全体が一拍点灯し（.fboard.done）、締めのメッセージ（F_CLOSE_LINES＝「あなたたちも、引き継ぐ側になった。」で始まる、前任ICNのメモに始まりチーム自身のメモで終わる円環を示す文言）を出す。記した一言は画面に残り続け、再訪時もアニメーションを再生せず完成状態を直接描く（fLine が re-render をまたいで保持される）——ファシリテーターが各チームのPCから読み上げるため。苅部さんは登場しない（2026-08-22 ユーザー決定）——旧実装は入場40秒後にPHSを鳴らして「私も呼ばれてます。で、どこまで公表するんですか。」と言わせていたが、公表を前提にした旧・記者会見設計の台詞であり、判定なしの振り返りとなった現Finalと文脈が噛み合わないため、F_KARUBE_LINE・F_KARUBE_DELAY・phsFPending 一式ごと削除した（旧2段目＝最終セーフティは、それ以前に判定廃止で削除済み）。AIチャットに Final 専用の台本応答はもう無い（2026-08-22 ユーザー決定）——旧実装は F_REQUEST_TRIGGER→F_AI_REPLY で「承知しました。会見用の文案です。」と返していたが、記者会見の資料を作らせる旧設計の応答なので定数と sendAI() の Final 分岐ごと削除し、scripted 時は他ステージのトリガー不一致と同じ既定応答（「（このモックでは応答しません）」）へ合流させた（LIVE時は従来どおり sendAiLive()）。振り返りボード自体はAIチャットに依存しない。ゴール演出は Stage 5 側（stage6GoalSequence）に移った——#ov-goal に追加した「振り返りへ進む」ボタンを押すとエピローグ（#ov-epilogue・2026-09-06追加）を挟み、その［振り返りへ］で go(\"final\") でここへ来る。Final 自身はもう #ov-goal を開かない（goalSequence() は Stage 5 専用の共有関数として残した）。ボード完成の後にエンディングが続く（2026-08-22追加）：①幹部の労いリレー（#ov-f-relay。院長→看護部長→事務長を F_RELAY から1人ずつ、［次へ］ボタンと背景クリックの早送りだけで送る。自動タイマーは無い）→②感謝状（#ov-f-handover。同日ユーザー決定で「引き継ぎ書」から改稿——病院からチームへの謝意と、記した一言を次のICTチームへ必ず申し送るという約束を賞状の体裁で見せる。宛名はチーム名、一言は esc() を通して引用枠へ入る）。感謝状はゲームの最終状態で閉じる導線を持たず、fEnded が立った後は #final 再入場のたびに renderFinal() が直接復元する。devbar・URLハッシュからの単体起動は従来どおり可能。" }
+    { id: "final",   label: "⑪ Final 振り返り",  mode: "peace", note: "2026-08-22 全面改修（ユーザー決定）。参加者に見える名は「会見」から「振り返り」へ改称した——旧実装は記者会見資料を作って提出する4欄フォームだったが、レースのゴールが Stage 5 クリアへ移ったことで「会見資料を作る」という前提のタスクではなくなったため、「振り返り」の方が画面の中身（対応の全体図＋一言）と一致する。旧4欄判定（checkFinal/F_ORDER/F_WRONG/F_REQUIRED、誤り→不足・Stage 3 と同じ順序）は削除した——判定そのものが無い。発熱インジケータと器のモードは、2026-09-06 の改修でここだけ収束後の状態へ戻す（旧: Stage 4・5 から crisis・14 のまま継続）——直前のエピローグ（#ov-epilogue）で院長が「新規の発熱は3日連続でゼロ」「いずれも収束した」と告げるので、赤い器と発熱14が残っていると画面が台詞と真正面から矛盾する。STEPS のこのエントリの mode を peace にし、go() の final 分岐で発熱を 0 に、.crescendo（発熱だけを強調する危機表示）を外して在院・空床・本日入院の平常表示へ戻す。ゴール演出（#ov-goal）までは 14・crisis のままで、落ちるのは Final へ入る瞬間だけ。チェックポイント復帰・devbar・URLハッシュのどの経路も go() の同じ分岐を通るので、表示は常に一致する。事務長・広報課からのメール2通は「資料を4点作れ」ではなく「振り返って一言を残せ」の前振りに書き換えた（聖クロノス熱（仮）の爆誕・記者クラブの質問リストは文言のみ調整して維持）。2026-09-06 にこの2通をさらに会見“後”の文面へ直した——エピローグで院長が「記者会見を終えた」と告げる以上、「明朝10時に会見」「会見に先立ち」のままでは受信トレイだけ時間が巻き戻る。広報課の追加質問は12件でエピローグの台詞と一致させること（片方だけ動かさない）。添付の質問リスト（final_press_questions.md）は会見“前”に届いていたものとして据え置く。中央ペインは振り返りボード——この研修で作った成果物のタイル6枚（S1メール対応／S2火の手・発熱の芽／S3疥癬の方針／S4眼痛の手がかり／S5保健所報告14名／S6面会制限ポスター）が0.4秒間隔（F_BOARD_LIGHT_MS）で順に点灯し（fLightTiles）、全点灯後に中央下の空白ピース「引き継ぎ」が開く（2026-08-22再設計・親裁定済み：当初の「記者会見」ラベル／「明日の記者会見で最初に伝える一言」だとICTの振り返りという主題からズレたため、Stage 1 の前任ICNの引き継ぎメモと対をなす「引き継ぎメモ」型に変更した）。ピースには「次にこの病院へ来るICTに引き継ぎをしましょう。次のチームに伝えたい一言をチームで相談して入力してください。」の入力欄（placeholder例「AIに渡す前に、名前を消す。」）と［記す］ボタンのみ——判定は空欄拒否（fSubmitLine）だけで内容は一切見ない。記すとボード全体が一拍点灯し（.fboard.done）、締めのメッセージ（F_CLOSE_LINES＝「あなたたちも、引き継ぐ側になった。」で始まる、前任ICNのメモに始まりチーム自身のメモで終わる円環を示す文言）を出す。記した一言は画面に残り続け、再訪時もアニメーションを再生せず完成状態を直接描く（fLine が re-render をまたいで保持される）——ファシリテーターが各チームのPCから読み上げるため。苅部さんは登場しない（2026-08-22 ユーザー決定）——旧実装は入場40秒後にPHSを鳴らして「私も呼ばれてます。で、どこまで公表するんですか。」と言わせていたが、公表を前提にした旧・記者会見設計の台詞であり、判定なしの振り返りとなった現Finalと文脈が噛み合わないため、F_KARUBE_LINE・F_KARUBE_DELAY・phsFPending 一式ごと削除した（旧2段目＝最終セーフティは、それ以前に判定廃止で削除済み）。AIチャットに Final 専用の台本応答はもう無い（2026-08-22 ユーザー決定）——旧実装は F_REQUEST_TRIGGER→F_AI_REPLY で「承知しました。会見用の文案です。」と返していたが、記者会見の資料を作らせる旧設計の応答なので定数と sendAI() の Final 分岐ごと削除し、scripted 時は他ステージのトリガー不一致と同じ既定応答（「（このモックでは応答しません）」）へ合流させた（LIVE時は従来どおり sendAiLive()）。振り返りボード自体はAIチャットに依存しない。ゴール演出は Stage 5 側（stage6GoalSequence）に移った——#ov-goal に追加した「振り返りへ進む」ボタンを押すとエピローグ（#ov-epilogue・2026-09-06追加）を挟み、その［振り返りへ］で go(\"final\") でここへ来る。Final 自身はもう #ov-goal を開かない（goalSequence() は Stage 5 専用の共有関数として残した）。ボード完成の後にエンディングが続く（2026-08-22追加）：①幹部の労いリレー（#ov-f-relay。院長→看護部長→事務長を F_RELAY から1人ずつ、［次へ］ボタンと背景クリックの早送りだけで送る。自動タイマーは無い）→②感謝状（#ov-f-handover。同日ユーザー決定で「引き継ぎ書」から改稿——病院からチームへの謝意と、記した一言を次のICTチームへ必ず申し送るという約束を賞状の体裁で見せる。宛名はチーム名、一言は esc() を通して引用枠へ入る）。感謝状はゲームの最終状態で閉じる導線を持たず、fEnded が立った後は #final 再入場のたびに renderFinal() が直接復元する。devbar・URLハッシュからの単体起動は従来どおり可能。" }
   ];
 
   /* 停留所（pos）→ そのステージ先頭の view。STEPS の並び順から作るので、
@@ -8703,7 +8743,7 @@
 
     // 画面ごとの初期化
     $("redband").classList.add("hide");
-    // Stage 3・3.5・4 の開始演出（#s3-redband・#s4-redband・#s5-redband）。
+    // Stage 3・4・5 の開始演出（#s3-redband・#s4-redband・#s5-redband）。
     // どれも赤帯の間にシーンを離れると次のシーンへ帯だけ視覚的に残留するため
     // （clearLater() は保留中の退場タイマーを回収するだけで、既に .in が
     // 付いた帯そのものは消さない）、#redband と同じ流儀でここでも明示的に隠す
@@ -9017,12 +9057,14 @@
     // 「200で checkpoint が null（＝初回入室）」と「取得できなかった」を必ず分ける。
     // 一緒くたに welcome へ通すと、サーバに進行が残っているチームを Prologue から
     // やり直させることになる——復帰の仕組みごと無かったことになるのがいちばん痛い。
-    if (!cpRes.ok || !isCheckpointState(cpRes.body)) {
+    // 旧名で保存されたチェックポイントは、検証より手前で新名へ直す（Issue #118）。
+    const cpState = normalizeLegacyCheckpointState(cpRes.body);
+    if (!cpRes.ok || !isCheckpointState(cpState)) {
       entryBlockMessage = "進行状況を取得できません。ネットワークを確認して再試行してください。";
       entryRetry = attemptEnter;
       return;
     }
-    const snapshot = cpRes.body.checkpoint || null;
+    const snapshot = cpState.checkpoint || null;
     if (snapshot) liveState.checkpointRevision = snapshot.revision;
     adoptDataRevision(snapshot);   // 別タブが進めていれば、その先から番号を振り直す
     // 開発用ハッシュで開いていたら、サーバの進行に基づく復帰先より優先する
@@ -9041,7 +9083,7 @@
       go("welcome");
       return;
     }
-    resumeFromCheckpoint(snapshot, cpRes.body.serverNow);
+    resumeFromCheckpoint(snapshot, cpState.serverNow);
   }
   $("btn-enter").addEventListener("click", attemptEnter);
 
@@ -9064,9 +9106,9 @@
     // pos より前を指しているときは、クリア処理が pos を先に進めた直後に
     // リロードされた——つまり view が1ステージ古い——ので pos 側を開く
     // （POS_TO_VIEW のコメント参照）。
-    const savedView = normalizeLegacyViewId(body.view);
-    const target = viewPos(savedView) >= body.pos
-      ? savedView
+    // body は normalizeLegacyCheckpointState を通っているので、view は必ず新名。
+    const target = viewPos(body.view) >= body.pos
+      ? body.view
       : (POS_TO_VIEW[body.pos] || POS_TO_VIEW[POS_TO_VIEW.length - 1]);
 
     const savedAtMs = Date.parse(snapshot.savedAt);
@@ -9096,7 +9138,7 @@
     const data = body.data || {};
     s3PenaltyState = data.s3Penalty || "none";
     s5PenaltyState = data.s5Penalty || "none";
-    // Stage 3.5 の要約提出済みも同じく go() の後（renderStage4 が "none" へ戻すため）。
+    // Stage 4 の要約提出済みも同じく go() の後（renderStage4 が "none" へ戻すため）。
     s4SummaryState = data.s4Summary || "none";
     syncSentData();   // いま持っている data はサーバ由来。次の保存で新世代を名乗らせない
     resumePenalty(target);
@@ -9138,7 +9180,7 @@
     }
   }
 
-  /* Stage 3.5 の要約提出後にリロードされていたら、院長の一往復を差し戻す
+  /* Stage 4 の要約提出後にリロードされていたら、院長の一往復を差し戻す
      （Issue #88）。要約の本文は預けていないので提出欄は空のままだが、対話ごと
      消えて要約を書き直させるよりはよい。罰ゲームと同じく、開始演出（赤帯→院長の
      タスク付与オーバーレイ）が終わってから差し込む。 */
