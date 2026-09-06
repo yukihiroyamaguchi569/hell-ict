@@ -4,7 +4,7 @@
 
 | ファイル | 出典 | 作者 | ライセンス | 加工 |
 |---|---|---|---|---|
-| `stage3-penalty-bottle.svg` | Wikimedia Commons [File:Hand_sanitizer.svg](https://commons.wikimedia.org/wiki/File:Hand_sanitizer.svg)（Open Clip Art Library 由来） | Algot Runeman | [CC0 1.0](https://creativecommons.org/publicdomain/zero/1.0/)（帰属不要・改変自由） | 原色（ポンプとキャップのマゼンタ、ラベルのシアン、液の赤）を暗い病院UIに馴染むグレー系へ塗り替え、Inkscape の編集メタデータを削除。形は原本のまま |
+| `stage3-penalty-bottle.svg` | Wikimedia Commons [File:Hand_sanitizer.svg](https://commons.wikimedia.org/wiki/File:Hand_sanitizer.svg)（Open Clip Art Library 由来） | Algot Runeman | [CC0 1.0](https://creativecommons.org/publicdomain/zero/1.0/)（帰属不要・改変自由） | 原色（ポンプとキャップのマゼンタ、ラベルのシアン、液の赤）を暗い病院UIに馴染むグレー系へ塗り替え、Inkscape の編集メタデータを削除。ラベル面の英字「HAND SANITIZER」は小さなマスでは読めないため削除し、無地にして状態の文字を重ねる。形はそれ以外原本のまま |
 | `stage3-penalty-sanitizer-irasutoya.png` | いらすとや [アルコール消毒液のイラスト](https://www.irasutoya.com/2020/02/blog-post_103.html) | いらすとや（みふねたかし） | [いらすとやの利用規約](https://www.irasutoya.com/p/terms.html)（商用可・クレジット不要。1作品につき素材20点まで。素材自体を主体とする再配布は禁止） | 原本のまま |
 
 どちらも Stage 3 の罰ゲーム（拡大対応業務：消毒液ボトルの補充）で使う。使い方は
