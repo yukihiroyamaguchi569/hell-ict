@@ -793,9 +793,21 @@
   width: 100%; max-width: 880px; background: var(--surface); color: var(--fg);
   border: 1px solid var(--rule); padding: 14px; max-height: 56vh; overflow: auto;
 }
+/* ボトル棚のときだけ器を広げ、高さを 56vh ではなく px で止める。40本を1画面へ
+   収めるための寸法なので、ブラウザの高さで変わってはいけない——製品の画面は
+   1280×720 固定で、vh はモックのページ（見出し・開発用スイッチャ）の分だけ
+   ずれる。Stage 4 の報告書は文章なので 880px / 56vh のまま。 */
+.lock .box.shelf { max-width: 1040px; max-height: 470px; }
 /* ボトル棚。単調な作業そのものが罰なので、見た目で達成感を出さない——
-   済んだ本数が増えるだけで、褒めも音も無い。 */
-.bottles { display: grid; grid-template-columns: repeat(10, 1fr); gap: 7px; padding: 12px 2px; }
+   済んだ本数が増えるだけで、褒めも音も無い。
+   40本（5A20＋5B10＋5C10）がスクロール無しで収まる寸法にしてある。はみ出すと
+   参加者は追加分が湧いたことに気づけず、「終わったのに閉じない」と読む
+   （2026-09-06 ユーザー決定）。 */
+.bottles { display: flex; flex-direction: column; gap: 9px; padding: 10px 2px 0; }
+/* 病棟ごとに区切る。タイルのタグは詰め終わると「済」に変わって病棟名が消えるので、
+   どの棚がどの病棟のものかは棚の見出しが持つ。 */
+.bottles .wname { font-size: 11px; font-weight: 700; letter-spacing: .08em; color: var(--fg-muted); margin-bottom: 4px; }
+.bottles .row { display: grid; grid-template-columns: repeat(20, 1fr); gap: 6px; }
 .bottles button {
   position: relative;
   aspect-ratio: 1 / 1.7; background: var(--bg); border: 1px solid var(--rule);
@@ -827,8 +839,16 @@
 /* 指示文にいらすとやの消毒液イラストを添える（Stage 3 の罰だけ。Stage 4 の罰の .note は素のまま）。
    文言は追加分が湧いたときに .t だけ差し替わるので、イラストは差し替えに巻き込まれない。 */
 .lock .note.icon { display: flex; align-items: center; gap: 12px; }
-.lock .note.icon img { flex: 0 0 auto; height: 80px; width: auto; }
-.lock .stat { font-size: 12px; color: var(--fg-muted); padding: 6px 2px 0; font-variant-numeric: tabular-nums; }
+.lock .note.icon img { flex: 0 0 auto; height: 54px; width: auto; }
+/* 注記と進み具合を1行に並べる。棚の高さを稼ぐためでもあるが、主目的は
+   「全◯本」が 20→30→40 と増えるのを注記のすぐ隣で見せること——追加分の到着を
+   文言と数字の両方で示す。 */
+.lock .ptop { display: flex; align-items: center; gap: 16px; }
+.lock .ptop .note { flex: 1 1 auto; }
+.lock .stat {
+  flex: 0 0 auto; font-size: 19px; font-weight: 700; color: var(--fg);
+  font-variant-numeric: tabular-nums; white-space: nowrap; letter-spacing: .02em;
+}
 
 /* Stage 4：個人情報インシデントの警報。blackout（Stage 3・暗転）と対で使う——
    逆に画面をフラッシュさせることで「事故の音」を表現する
@@ -3508,7 +3528,7 @@
     // DOM とリスナーが残り続けるので、シーンを離れるたびに必ず空にする
     // （finishPenalty()/finishS4Penalty() 経由でも別途空にする）。
     const host = $("penalty-host");
-    if (host) host.innerHTML = "";
+    if (host) { host.innerHTML = ""; host.classList.remove("shelf"); }
     // Stage 4 の罰（AI使用ロック）が付けた沈み込みも、シーンを離れたら必ず外す。
     paneR.classList.remove("locked");
   }
@@ -6731,13 +6751,16 @@
     // 見出しは Stage 4 の罰（startS4Penalty）が同じ器を書き換えるので、毎回セットし直す。
     $("lock-hd").textContent = "拡大対応業務：🧴 消毒液ボトルの補充";
     // 指示文（.t）とイラストを別要素に分ける。追加分が湧いたときに差し替えるのは .t だけで、
-    // イラストは残る（fillBottle 参照）。
+    // イラストは残る（fillBottle 参照）。進み具合（.stat）は注記の右隣に並べる。
     $("penalty-host").innerHTML =
-      '<div class="note icon">' +
+      '<div class="ptop">' +
+      '<div class="note icon" id="bottle-note">' +
       '<img src="../../../assets/images/production/stage3-penalty-sanitizer-irasutoya.png" alt="">' +
       '<span class="t">5A病棟の消毒液ボトルを補充してください。</span></div>' +
-      '<div class="bottles" id="bottles"></div>' +
-      '<div class="stat" id="bottle-stat"></div>';
+      '<div class="stat" id="bottle-stat"></div></div>' +
+      '<div class="bottles" id="bottles"></div>';
+    // 器（.box）はボトル棚のときだけ広くする。Stage 4 の報告書は文章なので外す。
+    $("penalty-host").classList.add("shelf");
     drawBottles();
 
     $("ov-lock").classList.remove("hide");
@@ -6768,21 +6791,34 @@
 
   function stopPenaltyClock() { clearInterval(penaltyClockTick); penaltyClockTick = null; }
 
+  /* 病棟ごとの棚に分けて描く。並び順は s3Bottles に現れた順（5A → 5B → 5C）で、
+     追加分は必ず末尾に積まれるので、湧いた棚は常に一番下に出る。 */
   function drawBottles() {
     const host = $("bottles");
     if (!host) return;
-    host.innerHTML = s3Bottles.map((b, i) =>
-      '<button data-i="' + i + '" class="' + (b.state === "todo" ? "" : b.state) + '"' +
-      (b.state === "todo" ? "" : " disabled") + ">" +
-      '<img src="../../../assets/images/production/stage3-penalty-bottle.svg" alt="">' +
-      '<span class="tag">' +
-      (b.state === "done" ? "済" : b.state === "filling" ? "…" : b.ward) + "</span></button>"
+    const wards = [];
+    s3Bottles.forEach((b, i) => {
+      let w = wards.find((x) => x.ward === b.ward);
+      if (!w) { w = { ward: b.ward, items: [] }; wards.push(w); }
+      w.items.push({ b, i });
+    });
+    host.innerHTML = wards.map((w) =>
+      '<div class="ward">' +
+      '<div class="wname">' + esc(w.ward) + "病棟</div>" +
+      '<div class="row">' + w.items.map(({ b, i }) =>
+        '<button data-i="' + i + '" class="' + (b.state === "todo" ? "" : b.state) + '"' +
+        (b.state === "todo" ? "" : " disabled") + ">" +
+        '<img src="../../../assets/images/production/stage3-penalty-bottle.svg" alt="">' +
+        '<span class="tag">' +
+        (b.state === "done" ? "済" : b.state === "filling" ? "…" : b.ward) + "</span></button>"
+      ).join("") + "</div></div>"
     ).join("");
     host.querySelectorAll("button:not([disabled])").forEach((el) => {
       el.addEventListener("click", () => fillBottle(Number(el.dataset.i)));
     });
     const done = s3Bottles.filter((b) => b.state === "done").length;
-    $("bottle-stat").textContent = done + " / " + s3Bottles.length + " 本";
+    // 「全◯本」は追加分が湧くと増える。文言の差し替えを見落としても、数字で分かる。
+    $("bottle-stat").textContent = "済 " + done + " / 全 " + s3Bottles.length + " 本";
   }
 
   function fillBottle(i) {
@@ -6817,6 +6853,7 @@
     s3Stop();
     $("ov-lock").classList.add("hide");
     $("penalty-host").innerHTML = "";
+    $("penalty-host").classList.remove("shelf");
     s3Bottles = [];
     if (view !== "s3") return;   // 判断C
     // Stage 3 の提出フォームへ復帰。入力は保持する（Stage 2 §NG時と同じ理由）。
@@ -7371,6 +7408,7 @@
     saveCheckpoint("s4-penalty-start", true);
     s4Masked = new Set();
     $("lock-hd").textContent = "インシデント対応業務：報告書の作成";
+    $("penalty-host").classList.remove("shelf");
 
     $("penalty-host").innerHTML =
       '<div class="note">個人情報にあたる箇所を黒く塗り、提出してください。</div>' +
