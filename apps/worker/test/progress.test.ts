@@ -1,6 +1,6 @@
 import { env, exports } from "cloudflare:workers";
 import { beforeEach, describe, expect, it } from "vitest";
-import { PII_REDACTION, publicTeamId, stage4Patient } from "@hell-ict/domain";
+import { PII_REDACTION, publicTeamId, stage5Patient } from "@hell-ict/domain";
 import { z } from "zod";
 
 import { parseTeamCodeRule } from "../src/guard.js";
@@ -172,7 +172,7 @@ describe("進捗記録", () => {
 
   it("jumpはposへ算入しないが、最終更新時刻とeventsには残す", async () => {
     await postJson("/api/progress", event({ pos: 2, kind: "clear", view: "s2" }));
-    await postJson("/api/progress", event({ pos: 5, kind: "jump", view: "s5" }));
+    await postJson("/api/progress", event({ pos: 5, kind: "jump", view: "s6" }));
 
     const result = await summary();
     expect(result.teams).toMatchObject([{ publicId: await idOf("100001"), pos: 2 }]);
@@ -187,7 +187,7 @@ describe("進捗記録", () => {
 
   it("resumeは200で記録するが、jumpと同じくposへ算入しない", async () => {
     await postJson("/api/progress", event({ pos: 2, kind: "clear", view: "s2" }));
-    const response = await postJson("/api/progress", event({ pos: 5, kind: "resume", view: "s5" }));
+    const response = await postJson("/api/progress", event({ pos: 5, kind: "resume", view: "s6" }));
 
     expect(response.status).toBe(200);
     const result = await summary();
@@ -233,7 +233,7 @@ describe("進捗記録", () => {
   });
 
   it("既知の画面idは受け付ける", async () => {
-    for (const view of ["entry", "s1", "s35", "final"]) {
+    for (const view of ["entry", "s1", "s4", "final"]) {
       const response = await postJson("/api/progress", event({ view }));
       expect(response.status, view).toBe(200);
     }
@@ -256,18 +256,18 @@ describe("進捗記録", () => {
     // 記録は残し、PIIだけを落とす。
     const response = await postJson(
       "/api/progress",
-      event({ teamName: `${stage4Patient.name}班` }),
+      event({ teamName: `${stage5Patient.name}班` }),
     );
     expect(response.status).toBe(200);
 
     const result = await summary();
-    expect(result.teams[0]?.teamName).not.toContain(stage4Patient.name);
+    expect(result.teams[0]?.teamName).not.toContain(stage5Patient.name);
     expect(result.teams[0]?.teamName).toContain(PII_REDACTION);
     // D1にも平文は残っていない。
     const stored = await env.PROGRESS_DB.prepare(
       "SELECT team_name FROM progress_events LIMIT 1",
     ).first();
-    expect(JSON.stringify(stored)).not.toContain(stage4Patient.name);
+    expect(JSON.stringify(stored)).not.toContain(stage5Patient.name);
   });
 
   it.each([
@@ -502,14 +502,36 @@ describe("進捗記録", () => {
       `INSERT INTO progress_events (team_code, team_name, pos, view, kind, client_at)
        VALUES (?, ?, 1, ?, 'clear', '')`,
     )
-      .bind("100001", `${stage4Patient.name}班`, `連絡先 ${stage4Patient.phone}`)
+      .bind("100001", `${stage5Patient.name}班`, `連絡先 ${stage5Patient.phone}`)
       .run();
 
     const result = await summary();
-    expect(result.teams[0]?.teamName).not.toContain(stage4Patient.name);
+    expect(result.teams[0]?.teamName).not.toContain(stage5Patient.name);
     expect(result.teams[0]?.teamName).toContain(PII_REDACTION);
-    expect(result.events[0]?.view).not.toContain(stage4Patient.phone);
+    expect(result.events[0]?.view).not.toContain(stage5Patient.phone);
     expect(result.events[0]?.view).toContain(PII_REDACTION);
+  });
+
+  it("振り直し前に積まれたs35の行は、summaryでは新名s4で出る", async () => {
+    // D1の過去行は書き換えない（Issue #118）。読む側で新名へ読み替える。
+    await env.PROGRESS_DB.prepare(
+      `INSERT INTO progress_events (team_code, team_name, pos, view, kind, client_at)
+       VALUES ('100002', 'C班', 4, 's35', 'clear', '')`,
+    ).run();
+
+    const result = await summary();
+    expect(result.events[0]?.view).toBe("s4");
+  });
+
+  it("s4・s5の行は新旧の判別が付かないのでずらさない", async () => {
+    // 一律にずらすと、振り直し後に積まれた行まで1つ後ろへ動く。
+    await env.PROGRESS_DB.prepare(
+      `INSERT INTO progress_events (team_code, team_name, pos, view, kind, client_at)
+       VALUES ('100003', 'D班', 5, 's4', 'clear', '')`,
+    ).run();
+
+    const result = await summary();
+    expect(result.events[0]?.view).toBe("s4");
   });
 
   it("teamsはpos降順、同順位は最終更新が古い順に並ぶ", async () => {
@@ -603,7 +625,7 @@ describe("進捗記録: リセット世代の絞り込み", () => {
       insertRow({
         teamCode: "100001",
         pos: 5,
-        view: "s5",
+        view: "s6",
         generation: 2,
         createdAt: "2026-08-23 01:00:05",
       }),
@@ -633,7 +655,7 @@ describe("進捗記録: リセット世代の絞り込み", () => {
         teamCode: "100002",
         teamName: "第一世代",
         pos: 5,
-        view: "s5",
+        view: "s6",
         createdAt: "2026-08-23 01:00:00",
       }),
       resetRow("100002", 1, "2026-08-23 01:01:00"),
@@ -678,7 +700,7 @@ describe("進捗記録: リセット世代の絞り込み", () => {
         teamCode: "100003",
         teamName: "リセット前",
         pos: 4,
-        view: "s4",
+        view: "s5",
         createdAt: "2026-08-23 01:00:00",
       }),
       resetRow("100003", 1, "2026-08-23 01:01:00"),
@@ -706,7 +728,7 @@ describe("進捗記録: リセット世代の絞り込み", () => {
         teamCode: "100005",
         teamName: "無関係",
         pos: 4,
-        view: "s4",
+        view: "s5",
         createdAt: "2026-08-23 01:02:00",
       }),
     ]);

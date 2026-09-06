@@ -193,7 +193,7 @@ const saveCheckpoint = (
       view: "s3",
       pos: 3,
       elapsedMs: 60_000,
-      trap: { s3Used: false, s4Used: false },
+      trap: { s3Used: false, s5Used: false },
       dataRevision: 0,
       data: { note: "途中経過" },
     },
@@ -662,7 +662,7 @@ describe("GMリセット: 照合とINSERTの隙間", () => {
       // D1へ直接作る。世代0の行が、reset行（世代1）より後のidで積まれる。
       await env.PROGRESS_DB.prepare(
         `INSERT INTO progress_events (team_code, team_name, pos, view, kind, generation, client_at)
-         VALUES (?, '', 5, 's5', 'clear', 0, '')`,
+         VALUES (?, '', 5, 's6', 'clear', 0, '')`,
       )
         .bind(teamCode)
         .run();
@@ -681,7 +681,7 @@ describe("GMリセット: 照合とINSERTの隙間", () => {
       expect((await resetByCode(teamCode)).status).toBe(200);
       await postJson(
         "/api/progress",
-        progressEvent(teamCode, { pos: 4, view: "s4", generation: 1 }),
+        progressEvent(teamCode, { pos: 4, view: "s5", generation: 1 }),
       );
       await expect(posOf(teamCode)).resolves.toBe(4);
     });
@@ -886,7 +886,7 @@ describe("GMリセット: 表示名の世代", () => {
       // 照合を通った直後にリセットが走った古いタブの行が、後から積まれる。
       await env.PROGRESS_DB.prepare(
         `INSERT INTO progress_events (team_code, team_name, pos, view, kind, generation, client_at)
-         VALUES (?, '古いタブの名前', 5, 's5', 'clear', 0, '')`,
+         VALUES (?, '古いタブの名前', 5, 's6', 'clear', 0, '')`,
       )
         .bind(teamCode)
         .run();
@@ -914,10 +914,10 @@ describe("GMリセット: チェックポイントのPIIゲートと世代", () 
         expectedRevision: 0,
         generation,
         body: {
-          view: "s4",
+          view: "s5",
           pos: 4,
           elapsedMs: 60_000,
-          trap: { s3Used: false, s4Used: false },
+          trap: { s3Used: false, s5Used: false },
           dataRevision: 0,
           data: { memo: "渡辺三郎さん 090-1234-5678" },
         },
@@ -940,10 +940,10 @@ describe("GMリセット: チェックポイントのPIIゲートと世代", () 
         expectedRevision: 0,
         generation,
         body: {
-          view: "s4",
+          view: "s5",
           pos: 4,
           elapsedMs: 60_000,
-          trap: { s3Used: false, s4Used: false },
+          trap: { s3Used: false, s5Used: false },
           dataRevision: 0,
           data: { memo: "渡辺三郎さん 090-1234-5678" },
         },

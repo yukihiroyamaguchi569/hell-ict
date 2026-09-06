@@ -615,7 +615,7 @@ describe("活動ログ", () => {
     it("PIIを含む本文はtextを捨て、piiRedactedを立てて記録だけ残す", async () => {
       const response = await postJson(
         "/api/teams/500104/activity",
-        activity({ kind: "submit.s4", view: "s4", text: "渡辺 三郎さんの一覧を提出します" }),
+        activity({ kind: "submit.s5", view: "s5", text: "渡辺 三郎さんの一覧を提出します" }),
       );
       expect(response.status).toBe(200);
 
@@ -631,8 +631,8 @@ describe("活動ログ", () => {
       const response = await postJson(
         "/api/teams/500108/activity",
         activity({
-          kind: "submit.s4",
-          view: "s4",
+          kind: "submit.s5",
+          view: "s5",
           text: "匿名化した一覧を提出します",
           meta: { verdict: "fail", contact: "090-1234-5678" },
         }),
@@ -894,7 +894,7 @@ describe("活動ログ", () => {
     it("既知の画面idは受け付ける", async () => {
       const response = await postJson("/api/teams/500119/activity", {
         ...activity(),
-        view: "s35",
+        view: "s4",
       });
       expect(response.status).toBe(200);
       await expect(rows("500119")).resolves.toHaveLength(1);

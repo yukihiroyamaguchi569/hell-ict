@@ -1,6 +1,7 @@
 import { z } from "zod";
 
 import {
+  normalizeLegacyViewId,
   PII_REDACTION,
   publicTeamId,
   redactPii,
@@ -408,13 +409,20 @@ const toPublicRow = async <Row extends { teamCode: string; teamName: string }>(
     : { ...base, publicId };
 };
 
-/** eventsはviewも表示用テキストなので同じ伏せ字化を通す（enum化より前の行のため）。 */
+/**
+ * eventsはviewも表示用テキストなので同じ伏せ字化を通す（enum化より前の行のため）。
+ * あわせて、2026-09-06の内部名振り直し（Issue #118）より前に積んだ行の画面idを
+ * 新名へ読み替える——D1の過去行は書き換えない方針なので、読む側で吸収する。
+ */
 const toPublicEventRow = async (
   row: z.infer<typeof eventRowSchema>,
   context: PublicRowContext,
 ): Promise<Omit<z.infer<typeof eventRowSchema>, "teamCode"> & { publicId: string }> => {
   const publicRow = await toPublicRow(row, context);
-  return { ...publicRow, view: redactDisplayText(row.view, context.rule) };
+  return {
+    ...publicRow,
+    view: normalizeLegacyViewId(redactDisplayText(row.view, context.rule)),
+  };
 };
 
 /**

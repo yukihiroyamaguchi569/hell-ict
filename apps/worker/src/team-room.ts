@@ -15,6 +15,7 @@ import {
   initialChatSnapshot,
   initialTeamSnapshot,
   normalizeAssistantText,
+  normalizeLegacyCheckpointSnapshot,
   promptProfileSchema,
   redactChatMessageResultPii,
   redactPii,
@@ -1091,9 +1092,14 @@ export class TeamRoom extends DurableObject<Env> {
       this.ctx.storage.sql
         .exec<StoredCheckpointState>("SELECT snapshot FROM checkpoint_state WHERE id = 1")
         .toArray()[0] ?? null;
+    // 2026-09-06の内部名振り直し（Issue #118）より前に保存されたsnapshotは、旧名の
+    // まま置いてある。strictなschemaはそれを弾くので、parseの前に新名へ読み替える
+    // ——ここで落とすと、そのチームは復帰できないままリセットを待つことになる。
     return stored === null
       ? null
-      : checkpointSnapshotSchema.parse(JSON.parse(stored.snapshot) as unknown);
+      : checkpointSnapshotSchema.parse(
+          normalizeLegacyCheckpointSnapshot(JSON.parse(stored.snapshot) as unknown),
+        );
   }
 
   async loadCheckpoint(teamCodeInput: unknown): Promise<CheckpointSnapshot | null> {
