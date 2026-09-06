@@ -2446,7 +2446,7 @@
      矛先は判断と状況へ——人格攻撃はしない（AGENTS.md トーンルール）。
      話者表記〔皮膚科医〕は付けない（2026-09-06 ユーザー決定で肖像付きの窓
      #ov-s3scold へ移したため）——肖像とキャプションが既に話者を示している
-     （S3_NOTICE_LINES・S35_DIRECTOR_LINES と同じ流儀）。 */
+     （S3_NOTICE_LINES・S35_DIRECTOR_PAGES と同じ流儀）。 */
   const S3_TRAP_DOCTOR_LINES = [
     "誰です、全員に厳しい感染対策なんて指示を出したのは。通常疥癬ですよ。治療も終わってる。カルテは読みましたか。",
     "不要な隔離は患者を弱らせます。全部外してください。",
@@ -2516,11 +2516,20 @@
   /* 矛先は組織の期待の圧に留め、人格は攻撃しない（AGENTS.md トーンルール）。*/
   /* 肖像あり文脈では話者表記〔〕を付けない（#ov-s3notice の S3_NOTICE_LINES・ */
   /* #ov-s4call の .say と同じ流儀。肖像が話者を示すので文中では不要）。       */
-  const S35_DIRECTOR_LINES = [
-    "14名も発熱者が増えているじゃないか！！",
-    "周辺国・東陵国で、原因不明の発熱クラスターが出ているそうだ。速報論文が届いている。",
-    "英語だ。要約して、私に上げなさい。",
-    "以上だ。期待している。"
+  /* 2画面に割る（2026-09-06 ユーザー決定）。1画面目は状況への苛立ちだけを           */
+  /* 投げ、［次へ］で間を作ってから2画面目でタスクを渡す。4行を一息に読ませると      */
+  /* 「英語だ。要約して」という肝心の指示が苛立ちに埋もれる。                        */
+  /* 窓（#ov-s35-director）は同じまま、本文とボタンの文言だけ差し替える。            */
+  const S35_DIRECTOR_PAGES = [
+    [
+      "14名も発熱者が増えているじゃないか！！",
+      "検査も全て陰性だというし、これはなんの病気なんだ！"
+    ],
+    [
+      "周辺国・東陵国で、原因不明の発熱クラスターが出ているそうだ。速報論文が届いている。",
+      "英語だ。要約して、私に上げなさい。",
+      "以上だ。期待している。"
+    ]
   ];
 
   /* 幹部からの転送メールは院長のタスク付与オーバーレイへ差し替えたため、
@@ -2586,7 +2595,7 @@
        「眩しく感じる」。距離を5文字に絞り、句読点をまたがせない。
 
      誤検知の下限は確認済み——教材の速報論文（S35_REPORT_TEXT）は全文英語、
-     院長の台詞（S35_DIRECTOR_LINES）と転送メール（MAIL_S35_DIRECTOR）にも
+     院長の台詞（S35_DIRECTOR_PAGES）と転送メール（MAIL_S35_DIRECTOR）にも
      「痛」「光」は一字も無い。眼症状に触れない要約や、論文・画面文言の丸写しが
      素通りすることはない。 */
   const S35_REQUIRED_SUMMARY =
@@ -6937,6 +6946,22 @@
      要約の本文そのものは預けない——data に個人情報を入れない規約（checkpointData()
      のコメント）を守り、参加者が書いた自由記述をサーバへ増やさないため。 */
   let s35SummaryState = "none";
+  /* 院長のオーバーレイの表示中のページ（S35_DIRECTOR_PAGES の添字）。
+     チェックポイントへは預けない——復帰時はこの窓を畳む（resumeS35Talk）か、
+     入場演出からやり直して1画面目から始まるかのどちらかで、途中のページを
+     復元する経路は無い。 */
+  let s35DirectorPage = 0;
+
+  /* 院長のオーバーレイの本文とボタンを、指定ページの内容へ描き直す。
+     窓・肖像・キャプションは据え置き、差し替えるのは本文とボタン文言だけ。 */
+  function showS35DirectorPage(page) {
+    s35DirectorPage = page;
+    const lines = S35_DIRECTOR_PAGES[page];
+    $("s35director-body").innerHTML =
+      lines.map((t) => '<div class="say">' + esc(t) + "</div>").join("");
+    $("btn-s35director-close").textContent =
+      page < S35_DIRECTOR_PAGES.length - 1 ? "次へ" : "了解しました";
+  }
 
   /* 罠も罰も無いので、他ステージの xStop() のように止めるタイマーは本来無い
      （later() は clearLater() が回収する）。go() からの呼び出し規約
@@ -7001,8 +7026,7 @@
     s35FlashSurge();
     later(() => {
       if (view !== "s35") return;   // 判断C：赤帯の間にシーンを離れていたら一報を出さない
-      $("s35director-body").innerHTML =
-        S35_DIRECTOR_LINES.map((t) => '<div class="say">' + esc(t) + "</div>").join("");
+      showS35DirectorPage(0);
       $("ov-s35-director").classList.remove("hide");
     }, 2600);
   }
@@ -7208,6 +7232,11 @@
   // 同じく一度だけ配線する。院長の一往復の［送信する］は中央ペインへ都度差し込む
   // 要素なので、ここではなく s35ShowDirectorTalk() の中で配線する（Issue #88）。
   $("btn-s35director-close").addEventListener("click", () => {
+    // 最後の画面でなければ、窓は開けたまま次のページへ送る。
+    if (s35DirectorPage < S35_DIRECTOR_PAGES.length - 1) {
+      showS35DirectorPage(s35DirectorPage + 1);
+      return;
+    }
     $("ov-s35-director").classList.add("hide");
     // ここでAIを出したり通常画面を再構築したりしない——中身（メール・提出フォーム）
     // は renderStage35() で既に揃っている（Stage 3 の btn-s3notice-close と同じ流儀）。
