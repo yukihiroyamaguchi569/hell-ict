@@ -6933,11 +6933,20 @@
      入場演出からやり直して1画面目から始まるかのどちらかで、途中のページを
      復元する経路は無い。 */
   let s35DirectorPage = 0;
+  /* ページを描き直した実時刻と、その直後に捨てる押下の猶予（2026-09-06 レビュー
+     指摘）。［次へ］のダブルクリックや Enter の2連打だと、2度目の押下が
+     「閉じる」分岐まで走り、2画面目の3行（要約の指示）が読まれないまま窓が
+     消える。演出用の later()/wait() は prefers-reduced-motion で 0ms へ潰れる
+     ので、遅延ではなく Date.now の実時刻で判定する——これは見た目の間ではなく、
+     読ませたい文章を飛ばさないための不変条件。 */
+  let s35DirectorPageAt = 0;
+  const S35_DIRECTOR_PAGE_GRACE_MS = 400;
 
   /* 院長のオーバーレイの本文とボタンを、指定ページの内容へ描き直す。
      窓・肖像・キャプションは据え置き、差し替えるのは本文とボタン文言だけ。 */
   function showS35DirectorPage(page) {
     s35DirectorPage = page;
+    s35DirectorPageAt = Date.now();
     const lines = S35_DIRECTOR_PAGES[page];
     $("s35director-body").innerHTML =
       lines.map((t) => '<div class="say">' + esc(t) + "</div>").join("");
@@ -7160,6 +7169,9 @@
   // 同じく一度だけ配線する。院長の一往復の［送信する］は中央ペインへ都度差し込む
   // 要素なので、ここではなく s35ShowDirectorTalk() の中で配線する（Issue #88）。
   $("btn-s35director-close").addEventListener("click", () => {
+    // 描き直した直後の押下は捨てる（S35_DIRECTOR_PAGE_GRACE_MS のコメント参照）。
+    // 連打で2画面目を読み飛ばさせない。
+    if (Date.now() - s35DirectorPageAt < S35_DIRECTOR_PAGE_GRACE_MS) return;
     // 最後の画面でなければ、窓は開けたまま次のページへ送る。
     if (s35DirectorPage < S35_DIRECTOR_PAGES.length - 1) {
       showS35DirectorPage(s35DirectorPage + 1);
