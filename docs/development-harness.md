@@ -84,8 +84,8 @@ pnpm verify:full
 Workerの運用値（`EVENT_NO`、`TEAM_MAX`、`ADMIN_TOKEN`など）はCloudflare側のsecretであり、GitHub Secretsとは別物である。自動デプロイで消えないので、登録は前節の`wrangler secret put`のまま1回でよい。
 
 - **手動で出す**: `pnpm build:testplay && cd apps/worker && pnpm exec wrangler deploy`。
-- **Actionsから出す**: Actions &gt; 「本番デプロイ」 &gt; Run workflow。マージを伴わずに出し直せる。
-- **失敗したとき**: Actionsのログでどのジョブ（`pnpm verify` / `wrangler deploy` / `/api/health` の確認）が落ちたかを見る。デプロイ後の確認ステップは`GET /api/health`が`status: "ok"`かつ`guards.eventNo: true`であることを求めるので、`EVENT_NO`の設定漏れや書き損じはここで失敗する。デプロイ自体は成功しているので、secretを直して再実行する。
+- **Actionsから出す**: Actions &gt; 「本番デプロイ」 &gt; Run workflow。マージを伴わずに出し直せる。**`main`以外のブランチを選んでも何もしない**——未マージのコードを本番へ出せないよう、両ジョブが`main`のときだけ走る。
+- **失敗したとき**: Actionsのログでどのジョブ（`pnpm verify` / `wrangler deploy` / `/api/health` の確認）が落ちたかを見る。デプロイ後の確認ステップは`GET /api/health`が`status: "ok"`かつ`guards.eventNo: true`かつ`guards.teamMax`が数値であることを求めるので、`EVENT_NO`の設定漏れや書き損じに加え、`TEAM_MAX`の書き損じ（`"invalid"`＝全チームが404）もここで失敗する。デプロイ自体は成功しているので、secretを直して再実行する。
 
 ### ゲームマスターのリセット（`ADMIN_TOKEN`）
 

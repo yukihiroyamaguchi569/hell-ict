@@ -21,6 +21,9 @@ jobs:
   # 検証を通ってからデプロイする。verify.ymlのverifyジョブと同じ手順。
   verify:
     name: pnpm verify
+    # workflow_dispatchは選んだrefで走るため、refを絞らないと未マージのブランチを
+    # 本番へ出せてしまう。手動実行はmainの出し直しに限る。
+    if: github.ref == 'refs/heads/main'
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v6
@@ -40,6 +43,8 @@ jobs:
   deploy:
     name: wrangler deploy
     needs: verify
+    # verifyと同じ理由でmainに限る（needsだけではjob側のifを継承しない）。
+    if: github.ref == 'refs/heads/main'
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v6
@@ -71,15 +76,17 @@ jobs:
           command: deploy
       # デプロイ後、入口ガードが本番の設定で立ち上がっているかを確かめる。
       # eventNoがfalse（EVENT_NO未設定）や"invalid"（書き損じ）なら失敗させる。
+      # teamMaxは数値のときだけ規則が効いている——"invalid"（TEAM_MAXの書き損じ）は
+      # 全チームが404になるので、ここで捕まえる。
       # 反映に少し間があるので数回だけ待って再試行する。
       - name: /api/health を確認
         run: |
           for i in 1 2 3 4 5; do
             body=$(curl -fsS https://hell-ict.yukihiroyamaguchi.workers.dev/api/health) && \
-              echo "$body" | jq -e '.status == "ok" and .guards.eventNo == true' >/dev/null && \
+              echo "$body" | jq -e '.status == "ok" and .guards.eventNo == true and (.guards.teamMax | type) == "number"' >/dev/null && \
               echo "health ok: $body" && exit 0
             echo "health not ready (attempt $i): ${body:-<no response>}"
             sleep 5
           done
-          echo "::error::/api/health が status=ok / guards.eventNo=true になりません"
+          echo "::error::/api/health が status=ok / guards.eventNo=true / guards.teamMax=数値 になりません（EVENT_NO・TEAM_MAXの設定を確認する）"
           exit 1
