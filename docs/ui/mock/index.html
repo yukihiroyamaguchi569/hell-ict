@@ -3276,6 +3276,18 @@
     const at = boxes.indexOf(e.target);
     if (at > 0) boxes[at - 1].focus();
   });
+  /* Enter で［入室する］を押せるようにする（2026-09-06 ユーザー指示）。コードの
+     6枠とチーム名欄のどちらからでも効く。IME の変換確定 Enter は拾わない
+     （imeComposing）。ボタンが disabled（プローブ待ち・送信中）なら何もしない。 */
+  const enterOnReturn = (e) => {
+    if (e.key !== "Enter" || imeComposing(e)) return;
+    const btn = $("btn-enter");
+    if (btn.disabled) return;
+    e.preventDefault();
+    btn.click();
+  };
+  $("code").addEventListener("keydown", enterOnReturn);
+  $("team-name").addEventListener("keydown", enterOnReturn);
 
   /* ------------------------------------------------------------------ */
   /* チーム名（2026-08-22追加）——入室時にチーム自身が決めて入力する。      */
