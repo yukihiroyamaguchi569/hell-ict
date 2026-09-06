@@ -795,11 +795,9 @@
    1280×720 固定で、vh はモックのページ（見出し・開発用スイッチャ）の分だけ
    ずれる。Stage 4 の報告書は文章なので 880px / 56vh のまま。 */
 .lock .box.shelf { max-width: 1040px; max-height: 470px; }
-/* 罰ゲームの器へ放り込まれた理由を1〜2文で置く。責める言い方はしない
-   （企画書§6）。Stage 3・4 で毎回セットし直す——Stage 3 は空にするので
-   （2026-09-06 ユーザー決定）、:empty で行そのものを畳んで gap を残さない。 */
-.lock .why { font-size: 13px; color: var(--fg-muted); max-width: 880px; text-align: center; }
-.lock .why:empty { display: none; }
+/* 報告書のときも器を広げ、高さを px で止める（ボトル棚と同じ理由）。20箇所の
+   黒塗り対象を持つ本文が 1366×768 でスクロール無しに収まる寸法。 */
+.lock .box.paper { max-width: 1040px; max-height: 500px; }
 /* ボトル棚。単調な作業そのものが罰なので、見た目で達成感を出さない——
    済んだ本数が増えるだけで、褒めも音も無い。
    40本（5A20＋5B10＋5C10）がスクロール無しで収まる寸法にしてある。はみ出すと
@@ -872,7 +870,7 @@
 /* Stage 4：インシデント対応業務（黒塗り）。下書きの中から個人情報にあたる
    トークンだけをクリックして塗る——ボトル補充（Stage 3）と違い判断がいる
    （docs/ui/05_Stage4.md §4）。2003年書式で組む。 */
-.report { font-family: var(--font-legacy); font-size: 14px; line-height: 2.1; white-space: pre-wrap; }
+.report { font-family: var(--font-legacy); font-size: 13px; line-height: 1.7; white-space: pre-wrap; }
 .report .tok { border: 1px dashed var(--warn); padding: 0 3px; cursor: pointer; background: transparent; color: inherit; font: inherit; }
 .report .tok:hover { background: rgba(217,154,31,.14); }
 .report .tok.masked { background: #16181a; color: #16181a; border-color: #16181a; }
@@ -1763,15 +1761,12 @@
 
         <!-- Stage 3・4：罰ゲームの器。主役は残り時間の数字。
              見出しは「罰ゲーム：〜」と名乗る（2026-09-06 ユーザー決定。旧実装は
-             「拡大対応業務」等の業務名で伏せていた）。
+             「拡大対応業務」等の業務名で伏せていた）。理由の説明行（旧 #lock-why）は
+             同じ決定で両ステージとも削除した——直前の叱責が理由を言い終えている。
              見出しは #penalty-host と同じく「毎回明示的にセットし直す」流儀にする
              （unlockSequence() 系と同じ理由。docs/ui/mock/README.md 既知の設計負債）。
              #penalty-host は空のまま持ち、startPenalty()/startS4Penalty() が中身を注入する。 -->
         <div class="veil lock hide" id="ov-lock">
-          <!-- なぜこの画面に放り込まれたのか（1〜2文）。突然ボトルが並ぶと
-               「何をやらされているのか」が分からない。見出しと同じく毎回
-               セットし直す——前のステージの説明を残さない。 -->
-          <div class="why" id="lock-why"></div>
           <div class="hd" id="lock-hd">罰ゲーム：🧴 消毒液ボトルの補充</div>
           <!-- 2026-08-22改修：残り時間のカウントダウンをやめ、この業務に実際に
                費やしている時間を数え上げる（startPenaltyClock）。罰は作業を
@@ -2783,26 +2778,73 @@
     { re: new RegExp(S4_PATIENT.familyName.replace(" ", "[\\s　]*")), label: "ご家族の氏名" }
   ];
 
+  /* 罰ゲーム（黒塗り）で使うダミー連絡先。**すべて実在しない値**にすること——
+     電話は 090-0000-XXXX（総務省の予約帯ではないが、下4桁まで明らかな連番の
+     ダミーと分かる形）、メールは RFC 2606 の example.jp/example.com、住所は
+     架空の市名（常盤野市）で統一する。ここはAIチャットへ流れる経路が無い
+     （罰ゲーム中は右ペインごとロックされる）が、PII検知の設計原則どおり
+     「実在しうる値をアプリの中に置かない」を守る。氏名は S4_FEVER_ROWS の
+     患者と姓を揃え、続柄の分かる家族として自然に読めるようにしてある。 */
+  const S4_REPORT_KIN = [
+    { name: "渡辺 健一", rel: "長男", tel: "090-0000-0114", mail: "k.watanabe@example.jp" },
+    { name: "田島 美和", rel: "長女", tel: "090-0000-0227", mail: "tajima.miwa@example.com" },
+    { name: "大久保 節子", rel: "妻",  tel: "090-0000-0338", mail: "okubo.setsuko@example.jp" }
+  ];
+  const S4_REPORT_ADDRESSES = [
+    "常盤野市 朝比奈町3丁目12-4",
+    "常盤野市 双葉ヶ丘1-8-207",
+    "常盤野市 灘見西42-1"
+  ];
+
   /* インシデント報告書の下書き（罰ゲーム＝黒塗りの対象）。pii:true は
      塗るべきトークン、pii:false は塗ってはいけない一般語のトークン、
-     pii キー無しはクリックできない地の文。旧デザイン（患者005単体のカルテ
-     抜粋を送りかけた、という筋）から、新デザイン（14名分の発熱患者一覧を
-     丸ごと送りかけた、という筋）へ最小限書き換えた——ただし報告書に出す
-     具体例はプレイヤーが実際に目にした一覧の内容（氏名・ID・病棟）だけに
-     とどめ、一覧に無い生年月日・電話番号などは出さない（見ていない情報を
-     報告書に書かせない）。ID・病棟は単独では個人情報として扱わない
-     （S4_PIIの基準と同じ）ので pii:false——「番号や病棟名まで塗りすぎる」
-     過剰黒塗りの判断材料にする。 */
+     pii キー無しはクリックできない地の文。
+     2026-09-06 ユーザー決定で塗るべき対象を8個から20個へ増やし、氏名だけでなく
+     電話番号・メールアドレス・住所も混ぜた——氏名だけを狩る作業になっていて、
+     「何が個人情報か」を1種類しか判断していなかったため。増やしたぶんの筋は
+     「一覧と同じブックに家族連絡先シートと退院支援シートが同居していて、選択
+     範囲に巻き込まれた」——参加者が見ていない情報を報告書に書かせない原則は、
+     ここでは事故の内訳として報告書自身が説明する形で満たす。
+     ID・病棟・日付・体温は単独では個人情報として扱わない（S4_PIIの基準と同じ）
+     ので pii:false——「番号や病棟名まで塗りすぎる」過剰黒塗りの判断材料にする。 */
   const S4_REPORT = [
     { t: "【インシデント報告書（下書き）】\n" },
-    { t: "発生日時：" }, { t: "8月22日 16:40", pii: false }, { t: "\n" },
+    { t: "発生日時：" }, { t: "8月22日 16:40", pii: false }, { t: "　" },
+    { t: "報告者：" }, { t: "感染制御チーム", pii: false }, { t: "\n" },
     { t: "対象：" }, { t: "保健所提出用・発熱患者一覧（14名分）", pii: false }, { t: "\n" },
-    { t: "報告者：" }, { t: "感染制御チーム", pii: false }, { t: "\n\n" },
-    { t: "概要：一覧をそのまま" }, { t: "外部AIサービス", pii: false }, { t: "へ貼り付けようとした。\n" },
-    { t: "氏名列には" }, { t: S4_FEVER_ROWS[0].name, pii: true }, { t: "様、" },
-    { t: S4_FEVER_ROWS[1].name, pii: true }, { t: "様など14名分の氏名が含まれていた。\n" },
-    { t: "患者ID（例：" }, { t: S4_FEVER_ROWS[0].id, pii: false }, { t: "）や病棟名（例：" },
-    { t: S4_FEVER_ROWS[0].ward, pii: false }, { t: "）は、単独では個人情報として扱わない。" }
+    { t: "概要：一覧をそのまま" }, { t: "外部AIサービス", pii: false },
+    { t: "へ貼り付けようとした。送信は直前で遮断されたが、選択範囲には次が含まれていた。\n\n" },
+
+    { t: "1. 氏名列（14名分）のうち：\n　" },
+    { t: S4_FEVER_ROWS[0].name, pii: true }, { t: "様　" },
+    { t: S4_FEVER_ROWS[1].name, pii: true }, { t: "様　" },
+    { t: S4_FEVER_ROWS[2].name, pii: true }, { t: "様　" },
+    { t: S4_FEVER_ROWS[3].name, pii: true }, { t: "様　" },
+    { t: S4_FEVER_ROWS[4].name, pii: true }, { t: "様　" },
+    { t: S4_FEVER_ROWS[5].name, pii: true }, { t: "様　" },
+    { t: S4_FEVER_ROWS[6].name, pii: true }, { t: "様　" },
+    { t: S4_FEVER_ROWS[7].name, pii: true }, { t: "様　ほか6名\n\n" },
+
+    { t: "2. 同じブックの「家族連絡先」シート（選択範囲に巻き込まれた）：\n　" },
+    { t: S4_REPORT_KIN[0].name, pii: true }, { t: "（" + S4_REPORT_KIN[0].rel + "）　" },
+    { t: S4_REPORT_KIN[0].tel, pii: true }, { t: "　" },
+    { t: S4_REPORT_KIN[0].mail, pii: true }, { t: "\n　" },
+    { t: S4_REPORT_KIN[1].name, pii: true }, { t: "（" + S4_REPORT_KIN[1].rel + "）　" },
+    { t: S4_REPORT_KIN[1].tel, pii: true }, { t: "　" },
+    { t: S4_REPORT_KIN[1].mail, pii: true }, { t: "\n　" },
+    { t: S4_REPORT_KIN[2].name, pii: true }, { t: "（" + S4_REPORT_KIN[2].rel + "）　" },
+    { t: S4_REPORT_KIN[2].tel, pii: true }, { t: "　" },
+    { t: S4_REPORT_KIN[2].mail, pii: true }, { t: "\n\n" },
+
+    { t: "3. 同じブックの「退院支援」シートの住所欄：\n　" },
+    { t: S4_REPORT_ADDRESSES[0], pii: true }, { t: "　" },
+    { t: S4_REPORT_ADDRESSES[1], pii: true }, { t: "　" },
+    { t: S4_REPORT_ADDRESSES[2], pii: true }, { t: "\n\n" },
+
+    { t: "なお、患者ID（例：" }, { t: S4_FEVER_ROWS[0].id, pii: false }, { t: "）、病棟名（例：" },
+    { t: S4_FEVER_ROWS[0].ward, pii: false }, { t: "）、発熱確認日（例：" },
+    { t: S4_FEVER_ROWS[0].date, pii: false }, { t: "）、体温（例：" },
+    { t: S4_FEVER_ROWS[0].temp, pii: false }, { t: "）は、単独では個人情報として扱わない。" }
   ];
 
   /* 着弾メール1通。事務長が保健所からの依頼を転送し、そのまま一覧を添付する
@@ -6768,11 +6810,7 @@
     s3BottleWaves = S3_BOTTLE_WAVES.slice();
     s3FreshWard = null;
 
-    // 説明と見出しは Stage 4 の罰（startS4Penalty）が同じ器を書き換えるので、毎回セットし直す。
-    // Stage 3 は説明文を置かない（2026-09-06 ユーザー決定）——直前の皮膚科医の窓が
-    // 理由を言い終えているので、同じことをもう一度読ませない。空にするのは Stage 4 の
-    // 説明が残らないようにするため。
-    $("lock-why").textContent = "";
+    // 見出しは Stage 5 の罰（startS4Penalty）が同じ器を書き換えるので、毎回セットし直す。
     $("lock-hd").textContent = "罰ゲーム：🧴 消毒液ボトルの補充";
     // 指示文（.t）とイラストを別要素に分ける。追加分が湧いたときに差し替えるのは .t だけで、
     // イラストは残る（fillBottle 参照）。進み具合（.stat）は注記の右隣に並べる。
@@ -6785,6 +6823,7 @@
       '<div class="bottles" id="bottles"></div>';
     // 器（.box）はボトル棚のときだけ広くする。Stage 4 の報告書は文章なので外す。
     $("penalty-host").classList.add("shelf");
+    $("penalty-host").classList.remove("paper");
     drawBottles();
 
     $("ov-lock").classList.remove("hide");
@@ -7409,12 +7448,11 @@
     s4PenaltyState = "in-progress";
     saveCheckpoint("s4-penalty-start", true);
     s4Masked = new Set();
-    // 説明・見出し・器の広さは Stage 3 の罰と共有なので、毎回セットし直す
-    // （前のステージの説明が残ると、黒塗りの画面にボトルの話が出る）。
-    $("lock-why").textContent =
-      "個人情報インシデントの後処理として、ICTに追加業務が割り当てられました。報告書を提出するまで、AIは使用できません。";
+    // 見出しと器の広さは Stage 3 の罰と共有なので、毎回セットし直す
+    // （前のステージの寸法が残ると、報告書がボトル棚の器で出る）。
     $("lock-hd").textContent = "罰ゲーム：報告書の作成";
     $("penalty-host").classList.remove("shelf");
+    $("penalty-host").classList.add("paper");
 
     $("penalty-host").innerHTML =
       '<div class="note">個人情報にあたる箇所を黒く塗り、提出してください。</div>' +
