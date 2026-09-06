@@ -147,6 +147,20 @@ const activity = (overrides: Record<string, unknown> = {}): Record<string, unkno
 const uniqueCommandId = (index: number): string =>
   `00000000-0000-4000-8000-${String(index).padStart(12, "0")}`;
 
+/**
+ * 活動ログの枠を`count`件ぶん消費した状態にする。
+ *
+ * 本番と同じ`consumeActivityAttempt`を通すが、DOの中でループを回すのでWorkerとの
+ * 往復は1回で済む。上限（120件/分）ぶんHTTPを叩いて枠を埋めると、往復がそのまま
+ * 上限の数だけ積み上がり、遅いランナーでvitestの既定タイムアウトを超える。
+ */
+const fillActivityBudget = (teamCode: string, nowMs: number, count: number): Promise<void> =>
+  runInDurableObject(env.TEAM_ROOM.getByName(teamCode), async (instance) => {
+    for (let index = 0; index < count; index += 1) {
+      await instance.consumeActivityAttempt(nowMs, ACTIVITY_RATE_LIMIT_PER_MINUTE, 0);
+    }
+  });
+
 const jsonBytes = (value: unknown): number =>
   new TextEncoder().encode(JSON.stringify(value)).length;
 
@@ -726,7 +740,7 @@ describe("活動ログ", () => {
     it("上限を超えた活動ログは429で、D1に書かない", async () => {
       const teamCode = "500170";
       const windowStartMs = 1_756_300_000_000;
-      const post = (index: number): Promise<Response> =>
+      const post = (index: number, nowMs = windowStartMs): Promise<Response> =>
         handleActivityPost(
           new Request(`https://example.test/api/teams/${teamCode}/activity`, {
             method: "POST",
@@ -735,33 +749,30 @@ describe("活動ログ", () => {
           }),
           env,
           teamCode,
-          windowStartMs,
+          nowMs,
         );
 
-      for (let index = 0; index < ACTIVITY_RATE_LIMIT_PER_MINUTE; index += 1) {
-        expect((await post(index)).status, `#${String(index)}`).toBe(200);
-      }
-      const accepted = (await rows(teamCode)).length;
-      expect(accepted).toBe(ACTIVITY_RATE_LIMIT_PER_MINUTE);
+      // 1件目で枠が実際に減ることを確かめる。
+      expect((await post(0)).status).toBe(200);
+      await expect(rows(teamCode)).resolves.toHaveLength(1);
 
-      const blocked = await post(ACTIVITY_RATE_LIMIT_PER_MINUTE);
+      // 残りの枠はDOの中でまとめて使い切る。上限ぶんPOSTを直列に投げると1テストで
+      // 121往復になり、テストの所要時間が本番の定数（120件/分）に引きずられる。
+      await fillActivityBudget(teamCode, windowStartMs, ACTIVITY_RATE_LIMIT_PER_MINUTE - 2);
+
+      // 上限ちょうどの1件はまだ通り、その次から断られる。境界の両側を押さえる。
+      expect((await post(1)).status).toBe(200);
+      await expect(rows(teamCode)).resolves.toHaveLength(2);
+
+      const blocked = await post(2);
       expect(blocked.status).toBe(429);
       expect(blocked.headers.get("Retry-After")).not.toBeNull();
-      await expect(rows(teamCode)).resolves.toHaveLength(accepted);
+      await expect(rows(teamCode)).resolves.toHaveLength(2);
 
       // 窓が明ければまた書ける。
-      const revived = await handleActivityPost(
-        new Request(`https://example.test/api/teams/${teamCode}/activity`, {
-          method: "POST",
-          headers: { Origin: "https://example.test" },
-          body: JSON.stringify({ ...activity(), commandId: uniqueCommandId(900) }),
-        }),
-        env,
-        teamCode,
-        windowStartMs + RATE_LIMIT_WINDOW_MS,
-      );
+      const revived = await post(900, windowStartMs + RATE_LIMIT_WINDOW_MS);
       expect(revived.status).toBe(200);
-      await expect(rows(teamCode)).resolves.toHaveLength(accepted + 1);
+      await expect(rows(teamCode)).resolves.toHaveLength(3);
     });
 
     it("活動ログの枠はチャットの枠と独立している", async () => {
