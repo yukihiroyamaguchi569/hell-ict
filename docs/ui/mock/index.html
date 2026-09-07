@@ -4667,6 +4667,22 @@
     renderAiLogFromThread(liveState.activeThreadId);
   }
 
+  /* 実応答の本文HTML。タブを含む行があれば、そこから下は台本応答と同じ
+     <pre class="tsv">（white-space: pre）へ入れる——通常の .body は
+     white-space が normal なのでタブが空白1個へ潰れ、参加者が吹き出しを
+     選択してコピーすると区切りが失われる（Stage 5 は整形結果をコピーして
+     提出欄へ貼る経路なので、そのまま実害になる）。最初にタブを含む行より
+     前は導入文なので、従来どおり <div> へ改行を <br> で入れる。タブを
+     含まない応答（大半の会話）は今までと同じ描き方のまま。 */
+  function liveReplyHtml(text) {
+    const lines = text.split("\n");
+    const tableAt = lines.findIndex((line) => line.includes("\t"));
+    if (tableAt < 0) return esc(text).replace(/\n/g, "<br>");
+    const lead = lines.slice(0, tableAt);
+    return (lead.length ? "<div>" + lead.map(esc).join("<br>") + "</div>" : "")
+      + '<pre class="tsv">' + esc(lines.slice(tableAt).join("\n")) + "</pre>";
+  }
+
   async function sendAiLive(text) {
     aiSending = true;
     updateAiInputLock();
@@ -4696,7 +4712,7 @@
     if (res.ok && isAssistantReply(res.body)) {
       chatSendCommand.clear(sentThreadId, chatProfile, text);   // 確定したので破棄
       applyChatSnapshot(res.body.snapshot);
-      placeholder.querySelector(".body").innerHTML = esc(res.body.assistant.text).replace(/\n/g, "<br>");
+      placeholder.querySelector(".body").innerHTML = liveReplyHtml(res.body.assistant.text);
       return;
     }
     placeholder.remove();   // プレースホルダは残留させない（差し替え or 削除のどちらか必ず）
@@ -7467,10 +7483,17 @@
      ——整えるよう頼まれているのは一覧そのものであって、添え書きではない。
      散文はIDを含んでいても②を満たさないので外れ、Markdown表・TSV・空白
      揃えの表はいずれも満たす。IDの網羅チェックだけは提出文全体を見る
-     （どこに書いてあっても足りていれば足りている）。 */
+     （どこに書いてあっても足りていれば足りている）。
+     ②を満たす行が14行に満たないときは、①だけで拾い直す——区切りで絞るのは
+     前置きを外すためであって、区切りの無い一覧を検査の外へ逃がすためでは
+     ない。事務長から届いた汚い一覧はタブ区切りなので、タブを空白1個へ
+     置き換えて貼るだけで②を満たす行が0行になり、整えないまま素通りして
+     しまう。表の行が14行そろっていれば、従来どおり前置きは除外される。 */
   function s5DataLines(text) {
-    return text.split("\n").filter((line) =>
-      S5_ID_TOKEN.test(line) && (line.match(S5_TABLE_SEP) || []).length >= 2);
+    const lines = text.split("\n");
+    const withId = lines.filter((line) => S5_ID_TOKEN.test(line));
+    const tableLines = withId.filter((line) => (line.match(S5_TABLE_SEP) || []).length >= 2);
+    return tableLines.length >= S5_FEVER_ROWS.length ? tableLines : withId;
   }
 
   /* 整形の差し戻し文。事務長の口調で、事実だけを一文で言う。 */
