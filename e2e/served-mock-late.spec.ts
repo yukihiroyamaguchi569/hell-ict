@@ -68,8 +68,13 @@ test.describe("配信版モック（後半ステージ）", () => {
     await expect(reply.locator(".tag")).toHaveCount(0);
     expect(await stubSeenCount(page, marker)).toBe(1);
 
+    // 表はタブを保つ器（<pre class="tsv">）に入る。ここが通常の .body だと、
+    // 参加者が吹き出しを選択してコピーした時点でタブが空白1個へ潰れる。
+    await expect(reply.locator("pre.tsv")).toHaveCount(1);
+
     const formatted = await bubbleText(reply);
     expect(formatted).toContain("2026-08-10");
+    expect(formatted).toContain("\t");
 
     await page.locator("#s5-reply").fill(formatted);
     await page.getByRole("button", { name: "保健所へ提出" }).click();
@@ -78,6 +83,27 @@ test.describe("配信版モック（後半ステージ）", () => {
     // 解錠オーバーレイを経て、Stage 6 へ自動で進む（stage5UnlockSequence）。
     await expect(page.locator("#ov-unlock")).toBeVisible();
     await expect(page.locator(".stage-title")).toHaveText("Stage 6　掲示", { timeout: 15_000 });
+  });
+
+  test("Stage 5：汚い一覧のタブを空白1個へ潰して提出しても、整形の差し戻しになる", async ({
+    page,
+  }) => {
+    await page.goto(`${SERVED_MOCK}#s5`);
+    await enterTeam(page);
+    await expect(page.locator(".stage-title")).toHaveText("Stage 5　報告");
+
+    // 氏名列を外すところまでは正解経路と同じ。整えずに、タブだけを空白1個へ
+    // 置き換えて出す——判定が「表として区切られた行」だけを検査していると、
+    // データ行が0行になって全角数字も日付のばらつきも見ずに通ってしまう。
+    await openFeverLinelist(page);
+    await page.locator("#viewer-col-picks label", { hasText: "氏名" }).locator("input").uncheck();
+    const linelist = await copyFromViewer(page, "#btn-copy-cols");
+    expect(linelist).toContain("\t");
+
+    await page.locator("#s5-reply").fill(linelist.replace(/\t/g, " "));
+    await page.getByRole("button", { name: "保健所へ提出" }).click();
+    await expect(page.locator("#s5-verdict")).toContainText("保健所に出す書式になっていません");
+    await expect(page.locator("#s5-verdict")).not.toContainText("Stage 5 をクリアしました");
   });
 
   test("Stage 5：氏名を含む一覧を送るとWorkerへも届かず、叱責と黒塗りの罰へ進む", async ({

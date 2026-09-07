@@ -41,12 +41,11 @@ export const sendToAi = async (page: Page, text: string): Promise<void> => {
 /**
  * LIVEの応答吹き出しを、改行とタブを保ったテキストへ戻す。
  *
- * ⚠️ 2026-09-07 実測：LIVEの応答は sendAiLive() が esc() して改行だけ <br> へ
- * 置き換え、.body（white-space: normal）へ入れる——表を <pre class="tsv">
- * （white-space: pre）へ入れるのは台本応答だけなので、タブが1個の空白へ潰れる。
- * 参加者が吹き出しを選択してコピーすると、タブは失われて空白1個になる。
- * このヘルパーはDOMのテキストノードから組み直してタブを保つ（＝参加者の
- * コピーより有利な経路）。モックは正典なのでここでは直さない。
+ * LIVEの応答も、タブを含めば台本応答と同じ <pre class="tsv">
+ * （white-space: pre）に入るようになった（sendAiLive()→liveReplyHtml()）。
+ * このヘルパーは台本／LIVEのどちらの吹き出しからも本文を取れる汎用として
+ * 残す——導入文（<br> 区切り）と表（<pre>）が混在しても、DOMから組み直して
+ * 改行とタブをそのまま返す。
  */
 export const bubbleText = (bubble: Locator): Promise<string> =>
   bubble.locator(".body").evaluate((element) => {
