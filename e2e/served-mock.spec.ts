@@ -1,33 +1,14 @@
 import { expect, test, type Page } from "@playwright/test";
 
+import { enterTeam, SERVED_MOCK } from "./served-mock-helpers";
+
 /**
- * 配信版モックのE2E。参加者が当日触るのはReactハーネス（4173）ではなく、
- * scripts/build-testplay.sh が docs/ui/mock/index.html を加工して
- * apps/worker/public/ へ置き、WorkerのAssetsが同一オリジンで配るこちらである。
- * 加工（開発用UIを隠すstyle・#devbarトグル・画像パスの書き換え）と、
- * 加工後にだけ通る起動経路（LIVEの入室）は、ここでしか検証できない。
+ * 配信版モックのE2E。加工（開発用UIを隠すstyle・#devbarトグル・画像パスの
+ * 書き換え）と、加工後にだけ通る起動経路（LIVEの入室）は、ここでしか検証できない。
  * ビルドの前段化は playwright.config.ts のworker webServerコメントを参照。
+ * 入室ヘルパーと入口URLは served-mock-helpers.ts に置き、後半ステージの
+ * spec（served-mock-late.spec.ts）と共有する。
  */
-const SERVED_MOCK = "http://127.0.0.1:8787/";
-
-/** 他テストと同じ部屋へ入らないよう、チームコードは毎回引き直す。 */
-const uniqueTeamCode = (): string => String(Math.floor(Math.random() * 1_000_000)).padStart(6, "0");
-
-/**
- * 入室画面からLIVEで入室する。コード欄は1桁ずつ6枠に分かれており、6枠とも
- * aria-labelが「チームコード」なのでgetByLabelでは絞れない（DOM構造で指す）。
- * ［入室する］は起動時の /api/health プローブが終わるまでdisabledなので、
- * clickの自動待機がそのままプローブ待ちになる。
- */
-const enterTeam = async (page: Page): Promise<void> => {
-  const boxes = page.locator("#code input");
-  for (const [index, digit] of uniqueTeamCode().split("").entries()) {
-    await boxes.nth(index).fill(digit);
-  }
-  await page.getByLabel("チーム名").fill("E2E班");
-  await page.getByRole("button", { name: "入室する" }).click();
-  await expect(page.locator("#ov-entry")).toBeHidden();
-};
 
 /**
  * Stage 4 の開始演出（院長のタスク付与オーバーレイ）を閉じる。台詞は2画面あり、
