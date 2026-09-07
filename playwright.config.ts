@@ -10,7 +10,20 @@ export default defineConfig({
     channel: process.env.PLAYWRIGHT_CHANNEL,
     trace: "on-first-retry",
   },
-  projects: [{ name: "chromium", use: { ...devices["Desktop Chrome"] } }],
+  projects: [
+    // 高速レーン（pnpm verify）。`test:e2e` は --project=chromium なので、
+    // journey はここに入らない。
+    { name: "chromium", use: { ...devices["Desktop Chrome"] }, testIgnore: "journey/**" },
+    // 監査レーン（pnpm verify:full / CIの `監査レーン` ラベル）。Prologueから
+    // 感謝状までを1本で通すため、演出とタイマーのぶんテスト単位の制限時間を
+    // 長く取る（chromiumの既定30秒では足りない）。
+    {
+      name: "journey",
+      use: { ...devices["Desktop Chrome"] },
+      testMatch: "journey/**",
+      timeout: 300_000,
+    },
+  ],
   webServer: [
     {
       // 既存プロセスを再利用すると、OPENAI_BASE_URLがスタブを指さない
