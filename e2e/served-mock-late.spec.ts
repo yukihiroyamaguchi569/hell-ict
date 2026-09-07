@@ -1,6 +1,13 @@
-import { expect, test, type Locator, type Page } from "@playwright/test";
+import { expect, test, type Page } from "@playwright/test";
 
-import { enterTeam, SERVED_MOCK } from "./served-mock-helpers";
+import {
+  bubbleText,
+  copyFromViewer,
+  enterTeam,
+  openFeverLinelist,
+  sendToAi,
+  SERVED_MOCK,
+} from "./served-mock-helpers";
 
 /**
  * 配信版モックの後半ステージ（Stage 5 報告／Stage 6 掲示／Final）のE2E。
@@ -25,50 +32,6 @@ const stubSeenCount = async (page: Page, query: string): Promise<number> => {
   const { count } = body as { count: unknown };
   if (typeof count !== "number") throw new Error("スタブの /seen 応答が想定の形ではありません。");
   return count;
-};
-
-/**
- * LIVEの応答吹き出しを、改行とタブを保ったテキストへ戻す。
- *
- * ⚠️ 2026-09-07 実測：LIVEの応答は sendAiLive() が esc() して改行だけ <br> へ
- * 置き換え、.body（white-space: normal）へ入れる——表を <pre class="tsv">
- * （white-space: pre）へ入れるのは台本応答だけなので、タブが1個の空白へ潰れる。
- * 参加者が吹き出しを選択してコピーすると、タブは失われて空白1個になる。
- * このヘルパーはDOMのテキストノードから組み直してタブを保つ（＝参加者の
- * コピーより有利な経路）。モックは正典なのでここでは直さない。
- */
-const bubbleText = (bubble: Locator): Promise<string> =>
-  bubble.locator(".body").evaluate((element) => {
-    const holder = document.createElement("div");
-    holder.innerHTML = element.innerHTML.replace(/<br\s*\/?>/gi, "\n");
-    return holder.textContent ?? "";
-  });
-
-/** 事務長メールを開いて添付ビューア（発熱患者一覧）を出す。 */
-const openFeverLinelist = async (page: Page): Promise<void> => {
-  await page
-    .locator("#mails button.mail")
-    .filter({ hasText: "保健所への発熱患者一覧提出" })
-    .click();
-  await expect(page.locator("#ov-viewer")).toBeVisible();
-  await expect(page.locator("#viewer-cols")).toBeVisible();
-};
-
-/** ビューアの列選択コピー／全文コピーを押し、クリップボードの中身を返す。 */
-const copyFromViewer = async (
-  page: Page,
-  button: "#btn-copy" | "#btn-copy-cols",
-): Promise<string> => {
-  await page.locator(button).click();
-  await expect(page.locator(button)).toHaveText("コピーしました");
-  await page.locator("#btn-viewer-close").click();
-  await expect(page.locator("#ov-viewer")).toBeHidden();
-  return page.evaluate(() => navigator.clipboard.readText());
-};
-
-const sendToAi = async (page: Page, text: string): Promise<void> => {
-  await page.getByLabel("AIへの指示").fill(text);
-  await page.getByRole("button", { name: "送信" }).click();
 };
 
 test.describe("配信版モック（後半ステージ）", () => {
