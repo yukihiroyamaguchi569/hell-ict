@@ -80,9 +80,19 @@ test.describe("配信版モック（後半ステージ）", () => {
     await expect(page.locator(".stage-title")).toHaveText("Stage 6　掲示", { timeout: 15_000 });
   });
 
-  test("Stage 5：氏名を含む一覧を送るとOpenAIへ届かず、叱責と黒塗りの罰へ進む", async ({
+  test("Stage 5：氏名を含む一覧を送るとWorkerへも届かず、叱責と黒塗りの罰へ進む", async ({
     page,
   }) => {
+    // 送信前ゲートはAIチャットの手前（クライアント側）にある。WorkerにもPII
+    // ゲートがあるので、OpenAIへ届いていないことだけでは「手前で捨てた」証明に
+    // ならない——チャット送信APIそのものが呼ばれていないことまで見る。
+    const chatSendUrls: string[] = [];
+    page.on("request", (request) => {
+      if (request.method() === "POST" && request.url().endsWith("/chat/messages")) {
+        chatSendUrls.push(request.url());
+      }
+    });
+
     await page.goto(`${SERVED_MOCK}#s5`);
     await enterTeam(page);
 
@@ -101,8 +111,10 @@ test.describe("配信版モック（後半ステージ）", () => {
     await expect(page.locator("#lock-hd")).toHaveText("罰ゲーム：報告書の作成");
     await expect(page.locator("#penalty-host")).toContainText("個人情報にあたる箇所を黒く塗り");
 
-    // 送信前ゲートで止めた本文は、Workers側のPIIゲートより手前で捨てられる。
-    // 表示が出たことだけでは足りない——OpenAIへ一度も届いていないことまで見る。
+    // 罰画面まで進んでもなお、チャット送信APIは一度も呼ばれていない（＝Workerへ
+    // 渡る前に捨てられた）。このページは入室した1チームの部屋としか話さないので、
+    // 収集した全件がそのままこのチームの送信になる。その先のOpenAIにも当然届かない。
+    expect(chatSendUrls).toEqual([]);
     expect(await stubSeenCount(page, marker)).toBe(0);
     expect(await stubSeenCount(page, "渡辺 三郎")).toBe(0);
   });

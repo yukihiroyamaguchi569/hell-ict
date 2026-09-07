@@ -21,6 +21,13 @@ const DEFAULT_REPLY = "（スタブ応答）承知しました。";
  * スタブの三重管理になって片方だけ直り静かに壊れる）。                     *
  * ---------------------------------------------------------------------- */
 
+/**
+ * Stage 5 の依頼語。モックの S5_REQUEST_TRIGGER と同じ語彙にする——
+ * 「表の形をしている」だけで発火させると、別ステージでたまたま表を貼った
+ * 送信まで整形応答へ流れてしまう。
+ */
+const REQUEST_TRIGGER = /整形|整えて|一覧|まとめて|表にして|並べて/;
+
 /** 表の区切り。タブ、または2つ以上連続する空白。 */
 const FIELD_SEP = /\t|[ \u3000]{2,}/;
 /** 見出し行の目印。列選択コピー（#viewer-cols）は必ず見出し行を含む。 */
@@ -57,10 +64,13 @@ const splitFields = (line) =>
   line.trim() === "" ? [] : line.split(FIELD_SEP).map((field) => field.trim());
 
 /**
- * 発熱患者一覧の整形。見出し行に「患者ID」を含む表が2行以上あれば、
- * 日付と体温の列だけを揃えたタブ区切りの表を返す。表が見つからなければnull。
+ * 発熱患者一覧の整形。①Stage 5 の依頼語があり ②見出し行に患者ID・
+ * 発熱確認日・最高体温の3列が揃い ③データ行が2行以上ある——を全部満たす
+ * ときだけ、日付と体温を揃えたタブ区切りの表を返す。ひとつでも欠ければnull
+ * （＝既定の固定文へ落ちる）。
  */
 const formatFeverLinelist = (text) => {
+  if (!REQUEST_TRIGGER.test(text)) return null;
   const lines = text.split("\n");
   const headerIndex = lines.findIndex(
     (line) => line.includes(ID_HEADER) && splitFields(line).length >= 2,
@@ -69,6 +79,8 @@ const formatFeverLinelist = (text) => {
   const header = splitFields(lines[headerIndex]);
   const dateColumn = header.indexOf(DATE_HEADER);
   const tempColumn = header.indexOf(TEMP_HEADER);
+  // 整形する列そのものが無い表は、この一覧ではない。
+  if (dateColumn < 0 || tempColumn < 0) return null;
 
   const rows = [];
   for (const line of lines.slice(headerIndex + 1)) {
