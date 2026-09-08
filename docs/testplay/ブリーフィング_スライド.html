@@ -202,40 +202,6 @@
         font-weight: 700;
       }
 
-      /* 3列レイアウト（画面の見方） */
-      .cols {
-        display: grid;
-        grid-template-columns: 1fr 1fr 1fr;
-        gap: 18px;
-        margin-bottom: 22px;
-      }
-
-      .col {
-        background: var(--surface);
-        border: 1px solid var(--rule);
-        padding: 20px 22px;
-      }
-
-      .col .where {
-        font-size: 20px;
-        color: var(--fg-muted);
-        letter-spacing: 0.14em;
-      }
-
-      .col .what {
-        font-size: 30px;
-        font-weight: 700;
-        margin-top: 8px;
-        line-height: 1.3;
-      }
-
-      .col .note {
-        font-size: 19px;
-        color: var(--fg-muted);
-        margin-top: 12px;
-        line-height: 1.5;
-      }
-
       /* 手順（入室） */
       ol.steps {
         margin: 0;
@@ -397,11 +363,7 @@ ICT は Infection and Communication Technology ではない。Infection Control 
 ゲームの中身の予告はしない。"
         >
           <h1 class="title">地獄の<em>ICT</em></h1>
-          <div class="sub">AIを相棒に、崩れかけた病院を生き延びろ</div>
-          <div class="ict">
-            ICT = <b>Infection Control Team</b>（感染制御チーム）<br />
-            情報通信技術のほうではありません。
-          </div>
+          <div class="sub">AIを相棒に、崩れかけた病院を立て直せ</div>
           <div class="foot">
             <span class="grow">ブリーフィング</span><span class="num"></span>
           </div>
@@ -481,11 +443,7 @@ ICT は Infection and Communication Technology ではない。Infection Control 
             </li>
             <li><span class="hi">今日が着任初日です。</span>引き継ぎは、あまりありません</li>
             <li>院内では、複数の火の手が同時に上がりかけています</li>
-            <li class="plain">
-              <span style="color: var(--fg-muted)"
-                >実在の病院ではありません。登場人物も、届くメールも、全員・全部が架空です。</span
-              >
-            </li>
+
           </ul>
           <div class="foot">
             <span class="grow">舞台：聖クロノス総合病院</span><span class="num"></span>
@@ -503,18 +461,16 @@ ICT は Infection and Communication Technology ではない。Infection Control 
 【線引き】「AIに投げる係を作れ」までは言わない（解法に近づく）。"
         >
           <h2><span class="mark">04</span>チームとPC</h2>
-          <p class="lead">3〜4人で1チーム。ゲームに使うPCは、チームに1台だけです。</p>
+          <p class="lead"> </p>
           <ul>
-            <li><b>個人のPC・スマホは使いません。</b>1台を囲んでください</li>
+            <li><b>個人のPC・スマホは使いません。</b></li>
             <li>
               <b>マウスはありません。トラックパッドで操作します。</b>
-              <span style="color: var(--fg-muted)">（これは仕様です）</span>
-            </li>
-            <li>
-              <b>役割を分けたほうが速い。</b>おすすめは——
+              <span style="color: var(--fg-muted)"></span>
+
               <ul>
-                <li>打つ人 / 読む人 / 決める人</li>
-                <li>固定せず、ステージごとに交代する（全員がAIを触ったほうが得です）</li>
+                <li>二本指でクリックすると右クリックと同じようにメニューが表示されます</li>
+                <li>席は固定せず、ステージごとに交代してください（全員でAIをさわりましょう）</li>
               </ul>
             </li>
             <li>チーム名は、この後の入室画面でチームごとに決めてもらいます</li>
@@ -539,101 +495,13 @@ ICT は Infection and Communication Technology ではない。Infection Control 
             <li><b>全チーム同時スタート。最初にゴールしたチームが優勝です</b></li>
             <li>
               <b>順位は、会場前のディスプレイに出ます。</b>
-              <ul>
-                <li><span class="danger">手元のPCには、他のチームの位置は出ません</span></li>
-                <li>気になったら、顔を上げてください</li>
-              </ul>
             </li>
-            <li>全チームがゴールするまで続けます。優勝以外の賞もあります</li>
-            <li class="plain">
-              <span style="color: var(--fg-muted)"
-                >追い抜かれても、追い抜いても、やることは変わりません。</span
-              >
-            </li>
+            <li><b>制限時間は80分です</b></li>
           </ul>
           <div class="foot"><span class="grow">進み方</span><span class="num"></span></div>
         </section>
 
         <!-- 7 -->
-        <section
-          class="slide"
-          data-notes="画面は3列。左＝受信トレイと共有フォルダ、中央＝今の課題と提出、右＝AIチャット。
-AIパネルは最初から出ているわけではない。言わないと「壊れている」と誤解されて手が止まる。
-ただし、いつ・なぜ出るかは言わない。
-右下の「メッセージ」は情シスの苅部さんからの連絡。着信でバッジが光る。
-返信はできるが相談窓口ではない——何を書いても定型で受け流される。これも言わないと「壊れている」と思われる。
-上のバーに時計と文字サイズ変更。小さければ上げてよい。
-
-【線引き】共有フォルダの中身に触れない。苅部さんが詰まったときに声をかけてくることも言わない。"
-        >
-          <h2><span class="mark">06</span>画面の見方</h2>
-          <div class="cols">
-            <div class="col">
-              <div class="where">左</div>
-              <div class="what">受信トレイ<br />共有フォルダ</div>
-              <div class="note">届いたメールと、置いてある資料。</div>
-            </div>
-            <div class="col">
-              <div class="where">中央</div>
-              <div class="what">今の課題と<br />提出するところ</div>
-              <div class="note">主戦場はここです。</div>
-            </div>
-            <div class="col">
-              <div class="where">右</div>
-              <div class="what">AIチャット</div>
-              <div class="note">
-                使えるようになった時点で現れます。<b>最初から出てはいません。</b>
-              </div>
-            </div>
-          </div>
-          <ul>
-            <li>
-              右下の<b>「メッセージ」</b>は、情シスの<b>苅部さん</b>からの連絡が来る場所です
-              <ul>
-                <li>
-                  <span class="danger">返信はできますが、相談窓口ではありません。</span
-                  >何を書いても「今、別病棟の対応中です」と返ってきます
-                </li>
-              </ul>
-            </li>
-            <li>
-              上のバーに<b>時計</b>と<b>文字サイズを変えるボタン</b>があります。小さければ上げてください
-            </li>
-            <li>
-              AIチャットは<b>今のステージの分だけ</b>——前のステージの会話は残りません
-            </li>
-          </ul>
-          <div class="foot"><span class="grow">画面の見方</span><span class="num"></span></div>
-        </section>
-
-        <!-- 8 -->
-        <section
-          class="slide"
-          data-notes="罰は減点ではない。時間で払う。
-何かを踏むと「罰ゲーム：〜」という見出しで作業が降ってきて、終えるまで先へ進めない。
-レースなので時間がいちばん痛い。
-ただし、罰を恐れて止まるより進んだほうが速い。
-
-【線引き】何が引き金かは絶対に言わない。「AIに変なものを送ると罰になる」も言わない（Stage 5 の予告になる）。"
-        >
-          <h2><span class="mark">07</span>時間と、罰</h2>
-          <p class="lead">このゲームに減点はありません。罰は、時間で払います。</p>
-          <ul>
-            <li>
-              何かを踏むと、画面に <span class="danger">「罰ゲーム：〜」</span> と出て、作業が降ってきます
-            </li>
-            <li><b>それを終えるまで、先へは進めません</b></li>
-            <li>レースですから、<span class="hi">時間がいちばん痛い</span>——それが罰です</li>
-            <li class="plain">
-              <span style="color: var(--fg-muted)"
-                >とはいえ、罰を恐れて止まっているほうが遅くなります。進んでください。</span
-              >
-            </li>
-          </ul>
-          <div class="foot"><span class="grow">時間と、罰</span><span class="num"></span></div>
-        </section>
-
-        <!-- 9 -->
         <section
           class="slide"
           data-notes="詰まったときの順番：資料を読む → AIに何が欲しいか言葉にして渡す → 声に出して相談する。
@@ -643,12 +511,12 @@ AIパネルは最初から出ているわけではない。言わないと「壊
 【線引き】依頼文の例文は1つも見せない（Issue #94「伝えないこと」）。
 「まず資料を読む」を作法として言うか解法とみなすかは要検討。"
         >
-          <h2><span class="mark">08</span>詰まったときは</h2>
-          <p class="lead">この順番で試してください。</p>
+          <h2><span class="mark">06</span>詰まったときは</h2><BR>
+ 
           <ol class="steps">
-            <li><b>手元の資料を読む。</b>必要なものは、受信トレイと共有フォルダに置いてあります</li>
-            <li><b>AIに頼むときは、何が欲しいかを言葉にする。</b>「やって」ではなく「何を、どういう形で」</li>
-            <li><b>チームで声に出して相談する。</b>1台を囲んでいる意味はここにあります</li>
+            <li><b>チームで声に出して相談する</b> 1台を囲んでいる意味はここにあります</li>
+            <li><b>とりあえず試してみる</b>　考えているだけでは進みません</li>
+
           </ol>
           <ul style="margin-top: 26px">
             <li>
@@ -656,74 +524,14 @@ AIパネルは最初から出ているわけではない。言わないと「壊
             </li>
             <li>
               進行役が答えないこと：<span class="danger">課題の答えと、解き方</span>
-              <span style="color: var(--fg-muted)">（意地悪ではなく、そういう研修です）</span>
+              <span style="color: var(--fg-muted)"></span>
             </li>
           </ul>
           <div class="foot"><span class="grow">詰まったときは</span><span class="num"></span></div>
         </section>
 
+ 
         <!-- 10 -->
-        <section
-          class="slide"
-          data-notes="URLを読み上げる／ホワイトボードに書いておく。
-チームコードは読み上げない。卓に配った辞令カード（A4縦・チームA〜Fの6枚）に印字してあるものを各チームが打つ。
-読み上げると全チームが同じコードを打ち、1つの部屋へ入る事故になる。
-入室直後に、各卓のコードが割当表どおりか目視で確認する（取り違えは404にならず通ってしまう）。
-チーム名は12文字まで。用途（感謝状の宛名）に触れるかは未決。
-Enter か［入室する］で入室。入ったらそのまま待つ。全チーム揃ってから始める。"
-        >
-          <h2><span class="mark">09</span>入室の手順</h2>
-          <ol class="steps">
-            <li>ブラウザで <span class="blank">URL</span> を開く</li>
-            <li>
-              <b>6桁のチームコード</b>を入れる
-              <span class="danger">（卓の「辞令」に印字してある、自分の卓のコードです）</span>
-            </li>
-            <li><b>チーム名</b>をチームで決めて入れる（12文字まで）</li>
-            <li><b>Enter</b> か ［入室する］ を押す</li>
-          </ol>
-          <ul style="margin-top: 28px">
-            <li class="plain">
-              <span class="hi">入ったら、そのまま待ってください。</span>
-              <span style="color: var(--fg-muted)">全チームが揃ってから、一斉に始めます。</span>
-            </li>
-          </ul>
-          <div class="foot"><span class="grow">入室の手順</span><span class="num"></span></div>
-        </section>
-
-        <!-- 11 -->
-        <section
-          class="slide"
-          data-notes="実在の患者・職員の個人情報は絶対に入力しない。ゲーム内のデータは全部架空。
-※ 罠と結びつけない。「個人情報を送ると罰になる」と言った時点で罠が死ぬ。同じ息で言わないこと。
-ブラウザは閉じない。閉じても同じチームコードで入り直せば戻れる。リロードも同じ。慌てて他のPCを触らない。
-音が出る。最初にどこかをクリックしてから鳴り出す。
-困ったら手を挙げる。
-
-【要確認】復帰の挙動は当日の実装を確認してから断言する。"
-        >
-          <h2><span class="mark">10</span>いくつかお願い</h2>
-          <ul>
-            <li>
-              <span class="danger">実在の患者さん・職員の個人情報は、絶対に入力しないでください</span>
-              <ul>
-                <li>ゲームの中に出てくる名前・データは、すべて架空のものです</li>
-              </ul>
-            </li>
-            <li>
-              <b>ブラウザは閉じないでください。</b>
-              <ul>
-                <li>うっかり閉じても、同じチームコードで入り直せば戻れます（リロードも同じ）</li>
-                <li>慌てて他のPCを触らないでください</li>
-              </ul>
-            </li>
-            <li><b>音が出ます。</b>最初にどこかをクリックしてから鳴り始めます</li>
-            <li><b>困ったら手を挙げてください。</b>直せるものは、直しに行きます</li>
-          </ul>
-          <div class="foot"><span class="grow">いくつかお願い</span><span class="num"></span></div>
-        </section>
-
-        <!-- 12 -->
         <section
           class="slide closing"
           data-notes="「準備はいいですか」——質問を受ける最後のタイミングにする。
