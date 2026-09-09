@@ -300,10 +300,22 @@
    浮いている、高さ44pxのバー）を避けるため。これが無いと、最下段の［提出する］
    ［確認した（次へ）］がバーの下へ潜って押せなくなる（Issue #93）。
    22px（他辺と同じ余白）＋62px（バーの高さ＋余白）。 */
-.work { flex: 1; overflow-y: auto; padding: 22px 28px 84px; display: flex; flex-direction: column; gap: 18px; }
-.stage-title { font-size: calc(20px * var(--fs-scale)); font-weight: 700; display: flex; align-items: center; gap: 9px; }
+.work { flex: 1; overflow-y: auto; padding: 12px 28px 84px; display: flex; flex-direction: column; gap: 18px; }
+/* 案件カード（Issue #145）：ステージ名と課題文を1枚にまとめ、中央ペインの
+   上端を見るだけで「いまの仕事」が分かるようにする。カードを足しても縦の
+   密度は増やさない——.work の上余白を22px→12px、カード内の行間を .work の
+   gap(18px) より詰めることで、追加した枠のぶんを相殺している。
+   ここは説明を増やす場所ではない（入る要素はステージ名と課題文だけ）。 */
+.case {
+  background: color-mix(in srgb, var(--surface-2) 60%, transparent);
+  border-left: 3px solid var(--accent);
+  padding: 10px 14px 11px;
+  display: flex; flex-direction: column; gap: 4px;
+  transition: background-color .78s ease, border-color .78s ease;
+}
+.stage-title { font-size: calc(22px * var(--fs-scale)); font-weight: 700; display: flex; align-items: center; gap: 9px; }
 .stage-title::before { content: "▸"; color: var(--accent); }
-.brief { font-size: calc(18px * var(--fs-scale)); line-height: 1.75; max-width: 60ch; }
+.brief { font-size: calc(16px * var(--fs-scale)); line-height: 1.7; max-width: 60ch; }
 .cols {
   font-family: var(--font-num); font-size: calc(13px * var(--fs-scale)); color: var(--fg-note);
   border-left: 2px solid var(--rule); padding-left: 12px; line-height: 1.9;
@@ -5573,7 +5585,7 @@
     const cur = s1.items.find((x) => x.key === s1.open && x.state === "live");
     const roundLabel = s1.round === 2 ? "　（2回目・AIあり）" : s1.round === 3 ? "　（3回目・コンテキストあり）" : "";
     const head =
-      '<div class="stage-title">Stage 1　平常運転' + roundLabel + "</div>" +
+      '<div class="case"><div class="stage-title">Stage 1　平常運転' + roundLabel + "</div></div>" +
       '<div class="s2-hd">' +
         '<div class="s2-count">返信済み　<b>' + doneThisRound + " / " + defs.length + "</b></div>" +
         '<div class="grow"></div>' +
@@ -6078,9 +6090,11 @@
     s2Hot = []; s2AddTaken = false; s2AddLanded = false;
     paneC.innerHTML =
       '<div class="work">' +
-        '<div class="stage-title">Stage 2　火の手</div>' +
-        // 正規化ルールの表は出さない。要件の言語化そのものが学習目標だから。
-        '<div class="brief">流行曲線が描けるよう、各列の書き方を統一して提出せよ。</div>' +
+        '<div class="case">' +
+          '<div class="stage-title">Stage 2　火の手</div>' +
+          // 正規化ルールの表は出さない。要件の言語化そのものが学習目標だから。
+          '<div class="brief">流行曲線が描けるよう、各列の書き方を統一して提出せよ。</div>' +
+        "</div>" +
         // 締切は課題カードの中に1本。ヘッダーに逃がすと判定と同じ画面に収まらない。
         '<div class="s2-dl" id="s2-dl"><span>7:00 申し送りまで</span>' +
           '<b id="s2-dl-t">05:00</b><span class="bar"><i id="s2-dl-b" style="width:100%"></i></span></div>' +
@@ -6703,8 +6717,10 @@
 
     paneC.innerHTML =
       '<div class="work">' +
-        '<div class="stage-title">Stage 3　方針</div>' +
-        '<div class="brief">転院患者3名（3B・5B・6A病棟）への疥癬対応方針を至急まとめよ。</div>' +
+        '<div class="case">' +
+          '<div class="stage-title">Stage 3　方針</div>' +
+          '<div class="brief">転院患者3名（3B・5B・6A病棟）への疥癬対応方針を至急まとめよ。</div>' +
+        "</div>" +
         '<div class="box" id="s3-box-ppe"><div class="hd">PPE・隔離</div>' +
           '<textarea class="submit-area" id="s3-ppe" placeholder="個室隔離・PPEの要否など" style="min-height:70px"></textarea></div>' +
         '<div class="box" id="s3-box-release"><div class="hd">接触予防策の解除基準</div>' +
@@ -7120,8 +7136,10 @@
     // 課題文に書かない（docs/scenario/04_Stage3_5_新情報の解釈.md §課題と提出物）。
     paneC.innerHTML =
       '<div class="work">' +
-        '<div class="stage-title">Stage 4　新情報の解釈</div>' +
-        '<div class="brief">速報論文を要約して院長へ報告してください。</div>' +
+        '<div class="case">' +
+          '<div class="stage-title">Stage 4　新情報の解釈</div>' +
+          '<div class="brief">速報論文を要約して院長へ報告してください。</div>' +
+        "</div>" +
         '<div class="box" id="s4-box"><div class="hd">院長への要約</div>' +
           '<textarea class="submit-area" id="s4-summary" style="min-height:160px"></textarea></div>' +
         '<div class="row-end"><button class="btn" id="btn-s4-submit">院長へ報告</button></div>' +
@@ -7400,8 +7418,10 @@
 
     paneC.innerHTML =
       '<div class="work">' +
-        '<div class="stage-title">Stage 5　報告</div>' +
-        '<div class="brief">保健所へ提出する発熱患者一覧を整えよ。</div>' +
+        '<div class="case">' +
+          '<div class="stage-title">Stage 5　報告</div>' +
+          '<div class="brief">保健所へ提出する発熱患者一覧を整えよ。</div>' +
+        "</div>" +
         // 締切は課題カードの中に1本（Stage 2 §「締切は課題カードの中に1本」と同じ配置）。
         // .s2-dl は Stage 2 発の名前だがステージ非依存の見た目なので、そのまま再利用する。
         // 表示文言だけ「電話でお待ちです」から「保健所の提出期限」へ差し替える
@@ -7913,8 +7933,10 @@
 
     paneC.innerHTML =
       '<div class="work">' +
-        '<div class="stage-title">Stage 6　掲示</div>' +
-        '<div class="brief">面会制限のお知らせを作り、掲示用に提出せよ。</div>' +
+        '<div class="case">' +
+          '<div class="stage-title">Stage 6　掲示</div>' +
+          '<div class="brief">面会制限のお知らせを作り、掲示用に提出せよ。</div>' +
+        "</div>" +
         '<div class="s6cand box" id="s6-cand"></div>' +
         '<div class="row-end"><button class="btn" id="btn-s6-submit" disabled>提出する</button></div>' +
         '<div id="s6-verdict"></div>' +
@@ -8118,8 +8140,10 @@
 
     paneC.innerHTML =
       '<div class="work">' +
-        '<div class="stage-title">Final　振り返り</div>' +
-        '<div class="brief">これまでの対応を振り返り、次のICTチームへ渡す引き継ぎメモの一言を残せ。</div>' +
+        '<div class="case">' +
+          '<div class="stage-title">Final　振り返り</div>' +
+          '<div class="brief">これまでの対応を振り返り、次のICTチームへ渡す引き継ぎメモの一言を残せ。</div>' +
+        "</div>" +
         '<div class="fboard" id="f-board">' +
           '<div class="ftiles" id="f-tiles">' + tilesHtml + '</div>' +
           '<div class="fpiece" id="f-piece">' +
