@@ -325,6 +325,14 @@
   padding: 8px 13px; font-size: calc(13px * var(--fs-scale)); font-weight: 700; letter-spacing: .05em;
   color: var(--fg-note); border-bottom: 1px solid var(--rule);
 }
+/* 入力中の枠を中立色で示す（Issue #147）。1画面を3〜4人で囲むので、
+   操作担当以外も「いまどこへ書いているか」を追えるようにする。
+   .warn（誤り・不足の橙）には掛けない——警告の意味を持つ色を、入力中の
+   案内と混ぜない。.box.ctx-hi と同じく --accent は案内の強調として使う。 */
+.box:not(.warn):focus-within {
+  border-color: var(--accent);
+  box-shadow: 0 0 0 2px color-mix(in srgb, var(--accent) 22%, transparent);
+}
 /* Stage 3：差し戻し（不足）の枠。橙のみ、赤は使わない（Stage 2 §3の絶対条件を継続）。 */
 .box.warn { border-color: var(--warn); }
 .box.warn > .hd { color: var(--warn); }
