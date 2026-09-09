@@ -28,21 +28,26 @@
 
 /* --- テーマモード ------------------------------------------------------ */
 /* 転調は「赤い帯を足す」ではなく、器の色そのものを差し替えることで起こす。 */
+/* --fg-muted と --fg-note を分けてある（Issue #144）。--fg-muted は「目立たない
+   こと自体が演出」の側（受信トレイの伏線・共有フォルダ・2003年書式の紙）に残し、
+   --fg-note は参加者が次の判断に使う小文字（課題の補足・判定理由・操作案内）に
+   使う。後者だけを背景とのコントラスト比4.5:1以上へ寄せる——crisis は器が
+   ほぼ黒なので、--fg-muted のままだと 3.6:1 前後で会場の後ろから読めない。 */
 [data-mode="peace"] {
   --bg: #f5f1e8;  --surface: #fffdf8; --surface-2: #efe9dc;
-  --fg: #2b2724;  --fg-muted: #6f6559;
+  --fg: #2b2724;  --fg-muted: #6f6559; --fg-note: #6f6559;
   --accent: #3f7d78; --rule: #ddd5c6;
   --ok: #3f7d78;  --warn: #b8862b;
 }
 [data-mode="alert"] {
   --bg: #14171a;  --surface: #1e2226; --surface-2: #272c31;
-  --fg: #e8ecef;  --fg-muted: #8d979f;
+  --fg: #e8ecef;  --fg-muted: #8d979f; --fg-note: #8d979f;
   --accent: #c1121f; --rule: #2c3238;
   --ok: #3fa66b;  --warn: #d99a1f;
 }
 [data-mode="crisis"] {
   --bg: #08090a;  --surface: #101112; --surface-2: #17191b;
-  --fg: #d8dce0;  --fg-muted: #6b7176;
+  --fg: #d8dce0;  --fg-muted: #6b7176; --fg-note: #7f868c;
   --accent: #e01e2b; --rule: #1e2022;
   --ok: #3fa66b;  --warn: #d99a1f;
 }
@@ -192,7 +197,7 @@
 
 .pane-hd {
   flex: 0 0 auto; padding: 11px 14px; font-size: 13px; font-weight: 700;
-  letter-spacing: .06em; color: var(--fg-muted);
+  letter-spacing: .06em; color: var(--fg-note);
   border-bottom: 1px solid var(--rule); display: flex; align-items: center; gap: 8px;
   transition: color .78s ease, border-color .78s ease;
 }
@@ -276,8 +281,8 @@
   font-variant-numeric: tabular-nums; line-height: 1;
 }
 .s2-timer.hot { color: var(--warn); }
-.s2-note { font-size: 14px; color: var(--fg-muted); line-height: 1.8; max-width: 62ch; }
-.s2-log { font-size: 13px; color: var(--fg-muted); line-height: 2; }
+.s2-note { font-size: 14px; color: var(--fg-note); line-height: 1.8; max-width: 62ch; }
+.s2-log { font-size: 13px; color: var(--fg-note); line-height: 2; }
 .s2-log b { color: var(--fg); font-weight: 600; }
 .s2-log .cost { color: var(--warn); }
 
@@ -300,13 +305,13 @@
 .stage-title::before { content: "▸"; color: var(--accent); }
 .brief { font-size: calc(18px * var(--fs-scale)); line-height: 1.75; max-width: 60ch; }
 .cols {
-  font-family: var(--font-num); font-size: calc(13px * var(--fs-scale)); color: var(--fg-muted);
+  font-family: var(--font-num); font-size: calc(13px * var(--fs-scale)); color: var(--fg-note);
   border-left: 2px solid var(--rule); padding-left: 12px; line-height: 1.9;
 }
 .box { border: 1px solid var(--rule); background: var(--surface); transition: background-color .78s ease, border-color .78s ease; }
 .box > .hd {
   padding: 8px 13px; font-size: calc(13px * var(--fs-scale)); font-weight: 700; letter-spacing: .05em;
-  color: var(--fg-muted); border-bottom: 1px solid var(--rule);
+  color: var(--fg-note); border-bottom: 1px solid var(--rule);
 }
 /* Stage 3：差し戻し（不足）の枠。橙のみ、赤は使わない（Stage 2 §3の絶対条件を継続）。 */
 .box.warn { border-color: var(--warn); }
@@ -320,9 +325,9 @@
   background: transparent; color: var(--fg); border: 0; padding: 13px;
   font-family: var(--font-num); font-size: calc(14px * var(--fs-scale)); line-height: 1.7;
 }
-.submit-area::placeholder { color: var(--fg-muted); }
+.submit-area::placeholder { color: var(--fg-note); }
 .recog {
-  font-family: var(--font-num); font-size: calc(13px * var(--fs-scale)); color: var(--fg-muted);
+  font-family: var(--font-num); font-size: calc(13px * var(--fs-scale)); color: var(--fg-note);
   padding: 0 13px 11px; min-height: 1.4em;
 }
 
@@ -331,7 +336,7 @@
    なので1本。超えても提出は止めない——止めた瞬間「詰まらせない」が壊れる。 */
 .s2-dl {
   display: flex; align-items: center; gap: 12px;
-  font-family: var(--font-num); font-size: 14px; color: var(--fg-muted);
+  font-family: var(--font-num); font-size: 14px; color: var(--fg-note);
 }
 .s2-dl .bar { flex: 0 0 190px; height: 5px; background: var(--surface-2); position: relative; }
 .s2-dl .bar i { position: absolute; inset: 0 auto 0 0; background: var(--ok); transition: width .25s linear; }
@@ -348,7 +353,7 @@
 .grid th, .grid td { border: 1px solid var(--rule); padding: 0; }
 .grid th {
   position: sticky; top: 0; z-index: 1; background: var(--surface-2);
-  font-size: 12px; font-weight: 700; color: var(--fg-muted);
+  font-size: 12px; font-weight: 700; color: var(--fg-note);
   padding: 5px 7px; text-align: left; white-space: nowrap;
 }
 .grid td input {
@@ -371,12 +376,12 @@
 .grid.landed { animation: gridLanded .9s ease-out; }
 .grid .n { width: 1%; white-space: nowrap; background: var(--surface-2); }
 .grid .n button {
-  background: transparent; border: 0; color: var(--fg-muted);
+  background: transparent; border: 0; color: var(--fg-note);
   font-family: var(--font-num); font-size: 12px; padding: 4px 6px; letter-spacing: .06em;
 }
 .grid .n button:hover { color: var(--warn); }
 .grid tfoot button {
-  background: transparent; border: 0; color: var(--fg-muted);
+  background: transparent; border: 0; color: var(--fg-note);
   font-family: var(--font-num); font-size: 13px; padding: 7px 9px;
 }
 .grid tfoot button:hover { color: var(--fg); }
@@ -394,7 +399,7 @@
 .folded {
   display: flex; align-items: center; gap: 14px;
   border: 1px solid var(--rule); background: var(--surface);
-  padding: 11px 13px; font-family: var(--font-num); font-size: 14px; color: var(--fg-muted);
+  padding: 11px 13px; font-family: var(--font-num); font-size: 14px; color: var(--fg-note);
 }
 .folded .grow { flex: 1; }
 /* 提出ボタンは中央ペインの中に置く。誰かが「待って」と言える距離に。 */
@@ -413,7 +418,7 @@
 
 /* --- 判定：1項目ずつ点いていく2秒間 ------------------------------------ */
 .verdict { display: flex; flex-direction: column; gap: 9px; }
-.verdict .lead { font-size: calc(15px * var(--fs-scale)); color: var(--fg-muted); }
+.verdict .lead { font-size: calc(15px * var(--fs-scale)); color: var(--fg-note); }
 .check {
   display: flex; gap: 11px; align-items: flex-start; font-size: calc(16px * var(--fs-scale));
   opacity: 0; transform: translateY(3px); transition: opacity .22s ease, transform .22s ease;
@@ -422,7 +427,7 @@
 .check .mark { font-family: var(--font-num); font-weight: 700; flex: 0 0 auto; }
 .check.pass .mark { color: var(--ok); }
 .check.fail .mark { color: var(--warn); }
-.check.halt { color: var(--fg-muted); }
+.check.halt { color: var(--fg-note); }
 .check .why {
   display: block; font-size: calc(14px * var(--fs-scale)); color: var(--warn);
   font-family: var(--font-legacy); margin-top: 4px;
@@ -435,7 +440,7 @@
 .verdict .checking::before {
   content: ""; display: inline-block; width: 12px; height: 12px; margin-right: 8px;
   vertical-align: -1px; border-radius: 50%;
-  border: 2px solid var(--fg-muted); border-top-color: transparent;
+  border: 2px solid var(--fg-note); border-top-color: transparent;
   animation: verdictSpin .8s linear infinite;
 }
 /* 結果の行が下に付いたら輪は止める。JS側で消し忘れないようCSSで自動にする。 */
@@ -891,10 +896,10 @@
 /* Stage 5：提出候補の枠。.box を土台にする（枠の見た目だけを借りる——Stage 5 に
    判定は無いので .warn は使わない。docs/ui/06_Stage5.md §2）。 */
 .s6cand { padding: 14px; display: flex; gap: 14px; align-items: flex-start; min-height: 120px; }
-.s6cand .empty { color: var(--fg-muted); font-size: 15px; }
+.s6cand .empty { color: var(--fg-note); font-size: 15px; }
 .s6cand .thumb { width: 120px; height: 120px; object-fit: cover; border: 1px solid var(--rule); flex: 0 0 auto; background: var(--surface-2); cursor: zoom-in; }
 .s6cand .thumb.broken { display: none; cursor: default; }
-.s6cand .thumb-fallback { width: 120px; flex: 0 0 auto; font-size: 12px; line-height: 1.6; color: var(--fg-muted); border: 1px dashed var(--rule); padding: 8px; }
+.s6cand .thumb-fallback { width: 120px; flex: 0 0 auto; font-size: 12px; line-height: 1.6; color: var(--fg-note); border: 1px dashed var(--rule); padding: 8px; }
 .s6cand .thumb-fallback.hide { display: none; }
 
 /* Stage 4：事務長の督促ポップアップ（2026-08-22再設計で近藤さんから差し替え）。
@@ -1050,7 +1055,7 @@
 }
 .fpiece.ready { opacity: 1; filter: grayscale(0); border-style: solid; }
 .fpiece.done { border-color: var(--accent); }
-.fpiece-label { font-size: 12px; color: var(--fg-muted); letter-spacing: .08em; margin-bottom: 8px; }
+.fpiece-label { font-size: 12px; color: var(--fg-note); letter-spacing: .08em; margin-bottom: 8px; }
 .fpiece-body { display: flex; flex-direction: column; gap: 10px; align-items: stretch; }
 .fpiece-prompt { font-size: 14px; color: var(--fg); text-align: left; }
 .fpiece-body input {
@@ -1065,7 +1070,7 @@
    「祝いの一言は出さない」流儀を締めのメッセージ（.fclose）でも踏襲する。 */
 .fboard.done .ftile { animation: fPulse .9s ease-out; }
 @keyframes fPulse { 0% { box-shadow: 0 0 0 rgba(0,0,0,0); } 40% { box-shadow: 0 0 0 3px var(--accent); } 100% { box-shadow: 0 0 0 rgba(0,0,0,0); } }
-.fclose { font-size: 15px; line-height: 1.9; color: var(--fg-muted); max-width: 56ch; text-align: center; margin: 4px auto 0; }
+.fclose { font-size: 15px; line-height: 1.9; color: var(--fg-note); max-width: 56ch; text-align: center; margin: 4px auto 0; }
 .fclose .fclose-head { color: var(--fg); font-weight: 700; margin-bottom: 4px; }
 
 /* Final：②感謝状（2026-08-22追加、同日ユーザー確認で「記念品」寄りの
