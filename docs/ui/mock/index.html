@@ -1993,6 +1993,42 @@
     v.innerHTML = '<div class="verdict"><div class="lead checking">提出を確認しています…</div></div>';
     return v.firstElementChild;
   }
+
+  /* ステージごとの現場反応（Issue #150）。既にあるクリア表示（.verdict の判定枠、
+     Stage 1 だけは結果ウィンドウの声の欄）へ1行だけ足して、提出した成果が病院の
+     どこへ届いたのかを短く返す。新しいオーバーレイ・アニメーション・効果音は
+     増やさない。判定・順位・AIの応答には一切触れない——出す文言と場所だけ。
+     話者は現場の当事者に限る。ここで幹部を出すと、既にある事務長（S5_CLEAR_LINES）
+     や院長の台詞と役目がぶつかる。矛先は組織と状況へ向け、職種は貶めない
+     （AGENTS.md トーンルール）。 */
+  const FIELD_ECHO = {
+    s1: "〔3B病棟 看護師〕返信が届きました。確認の電話を何本もかけずに済みます。",
+    s2: "〔5A病棟 師長〕整った一覧をいただきました。今夜の夜勤への引き継ぎに、このまま使えます。",
+    s3: "〔3B病棟 看護師長〕方針を受け取りました。3名は個室を空けて、通常の病室でお迎えできます。",
+    s4: "〔夜勤師長〕確認の依頼が届きました。今夜の申し送りで、目の痛みを全員に聞いてみます。",
+    s5: "〔5B病棟 師長〕保健所への報告が通ったそうですね。病棟で数え直しを頼まれずに済みます。",
+    s6: "〔患者相談窓口 近藤〕受付と病棟入口へ掲示しました。さっそく、絵を指さして面会時間を確かめる方がいます。"
+  };
+  /* 現場反応を読む一拍。解錠演出が画面を覆う前に置く——Stage 5 が S5_CLEAR_LINES の
+     後に later(stage5UnlockSequence, 2200) で取っている間合いと同じ値に揃える
+     （新しい演出ではなく、既にある解錠の呼び出しを一拍遅らせるだけ）。
+     prefers-reduced-motion では later() が 0 になる（既存挙動）。 */
+  const FIELD_ECHO_HOLD_MS = 2200;
+
+  /* 現場反応を判定枠へ積む。行は .lead——既存の差し戻し文と同じ地の文の見た目に
+     揃え、クリアの見出し（.done）より前に置く（Stage 5 の並びと同じ）。 */
+  function appendFieldEcho(box, lines) {
+    lines.forEach((text) => {
+      const l = document.createElement("div");
+      l.className = "lead";
+      l.textContent = text;
+      box.appendChild(l);
+    });
+    // 判定枠は提出フォームの下にあるので、行が増えるほど画面の外へ落ちる。
+    // Stage 4 の s4ScrollTalkIntoView() と同じ操作で中央ペインを末尾まで送る。
+    const work = paneC.querySelector(".work");
+    if (work) work.scrollTo({ top: work.scrollHeight, behavior: "smooth" });
+  }
   let timers = [];
   const later = (fn, ms) => { timers.push(setTimeout(fn, reduce ? 0 : ms)); };
   const clearLater = () => { timers.forEach(clearTimeout); timers = []; };
@@ -5449,12 +5485,15 @@
 
   // R2・R3・手動クリア・詰み防止用の簡易表示。R1失敗（kind "round1"）は
   // 内容量が多いので、こちらではなく専用の s1ThreadHTML を使う。
-  function s1VoicesHTML() {
-    if (!s1.curt.length) return "";
+  // lead: クリア時の現場反応（Issue #150）。器を増やさず、同じ .voices の
+  // 先頭行として出す——そっけない返信の声が0件でも、この行だけで箱を開く。
+  function s1VoicesHTML(lead) {
+    if (!s1.curt.length && !lead) return "";
     const rows = s1.curt.slice(0, S1_CURT_SHOWN).map((c, i) =>
       "〔" + c.def.from + "〕" + S1_CURT_VOICES[i % S1_CURT_VOICES.length]);
     const rest = s1.curt.length - S1_CURT_SHOWN;
     if (rest > 0) rows.push("……ほか " + rest + "件、同じような返事が届いています。");
+    if (lead) rows.unshift(lead);
     return '<div class="voices">' + rows.map((r) => "<div>" + esc(r) + "</div>").join("") + "</div>";
   }
 
@@ -5539,7 +5578,7 @@
       '<div class="sum">' + sum + "</div>" +
       restLine +
       '<div class="said">' + esc(s1AdminLine(kind, missed, s1.curt.length)) + "</div>" +
-      (kind === "round1" ? s1ThreadItemsHTML() : s1VoicesHTML()) +
+      (kind === "round1" ? s1ThreadItemsHTML() : s1VoicesHTML(kind === "round2" ? "" : FIELD_ECHO.s1)) +
       okHTML;
     $("ov-s1res").classList.remove("hide");
     // クリア（manual/ai/partial）だけ鳴らす。round1・round2 は失敗の結果窓だが、
@@ -6589,10 +6628,13 @@
     if (!bad) {
       s2Hot = [];
       s2StopDeadline();
+      appendFieldEcho(box, [FIELD_ECHO.s2]);
       const d = document.createElement("div");
       d.className = "done"; d.textContent = "Stage 2 をクリアしました";
       box.appendChild(d);
-      unlockSequence();
+      // 現場反応を読む一拍を置いてから解錠へ（Stage 5 と同じ間合い）。即座に
+      // 呼ぶと、足した1行が出た瞬間に解錠オーバーレイで隠れて読めない。
+      later(unlockSequence, FIELD_ECHO_HOLD_MS);
     } else {
       // 該当セルを光らせておく。[提出に戻る] でグリッドが開いた瞬間に、
       // 直すべき場所が既に指されている。探す時間がゼロになる。
@@ -6814,6 +6856,7 @@
       return;
     }
 
+    appendFieldEcho(box, [FIELD_ECHO.s3]);
     const d = document.createElement("div");
     // 見出しは「今クリアしたステージ」を言う（Issue #79。解錠は次のステージが
     // 開くという意味だが、参加者には自分が何を終えたのかを伝えるほうが分かりやすい）。
@@ -6822,7 +6865,8 @@
     d.className = "done"; d.textContent = "Stage 3 をクリアしました";
     box.appendChild(d);
     s3Verdicting = false;
-    stage3UnlockSequence();
+    // 現場反応を読む一拍（Stage 2・5 と同じ間合い）。
+    later(stage3UnlockSequence, FIELD_ECHO_HOLD_MS);
   }
 
   async function stage3UnlockSequence() {
@@ -7257,7 +7301,9 @@
     s4ActionVerdicting = false;
     // 結果演出（院長の結果報告3行 → クリアカード）は 2026-09-06 ユーザー決定で削除。
     // 通過したら、他ステージと同じクリア画面（#ov-unlock）へそのまま送る。
-    stage4UnlockSequence();
+    appendFieldEcho(box, [FIELD_ECHO.s4]);   // 対話の下端まで送るのは appendFieldEcho の側
+    // 現場反応を読む一拍（Stage 2・5 と同じ間合い）。
+    later(stage4UnlockSequence, FIELD_ECHO_HOLD_MS);
   }
 
   async function stage4UnlockSequence() {
@@ -7584,6 +7630,9 @@
       l.className = "lead"; l.textContent = line;
       box.appendChild(l);
     });
+    // 現場反応は事務長の一言の後に置く（Issue #150）——「私からお届けしておきます」
+    // より先に受理を告げると、順序が逆になる。
+    appendFieldEcho(box, [FIELD_ECHO.s5]);
     const d = document.createElement("div");
     // 見出しは「今クリアしたステージ」を言う（Issue #79）。次に開く Stage 6 は
     // stage5UnlockSequence() の副題が言う。
@@ -7992,11 +8041,13 @@
       return;
     }
 
+    appendFieldEcho(box, [FIELD_ECHO.s6]);
     const d = document.createElement("div");
     d.className = "done"; d.textContent = "Stage 6 をクリアしました（テストプレイ完走）";
     box.appendChild(d);
     s6Verdicting = false;
-    stage6GoalSequence();
+    // 現場反応を読む一拍（Stage 2・5 と同じ間合い）。ゴール演出は変えない。
+    later(stage6GoalSequence, FIELD_ECHO_HOLD_MS);
   }
 
   /* Stage 5 クリア＝レースのゴール。Stage 4 までと同じ「次のステージを
