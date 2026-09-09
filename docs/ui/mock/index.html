@@ -295,7 +295,9 @@
    浮いている、高さ44pxのバー）を避けるため。これが無いと、最下段の［提出する］
    ［確認した（次へ）］がバーの下へ潜って押せなくなる（Issue #93）。
    22px（他辺と同じ余白）＋62px（バーの高さ＋余白）。 */
-.work { flex: 1; overflow-y: auto; padding: 22px 28px 84px; display: flex; flex-direction: column; gap: 18px; }
+/* 下余白は苅部さんのバー（.phs＝画面下から 62px + 高さ44px ＝ 106px）より深く取る。
+   浅いと、末尾まで送った判定の最終行がバーの下へ潜って読めない。 */
+.work { flex: 1; overflow-y: auto; padding: 22px 28px 110px; display: flex; flex-direction: column; gap: 18px; }
 .stage-title { font-size: calc(20px * var(--fs-scale)); font-weight: 700; display: flex; align-items: center; gap: 9px; }
 .stage-title::before { content: "▸"; color: var(--accent); }
 .brief { font-size: calc(18px * var(--fs-scale)); line-height: 1.75; max-width: 60ch; }
@@ -2014,6 +2016,17 @@
      （新しい演出ではなく、既にある解錠の呼び出しを一拍遅らせるだけ）。
      prefers-reduced-motion では later() が 0 になる（既存挙動）。 */
   const FIELD_ECHO_HOLD_MS = 2200;
+
+  /* クリアの記録（停留所・サーバへのクリア報告・チェックポイント）。現場反応の
+     余韻も解錠演出も待たず、判定が成立した瞬間に確定させる——レースの到達時刻と
+     順位が、演出の長さや prefers-reduced-motion の設定で動いてはいけない
+     （Stage 1 の s1Result と同じ扱い）。遅らせてよいのは #ov-unlock の表示と
+     その後の go() だけ。 */
+  function recordStageClear(pos) {
+    TEAMS[2].pos = pos;
+    reportProgress(pos, "clear");
+    saveCheckpoint("stage-clear");
+  }
 
   /* 現場反応を判定枠へ積む。行は .lead——既存の差し戻し文と同じ地の文の見た目に
      揃え、クリアの見出し（.done）より前に置く（Stage 5 の並びと同じ）。 */
@@ -6649,6 +6662,8 @@
       const d = document.createElement("div");
       d.className = "done"; d.textContent = "Stage 2 をクリアしました";
       box.appendChild(d);
+      // 到達は今この瞬間。余韻の前に記録する（recordStageClear のコメント参照）。
+      recordStageClear(3);
       // 現場反応を読む一拍を置いてから解錠へ（Stage 5 と同じ間合い）。即座に
       // 呼ぶと、足した1行が出た瞬間に解錠オーバーレイで隠れて読めない。
       later(unlockSequence, FIELD_ECHO_HOLD_MS);
@@ -6680,8 +6695,8 @@
     // 承認だけが報酬。スコアも星も出さない。
     hasUnlockMail = true; renderMails("u");
     sfx("decision1");   // 師長の承認メールが着弾する
-    // 自チームのマーカーが S3 へ滑る
-    TEAMS[2].pos = 3; reportProgress(3, "clear"); saveCheckpoint("stage-clear");
+    // 停留所とクリア報告は runVerdict() 側で済んでいる（recordStageClear）。
+    // ここは演出だけを担う。
     await wait(700);
     if (view !== "s2") return;   // 判断C
     // 解錠の喜びの陰で、誰も見ていない数字が増える。演出はつけない。
@@ -6887,6 +6902,8 @@
     d.className = "done"; d.textContent = "Stage 3 をクリアしました";
     box.appendChild(d);
     s3Verdicting = false;
+    // 到達は今この瞬間。立て直しの2行を読む間も、記録の時刻は動かさない。
+    recordStageClear(4);
     // 現場反応を読む一拍（Stage 2・5 と同じ間合い）。立て直したチームは行が
     // 増えるぶん長めに取る。
     later(stage3UnlockSequence, s3Recovered ? S3_RECOVERY_HOLD_MS : FIELD_ECHO_HOLD_MS);
@@ -6904,9 +6921,8 @@
     $("ov-unlock").classList.add("hide");
     // 発熱の値はここでは触らない——9→14 の急増は次ステージの開始演出が担う
     // （先に 14 にすると急変の一報が死ぬ）。
-    // 停留所は 2026-08-22 の表示番号振り直しで S4 が独立したので、ここで進める
-    // （以前は S3 の停留所を共有していたため進めなかった）。
-    TEAMS[2].pos = 4; reportProgress(4, "clear"); saveCheckpoint("stage-clear");
+    // 停留所とクリア報告は runStage3Verdict() 側で済んでいる（recordStageClear。
+    // 2026-08-22 の表示番号振り直しで S4 が独立した停留所を持つ）。
     go("s4");
   }
 
@@ -7325,6 +7341,8 @@
     // 結果演出（院長の結果報告3行 → クリアカード）は 2026-09-06 ユーザー決定で削除。
     // 通過したら、他ステージと同じクリア画面（#ov-unlock）へそのまま送る。
     appendFieldEcho(box, [FIELD_ECHO.s4]);   // 対話の下端まで送るのは appendFieldEcho の側
+    // 到達は今この瞬間（表示番号振り直し後、このクリアで進むのは S5 の停留所）。
+    recordStageClear(5);
     // 現場反応を読む一拍（Stage 2・5 と同じ間合い）。
     later(stage4UnlockSequence, FIELD_ECHO_HOLD_MS);
   }
@@ -7338,8 +7356,7 @@
     await wait(1900);
     if (view !== "s4") return;   // 判断C
     $("ov-unlock").classList.add("hide");
-    // 表示番号振り直し後、このクリアで進むのは S5（旧 Stage 4）の停留所。
-    TEAMS[2].pos = 5; reportProgress(5, "clear"); saveCheckpoint("stage-clear");
+    // 停留所とクリア報告は runS4ActionVerdict() 側で済んでいる（recordStageClear）。
     // このステージだけ、クリア後に次のシーンへ実際に遷移する（devbar・URLハッシュ
     // 単体起動でも詰まないようにするため。docs/ui/mock/README.md の他ステージは
     // 遷移せず状態更新のみで留まるが、S4→S5 の配線検証にはここが要る）。
@@ -7662,6 +7679,10 @@
     d.className = "done"; d.textContent = "Stage 5 をクリアしました";
     box.appendChild(d);
     s5Verdicting = false;
+    // 到達は今この瞬間。他ステージと同じく、余韻より先に記録を確定させる
+    // （この2200msの間はもともと記録が止まっていたが、同じ器へ現場反応を
+    // 1行足したのでここも揃える）。
+    recordStageClear(6);
     // 台詞を読む一拍を置いてから解錠オーバーレイへ。即座に覆うと、追加した
     // 事務長の一言が出た瞬間に隠れて読めない（Stage 4 の 2200ms と同じ間合い）。
     later(stage5UnlockSequence, 2200);
@@ -7676,12 +7697,11 @@
     await wait(1900);
     if (view !== "s5") return;   // 判断C
     $("ov-unlock").classList.add("hide");
-    // 位置を次の停留所へ進めてから、Stage 5 へ自動で進む（2026-08-22追加。
-    // stage3UnlockSequence() と同じ流儀——それまではファシリテーターが
-    // devbarで送る必要があった）。
+    // 停留所とクリア報告は runStage5Verdict() 側で済んでいる（recordStageClear）。
+    // ここは Stage 6 へ自動で進むだけ（2026-08-22追加。stage3UnlockSequence() と
+    // 同じ流儀——それまではファシリテーターがdevbarで送る必要があった）。
     // 発熱インジケータは動かさない——Stage 4・5 は 14 のまま継続
     // （docs/scenario/00_未知ウイルスの通奏低音.md §3「●●●継続」）。
-    TEAMS[2].pos = 6; reportProgress(6, "clear"); saveCheckpoint("stage-clear");
     await wait(900);
     if (view !== "s5") return;   // 判断C
     go("s6");
@@ -8069,6 +8089,8 @@
     d.className = "done"; d.textContent = "Stage 6 をクリアしました（テストプレイ完走）";
     box.appendChild(d);
     s6Verdicting = false;
+    // ゴールは今この瞬間。余韻の長さでレースの着順を動かさない。
+    recordStageClear(7);
     // 現場反応を読む一拍（Stage 2・5 と同じ間合い）。ゴール演出は変えない。
     later(stage6GoalSequence, FIELD_ECHO_HOLD_MS);
   }
@@ -8089,7 +8111,8 @@
     // （docs/scenario/00_未知ウイルスの通奏低音.md §3「●●●継続」）。ゴール演出の
     // 間もここは 14・crisis のまま。0 と peace へ落ちるのは、この後のエピローグを
     // 経て Final へ入る瞬間だけ（go() の final 分岐。2026-09-06）。
-    TEAMS[2].pos = 7; reportProgress(7, "clear"); saveCheckpoint("stage-clear");   // フッターの停留所表示も同時に進める
+    // 停留所とクリア報告（フッターの停留所表示を含む）は runStage6Verdict() 側で
+    // 済んでいる（recordStageClear）。ここはゴール演出だけを担う。
     goalSequence();
     $("goal-s").textContent = "レース終了 — このあと振り返りへ進みます";
     // .onclick への代入（addEventListener の積み増しではなく上書き）——
