@@ -313,6 +313,11 @@
   display: flex; flex-direction: column; gap: 4px;
   transition: background-color .78s ease, border-color .78s ease;
 }
+/* Stage 1 だけは課題文を持たない（続くのは受信トレイの件数と締切）ので、
+   同じ .case でも上下を詰めて1行の帯にする。Stage 1 の .work は
+   overflow:hidden ＋ flex でメール本文の高さを決めており、カードが高いぶん
+   そのまま本文の可視領域が削れるため（Issue #145・codex Sol の指摘）。 */
+.case.slim { padding-top: 3px; padding-bottom: 4px; }
 .stage-title { font-size: calc(22px * var(--fs-scale)); font-weight: 700; display: flex; align-items: center; gap: 9px; }
 .stage-title::before { content: "▸"; color: var(--accent); }
 .brief { font-size: calc(16px * var(--fs-scale)); line-height: 1.7; max-width: 60ch; }
@@ -5613,7 +5618,7 @@
     const cur = s1.items.find((x) => x.key === s1.open && x.state === "live");
     const roundLabel = s1.round === 2 ? "　（2回目・AIあり）" : s1.round === 3 ? "　（3回目・コンテキストあり）" : "";
     const head =
-      '<div class="case"><div class="stage-title">Stage 1　平常運転' + roundLabel + "</div></div>" +
+      '<div class="case slim"><div class="stage-title">Stage 1　平常運転' + roundLabel + "</div></div>" +
       '<div class="s2-hd">' +
         '<div class="s2-count">返信済み　<b>' + doneThisRound + " / " + defs.length + "</b></div>" +
         '<div class="grow"></div>' +
@@ -5625,7 +5630,7 @@
     // （ウィンドウそのものは #ov-s1res という別要素で全画面を覆うので、
     // 背後にどちらが描かれていても見え方に影響しない）。
     if (s1.open === "memo") {
-      paneC.innerHTML = '<div class="work" style="padding:14px 24px 78px;gap:8px;overflow:hidden">' + head +
+      paneC.innerHTML = '<div class="work" style="padding:4px 24px 78px;gap:8px;overflow:hidden">' + head +
         '<div class="reader" style="padding:0;overflow-y:auto;flex:1 1 auto;min-height:0">' + mailBodyHTML(S1_MEMO) + "</div>" +
         '<div class="row-end" style="flex:0 0 auto"><button class="btn ghost" id="s1-memo-copy">本文をコピー</button></div>' +
         "</div>";
@@ -5698,7 +5703,7 @@
     // 高さ44px）を送信ボタンが隠さないための実測クリアランス。ログは行数が読めず
     // ここに置くと再びボタンを押し出すので、この画面では出さない
     // （ログは未開封・クリア後の画面でのみ表示する）。
-    paneC.innerHTML = '<div class="work" style="padding:14px 24px 78px;gap:8px;overflow:hidden">' + head +
+    paneC.innerHTML = '<div class="work" style="padding:4px 24px 78px;gap:8px;overflow:hidden">' + head +
       '<div class="reader" style="padding:0;overflow-y:auto;flex:1 1 auto;min-height:0">' + mailBodyHTML(cur.def) + "</div>" +
       replyHTML +
       '<div class="row-end" style="flex:0 0 auto"><button class="btn" id="s1-send">送信する</button></div>' +
