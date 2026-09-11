@@ -12,3 +12,5 @@ minimumReleaseAgeExclude:
   - "@cloudflare/workers-types@5.20260820.1"
   - "@vitejs/plugin-react@6.1.0"
   - vite@8.2.2
+patchedDependencies:
+  wrangler@4.124.0: patches/wrangler@4.124.0.patch
