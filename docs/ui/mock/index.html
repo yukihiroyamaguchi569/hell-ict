@@ -5290,6 +5290,9 @@
     } else {
       mailReply = MAILS.map(() => "live");
       inboxDraft = MAILS.map(() => "");
+      // 既読も一緒に作り直す。ここを抜くと、前の試行で開封したまま
+      // welcome から入り直したときに「返信できるのに既読・未読バッジ0」になる。
+      mailState = MAILS.map(() => false);
       inboxT0 = Date.now();
     }
     inboxSave();
