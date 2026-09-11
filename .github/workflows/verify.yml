@@ -60,3 +60,6 @@ jobs:
       - run: pnpm install --frozen-lockfile
       - run: pnpm exec playwright install --with-deps chromium
       - run: pnpm verify:full
+      # verify と同じ理由（journey E2E でも wrangler dev が同じ形で落ちうる）。
+      - if: failure()
+        run: for f in ~/.config/.wrangler/logs/*.log; do echo "===== $f"; cat "$f"; done
