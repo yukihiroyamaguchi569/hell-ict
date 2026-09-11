@@ -98,6 +98,61 @@ const formatFeverLinelist = (text) => {
   return `承知しました。日付はYYYY-MM-DD、体温は℃に統一しました。\n\n${table}`;
 };
 
+/* ---------------------------------------------------------------------- *
+ * Stage 1（平常運転）の返信下書き                                          *
+ *                                                                        *
+ * 既定の固定文（DEFAULT_REPLY）は14文字しかなく、モックの返信判定           *
+ * （S1_MIN_LEN＝70文字以上 かつ S1_POLITE の丁寧語を含む）に届かない。      *
+ * そのためLIVEで［AIに下書きさせる］を使うと、下書きをそのまま送っても必ず  *
+ * 「そっけない」判定になり、Stage 1 をクリアできない——当日と同じLIVE経路を  *
+ * スタブで通せない、という形で塞がっていた。                               *
+ *                                                                        *
+ * 直すのはスタブだけで、モック側の判定（S1_MIN_LEN / S1_POLITE）は動かさない。*
+ * 実モデルはこの程度の長さの丁寧な下書きを返すので、スタブが短すぎるほうが  *
+ * 実態から外れている。                                                     *
+ * ---------------------------------------------------------------------- */
+
+/**
+ * Stage 1 の下書き依頼の目印。モックの s1BuildDraftText が必ず先頭へ置く
+ * 固定文と、受信メールのブロック見出しの両方を求める。参加者が打つ自由文では
+ * まず書かない組み合わせなので、Stage 2〜5 のチャットへ紛れ込まない。
+ */
+const S1_DRAFT_HEAD = "次の院内メールへの返信を下書きしてください。";
+const S1_MAIL_BLOCK = "【受信メール】";
+/** 下書き依頼に含まれる差出人。宛名に使う（無ければ宛名を省く）。 */
+const S1_FROM = /^差出人:\s*(.+)$/m;
+
+/**
+ * Stage 1 の返信下書き。S1_MIN_LEN（70文字）とS1_POLITE（丁寧語）を必ず満たす
+ * 長さと文面にする（宛名を除いて103文字。差出人名を足して109〜115文字——いちばん
+ * 短い「外来」で109、いちばん長い「3B病棟 看護師」で115。どれも70文字を超える）。
+ * 内容は「確認して折り返す」だけ
+ * ——この世界に正しい答えは存在しない（架空の病院なので実モデルも知らない）ので、
+ * 院内固有の連絡先や数値を作り話で埋めない。モックの draftPlain と同じ建て付け。
+ *
+ * 📌 差出人は**いちばん新しい依頼**から取る。userText() は同じスレッドのユーザー
+ * 発言を全部繋いで渡してくるので、素直に先頭から探すと2通目以降の宛名が1通目の
+ * 差出人（例：給食課）のままになる——LIVEで複数通に下書きを使うと必ず起きる。
+ * 最後の S1_DRAFT_HEAD 以降へ切り詰め、さらに【受信メール】以降だけを見る
+ * （コンテキスト欄に貼られた資料の中の「差出人:」を拾わないため）。
+ */
+const draftStage1Reply = (text) => {
+  const headIndex = text.lastIndexOf(S1_DRAFT_HEAD);
+  if (headIndex < 0) return null;
+  const request = text.slice(headIndex);
+  const blockIndex = request.indexOf(S1_MAIL_BLOCK);
+  if (blockIndex < 0) return null;
+  const matched = S1_FROM.exec(request.slice(blockIndex));
+  const salutation = matched === null ? "" : `${matched[1].trim()} 各位\n`;
+  return (
+    "（スタブ応答）\n" +
+    salutation +
+    "お世話になっております。ご連絡いただきありがとうございます。\n" +
+    "いただいた件につきましては、こちらで確認のうえ、改めてご連絡いたします。\n" +
+    "お手数をおかけいたしますが、よろしくお願いいたします。"
+  );
+};
+
 /** 会話履歴からユーザー発言だけを繋ぐ（systemの指示文を表と読み違えないため）。 */
 const userText = (payload) => {
   const messages = Array.isArray(payload?.messages) ? payload.messages : [];
@@ -114,7 +169,11 @@ const replyFor = (body) => {
   } catch {
     return DEFAULT_REPLY;
   }
-  return formatFeverLinelist(userText(payload)) ?? DEFAULT_REPLY;
+  // Stage 5 の整形を先に見る（この分岐は患者ID・発熱確認日・最高体温の見出しと
+  // データ2行以上を求めるので、Stage 1 の下書き依頼が紛れ込むことはない）。
+  // 続いて Stage 1 の下書き。どちらでもなければ従来どおり固定文へ落ちる。
+  const text = userText(payload);
+  return formatFeverLinelist(text) ?? draftStage1Reply(text) ?? DEFAULT_REPLY;
 };
 
 /* ---------------------------------------------------------------------- *

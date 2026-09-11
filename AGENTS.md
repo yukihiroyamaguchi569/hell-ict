@@ -84,7 +84,7 @@
 
 - `pnpm verify`: format、lint、型検査、ドメインテスト、教材整合テスト、Worker統合テスト、主要E2Eを実行する。PRの必須チェックとし、数分で終わる状態を保つ。
 - `pnpm verify:full`: 全E2E、全体Mutation Testing、重複検査、依存関係監査を実行する。手動実行と、中核ロジックを大きく変更したPRで使用する。
-  - 配信版モックをPrologueから感謝状まで1本で通すテスト（`e2e/journey/`、Playwrightの`journey`プロジェクト）は、実時間で2分半かかるため監査レーンだけに置く。高速レーンの`pnpm test:e2e`は`--project=chromium`なので走らない。
+  - 配信版モックをPrologueから感謝状まで1本で通すテスト（`e2e/journey/full-run.spec.ts`）と、Stage 1のラウンド遷移（R2の時間切れ→R3→やり直し→クリア）を通すテスト（`e2e/journey/stage1-rounds.spec.ts`）は、Playwrightの`journey`プロジェクトに置く。どちらも締切や演出を実時間で待つため1本あたり3分前後かかり、監査レーンだけに置く。高速レーンの`pnpm test:e2e`は`--project=chromium`なので走らない。
 
 CIでは `pnpm verify` を、コードに影響しうる変更を含む全PRで実行し、`pnpm verify:full` は既定でスキップする。`docs/`（`docs/materials/` と `docs/ui/mock/` を除く）とリポジトリ直下の `*.md` だけを変更したPRは、CI設定（`.github/workflows/verify.yml` の `paths-ignore`）により `pnpm verify` 自体をスキップする——`docs/materials/` はテストが実行時に読むため、`docs/ui/mock/` は配信版モックのE2E（`e2e/served-mock.spec.ts`）が検証対象そのものとして読むため、どちらも対象外とする。ゲーム状態遷移、ステージ判定、PIIゲート、時間処理、罰ゲーム、再接続の重複防止を変更したPRには `監査レーン` ラベルを付け、監査レーンをCIで実行する。ラベルを付けた時点で実行され、以後そのPRへpushするたびに再実行される。ラベルなしでも手動実行（Actionsの Run workflow）で任意のブランチに対して実行できる。
 
