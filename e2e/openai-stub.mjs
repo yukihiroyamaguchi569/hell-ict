@@ -98,6 +98,49 @@ const formatFeverLinelist = (text) => {
   return `承知しました。日付はYYYY-MM-DD、体温は℃に統一しました。\n\n${table}`;
 };
 
+/* ---------------------------------------------------------------------- *
+ * Stage 1（平常運転）の返信下書き                                          *
+ *                                                                        *
+ * 既定の固定文（DEFAULT_REPLY）は14文字しかなく、モックの返信判定           *
+ * （S1_MIN_LEN＝70文字以上 かつ S1_POLITE の丁寧語を含む）に届かない。      *
+ * そのためLIVEで［AIに下書きさせる］を使うと、下書きをそのまま送っても必ず  *
+ * 「そっけない」判定になり、Stage 1 をクリアできない——当日と同じLIVE経路を  *
+ * スタブで通せない、という形で塞がっていた。                               *
+ *                                                                        *
+ * 直すのはスタブだけで、モック側の判定（S1_MIN_LEN / S1_POLITE）は動かさない。*
+ * 実モデルはこの程度の長さの丁寧な下書きを返すので、スタブが短すぎるほうが  *
+ * 実態から外れている。                                                     *
+ * ---------------------------------------------------------------------- */
+
+/**
+ * Stage 1 の下書き依頼の目印。モックの s1BuildDraftText が必ず先頭へ置く
+ * 固定文と、受信メールのブロック見出しの両方を求める。参加者が打つ自由文では
+ * まず書かない組み合わせなので、Stage 2〜5 のチャットへ紛れ込まない。
+ */
+const S1_DRAFT_HEAD = "次の院内メールへの返信を下書きしてください。";
+const S1_MAIL_BLOCK = "【受信メール】";
+/** 下書き依頼に含まれる差出人。宛名に使う（無ければ宛名を省く）。 */
+const S1_FROM = /^差出人:\s*(.+)$/m;
+
+/**
+ * Stage 1 の返信下書き。S1_MIN_LEN（70文字）とS1_POLITE（丁寧語）を必ず満たす
+ * 長さと文面にする。内容は「確認して折り返す」だけ——この世界に正しい答えは
+ * 存在しない（架空の病院なので実モデルも知らない）ので、院内固有の連絡先や
+ * 数値を作り話で埋めない。モックの draftPlain と同じ建て付け。
+ */
+const draftStage1Reply = (text) => {
+  if (!text.includes(S1_DRAFT_HEAD) || !text.includes(S1_MAIL_BLOCK)) return null;
+  const matched = S1_FROM.exec(text);
+  const salutation = matched === null ? "" : `${matched[1].trim()} 各位\n`;
+  return (
+    "（スタブ応答）\n" +
+    salutation +
+    "お世話になっております。ご連絡いただきありがとうございます。\n" +
+    "いただいた件につきましては、こちらで確認のうえ、改めてご連絡いたします。\n" +
+    "お手数をおかけいたしますが、よろしくお願いいたします。"
+  );
+};
+
 /** 会話履歴からユーザー発言だけを繋ぐ（systemの指示文を表と読み違えないため）。 */
 const userText = (payload) => {
   const messages = Array.isArray(payload?.messages) ? payload.messages : [];
@@ -114,7 +157,11 @@ const replyFor = (body) => {
   } catch {
     return DEFAULT_REPLY;
   }
-  return formatFeverLinelist(userText(payload)) ?? DEFAULT_REPLY;
+  // Stage 5 の整形を先に見る（この分岐は患者ID・発熱確認日・最高体温の見出しと
+  // データ2行以上を求めるので、Stage 1 の下書き依頼が紛れ込むことはない）。
+  // 続いて Stage 1 の下書き。どちらでもなければ従来どおり固定文へ落ちる。
+  const text = userText(payload);
+  return formatFeverLinelist(text) ?? draftStage1Reply(text) ?? DEFAULT_REPLY;
 };
 
 /* ---------------------------------------------------------------------- *
