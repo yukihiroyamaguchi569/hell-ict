@@ -42,6 +42,7 @@ export default defineConfig({
         "bash scripts/build-testplay.sh && pnpm --filter @hell-ict/worker exec wrangler dev --local --ip 127.0.0.1 --port 8787 --var OPENAI_BASE_URL:http://127.0.0.1:8789",
       url: "http://127.0.0.1:8787/api/health",
       reuseExistingServer: false,
+      stdout: "pipe",
     },
     {
       name: "web",
