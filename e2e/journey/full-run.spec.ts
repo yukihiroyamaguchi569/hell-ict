@@ -24,6 +24,9 @@ import {
  * タイマーに乗っているため採らない）。所要は実測でおよそ2分半。
  */
 
+/** Prologue の返信。文面は判定されない（空欄だけ拒否）ので、1行で足りる。 */
+const PROLOGUE_REPLY = "承知しました。よろしくお願いいたします。";
+
 /** Stage 1 の返信。S1_MIN_LEN（70文字）以上かつ S1_POLITE の丁寧語を含むこと。 */
 const S1_REPLY =
   "いつもお世話になっております。ご連絡いただきありがとうございます。担当にて確認のうえ、折り返しご連絡いたします。お手数をおかけいたしますが、何卒よろしくお願い申し上げます。";
@@ -92,8 +95,14 @@ const clearPrologue = async (page: Page): Promise<void> => {
   await page.getByRole("button", { name: "メールを開く" }).click();
   const mails = page.locator("#mails button.mail");
   await expect(mails).toHaveCount(3);
-  for (let index = 0; index < 3; index += 1) await mails.nth(index).click();
-  // 3通とも読むと INBOX_READ_GRACE_MS（7秒）後にStage 1のブリーフィングが開く。
+  // 3通とも返信欄が出る。文面は判定されない（空欄だけ拒否）ので、同じ本文でよい。
+  // 一覧の並びは返信しても変わらない（MAILS の添字順）ので、nth で順に押せる。
+  for (let index = 0; index < 3; index += 1) {
+    await mails.nth(index).click();
+    await page.locator("#inbox-body").fill(PROLOGUE_REPLY);
+    await page.getByRole("button", { name: "送信する" }).click();
+  }
+  // 3通とも片付くと、演出を挟まずStage 1のブリーフィングが開く（inboxFrame）。
   await expect(page.locator("#ov-brief")).toBeVisible({ timeout: 20_000 });
 };
 
