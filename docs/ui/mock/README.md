@@ -88,16 +88,37 @@ JS 構造そのものは資産ではない。単一ファイル・フレーム�
   採らなかった）。`table` を持つものだけが列選択コピーを出す（下記 Stage 4）。
 - **`hideOverlays()`**（2128-）— オーバーレイIDの配列を舐めて閉じる。新しいオーバーレイを足したらこの配列に追加。Stage 3.5 の `#ov-s4-report` もここに入っている（`#ov-s4-kanbu` は2026-09-05に廃止・Issue #88）。
 - **`transition()`**（5125-）— 急変（Stage 1→2 の転調）専用。`go()` を経由しない。
-- **自動遷移は3か所ある**（2026-08-22追加。それまではファシリテーターがdevbarで送っていた）。
-  Prologue→Stage 1（`inboxStartAuto()`/`inboxNoteRead()`——3通とも開封で7秒後、または入室から
-  2分で `go("s1")`）、Stage 2クリア→Stage 3（`afterStage2Clear()` 末尾）、Stage 5クリア→Stage 6
+- **自動遷移は5か所ある**（2026-08-22追加。それまではファシリテーターがdevbarで送っていた）。
+  Prologue→Stage 1（`inboxFrame()`——3通すべてが「返信済み」か「時間切れ」になったら `go("s1")`）、
+  Stage 2クリア→Stage 3（`afterStage2Clear()` 末尾）、Stage 5クリア→Stage 6
   （`afterStage5Clear()` 末尾）。既存の Stage 3クリア→Stage 4（`afterStage3Clear()`）、
   Stage 4クリア→Stage 5（`afterStage4Clear()`）と合わせ、Prologue から Final 手前までが繋がる。
-  いずれも**クリアの2段ポップアップ（`#ov-field`→`#ov-exec`）を閉じた時点**から動き出す
-  （2026-09-11変更。それまでは判定の2.2秒後に自動で解錠演出が出て、そのまま次のステージへ進んでいた）
-  ——演出を読み切る前に画面が変わるという指摘への対応で、遷移そのものは残っている。
-  **Prologueのタイマーだけは `later()` ではなく素の `setTimeout`** を使う——`later()` は
+  ステージのクリア側はいずれも**クリアの2段ポップアップ（`#ov-field`→`#ov-exec`）を閉じた時点**から
+  動き出す（2026-09-11変更。それまでは判定の2.2秒後に自動で解錠演出が出て、そのまま次のステージへ
+  進んでいた）——演出を読み切る前に画面が変わるという指摘への対応で、遷移そのものは残っている。
+  **Prologueのタイマーだけは `later()` ではなく素の `setInterval`** を使う——`later()` は
   prefers-reduced-motion で遅延0になる演出用ヘルパーで、進行の待ち時間に使うとPrologueが一瞬で飛ぶ。
+- **Prologueの3通には返信欄が付く**（2026-09-11。旧実装の自動送り——`INBOX_AUTO_MS`（2分）/
+  `INBOX_READ_GRACE_MS`（7秒）/`inboxNoteRead()`——は撤去した）。「メールにはこうやって返信する」を
+  最初に覚える場なので、返信欄・締切表示・時間切れの扱いは **Stage 1 R1 とまったく同じ器**
+  （`.case slim`＋`.s2-hd`＋`.box`＋`.submit-area`、一覧側の `.due`）を使う。コンテキスト欄・要点欄・
+  ［AIに下書きさせる］は Stage 1 の話なので出さない。**文面は一切判定せず、空欄だけ拒否する**
+  （`inboxSend()`）。締切は `INBOX_LIMIT`（5分）で、起点は受信トレイを開いた瞬間・3通が並行して走る
+  ——Stage 1 の「締切は着弾から」をそのまま持ってきた結果（Prologue の3通は受信トレイを開いた
+  時点で全部届いている＝着弾時刻が同じ）。時間切れの1通はもう開けず返信もできないが、**罰は
+  科さない**（経過時間への加算も督促メールも無い）。締切の判定（`inboxExpire()`）は250msの
+  刻みではなく実時刻で行い、**frame・一覧のクリック・送信の3経路から呼ぶ**——背面タブで
+  `setInterval` が間引かれても、5分を過ぎたメールを開いて送信できないようにするため。
+  返信状態（`mailReply`／`inboxDraft`／`mailState`）と締切の起点（`inboxT0`、epoch ms）は
+  **`sessionStorage`（`hellInbox:<チームコード>`）へ持ち越す**——チェックポイントのbodyには
+  Worker側とモック側の両方にスキーマ検証が掛かっており、項目を足すとサーバAPIの契約が動く
+  （9/26本番まではモックとReactが同じサーバを叩く前提を保つ）。未確定commandId
+  （`makePendingCommand` の slot）と同じ理由で `localStorage` ではなく `sessionStorage`。
+  読み戻すのは**チェックポイント復帰の1回だけ**（`inboxResume` のワンショット。
+  `s1SkipBrief` と同じ流儀）で、ウェルカム画面からの通常開始とdevbarのジャンプは従来どおり
+  作り直す。起点を絶対時刻で預けるので、**リロードを繰り返しても5分の上限は伸びない**
+  （復帰時に過ぎていればその場で時間切れを確定する）。クリアしても解錠演出も効果音も出さず、
+  そのまま事務長のブリーフィング（`#ov-brief`）へ進む。
 
 ## ライブAPI接続（`feat/testplay-live-ai`）
 
@@ -486,8 +507,7 @@ Stage 5 に罠は無く、`sendAI()`（2379）は `view === "s6"` のとき `S5_
 - **各種タイマー定数は仮値。** `S1_LIMIT`（60秒）/`S1_SAFETY`（240秒）/`S3_KARUBE_DELAY`（40秒）/
   `S3_BOTTLE_FILL_MS`（700ms）/`S5_GATE_MS`（450ms）/`S5_DEADLINE`（2分）/
   `S6_KARUBE_DELAY`（40秒）/`S6_GEN_LIMIT`（5回）/`S6_GEN_MS`（2.5秒）/
-  `INBOX_AUTO_MS`（2分）/`INBOX_READ_GRACE_MS`（7秒。[../01_Prologue.md](../01_Prologue.md) §実装上の注意
-  「3通そろってから7秒」と一致させてある）は、いずれも2026-08-23テストプレイ向けの仮値。
+  `INBOX_LIMIT`（5分。Prologueの1通あたりの持ち時間）は、いずれも2026-08-23テストプレイ向けの仮値。
   当日朝の通しプレイで較正した値に置き換える（`S5_DEADLINE`は特に実測の裏付けが要る）。
   **罰ゲームの長さを決める定数はもう無い**（`S3_PENALTY`/`S5_PENALTY` は削除）——終わるのは作業を
   終えたときなので、狙いの1分に近づけるにはボトルの本数（`S3_BOTTLES_5A`/`5B`）と1本あたりの

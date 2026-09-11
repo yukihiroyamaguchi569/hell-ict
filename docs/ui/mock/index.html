@@ -3540,6 +3540,13 @@
   /* 状態                                                                */
   /* ------------------------------------------------------------------ */
   let mailState = MAILS.map(() => false);   // 既読フラグ
+  /* Prologue の返信状態。mailState（既読）と同じ枠組み——MAILS と同じ長さの
+     素の配列をメモリに持ち、go("inbox") のたびに作り直す（永続化しない）。
+     "live"（まだ返信できる）｜"sent"（返信済み）｜"missed"（5分超過）。
+     inboxDraft は書きかけの本文で、別のメールを開いて戻っても残る
+     （Stage 1 の it.bodyDraft と同じ扱い）。 */
+  let mailReply = MAILS.map(() => "live");
+  let inboxDraft = MAILS.map(() => "");
   let readS1 = false, readS1A = false, readU = false;
   let openIdx = null;
   let hasS1Mail = false;
@@ -3740,15 +3747,30 @@
     if (hasS1Mail) list.push({ m: MAIL_S1, key: "s1", read: readS1 });
     MAILS.forEach((m, i) => list.push({ m, key: i, read: mailState[i] }));
 
+    const left = INBOX_LIMIT - inboxNow();
     list.forEach((it) => {
+      /* Prologue（受信トレイ画面）の3通だけは、Stage 1 R1 と同じ「1通ごとの締切」を
+         一覧に出す。Stage 2 以降の一覧にも同じ3通が残るが、そちらはもう締切を持たない
+         読み物なので、この装飾は view === "inbox" のときだけ付ける。 */
+      const rep = view === "inbox" && typeof it.key === "number" ? mailReply[it.key] : null;
+      const hot = rep === "live" && left <= 15;
       const b = document.createElement("button");
-      b.className = "mail" + (it.read ? " read" : "") + (landing === it.key ? " landing" : "");
+      b.className = "mail" + (it.read ? " read" : "") + (rep && rep !== "live" ? " done read" : "") +
+        (hot ? " hot" : "") + (landing === it.key ? " landing" : "");
       b.setAttribute("aria-current", String(openIdx === it.key));
       b.innerHTML =
         '<div class="from">' + it.m.from + "</div>" +
         '<div class="subj">' + it.m.subj + "</div>" +
-        (it.m.attach ? '<div class="attach">📎 ' + it.m.attach + "</div>" : "");
+        (it.m.attach ? '<div class="attach">📎 ' + it.m.attach + "</div>" : "") +
+        (rep === null ? "" : rep === "live"
+          ? '<div class="due"><span>' + mmss(left) + '</span><span class="bar"><i style="width:' +
+            Math.max(0, Math.min(100, (left / INBOX_LIMIT) * 100)) + '%"></i></span></div>'
+          : '<div class="due"><span>' + (rep === "missed" ? "時間切れ・返信不可" : "返信済み") + "</span></div>");
       b.addEventListener("click", () => {
+        // 時間切れ・返信済みのメールはもう開けない（Stage 1 R1 の s1List と同じ作法）。
+        // Stage 1 以降は締切を持たない読み物に戻るので、この拒否は受信トレイ画面だけ。
+        // rep は描画時（最大250ms前）の状態なので、押した瞬間の実時刻でも見直す。
+        if (rep !== null && !inboxOpenable(it.key)) { renderInbox(); return; }
         if (typeof it.key === "number") mailState[it.key] = true;
         else if (it.key === "s1") readS1 = true;
         else if (it.key === "s1a") readS1A = true;
@@ -3762,10 +3784,12 @@
         else if (it.key === "fjimu") readFJimu = true;
         else if (it.key === "fkoho") readFKoho = true;
         openIdx = it.key;
-        if (view === "inbox") renderInbox(); else renderMails();
-        if (view === "inbox") { readerFor(it.m); inboxNoteRead(); }
+        // 受信トレイ画面（Prologue）は中央ペインにメール本文と返信欄を出す
+        // ——描くのは renderInbox() の中の inboxCenter() で、ビューアは使わない。
+        if (view === "inbox") { inboxSave(); renderInbox(); return; }
+        renderMails();
         // 添付を持つメールを開くと教材ビューアが中央ペインの上に開く（ui/03 §1）。
-        else if (it.m.attach) {
+        if (it.m.attach) {
           const viewerKey = it.key === "s1a" ? "add" : it.key === "s3kawai" ? "s3contaminated" : it.key === "s3shicho" ? "s3patients" : it.key === "s5jimu" ? "s5list" : it.key === "s6soudan" ? "s6notice" : it.key === "fkoho" ? "fpress" : "main";
           openViewer(viewerKey);
         }
@@ -3793,10 +3817,6 @@
       m.body.map((p) => "<p>" + p + "</p>").join("") +
       (m.attach ? '<div class="rule"></div><div class="meta">📎 ' + m.attach + "</div>" : "") +
       "</div>";
-  }
-
-  function readerFor(m) {
-    paneC.innerHTML = '<div class="reader">' + mailBodyHTML(m) + "</div>";
   }
 
   /* ------------------------------------------------------------------ */
@@ -5306,7 +5326,7 @@
     paneC.innerHTML =
       '<div class="welcome"><div class="inner">' +
         "<h2>聖クロノス総合病院 感染制御チーム（ICT）へようこそ</h2>" +
-        '<div class="say">本日より支援に入っていただく皆さんです。まずは落ち着いて、届いているメールに目を通してください。' +
+        '<div class="say">本日より支援に入っていただく皆さんです。まずは落ち着いて、届いているメールに目を通して返信してください。' +
         "何も起きていません。いい一日になりますように。</div>" +
         '<div class="row-end"><button class="btn" id="btn-inbox">メールを開く</button></div>' +
       "</div></div>";
@@ -5319,65 +5339,221 @@
     paneL.classList.remove("hide"); paneR.classList.remove("hide");
     paneR.classList.add("collapsed");
     renderMails();
-    if (openIdx === null) {
-      paneC.innerHTML = '<div class="reader"><div class="legacy" style="color:var(--fg-muted)">' +
-        "左の一覧からメールを開いてください。</div></div>";
-    }
+    inboxCenter();
   }
 
   /* ------------------------------------------------------------------ */
-  /* Prologue の自動遷移（2026-08-22追加）                                */
+  /* Prologue：3通に返信する（2026-09-11・自動送りを置き換え）             */
   /*                                                                    */
-  /* 進行台本（docs/testplay/2026-08-23_進行台本.md §3 Prologue）どおり    */
-  /* 「3通とも開封」または「2分経過」で事務長のブリーフィング（Stage 1）へ */
-  /* 自動で進む。それまではファシリテーターがdevbarで送る必要があった。    */
+  /* 旧実装は「3通とも開封」または「2分経過」で勝手に Stage 1 へ送っていた */
+  /* （INBOX_AUTO_MS / INBOX_READ_GRACE_MS / inboxNoteRead）。ここは       */
+  /* 「メールにはこうやって返信する」を最初に覚える場なので、自動送りは     */
+  /* 廃止し、3通すべてが「返信済み」か「時間切れ」になったときにだけ進む。  */
   /*                                                                    */
-  /* 3通目を押した瞬間に飛ばさない——最後の1通（夜勤師長の申し送り）にこそ  */
-  /* 未知ウイルスの種が仕込んであり、開いた直後に画面が変わると伏線ごと    */
-  /* 消える。読む猶予（INBOX_READ_GRACE_MS）を置いてから進める。           */
+  /* 返信の文面は一切判定しない（空欄だけ拒否）。正解も差し戻しも無く、    */
+  /* 時間切れにも罰を科さない——ここで払う通貨はまだ無い。覚えるのは操作     */
+  /* だけで、その操作は Stage 1 R1 の返信欄とまったく同じ形にしてある。     */
   /*                                                                    */
-  /* タイマーは later() ではなく素の setTimeout で持つ——later() は        */
-  /* prefers-reduced-motion で遅延0になる（演出用のため）ので、進行の      */
-  /* 待ち時間に使うとPrologueが一瞬で飛ぶ。go() の xStop() の流儀に合わせ  */
-  /* inboxStop() を用意し、シーンを離れるときに必ず止める。                */
+  /* 📌 締切の起点は「受信トレイを開いた瞬間」で、3通が同時に走る。Stage 1  */
+  /*    の作法（締切は着弾した時刻から・複数通が並行して走る・残り時間は    */
+  /*    一覧の側に出す）をそのまま持ってきた結果で、Prologue の3通は        */
+  /*    受信トレイを開いた時点ですでに全部届いている＝着弾時刻が同じ、と    */
+  /*    いうだけのこと。開封時刻を起点にすると、開かずに放置した1通だけが   */
+  /*    いつまでも減らない＝一覧の残り時間が「あと何分か」を表さなくなる。  */
+  /*    並行して走らせれば、Prologue 全体も最長5分で必ず終わる（旧実装の    */
+  /*    上限2分から大きく外れず、120分の進行に収まる）。                    */
+  /*                                                                    */
+  /* 📌 タイマーは later() ではなく素の setInterval で持つ——later() は     */
+  /*    prefers-reduced-motion で遅延0になる（演出用のため）ので、進行の    */
+  /*    待ち時間に使うと締切が一瞬で切れる。go() の xStop() の流儀に合わせ  */
+  /*    inboxStop() を用意し、シーンを離れるときに必ず止める。              */
   /* ------------------------------------------------------------------ */
-  const INBOX_AUTO_MS = 120000;        // 読み終わらなくても2分で始まる
-  // 3通とも開いた後に残す読む時間。20秒では「3通目を開いてから長すぎる」と
-  // なったため7秒へ短縮した（2026-08-22ユーザー決定）。同じ決定で、受信トレイ
-  // 表示からの下限（旧INBOX_MIN_MS＝30秒）は撤廃した——速く読み終えたチームを
-  // 待たせるのは「3通目を開いてから7秒」という意図と噛み合わないため。
-  const INBOX_READ_GRACE_MS = 7000;
-  let inboxTimer = null;
-  let inboxOpenedAt = 0;    // 受信トレイを開いた時刻（2分の起点。入室時刻ではない）
-  let inboxDeadline = 0;    // 2分の上限（絶対時刻）。猶予がこれを越えないようにする
-  let inboxAllRead = false; // 猶予タイマーを二重に張らないための旗
+  const INBOX_LIMIT = 300;    // 1通あたりの持ち時間（秒）
+  let inboxTick = null;
+  let inboxT0 = 0;              // 締切の起点（受信トレイを開いた時刻。入室時刻ではない）
+  let inboxResume = false;      // 復帰用ワンショット。チェックポイント復帰だけが立てる
+  const inboxNow = () => (inboxT0 ? (Date.now() - inboxT0) / 1000 : 0);
 
-  function inboxStop() { clearTimeout(inboxTimer); inboxTimer = null; }
+  function inboxStop() { if (inboxTick) { clearInterval(inboxTick); inboxTick = null; } }
 
-  function inboxArm(ms) {
-    inboxStop();
-    inboxTimer = setTimeout(() => {
-      inboxTimer = null;
-      if (view === "inbox") go("s1");   // 判断C：離れていたら何もしない
-    }, Math.max(0, ms));
+  /* ------------------------------------------------------------------ */
+  /* 返信状態の持ち越し（リロード対策）                                   */
+  /*                                                                    */
+  /* 📌 保持先は sessionStorage。チェックポイント（サーバ）へは載せない    */
+  /*    ——body には Worker 側とモック側の両方にスキーマ検証が掛かっており  */
+  /*    （isCheckpointBody / packages/domain の checkpoint schema）、項目を */
+  /*    足すとサーバAPIの契約が動く。9/26 本番まではモックとReactが同じ    */
+  /*    サーバを叩く前提を保つ方針なので、モックだけの都合でそこを広げない。*/
+  /*    未確定 commandId（makePendingCommand の slot）と同じ理由で          */
+  /*    localStorage ではなく sessionStorage を使う——タブを閉じたら消えて  */
+  /*    よい類の状態で、別PC・別タブへ持ち越す必要は無い。                 */
+  /*                                                                    */
+  /* 📌 起点（t0）は絶対時刻（epoch ms）で持つ。残り時間ではなく起点を     */
+  /*    預けるので、リロードを何度繰り返しても「受信トレイを開いてから5分」 */
+  /*    という上限は伸びない。復帰時に過ぎていれば、その場で時間切れを     */
+  /*    確定させる（inboxExpire）。                                       */
+  /* ------------------------------------------------------------------ */
+  const INBOX_STATES = ["live", "sent", "missed"];
+  const inboxStorageKey = () =>
+    "hellInbox:" + ((liveState && liveState.teamCode) || "local");
+
+  /* 既読（mailState）も一緒に預ける。返信済みの2通が復帰後に未読へ戻ると、
+     開けないのに未読バッジだけ3のまま残る。 */
+  function inboxSave() {
+    try {
+      sessionStorage.setItem(inboxStorageKey(),
+        JSON.stringify({ t0: inboxT0, reply: mailReply, draft: inboxDraft, read: mailState }));
+    } catch { /* 容量超過・プライベートモード。保存できなくても進行は止めない */ }
   }
 
-  /* 受信トレイに入るたびに呼ぶ（go("inbox") から）。 */
+  /* 壊れていれば丸ごと捨てる（半端に拾うより、作り直す方が害が小さい）。
+     t0 が未来を指す保存は時計の巻き戻し等でしか起こらず、拾うと締切が
+     伸びてしまうので無効として扱う。 */
+  function inboxLoad() {
+    let raw = null;
+    try { raw = sessionStorage.getItem(inboxStorageKey()); } catch { return null; }
+    if (!raw) return null;
+    let s = null;
+    try { s = JSON.parse(raw); } catch { return null; }
+    const ok = !!s && typeof s === "object" &&
+      Number.isFinite(s.t0) && s.t0 > 0 && s.t0 <= Date.now() &&
+      Array.isArray(s.reply) && s.reply.length === MAILS.length &&
+      s.reply.every((v) => INBOX_STATES.indexOf(v) >= 0) &&
+      Array.isArray(s.draft) && s.draft.length === MAILS.length &&
+      s.draft.every((v) => typeof v === "string") &&
+      Array.isArray(s.read) && s.read.length === MAILS.length &&
+      s.read.every((v) => typeof v === "boolean");
+    return ok ? s : null;
+  }
+
+  /* 受信トレイに入るたびに呼ぶ（go("inbox") から）。既定は作り直し（ウェルカム
+     画面から入る通常の開始・devbarのジャンプ）。inboxResume が立っているとき
+     ——チェックポイント復帰でここへ戻された1回だけ——保存を読み戻す。
+     s1SkipBrief と同じワンショットの流儀。 */
   function inboxStartAuto() {
-    inboxAllRead = false;
-    inboxOpenedAt = Date.now();
-    inboxDeadline = inboxOpenedAt + INBOX_AUTO_MS;
-    inboxArm(INBOX_AUTO_MS);
+    const saved = inboxResume ? inboxLoad() : null;
+    if (saved) {
+      inboxT0 = saved.t0;
+      mailReply = saved.reply;
+      inboxDraft = saved.draft;
+      mailState = saved.read;
+      inboxExpire();   // 席を外している間に5分を過ぎていれば、ここで確定させる
+    } else {
+      mailReply = MAILS.map(() => "live");
+      inboxDraft = MAILS.map(() => "");
+      // 既読も一緒に作り直す。ここを抜くと、前の試行で開封したまま
+      // welcome から入り直したときに「返信できるのに既読・未読バッジ0」になる。
+      mailState = MAILS.map(() => false);
+      inboxT0 = Date.now();
+    }
+    inboxSave();
+    inboxStop();
+    inboxTick = setInterval(inboxFrame, 250);
   }
 
-  /* メールを開くたびに呼ぶ（renderMails のクリック内）。3通そろった時点で
-     猶予へ切り替える——上限（2分）より後にはしない。 */
-  function inboxNoteRead() {
-    if (view !== "inbox" || inboxAllRead) return;
-    if (!mailState.every(Boolean)) return;
-    inboxAllRead = true;
-    const at = Date.now() + INBOX_READ_GRACE_MS;
-    inboxArm(Math.min(at, inboxDeadline) - Date.now());
+  /* 締切を過ぎた live を missed へ落とす。判定は 250ms の刻みではなく実時刻で
+     行い、frame・クリック・送信の3経路から同じものを呼ぶ——タブが背面に回ると
+     setInterval は間引かれるので、frame だけに任せると実時間で5分を過ぎたメール
+     を開いて送信できてしまう。戻り値は「何か落ちたか」。 */
+  function inboxExpire() {
+    if (INBOX_LIMIT - inboxNow() > 0) return false;
+    let changed = false;
+    mailReply.forEach((state, i) => {
+      if (state !== "live") return;
+      // 時間切れは、もう二度と返信できない（Stage 1 R1 と同じ一発勝負）。
+      // 罰は科さない——経過時間への加算も、督促のメールも無い。
+      mailReply[i] = "missed";
+      if (openIdx === i) openIdx = null;
+      changed = true;
+    });
+    if (changed) inboxSave();
+    return changed;
+  }
+
+  /* いま開ける（返信できる）か。押した瞬間の実時刻で見る。 */
+  function inboxOpenable(i) {
+    inboxExpire();
+    return mailReply[i] === "live";
+  }
+
+  /* 250msごと。s1Frame と同じ構造——期限切れの回収、一覧の再描画、開いている
+     メールの残り時間の更新、そして完了判定。 */
+  function inboxFrame() {
+    if (view !== "inbox") return;
+    // 締切は全通そろって切れる（3通の着弾時刻が同じ）ので、何か落ちたなら
+    // 開いていたメールも必ず閉じている＝中央ペインは描き直してよい。
+    if (inboxExpire()) inboxCenter();
+    renderMails();
+    const tm = $("inbox-timer");
+    if (tm) {
+      const left = INBOX_LIMIT - inboxNow();
+      tm.textContent = mmss(left);
+      tm.classList.toggle("hot", left <= 15);
+    }
+    // 3通が片付いたら事務長のブリーフィングへ。解錠演出も効果音も出さない
+    // ——まだ何も達成していないので、ここで報酬の作法を使わない。
+    if (mailReply.every((s) => s !== "live")) { inboxStop(); go("s1"); }
+  }
+
+  /* 中央ペイン。開いているメールがあれば本文＋返信欄、無ければ案内だけ。
+     見た目は Stage 1 R1（s1Center の !s1.aiReady 分岐）と同じ器をそのまま使う
+     ——ここで覚えた操作が Stage 1 でそのまま使えることが、この画面の目的。
+     コンテキスト欄・要点欄・［AIに下書きさせる］は Stage 1 の話なので出さない。 */
+  function inboxCenter() {
+    const sent = mailReply.filter((s) => s === "sent").length;
+    const cur = typeof openIdx === "number" && mailReply[openIdx] === "live" ? openIdx : null;
+    const head =
+      '<div class="case slim"><div class="stage-title">Prologue　受信トレイ</div></div>' +
+      '<div class="s2-hd">' +
+        '<div class="s2-count">返信済み　<b>' + sent + " / " + MAILS.length + "</b></div>" +
+        '<div class="grow"></div>' +
+        (cur === null ? "" : '<div class="s2-timer" id="inbox-timer">' + mmss(INBOX_LIMIT - inboxNow()) + "</div>") +
+      "</div>";
+
+    if (cur === null) {
+      paneC.innerHTML = '<div class="work">' + head +
+        '<div class="s2-note">左の一覧からメールを開いて、返信してください。<br>' +
+        "時間切れになったメールは、もう返信できません。</div></div>";
+      return;
+    }
+
+    // textarea の中身は esc() を通す。生で埋め込むと </textarea> を含む入力で
+    // 再描画のたびにDOMを壊せてしまう（Stage 1 の返信欄と同じ理由）。
+    paneC.innerHTML = '<div class="work" style="padding:4px 24px 78px;gap:8px;overflow:hidden">' + head +
+      '<div class="reader" style="padding:0;overflow-y:auto;flex:1 1 auto;min-height:0">' + mailBodyHTML(MAILS[cur]) + "</div>" +
+      '<div class="box"><div class="hd">返信</div>' +
+      '<textarea class="submit-area" id="inbox-body" style="min-height:56px" placeholder="本文を入力（分かることだけで構いません）">' +
+        esc(inboxDraft[cur]) + "</textarea></div>" +
+      '<div class="row-end" style="flex:0 0 auto"><button class="btn" id="inbox-send">送信する</button></div>' +
+      "</div>";
+    // 書きかけもそのつど預ける——回線断や誤操作でのリロードで消えては困る。
+    $("inbox-body").addEventListener("input", () => {
+      inboxDraft[cur] = $("inbox-body").value;
+      inboxSave();
+    });
+    $("inbox-send").addEventListener("click", () => inboxSend(cur));
+  }
+
+  /* 送信。判定は空欄拒否だけ——文面は一切見ない（正解も差し戻しも無い）。 */
+  function inboxSend(i) {
+    // 押した瞬間の実時刻で締切を見る（frame の刻みは背面タブで間引かれる）。
+    if (!inboxOpenable(i)) { renderInbox(); return; }
+    const body = ($("inbox-body").value || "").trim();
+    if (!body) {
+      // 専用の警告行は作らず、ボタンのテキストを一時的に差し替える
+      // （Stage 1 の s1Send と同じ流儀。戻す先は固定文字列）。
+      const btn = $("inbox-send");
+      if (btn) {
+        btn.textContent = "本文が空です";
+        later(() => { if ($("inbox-send")) $("inbox-send").textContent = "送信する"; }, 1600);
+      }
+      return;
+    }
+    mailReply[i] = "sent";
+    inboxDraft[i] = "";
+    openIdx = null;
+    inboxSave();
+    renderInbox();
   }
 
   /* ------------------------------------------------------------------ */
@@ -9010,7 +9186,7 @@
   const STEPS = [
     { id: "entry",   label: "① 入室",       mode: "peace", note: "企画書§7「なしログイン。6桁チームコード入室」。数字が32pxなのは、ファシリテーターの読み上げを部屋の後ろから聞きながら打つため。" },
     { id: "welcome", label: "② ウェルカム",  mode: "peace", note: "操作説明を一切しない。AI初体験は Stage 1 に取ってある。ヘッダーの「発熱 3」はこの最初の画面から居座っていて、他の在院・空床の数字に紛れて誰も気に留めない（「原因不明の発熱」だと臨床職には露骨すぎるため、ラベルは一般的な語にとどめてある）。" },
-    { id: "inbox",   label: "③ 受信トレイ",  mode: "peace", note: "右ペインはまだ無く、中央が右端まで伸びている。読ませたいのはメールだけ。3通目の夜勤師長メールが未知ウイルスの種で、太字にせず、色も変えず、段落の途中に置いてある。ここで警戒させたら設計失敗。" },
+    { id: "inbox",   label: "③ 受信トレイ",  mode: "peace", note: "右ペインはまだ無く、中央が右端まで伸びている。3通目の夜勤師長メールが未知ウイルスの種で、太字にせず、色も変えず、段落の途中に置いてある。ここで警戒させたら設計失敗。2026-09-11、3通すべてに返信欄を付けた——「メールにはこうやって返信する」を最初に覚える場で、器はStage 1 R1の返信欄とまったく同じ。文面は一切判定せず空欄だけ拒否する。1通5分（INBOX_LIMIT）で、起点は受信トレイを開いた瞬間・3通が並行して走る。時間切れの1通はもう返信できないが罰は科さない。3通すべてが「返信済み」か「時間切れ」になると、演出も効果音も無しで事務長のブリーフィングへ進む（旧・2分／7秒の自動送りは撤去）。返信状態と締切の起点はsessionStorageへ持ち越し、チェックポイント復帰のときだけ読み戻す——起点は絶対時刻なので、リロードを繰り返しても5分の上限は伸びない。" },
     { id: "s1",      label: "④ Stage 1 平常運転", mode: "peace", note: "画面はまだ明るい（peace）。アウトブレイクは起きていない——起きていないのに、着任初日のICTが1分刻みのメール処理をやらされる。3ラウンド×6通に作り直した（旧：2ラウンド×10通）。前任ICNの引き継ぎメモが受信トレイの最上部に締切なく常駐し、3ラウンド全ての回答材料をそこに仕込む。冒頭に事務長のブリーフィングが入る。「派遣は1分、他の職員は5分」——バグではなく人が決めた基準だと本人の口から告げる。[了解しました] を押した瞬間に締切のカウントとレースが始まる（読んでいる時間は減らない）。R1（AIなし）：6通に手だけで挑む。督促は来ない——時間切れは二度と返信できない一発勝負。短すぎる返信は「そっけない」判定を食らい、ラウンド終了時にメールスレッド形式で相手の困惑を見せる。全通を丁寧に返せれば苅部さんの出番なく「手動クリア」で終わる。R2（AI下書きあり）：新しい6通。「コンテキスト」「要点」「AIに下書きさせる」が増えるが、毎通の要点入力に時間を取られ時間切れで失敗する想定。R3（コンテキスト投入）：さらに新しい6通。R2失敗後、苅部さんが「引き継ぎメモをコンテキスト欄に丸ごと貼れ」と教える——貼れば要点不要で具体的な下書きが即座に出る。R1・R2失敗の結果ウィンドウは自動クローズせず、[確認した（次へ）] ボタンで参加者自身が閉じて次ラウンドへ進む（読む量が一定でないため）。R1の6通目（検査科メール）に未知ウイルスの種が1粒仕込んである。" },
     { id: "s2",      label: "⑤ Stage 2 火の手",   mode: "alert", note: "直前に急変（赤帯・転調）が入る。ここで初めて「5A病棟でMRSA疑い」が明かされ、器の色が peace から alert へ落ちる。メールを片付けて一息ついた瞬間に世界が変わる——段階を追って追い詰めるための順序。課題は師長から届く汚いExcelのラインリスト整形。右のAIチャットパネルはここが初出現——Stage 1で苅部さんが渡すのは中央ペインの下書きボタンだけ。Stage 2開始からS2_KARUBE_DELAY秒後、苅部さんが「手で直すもんじゃない」→AIをオンにして解禁する（「そっちにはAIがあるのに」式の当てこすりは2026-09-06に撤去）。「添付を開く」→［コピー］→AIへ貼り付け→提出、そこから先は自分で言語化させる。AIチャットはこのステージだけLIVE時も実APIを呼ばず、必ず整形済みTSV（s2ScriptedTable）を返す（2026-08-22ユーザー決定。実GPTの出力形が安定せず貼り戻せない事故を避けるため）。整形対象に MRSA陰性なのに発熱ありの3名（005/6/008）が紛れており、Stage 3 で回収される。" },
     { id: "unlock",  label: "⑥ 解錠",       mode: "alert", note: "報酬は師長の承認だけ。スコアも星も出さない。同時に「発熱」が 3→5 に静かに変わる——解錠の喜びの陰で、誰も見ていない数字が増える。" },
@@ -9107,7 +9283,9 @@
 
     if (id === "entry") { mailState = MAILS.map(() => false); readS1 = readS1A = readU = false; openIdx = null; renderEntry(); }
     else if (id === "welcome") renderWelcome();
-    else if (id === "inbox") { openIdx = null; renderInbox(); inboxStartAuto(); }
+    // 返信状態と締切の起点を作り直してから描く（順番を逆にすると、前回の
+    // 「時間切れ」を引きずったままの一覧が一瞬だけ見える）。
+    else if (id === "inbox") { openIdx = null; inboxStartAuto(); renderInbox(); }
     else if (id === "s1") {
       hasS1Mail = false; hasUnlockMail = false; $("fever").textContent = "3";
       hasS3LabMail = false; hasS3KawaiMail = false; readS3Lab = false; readS3Kawai = false;
@@ -9387,7 +9565,13 @@
       // 「再入室して Stage 1 へ戻った」と見えていた。復帰側は resume だけを送る
       // （チーム名はそちらにも載るので、名前がサーバへ届かなくなることはない）。
       reportProgress(TEAMS[2].pos, "entry");
-      go("welcome");
+      // 受信トレイまで進んでいたチームは受信トレイへ戻し、返信済み・時間切れと
+      // 5分の締切の起点を sessionStorage から読み戻す（inboxStartAuto）。作り直すと、
+      // 意図しないリロードで返信の成果が消えるうえ、リロードのたびに締切が
+      // 5分へ戻って「5分で必ず進む」上限を無期限に回避できてしまう。
+      // s1SkipBrief と同じワンショットの受け渡し。
+      if (savedView === "inbox") { inboxResume = true; go("inbox"); inboxResume = false; }
+      else go("welcome");
       return;
     }
     resumeFromCheckpoint(snapshot, cpState.serverNow);
