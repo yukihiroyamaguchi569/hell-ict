@@ -57,15 +57,14 @@ const waitForAllMails = async (page: Page): Promise<void> => {
 /** 開いているメールの残り時間（mm:ss）を秒で読む。 */
 const openMailSecondsLeft = async (page: Page): Promise<number> => {
   const label = (await page.locator("#s1-timer").innerText()).trim();
-  const parts = label.split(":");
-  // 添字アクセスは undefined を返しうる（Number(undefined) は NaN）。
-  // 読めない表示を 0 秒として通さないよう、ここで落とす。
-  const minutes = Number(parts[0]);
-  const seconds = Number(parts[1]);
-  if (!Number.isFinite(minutes) || !Number.isFinite(seconds)) {
+  // mm:ss だけを通す。split(":") と Number() の組み合わせだと "0:59:壊れた値" や
+  // "0:59.5" も読めてしまい、表示が壊れたまま検査が通る。分は1桁以上、秒は
+  // 2桁で 00〜59 に限る。
+  const m = /^(\d+):([0-5]\d)$/.exec(label);
+  if (!m) {
     throw new Error(`残り時間が mm:ss として読めません: ${label}`);
   }
-  return minutes * 60 + seconds;
+  return Number(m[1]) * 60 + Number(m[2]);
 };
 
 /** そのラウンドの5通へ同じ本文で返信する。 */
