@@ -8,6 +8,9 @@ overrides:
   qs: '>=6.16.0'
   fast-uri: ^3.1.6
 
+patchedDependencies:
+  wrangler@4.124.0: edb7e0556a827a54fc88e8426eae4b15cec4e76d7b4ca0e18a3c0c120c103742
+
 importers:
 
   .:
@@ -94,7 +97,7 @@ importers:
         version: 0.22.0(@cloudflare/workers-types@5.20260820.1)(@vitest/runner@4.1.11)(@vitest/snapshot@4.1.11)(vitest@4.1.11(@types/node@24.10.1)(vite@8.2.2(@types/node@24.10.1)(esbuild@0.28.1)))
       wrangler:
         specifier: 4.124.0
-        version: 4.124.0(@cloudflare/workers-types@5.20260820.1)
+        version: 4.124.0(patch_hash=edb7e0556a827a54fc88e8426eae4b15cec4e76d7b4ca0e18a3c0c120c103742)(@cloudflare/workers-types@5.20260820.1)
 
   packages/domain:
     dependencies:
@@ -2731,7 +2734,7 @@ snapshots:
       esbuild: 0.28.1
       miniflare: 5.20260815.0-alpha
       vitest: 4.1.11(@types/node@24.10.1)(vite@8.2.2(@types/node@24.10.1)(esbuild@0.28.1))
-      wrangler: 4.124.0(@cloudflare/workers-types@5.20260820.1)
+      wrangler: 4.124.0(patch_hash=edb7e0556a827a54fc88e8426eae4b15cec4e76d7b4ca0e18a3c0c120c103742)(@cloudflare/workers-types@5.20260820.1)
       zod: 4.4.3
     transitivePeerDependencies:
       - '@cloudflare/workers-types'
@@ -4456,7 +4459,7 @@ snapshots:
       '@cloudflare/workerd-linux-arm64': 1.20260815.1
       '@cloudflare/workerd-windows-64': 1.20260815.1
 
-  wrangler@4.124.0(@cloudflare/workers-types@5.20260820.1):
+  wrangler@4.124.0(patch_hash=edb7e0556a827a54fc88e8426eae4b15cec4e76d7b4ca0e18a3c0c120c103742)(@cloudflare/workers-types@5.20260820.1):
     dependencies:
       '@cloudflare/kv-asset-handler': 0.5.0
       '@cloudflare/unenv-preset': 2.16.1(unenv@2.0.0-rc.24)(workerd@1.20260815.1)
