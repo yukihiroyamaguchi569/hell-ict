@@ -298,9 +298,13 @@
 /* --- ワークスペース ---------------------------------------------------- */
 /* 下パディングを厚くしてあるのは、常駐する院内連絡先（.phs＝中央ペインの右下に
    浮いている、高さ44pxのバー）を避けるため。これが無いと、最下段の［提出する］
-   ［確認した（次へ）］がバーの下へ潜って押せなくなる（Issue #93）。
-   22px（他辺と同じ余白）＋62px（バーの高さ＋余白）。 */
-.work { flex: 1; overflow-y: auto; padding: 12px 28px 84px; display: flex; flex-direction: column; gap: 18px; }
+   ［確認した（次へ）］がバーの下へ潜って押せなくなる（Issue #93）。バーは画面下から
+   106px（bottom 62px＋高さ44px）を占めるので、それより深い110pxを取る——84pxでは、
+   クリア時に判定枠へ増えた最終行が末尾まで送ってもバーの下へ潜って読めない
+   （Issue #150）。
+   上余白は22pxではなく12px。案件カードを足したぶんだけ上を詰め、縦の密度を
+   増やさない（Issue #145）。 */
+.work { flex: 1; overflow-y: auto; padding: 12px 28px 110px; display: flex; flex-direction: column; gap: 18px; }
 /* 案件カード（Issue #145）：ステージ名と課題文を1枚にまとめ、中央ペインの
    上端を見るだけで「いまの仕事」が分かるようにする。カードを足しても縦の
    密度は増やさない——.work の上余白を22px→12px、カード内の行間を .work の
@@ -2043,6 +2047,53 @@
     v.innerHTML = '<div class="verdict"><div class="lead checking">提出を確認しています…</div></div>';
     return v.firstElementChild;
   }
+
+  /* ステージごとの現場反応（Issue #150）。既にあるクリア表示（.verdict の判定枠、
+     Stage 1 だけは結果ウィンドウの声の欄）へ1行だけ足して、提出した成果が病院の
+     どこへ届いたのかを短く返す。新しいオーバーレイ・アニメーション・効果音は
+     増やさない。判定・順位・AIの応答には一切触れない——出す文言と場所だけ。
+     話者は現場の当事者に限る。ここで幹部を出すと、既にある事務長（S5_CLEAR_LINES）
+     や院長の台詞と役目がぶつかる。矛先は組織と状況へ向け、職種は貶めない
+     （AGENTS.md トーンルール）。 */
+  const FIELD_ECHO = {
+    s1: "〔3B病棟 看護師〕返信が届きました。確認の電話を何本もかけずに済みます。",
+    s2: "〔5A病棟 師長〕整った一覧をいただきました。今夜の夜勤への引き継ぎに、このまま使えます。",
+    s3: "〔3B病棟 看護師長〕方針を受け取りました。3名は個室を空けて、通常の病室でお迎えできます。",
+    s4: "〔夜勤師長〕確認の依頼が届きました。今夜の申し送りで、目の痛みを全員に聞いてみます。",
+    s5: "〔5B病棟 師長〕保健所への報告が通ったそうですね。病棟で数え直しを頼まれずに済みます。",
+    s6: "〔患者相談窓口 近藤〕受付と病棟入口へ掲示しました。さっそく、絵を指さして面会時間を確かめる方がいます。"
+  };
+  /* 現場反応を読む一拍。解錠演出が画面を覆う前に置く——Stage 5 が S5_CLEAR_LINES の
+     後に later(stage5UnlockSequence, 2200) で取っている間合いと同じ値に揃える
+     （新しい演出ではなく、既にある解錠の呼び出しを一拍遅らせるだけ）。
+     prefers-reduced-motion では later() が 0 になる（既存挙動）。 */
+  const FIELD_ECHO_HOLD_MS = 2200;
+
+  /* クリアの記録（停留所・サーバへのクリア報告・チェックポイント）。現場反応の
+     余韻も解錠演出も待たず、判定が成立した瞬間に確定させる——レースの到達時刻と
+     順位が、演出の長さや prefers-reduced-motion の設定で動いてはいけない
+     （Stage 1 の s1Result と同じ扱い）。遅らせてよいのは #ov-unlock の表示と
+     その後の go() だけ。 */
+  function recordStageClear(pos) {
+    TEAMS[2].pos = pos;
+    reportProgress(pos, "clear");
+    saveCheckpoint("stage-clear");
+  }
+
+  /* 現場反応を判定枠へ積む。行は .lead——既存の差し戻し文と同じ地の文の見た目に
+     揃え、クリアの見出し（.done）より前に置く（Stage 5 の並びと同じ）。 */
+  function appendFieldEcho(box, lines) {
+    lines.forEach((text) => {
+      const l = document.createElement("div");
+      l.className = "lead";
+      l.textContent = text;
+      box.appendChild(l);
+    });
+    // 判定枠は提出フォームの下にあるので、行が増えるほど画面の外へ落ちる。
+    // Stage 4 の s4ScrollTalkIntoView() と同じ操作で中央ペインを末尾まで送る。
+    const work = paneC.querySelector(".work");
+    if (work) work.scrollTo({ top: work.scrollHeight, behavior: "smooth" });
+  }
   let timers = [];
   const later = (fn, ms) => { timers.push(setTimeout(fn, reduce ? 0 : ms)); };
   const clearLater = () => { timers.forEach(clearTimeout); timers = []; };
@@ -2544,6 +2595,23 @@
      （startPenaltyClock）。狙いは1分程度だが、P0実測は自動操作で21秒、人間でも
      30〜40秒程度で詰め終わる見込みで、狙いに届かない可能性がある。ボトルの本数
      （S3_BOTTLES_5A・S3_BOTTLE_WAVES）と1本あたりの所要（S3_BOTTLE_FILL_MS）で較正すること。 */
+
+  /* 罠を踏んだあと、アプリ内マニュアルの正典を自力照合して立て直したチームにだけ
+     出す2行（Issue #149）。罠を踏まずに通したチームには出さない。
+     ⚠️ ここは復旧“後”の表示に限る。罠の前の画面（課題文・メール・AIチャット・
+     差し戻し）には検証方法も復旧経路も置かない——予告した時点で罠が死ぬ。
+     1行目は立て直したこと自体を成果として残す余韻。2行目は、何を根拠に判断を
+     変えたのかをチームで確かめるための中立的な促しで、命令口調にも説教にもしない。
+     「打つ人」「読む人」のような役割を固定する言い方も避ける——いま操作していない
+     人にも順番が回るようにとだけ言う。外部ツールへの導線は作らない。 */
+  const S3_RECOVERY_LINES = [
+    "一度出した方針を、自分たちで確かめ直して差し替えました。早見表のとおりに動いていたら、3名は今夜も個室のままでした。",
+    "どの記述を根拠に判断を変えたのか、いま操作していない人からも一言ずつ聞いてみてください。"
+  ];
+  /* 立て直したチームは読む行が2行増えるので、解錠までの一拍を長めに取る
+     （FIELD_ECHO_HOLD_MS の 2200ms に対して）。新しい演出は足さず、既にある
+     解錠の呼び出しを遅らせるだけ。 */
+  const S3_RECOVERY_HOLD_MS = 4600;
 
   /* ------------------------------------------------------------------ */
   /* Stage 4：新情報の解釈 —— AI要約を次の一手へ変える                      */
@@ -5499,12 +5567,15 @@
 
   // R2・R3・手動クリア・詰み防止用の簡易表示。R1失敗（kind "round1"）は
   // 内容量が多いので、こちらではなく専用の s1ThreadHTML を使う。
-  function s1VoicesHTML() {
-    if (!s1.curt.length) return "";
+  // lead: クリア時の現場反応（Issue #150）。器を増やさず、同じ .voices の
+  // 先頭行として出す——そっけない返信の声が0件でも、この行だけで箱を開く。
+  function s1VoicesHTML(lead) {
+    if (!s1.curt.length && !lead) return "";
     const rows = s1.curt.slice(0, S1_CURT_SHOWN).map((c, i) =>
       "〔" + c.def.from + "〕" + S1_CURT_VOICES[i % S1_CURT_VOICES.length]);
     const rest = s1.curt.length - S1_CURT_SHOWN;
     if (rest > 0) rows.push("……ほか " + rest + "件、同じような返事が届いています。");
+    if (lead) rows.unshift(lead);
     return '<div class="voices">' + rows.map((r) => "<div>" + esc(r) + "</div>").join("") + "</div>";
   }
 
@@ -5589,7 +5660,7 @@
       '<div class="sum">' + sum + "</div>" +
       restLine +
       '<div class="said">' + esc(s1AdminLine(kind, missed, s1.curt.length)) + "</div>" +
-      (kind === "round1" ? s1ThreadItemsHTML() : s1VoicesHTML()) +
+      (kind === "round1" ? s1ThreadItemsHTML() : s1VoicesHTML(kind === "round2" ? "" : FIELD_ECHO.s1)) +
       okHTML;
     $("ov-s1res").classList.remove("hide");
     // クリア（manual/ai/partial）だけ鳴らす。round1・round2 は失敗の結果窓だが、
@@ -6641,10 +6712,15 @@
     if (!bad) {
       s2Hot = [];
       s2StopDeadline();
+      appendFieldEcho(box, [FIELD_ECHO.s2]);
       const d = document.createElement("div");
       d.className = "done"; d.textContent = "Stage 2 をクリアしました";
       box.appendChild(d);
-      unlockSequence();
+      // 到達は今この瞬間。余韻の前に記録する（recordStageClear のコメント参照）。
+      recordStageClear(3);
+      // 現場反応を読む一拍を置いてから解錠へ（Stage 5 と同じ間合い）。即座に
+      // 呼ぶと、足した1行が出た瞬間に解錠オーバーレイで隠れて読めない。
+      later(unlockSequence, FIELD_ECHO_HOLD_MS);
     } else {
       // 該当セルを光らせておく。[提出に戻る] でグリッドが開いた瞬間に、
       // 直すべき場所が既に指されている。探す時間がゼロになる。
@@ -6673,8 +6749,8 @@
     // 承認だけが報酬。スコアも星も出さない。
     hasUnlockMail = true; renderMails("u");
     sfx("decision1");   // 師長の承認メールが着弾する
-    // 自チームのマーカーが S3 へ滑る
-    TEAMS[2].pos = 3; reportProgress(3, "clear"); saveCheckpoint("stage-clear");
+    // 停留所とクリア報告は runVerdict() 側で済んでいる（recordStageClear）。
+    // ここは演出だけを担う。
     await wait(700);
     if (view !== "s2") return;   // 判断C
     // 解錠の喜びの陰で、誰も見ていない数字が増える。演出はつけない。
@@ -6868,6 +6944,12 @@
       return;
     }
 
+    appendFieldEcho(box, [FIELD_ECHO.s3]);
+    // 罠を踏んだうえで正典を照合して立て直したチームにだけ、余韻と振り返りの
+    // 促しを足す（Issue #149）。s3TrapUsed はチェックポイント復帰でも復元される
+    // ので、罰ゲームを挟んでリロードしたチームでもここへ届く。
+    const s3Recovered = s3TrapUsed;
+    if (s3Recovered) appendFieldEcho(box, S3_RECOVERY_LINES);
     const d = document.createElement("div");
     // 見出しは「今クリアしたステージ」を言う（Issue #79。解錠は次のステージが
     // 開くという意味だが、参加者には自分が何を終えたのかを伝えるほうが分かりやすい）。
@@ -6876,7 +6958,11 @@
     d.className = "done"; d.textContent = "Stage 3 をクリアしました";
     box.appendChild(d);
     s3Verdicting = false;
-    stage3UnlockSequence();
+    // 到達は今この瞬間。立て直しの2行を読む間も、記録の時刻は動かさない。
+    recordStageClear(4);
+    // 現場反応を読む一拍（Stage 2・5 と同じ間合い）。立て直したチームは行が
+    // 増えるぶん長めに取る。
+    later(stage3UnlockSequence, s3Recovered ? S3_RECOVERY_HOLD_MS : FIELD_ECHO_HOLD_MS);
   }
 
   async function stage3UnlockSequence() {
@@ -6891,9 +6977,8 @@
     $("ov-unlock").classList.add("hide");
     // 発熱の値はここでは触らない——9→14 の急増は次ステージの開始演出が担う
     // （先に 14 にすると急変の一報が死ぬ）。
-    // 停留所は 2026-08-22 の表示番号振り直しで S4 が独立したので、ここで進める
-    // （以前は S3 の停留所を共有していたため進めなかった）。
-    TEAMS[2].pos = 4; reportProgress(4, "clear"); saveCheckpoint("stage-clear");
+    // 停留所とクリア報告は runStage3Verdict() 側で済んでいる（recordStageClear。
+    // 2026-08-22 の表示番号振り直しで S4 が独立した停留所を持つ）。
     go("s4");
   }
 
@@ -7313,7 +7398,11 @@
     s4ActionVerdicting = false;
     // 結果演出（院長の結果報告3行 → クリアカード）は 2026-09-06 ユーザー決定で削除。
     // 通過したら、他ステージと同じクリア画面（#ov-unlock）へそのまま送る。
-    stage4UnlockSequence();
+    appendFieldEcho(box, [FIELD_ECHO.s4]);   // 対話の下端まで送るのは appendFieldEcho の側
+    // 到達は今この瞬間（表示番号振り直し後、このクリアで進むのは S5 の停留所）。
+    recordStageClear(5);
+    // 現場反応を読む一拍（Stage 2・5 と同じ間合い）。
+    later(stage4UnlockSequence, FIELD_ECHO_HOLD_MS);
   }
 
   async function stage4UnlockSequence() {
@@ -7325,8 +7414,7 @@
     await wait(1900);
     if (view !== "s4") return;   // 判断C
     $("ov-unlock").classList.add("hide");
-    // 表示番号振り直し後、このクリアで進むのは S5（旧 Stage 4）の停留所。
-    TEAMS[2].pos = 5; reportProgress(5, "clear"); saveCheckpoint("stage-clear");
+    // 停留所とクリア報告は runS4ActionVerdict() 側で済んでいる（recordStageClear）。
     // このステージだけ、クリア後に次のシーンへ実際に遷移する（devbar・URLハッシュ
     // 単体起動でも詰まないようにするため。docs/ui/mock/README.md の他ステージは
     // 遷移せず状態更新のみで留まるが、S4→S5 の配線検証にはここが要る）。
@@ -7642,12 +7730,19 @@
       l.className = "lead"; l.textContent = line;
       box.appendChild(l);
     });
+    // 現場反応は事務長の一言の後に置く（Issue #150）——「私からお届けしておきます」
+    // より先に受理を告げると、順序が逆になる。
+    appendFieldEcho(box, [FIELD_ECHO.s5]);
     const d = document.createElement("div");
     // 見出しは「今クリアしたステージ」を言う（Issue #79）。次に開く Stage 6 は
     // stage5UnlockSequence() の副題が言う。
     d.className = "done"; d.textContent = "Stage 5 をクリアしました";
     box.appendChild(d);
     s5Verdicting = false;
+    // 到達は今この瞬間。他ステージと同じく、余韻より先に記録を確定させる
+    // （この2200msの間はもともと記録が止まっていたが、同じ器へ現場反応を
+    // 1行足したのでここも揃える）。
+    recordStageClear(6);
     // 台詞を読む一拍を置いてから解錠オーバーレイへ。即座に覆うと、追加した
     // 事務長の一言が出た瞬間に隠れて読めない（Stage 4 の 2200ms と同じ間合い）。
     later(stage5UnlockSequence, 2200);
@@ -7662,12 +7757,11 @@
     await wait(1900);
     if (view !== "s5") return;   // 判断C
     $("ov-unlock").classList.add("hide");
-    // 位置を次の停留所へ進めてから、Stage 5 へ自動で進む（2026-08-22追加。
-    // stage3UnlockSequence() と同じ流儀——それまではファシリテーターが
-    // devbarで送る必要があった）。
+    // 停留所とクリア報告は runStage5Verdict() 側で済んでいる（recordStageClear）。
+    // ここは Stage 6 へ自動で進むだけ（2026-08-22追加。stage3UnlockSequence() と
+    // 同じ流儀——それまではファシリテーターがdevbarで送る必要があった）。
     // 発熱インジケータは動かさない——Stage 4・5 は 14 のまま継続
     // （docs/scenario/00_未知ウイルスの通奏低音.md §3「●●●継続」）。
-    TEAMS[2].pos = 6; reportProgress(6, "clear"); saveCheckpoint("stage-clear");
     await wait(900);
     if (view !== "s5") return;   // 判断C
     go("s6");
@@ -8052,11 +8146,15 @@
       return;
     }
 
+    appendFieldEcho(box, [FIELD_ECHO.s6]);
     const d = document.createElement("div");
     d.className = "done"; d.textContent = "Stage 6 をクリアしました（テストプレイ完走）";
     box.appendChild(d);
     s6Verdicting = false;
-    stage6GoalSequence();
+    // ゴールは今この瞬間。余韻の長さでレースの着順を動かさない。
+    recordStageClear(7);
+    // 現場反応を読む一拍（Stage 2・5 と同じ間合い）。ゴール演出は変えない。
+    later(stage6GoalSequence, FIELD_ECHO_HOLD_MS);
   }
 
   /* Stage 5 クリア＝レースのゴール。Stage 4 までと同じ「次のステージを
@@ -8075,7 +8173,8 @@
     // （docs/scenario/00_未知ウイルスの通奏低音.md §3「●●●継続」）。ゴール演出の
     // 間もここは 14・crisis のまま。0 と peace へ落ちるのは、この後のエピローグを
     // 経て Final へ入る瞬間だけ（go() の final 分岐。2026-09-06）。
-    TEAMS[2].pos = 7; reportProgress(7, "clear"); saveCheckpoint("stage-clear");   // フッターの停留所表示も同時に進める
+    // 停留所とクリア報告（フッターの停留所表示を含む）は runStage6Verdict() 側で
+    // 済んでいる（recordStageClear）。ここはゴール演出だけを担う。
     goalSequence();
     $("goal-s").textContent = "レース終了 — このあと振り返りへ進みます";
     // .onclick への代入（addEventListener の積み増しではなく上書き）——
