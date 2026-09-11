@@ -193,6 +193,34 @@
 /* AIペインは畳んだ状態から右へ逃がしておく。出現は右から滑り込む。 */
 .pane-r { transition: border-color .78s ease, margin-right .42s cubic-bezier(.2,.72,.28,1), opacity .34s ease; }
 .pane-r.collapsed { margin-right: -380px; opacity: 0; pointer-events: none; }
+/* --- Stage 2 だけの幅配分（.wide-ai。Issue #161） ------------------------
+   Stage 2 は22行×6列のラインリストをAIとやり取りするステージなのに、380pxでは
+   返ってきた表が6列中2.7列しか見えていなかった（表の自然幅568pxに対して可視
+   211px＝37%）。画面は1280px固定なので、AIペインへ足す幅は中央ペインから取る
+   しかない。そこで次の3つを一組で動かし、提出グリッドの読める文字数は変えずに
+   AIペインだけを広げる。実測値は wide-ai を付けた前後の比較（fs 1〜3で同じ）。
+     ① AIペインを 380→440px。表の可視幅は211→407px（37%→72%、2.7→5.7列）
+     ② 吹き出しの本文を縦積みに戻す（下の .bubble .body）。横並びのままだと
+        足した60pxの4割が導入文の段へ流れ、表は246px＝43%までしか伸びない
+     ③ 中央ペインは .work の左右余白 28→16px と、グリッドのセル余白 7→4px で
+        60pxのうち36pxを取り返す。結果、セルからはみ出す幅は採取日+2px・
+        備考+10pxで、Stage 2 以外（＝変更前）と同じまま——削ったのは余白だけで、
+        値の見え方は動かしていない。
+   3つは互いの帳尻で成り立っている。どれか1つだけ動かすなら必ず測り直すこと。 */
+.screen.wide-ai .pane-r { flex-basis: 440px; max-width: 440px; }
+.screen.wide-ai .pane-r.collapsed { margin-right: -440px; }
+/* 左下のメッセージバー（.phs）はAIペインの境界に合わせて浮いている
+   （right:400px＝380＋20pxの間合い）。広げた分だけ左へずらし、間合いを保つ。 */
+.screen.wide-ai .phs { right: 460px; }
+/* ②吹き出しの本文。.bubble .body は3ペインのレイアウト用 .body（display:flex）
+   の規則を拾って横並びになっており、導入文＋［表に送る］の段と表が横に並ぶ。
+   広げた幅を表へ配るため、ここだけ縦積みへ戻す（横並びを前提にした
+   ［表に送る］の配置は、縦積みでも表の直前のままで変わらない）。 */
+.screen.wide-ai .pane-r .bubble .body { display: block; }
+/* ③中央ペインの取り返し。 */
+.screen.wide-ai .work { padding-left: 16px; padding-right: 16px; }
+.screen.wide-ai .grid th,
+.screen.wide-ai .grid td input { padding-left: 4px; padding-right: 4px; }
 .hide { display: none !important; }
 
 .pane-hd {
@@ -6339,6 +6367,9 @@
   function renderStage2Excel() {
     hideOverlays();
     paneL.classList.remove("hide"); paneR.classList.remove("hide");
+    // Stage 2 だけAIペインを広げる（.wide-ai のCSSコメントに配分の根拠がある）。
+    // 外すのは go()——他の初期化と同じく、シーンを離れる側で一括して戻す。
+    screenEl.classList.add("wide-ai");
     hasS1Mail = true; openIdx = "s1"; readS1 = true;
     renderMails();
     s2Grid = clone(S2_SHEET_ROWS);
@@ -9059,6 +9090,10 @@
     $("s4-redband").classList.add("hide", "out"); $("s4-redband").classList.remove("in");
     $("s5-redband").classList.add("hide", "out"); $("s5-redband").classList.remove("in");
     aiRevealed = false; paneR.classList.add("collapsed"); paneR.classList.remove("locked");
+    // Stage 2 だけの幅配分（renderStage2Excel が付ける）。畳んだ状態の
+    // margin-right もペイン幅に合わせてあるので、collapsed を付け直すこの場所で
+    // 必ず外す——残ると次のステージが440px幅のまま滑り込む。
+    screenEl.classList.remove("wide-ai");
     $("phs").classList.add("hide");
     $("phs-win").classList.add("hide");
     $("phs-log").innerHTML = "";
