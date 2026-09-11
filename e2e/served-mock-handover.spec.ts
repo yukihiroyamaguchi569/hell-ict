@@ -1,6 +1,6 @@
 import { expect, test, type Page } from "@playwright/test";
 
-import { enterTeam, passClearPopups, SERVED_MOCK } from "./served-mock-helpers";
+import { enterTeam, SERVED_MOCK } from "./served-mock-helpers";
 
 /**
  * 操作担当の交代を促す案内（#ov-handover。Issue #148）のE2E。
@@ -108,12 +108,25 @@ test.describe("操作担当の交代（#ov-handover）", () => {
     if (reportedAt === undefined) throw new Error("クリアの報告が記録されていません。");
     expect(reportedAt - submittedAt).toBeLessThan(1_500);
 
-    await passClearPopups(page, {
-      title: "Stage 4 をクリアしました",
-      sub: "報告 — 保健所への発熱患者一覧",
-      handover: true,
-    });
-    // ④を通っても、クリアの報告は増えも減りもしない（二重記録を作らない）。
+    // ③まで送って④を開き、開いたまま置く。②③④はどれも自動で閉じるタイマーを
+    // 持たないので、チームが読んでいる間は何秒でも止まりうる——その間にクリアの
+    // 報告が後追いで飛ばないことを、実際に止めて確かめる。
+    await expect(page.locator("#ov-field")).toBeVisible({ timeout: 20_000 });
+    await page.locator("#btn-field-next").click();
+    await expect(page.locator("#ov-exec")).toBeVisible();
+    await expect(async () => {
+      await page.locator("#btn-exec-next").click();
+      await expect(page.locator("#ov-exec")).toBeHidden({ timeout: 1_000 });
+    }).toPass();
+    await expect(page.locator("#ov-handover")).toBeVisible();
+    await page.waitForTimeout(2_000);
+    expect(clearReportedAt).toHaveLength(1);
+
+    // 閉じて次のステージへ進んでも、報告は増えも減りもしない（二重記録を作らない）。
+    await expect(async () => {
+      await page.locator("#btn-handover-next").click();
+      await expect(page.locator("#ov-handover")).toBeHidden({ timeout: 1_000 });
+    }).toPass();
     await expect(page.locator(".stage-title")).toHaveText("Stage 5　報告", { timeout: 20_000 });
     expect(clearReportedAt).toHaveLength(1);
   });
@@ -137,8 +150,11 @@ test.describe("操作担当の交代（#ov-handover）", () => {
 
     // ④を開いたまま落ちる。チェックポイントは判定と同時に保存されている
     // （saveCheckpoint("stage-clear")）ので、復帰先は次のステージ。
-    // 開発用ハッシュは入室時に消えているので、リロード後はサーバの進行から復帰する。
-    await page.reload();
+    // 参加者の画面にはハッシュが付いていない（開発用ハッシュはこのテストが
+    // Stage 4 単体を開くために使っただけで、当日の入口は素のURL）。ハッシュを
+    // 残したまま開き直すと `gotoBootView` が復帰先より優先されて、確かめたい
+    // チェックポイント復帰の経路を通らない——素のURLで開き直す。
+    await page.goto(SERVED_MOCK);
     await expect(page.locator("#ov-entry")).toBeVisible();
     const boxes = page.locator("#code input");
     for (const [index, digit] of teamCode.split("").entries()) {
