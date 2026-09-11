@@ -1,6 +1,6 @@
 import { defineConfig, devices } from "@playwright/test";
 
-import { OPENAI_STUB_ORIGIN, WORKER_ORIGIN, WORKER_PORT } from "./e2e/ports";
+import { OPENAI_STUB_ORIGIN, WEB_ORIGIN, WEB_PORT, WORKER_ORIGIN, WORKER_PORT } from "./e2e/ports";
 
 export default defineConfig({
   testDir: "./e2e",
@@ -8,7 +8,7 @@ export default defineConfig({
   forbidOnly: Boolean(process.env.CI),
   retries: process.env.CI ? 2 : 0,
   use: {
-    baseURL: "http://127.0.0.1:4173",
+    baseURL: WEB_ORIGIN,
     channel: process.env.PLAYWRIGHT_CHANNEL,
     trace: "on-first-retry",
   },
@@ -51,8 +51,8 @@ export default defineConfig({
     },
     {
       name: "web",
-      command: "pnpm --filter @hell-ict/web dev --host 127.0.0.1 --port 4173",
-      url: "http://127.0.0.1:4173",
+      command: `pnpm --filter @hell-ict/web dev --host 127.0.0.1 --port ${String(WEB_PORT)}`,
+      url: WEB_ORIGIN,
       reuseExistingServer: !process.env.CI,
     },
   ],

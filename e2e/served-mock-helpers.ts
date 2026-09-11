@@ -3,7 +3,7 @@ import { expect, type Locator, type Page } from "@playwright/test";
 import { WORKER_ORIGIN } from "./ports";
 
 /**
- * 配信版モックの入口。参加者が当日触るのはReactハーネス（4173）ではなく、
+ * 配信版モックの入口。参加者が当日触るのはReactハーネス（既定4173）ではなく、
  * scripts/build-testplay.sh が docs/ui/mock/index.html を加工して
  * apps/worker/public/ へ置き、WorkerのAssetsが同一オリジンで配るこちらである。
  */

@@ -24,5 +24,9 @@ export const WORKER_PORT = readPort("WORKER_PORT", 8787);
 /** OpenAI Chat Completions APIのスタブ（e2e/openai-stub.mjs）。 */
 export const OPENAI_STUB_PORT = readPort("OPENAI_STUB_PORT", 8789);
 
+/** Vite開発サーバー（Reactハーネス）。 */
+export const WEB_PORT = readPort("WEB_PORT", 4173);
+
 export const WORKER_ORIGIN = `http://127.0.0.1:${String(WORKER_PORT)}`;
 export const OPENAI_STUB_ORIGIN = `http://127.0.0.1:${String(OPENAI_STUB_PORT)}`;
+export const WEB_ORIGIN = `http://127.0.0.1:${String(WEB_PORT)}`;
