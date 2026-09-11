@@ -1,5 +1,7 @@
 import { defineConfig, devices } from "@playwright/test";
 
+import { OPENAI_STUB_ORIGIN, WORKER_ORIGIN, WORKER_PORT } from "./e2e/ports";
+
 export default defineConfig({
   testDir: "./e2e",
   fullyParallel: true,
@@ -30,7 +32,7 @@ export default defineConfig({
       // 素のWorker/実キー経路へE2Eが無言で迂回しうる。常に起動し直す。
       name: "openai-stub",
       command: "node e2e/openai-stub.mjs",
-      url: "http://127.0.0.1:8789/health",
+      url: `${OPENAI_STUB_ORIGIN}/health`,
       reuseExistingServer: false,
     },
     {
@@ -38,9 +40,8 @@ export default defineConfig({
       // 配信版モック（e2e/served-mock.spec.ts）はWorkerのAssets（apps/worker/public/）
       // から配られる。build:testplayを前段に置かないとpublic/が.gitkeepだけの空になり、
       // クリーンチェックアウトのCIでは配信版を一度も開かないまま緑になる。
-      command:
-        "bash scripts/build-testplay.sh && pnpm --filter @hell-ict/worker exec wrangler dev --local --ip 127.0.0.1 --port 8787 --var OPENAI_BASE_URL:http://127.0.0.1:8789",
-      url: "http://127.0.0.1:8787/api/health",
+      command: `bash scripts/build-testplay.sh && pnpm --filter @hell-ict/worker exec wrangler dev --local --ip 127.0.0.1 --port ${String(WORKER_PORT)} --var OPENAI_BASE_URL:${OPENAI_STUB_ORIGIN}`,
+      url: `${WORKER_ORIGIN}/api/health`,
       reuseExistingServer: false,
       // wrangler dev の標準出力（1リクエスト1行）をCIログへ流す。wranglerが残す
       // ログファイルには、この行——どのチームがどのAPIをどの順で叩いたか——が入って

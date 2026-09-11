@@ -9,6 +9,7 @@ import {
   sendToAi,
   SERVED_MOCK,
 } from "../served-mock-helpers";
+import { WORKER_ORIGIN } from "../ports";
 
 /**
  * 配信版モックの通しテスト（監査レーン専用）。
@@ -318,7 +319,7 @@ const finishFinal = async (page: Page): Promise<void> => {
 test.beforeEach(async ({ context }) => {
   // Stage 5 の添付ビューアのコピーは navigator.clipboard を使う。
   await context.grantPermissions(["clipboard-read", "clipboard-write"], {
-    origin: "http://127.0.0.1:8787",
+    origin: WORKER_ORIGIN,
   });
 });
 
