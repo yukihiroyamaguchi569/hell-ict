@@ -90,9 +90,9 @@ JS 構造そのものは資産ではない。単一ファイル・フレーム�
 - **`transition()`**（5125-）— 急変（Stage 1→2 の転調）専用。`go()` を経由しない。
 - **自動遷移は3か所ある**（2026-08-22追加。それまではファシリテーターがdevbarで送っていた）。
   Prologue→Stage 1（`inboxStartAuto()`/`inboxNoteRead()`——3通とも開封で7秒後、または入室から
-  2分で `go("s1")`）、Stage 2クリア→Stage 3（`afterStage2Clear()` 末尾）、Stage 4クリア→Stage 5
-  （`afterStage5Clear()` 末尾）。既存の Stage 3→3.5（`afterStage3Clear()`）と合わせ、
-  Prologue から Final 手前までが繋がる。Stage 3.5→4（`afterStage4Clear()`）も同じ形。
+  2分で `go("s1")`）、Stage 2クリア→Stage 3（`afterStage2Clear()` 末尾）、Stage 5クリア→Stage 6
+  （`afterStage5Clear()` 末尾）。既存の Stage 3クリア→Stage 4（`afterStage3Clear()`）、
+  Stage 4クリア→Stage 5（`afterStage4Clear()`）と合わせ、Prologue から Final 手前までが繋がる。
   いずれも**クリアの2段ポップアップ（`#ov-field`→`#ov-exec`）を閉じた時点**から動き出す
   （2026-09-11変更。それまでは判定の2.2秒後に自動で解錠演出が出て、そのまま次のステージへ進んでいた）
   ——演出を読み切る前に画面が変わるという指摘への対応で、遷移そのものは残っている。
