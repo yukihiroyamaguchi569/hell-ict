@@ -79,6 +79,18 @@ export const passClearPopups = async (
   if (expected?.sub !== undefined) {
     await expect(page.locator("#ov-unlock .s")).toHaveText(expected.sub);
   }
+  // ②は話者の肖像を持つ。naturalWidth まで見るのは、404 でも <img> 自体は
+  // 「見えている」ことになるため——当日に顔が欠けるのをここで止める。
+  await expect
+    .poll(() =>
+      page
+        .locator("#ov-field .por img")
+        .evaluate((el) => (el instanceof HTMLImageElement ? el.naturalWidth : 0)),
+    )
+    .toBeGreaterThan(0);
+  // 所属と役職はキャプションが示すので、台詞側に〔〕の話者表記は残っていない。
+  await expect(page.locator("#ov-field .por .cap")).not.toBeEmpty();
+  await expect(page.locator("#ov-field .main")).not.toContainText("〔");
   await page.locator("#btn-field-next").click();
   await expect(page.locator("#ov-exec")).toBeVisible();
   await expect(async () => {
