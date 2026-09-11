@@ -32,13 +32,12 @@ const PROLOGUE_REPLY = "承知しました。よろしくお願いいたしま�
 const S1_REPLY =
   "いつもお世話になっております。ご連絡いただきありがとうございます。担当にて確認のうえ、折り返しご連絡いたします。お手数をおかけいたしますが、何卒よろしくお願い申し上げます。";
 
-/** Stage 1 の6通。落ちてくる順（0・5・11・17・23・30秒）。 */
+/** Stage 1 の5通。落ちてくる順（0・5・11・17・23秒）。 */
 const S1_SUBJECTS = [
   "サージカルマスクの在庫について",
   "先月の研修、出席されていますか",
   "今年度のICT委員会、日程を決めたいのですが",
   "抗菌薬使用量の集計、様式が変わりました",
-  "名札の発注、サイズはどちらにしますか",
   "月次の細菌検査報告書、送付先を教えてください",
 ] as const;
 
@@ -117,7 +116,7 @@ const clearStage1 = async (page: Page): Promise<void> => {
   await expect(page.locator("#clock")).not.toHaveClass(/idle/);
 
   for (const subject of S1_SUBJECTS) {
-    // 最後の1通は入場30秒後に届く。#mails は250msごとに描き直されるので
+    // 最後の1通は入場23秒後に届く。#mails は250msごとに描き直されるので
     // locatorで待つ（elementHandleを持ち回らない）。
     await page
       .locator("#mails button.mail")
@@ -127,7 +126,7 @@ const clearStage1 = async (page: Page): Promise<void> => {
     await page.getByRole("button", { name: "送信する" }).click();
   }
 
-  // 6通とも丁寧に返し切ると1ラウンドで完了する（s1RoundComplete → clean）。
+  // 5通とも丁寧に返し切ると1ラウンドで完了する（s1RoundComplete → clean）。
   await expect(page.locator("#ov-s1res")).toBeVisible({ timeout: 30_000 });
   await expect(page.locator("#s1res-main")).toContainText("受信トレイが落ち着きました");
   await page.getByRole("button", { name: "確認した（次へ）" }).click();
@@ -363,7 +362,9 @@ test("Prologueから感謝状まで、参加者の操作だけで通しで進む
     expect(activityKinds, `活動ログに ${kind} が積まれていない`).toContain(kind);
   }
   expect(activityKinds.filter((kind) => kind.startsWith("trap."))).toEqual([]);
-  expect(activityKinds.filter((kind) => kind === "submit.s1-reply")).toHaveLength(6);
+  expect(activityKinds.filter((kind) => kind === "submit.s1-reply")).toHaveLength(
+    S1_SUBJECTS.length,
+  );
 
   // サーバ側にも同じ到達点が残っている（当日の再読み込み復帰はここに乗る）。
   const checkpoint = await fetchCheckpoint(page, teamCode);
