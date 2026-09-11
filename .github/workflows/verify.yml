@@ -32,6 +32,10 @@ jobs:
       - run: pnpm install --frozen-lockfile
       - run: pnpm exec playwright install --with-deps chromium
       - run: pnpm verify
+      # E2Eの失敗は、wrangler dev 自身が落ちて以降が全部 ECONNREFUSED になる形で
+      # 現れることがある（ProxyWorkerの「Network connection lost.」で自死する既知の
+      # 不具合）。Playwrightの出力にはその理由が出ず、wranglerのデバッグログにしか
+      # 残らないので、失敗時だけ中身を出す。
       - if: failure()
         run: for f in ~/.config/.wrangler/logs/*.log; do echo "===== $f"; cat "$f"; done
 

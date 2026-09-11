@@ -42,6 +42,10 @@ export default defineConfig({
         "bash scripts/build-testplay.sh && pnpm --filter @hell-ict/worker exec wrangler dev --local --ip 127.0.0.1 --port 8787 --var OPENAI_BASE_URL:http://127.0.0.1:8789",
       url: "http://127.0.0.1:8787/api/health",
       reuseExistingServer: false,
+      // wrangler dev の標準出力（1リクエスト1行）をCIログへ流す。wranglerが残す
+      // ログファイルには、この行——どのチームがどのAPIをどの順で叩いたか——が入って
+      // いない。2026-09-11に wrangler dev が落ちた原因テストを特定できたのはこの並び
+      // からで、失敗時のログ出力（.github/workflows/verify.yml）と対で意味を持つ。
       stdout: "pipe",
     },
     {
