@@ -81,8 +81,12 @@ test.describe("配信版モック（後半ステージ）", () => {
     await page.getByRole("button", { name: "保健所へ提出" }).click();
     await expect(page.locator("#s5-verdict")).toContainText("Stage 5 をクリアしました");
 
-    // 現場 → 幹部の2段ポップアップを閉じると、Stage 6 へ自動で進む
-    // （afterStage5Clear）。
+    // クリアの告知（#ov-unlock）が先に出て、そこから現場 → 幹部と送る。
+    // 幹部のポップアップを閉じると Stage 6 へ自動で進む（afterStage5Clear）。
+    // 3段の順序をここで1回だけ確かめる——①は 1900ms で②へ自動で送るので、
+    // 判定が出た直後のこの位置でしか見られない。
+    await expect(page.locator("#ov-unlock")).toBeVisible();
+    await expect(page.locator("#ov-field")).toBeHidden();
     await passClearPopups(page, {
       title: "Stage 5 をクリアしました",
       sub: "掲示 — 面会制限のお知らせ",
@@ -173,12 +177,14 @@ test.describe("配信版モック（後半ステージ）", () => {
     await submit.click();
     await expect(page.locator("#s6-verdict")).toContainText("Stage 6 をクリアしました");
 
-    // 最終ステージも同じ2段ポップアップを通る。閉じた後に、従来どおりの
-    // ゴール演出（#ov-goal）が続く。
+    // 最終ステージも同じ3段演出を通る。閉じた後に、従来どおりの
+    // ゴール演出（#ov-goal）が続く。幹部のポップアップはクリア告知を
+    // 持たない（告知は #ov-unlock の役目）。
     await passClearPopups(page, {
       title: "Stage 6 をクリアしました",
       sub: "全ステージ完了 — このあとゴールです",
     });
+    await expect(page.locator("#ov-exec .clear-note")).toHaveCount(0);
     await expect(page.locator("#ov-goal")).toBeVisible();
     await expect(page.locator("#goal-s")).toHaveText("レース終了 — このあと振り返りへ進みます");
     await page.locator("#goal-next").click();

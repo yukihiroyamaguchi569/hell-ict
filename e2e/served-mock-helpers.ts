@@ -55,28 +55,32 @@ export const bubbleText = (bubble: Locator): Promise<string> =>
   });
 
 /**
- * クリア時の2段ポップアップを、参加者と同じ操作で送る。
+ * クリア時の3段演出を、参加者と同じ操作で送る。
  *
- * ①現場の反応（#ov-field）→ ②幹部の反応＋クリア告知（#ov-exec）の順に開き、
- * 自動で閉じるタイマーは持たない（読む速さはチームに委ねる設計）。②を閉じた
- * ときに初めて次のステージへ進む。②は開いた直後の押下を連打対策
- * （CLEAR_POP_GRACE_MS＝400ms）で捨てるので、閉じるまで押し直す。
+ * ①クリアの告知（#ov-unlock）→ ②現場の反応（#ov-field）→ ③幹部の反応
+ * （#ov-exec）の順に開く。①だけは押させず 1900ms で②へ自動で送るので、
+ * 参加者が押すのは②③の2回だけ。②③は自動で閉じるタイマーを持たない
+ * （読む速さはチームに委ねる設計）。③を閉じたときに初めて次のステージへ進む。
+ * ③は開いた直後の押下を連打対策（CLEAR_POP_GRACE_MS＝400ms）で捨てるので、
+ * 閉じるまで押し直す。
  *
  * expected を渡すと、クリア告知の見出し（.t）と次ステージ名（.s）も確かめる。
+ * ①は数秒で閉じるが、文言は startClearPopups() が②を出す前に入れており、
+ * 閉じた後も DOM に残る——②が見えてから読んでも取り違えは起きない。
  */
 export const passClearPopups = async (
   page: Page,
   expected?: { title?: string; sub?: string },
 ): Promise<void> => {
   await expect(page.locator("#ov-field")).toBeVisible({ timeout: 20_000 });
-  await page.locator("#btn-field-next").click();
-  await expect(page.locator("#ov-exec")).toBeVisible();
   if (expected?.title !== undefined) {
-    await expect(page.locator("#ov-exec .clear-note .t")).toHaveText(expected.title);
+    await expect(page.locator("#ov-unlock .t")).toHaveText(expected.title);
   }
   if (expected?.sub !== undefined) {
-    await expect(page.locator("#ov-exec .clear-note .s")).toHaveText(expected.sub);
+    await expect(page.locator("#ov-unlock .s")).toHaveText(expected.sub);
   }
+  await page.locator("#btn-field-next").click();
+  await expect(page.locator("#ov-exec")).toBeVisible();
   await expect(async () => {
     await page.locator("#btn-exec-next").click();
     await expect(page.locator("#ov-exec")).toBeHidden({ timeout: 1_000 });
