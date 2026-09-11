@@ -1576,9 +1576,13 @@
         </div>
 
         <!-- Stage 1 の処理結果。ブリーフィングと同じ院内システムのウィンドウで、
-             同じ事務長が結果を告げる——仕事を命じた人物が評価も下す。
-             下地は半透明（.viewer と同値）にして、片付けた受信トレイを透かす。
-             中身は s1ResultWin() が組み立てる。 -->
+             R1・R2 の終わりには同じ事務長が結果を告げる——仕事を命じた人物が
+             評価も下す。下地は半透明（.viewer と同値）にして、片付けた受信
+             トレイを透かす。中身は s1ShowResultWin() が組み立てる。
+             クリアの回（manual/partial/ai）だけは事務長が出ない——直後の幹部
+             ポップアップ（#ov-exec）で同じ人物が続けて喋るので、評価はそちらへ
+             寄せた（2026-09-11 ユーザー決定）。下の .por は s1ShowResultWin() が
+             回ごとに出し引きするので、ここの初期状態（表示）に意味は無い。 -->
         <div class="veil sysdlg s1res hide" id="ov-s1res">
           <div class="win">
             <div class="tb">
@@ -2202,10 +2206,15 @@
     s1: {
       field: FIELD_ECHO.s1,
       voice: EXEC_VOICE.jimu,
-      exec: [
-        "受信トレイは片付きましたか。結構です。",
-        "念のため申し上げますが、それは本日の分です。"
-      ],
+      /* Stage 1 だけ、事務長の評価（s1AdminLine）が execLines として先頭へ付く
+         （2026-09-11 ユーザー決定）——結果ウィンドウ（#ov-s1res）とこの幕の
+         両方で事務長が喋っていたので、評価はこちらへ寄せ、結果ウィンドウからは
+         肖像ごと外した。評価の文面は時間切れ・そっけない返信の件数で変わるので、
+         固定文のここには持てない（s1ShowResultWin が組み立てて渡す）。
+         旧・先頭行「受信トレイは片付きましたか。結構です。」はここで落とした
+         ——評価が結果ウィンドウ側にあった頃の代役であり、s1AdminLine の
+         「結構です。では、この調子でお願いしますよ。」と同じことを二度言う。 */
+      exec: ["念のため申し上げますが、それは本日の分です。"],
       title: "Stage 1 をクリアしました",
       // 副題（次ステージ名）はここだけ置かない。この直後に来る急変の赤帯が
       // 「火の手」の一報そのものなので、先に名前を出すと一報が死ぬ。
@@ -2332,15 +2341,18 @@
   /* stage: STAGE_CLEAR のキー。after: ③を閉じた後に走らせる続き（旧
      *UnlockSequence の後半）。extra: 現場の反応に続けて出す補足（Stage 3 の
      立て直しの2行だけ。台詞ではないので .reflect で見た目を分ける）。
+     execLines: ③の台詞を差し替える（省略時は STAGE_CLEAR[stage].exec）。
+     Stage 1 だけが使う——事務長の評価（s1AdminLine）は返信件数で文面が変わるので
+     固定文の STAGE_CLEAR には持てない。
 
      📌 肖像の src は②③ともここ（①を出す瞬間）で入れる。②が開くのは 1900ms 後、
      ③はさらにその後なので、読み込みはその間に済む。記録（recordStageClear）は
      この関数より前に終わっているので、画像の読み込みがレースの到達時刻に乗る
      ことはない。 */
-  function startClearPopups(stage, after, extra) {
+  function startClearPopups(stage, after, extra, execLines) {
     const conf = STAGE_CLEAR[stage];
     if (!conf) return;
-    clearPop = { view: view, conf: conf, after: after || null };
+    clearPop = { view: view, conf: conf, after: after || null, exec: execLines || conf.exec };
     setPopupPortrait("field-por-img", "field-por-cap", conf.field);
     setPopupPortrait("exec-por-img", "exec-por-cap", conf.voice);
     $("field-main").innerHTML = clearPopSayHTML([conf.field.line]) +
@@ -2372,7 +2384,7 @@
 
   function showExecPopup() {
     if (!clearPop) return;
-    $("exec-main").innerHTML = clearPopSayHTML(clearPop.conf.exec);
+    $("exec-main").innerHTML = clearPopSayHTML(clearPop.exec);
     $("ov-field").classList.add("hide");
     $("ov-exec").classList.remove("hide");
     clearPopExecOpenedAt = Date.now();
@@ -6130,7 +6142,16 @@
   }
 
   // kind: "round1"（1回目の終了）｜"round2"（2回目の終了）｜ s1Result の結果種別（manual / partial / ai）
+  //
+  // 📌 クリア（manual/partial/ai）のときだけ、事務長は**この窓に出ない**
+  //    （2026-09-11 ユーザー決定）。直後の幹部ポップアップ（#ov-exec）で同じ
+  //    事務長が続けて喋るので、評価が二度届いていた。評価（s1AdminLine）は
+  //    #ov-exec の先頭へ寄せ、この窓は返信件数と相手の反応だけにする——肖像も
+  //    外す（顔だけ残すと、喋らない事務長が黙って見ている画になる）。
+  //    R1・R2（round1/round2）は従来どおり。あちらでは事務長の評価が唯一の
+  //    反応なので、外すと手応えが消える。
   function s1ShowResultWin(kind) {
+    const cleared = kind !== "round1" && kind !== "round2";
     const defs = s1Defs();
     const done = defs.filter((d) => s1.doneIds.has(d.id)).length;
     const missed = s1.items.filter((x) => x.state === "missed").length;
@@ -6167,9 +6188,11 @@
       '<div class="hd2">' + title + "</div>" +
       '<div class="sum">' + sum + "</div>" +
       restLine +
-      '<div class="said">' + esc(s1AdminLine(kind, missed, s1.curt.length)) + "</div>" +
+      (cleared ? "" : '<div class="said">' + esc(s1AdminLine(kind, missed, s1.curt.length)) + "</div>") +
       (kind === "round1" ? s1ThreadItemsHTML() : s1VoicesHTML()) +
       okHTML;
+    // 事務長が喋らない回は肖像も出さない（上の 📌 参照）。
+    $("ov-s1res").querySelector(".por").classList.toggle("hide", cleared);
     $("ov-s1res").classList.remove("hide");
     // クリア（manual/ai/partial）だけ鳴らす。round1・round2 は失敗の結果窓だが、
     // ここは差し戻しではなく「ラウンドが終わった」報告なので音は付けない
@@ -6184,7 +6207,9 @@
       // 成功系（manual/ai/partial）は、他ステージと同じクリアの3段演出
       // （告知 → 現場 → 幹部）を通してから急変へ。窓が閉じた一拍あとに赤帯が来る
       // 「片付いたと思った直後」の間は transition() 側の演出に任せる。
-      else startClearPopups("s1", () => later(() => transition(), 700));
+      // 事務長の評価は、この幕（③幹部の反応）の先頭で言わせる（上の 📌 参照）。
+      else startClearPopups("s1", () => later(() => transition(), 700), null,
+        [s1AdminLine(kind, missed, s1.curt.length)].concat(STAGE_CLEAR.s1.exec));
     }, { once: true });
   }
   function s1HideResultWin() { $("ov-s1res").classList.add("hide"); }
