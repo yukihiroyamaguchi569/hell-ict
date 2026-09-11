@@ -28,21 +28,26 @@
 
 /* --- テーマモード ------------------------------------------------------ */
 /* 転調は「赤い帯を足す」ではなく、器の色そのものを差し替えることで起こす。 */
+/* --fg-muted と --fg-note を分けてある（Issue #144）。--fg-muted は「目立たない
+   こと自体が演出」の側（受信トレイの伏線・共有フォルダ・2003年書式の紙）に残し、
+   --fg-note は参加者が次の判断に使う小文字（課題の補足・判定理由・操作案内）に
+   使う。後者だけを背景とのコントラスト比4.5:1以上へ寄せる——crisis は器が
+   ほぼ黒なので、--fg-muted のままだと 3.6:1 前後で会場の後ろから読めない。 */
 [data-mode="peace"] {
   --bg: #f5f1e8;  --surface: #fffdf8; --surface-2: #efe9dc;
-  --fg: #2b2724;  --fg-muted: #6f6559;
+  --fg: #2b2724;  --fg-muted: #6f6559; --fg-note: #6f6559;
   --accent: #3f7d78; --rule: #ddd5c6;
   --ok: #3f7d78;  --warn: #b8862b;
 }
 [data-mode="alert"] {
   --bg: #14171a;  --surface: #1e2226; --surface-2: #272c31;
-  --fg: #e8ecef;  --fg-muted: #8d979f;
+  --fg: #e8ecef;  --fg-muted: #8d979f; --fg-note: #8d979f;
   --accent: #c1121f; --rule: #2c3238;
   --ok: #3fa66b;  --warn: #d99a1f;
 }
 [data-mode="crisis"] {
   --bg: #08090a;  --surface: #101112; --surface-2: #17191b;
-  --fg: #d8dce0;  --fg-muted: #6b7176;
+  --fg: #d8dce0;  --fg-muted: #6b7176; --fg-note: #7f868c;
   --accent: #e01e2b; --rule: #1e2022;
   --ok: #3fa66b;  --warn: #d99a1f;
 }
@@ -192,7 +197,7 @@
 
 .pane-hd {
   flex: 0 0 auto; padding: 11px 14px; font-size: 13px; font-weight: 700;
-  letter-spacing: .06em; color: var(--fg-muted);
+  letter-spacing: .06em; color: var(--fg-note);
   border-bottom: 1px solid var(--rule); display: flex; align-items: center; gap: 8px;
   transition: color .78s ease, border-color .78s ease;
 }
@@ -276,8 +281,8 @@
   font-variant-numeric: tabular-nums; line-height: 1;
 }
 .s2-timer.hot { color: var(--warn); }
-.s2-note { font-size: 14px; color: var(--fg-muted); line-height: 1.8; max-width: 62ch; }
-.s2-log { font-size: 13px; color: var(--fg-muted); line-height: 2; }
+.s2-note { font-size: 14px; color: var(--fg-note); line-height: 1.8; max-width: 62ch; }
+.s2-log { font-size: 13px; color: var(--fg-note); line-height: 2; }
 .s2-log b { color: var(--fg); font-weight: 600; }
 .s2-log .cost { color: var(--warn); }
 
@@ -293,22 +298,49 @@
 /* --- ワークスペース ---------------------------------------------------- */
 /* 下パディングを厚くしてあるのは、常駐する院内連絡先（.phs＝中央ペインの右下に
    浮いている、高さ44pxのバー）を避けるため。これが無いと、最下段の［提出する］
-   ［確認した（次へ）］がバーの下へ潜って押せなくなる（Issue #93）。
-   22px（他辺と同じ余白）＋62px（バーの高さ＋余白）。 */
-/* 下余白は苅部さんのバー（.phs＝画面下から 62px + 高さ44px ＝ 106px）より深く取る。
-   浅いと、末尾まで送った判定の最終行がバーの下へ潜って読めない。 */
-.work { flex: 1; overflow-y: auto; padding: 22px 28px 110px; display: flex; flex-direction: column; gap: 18px; }
-.stage-title { font-size: calc(20px * var(--fs-scale)); font-weight: 700; display: flex; align-items: center; gap: 9px; }
+   ［確認した（次へ）］がバーの下へ潜って押せなくなる（Issue #93）。バーは画面下から
+   106px（bottom 62px＋高さ44px）を占めるので、それより深い110pxを取る——84pxでは、
+   クリア時に判定枠へ増えた最終行が末尾まで送ってもバーの下へ潜って読めない
+   （Issue #150）。
+   上余白は22pxではなく12px。案件カードを足したぶんだけ上を詰め、縦の密度を
+   増やさない（Issue #145）。 */
+.work { flex: 1; overflow-y: auto; padding: 12px 28px 110px; display: flex; flex-direction: column; gap: 18px; }
+/* 案件カード（Issue #145）：ステージ名と課題文を1枚にまとめ、中央ペインの
+   上端を見るだけで「いまの仕事」が分かるようにする。カードを足しても縦の
+   密度は増やさない——.work の上余白を22px→12px、カード内の行間を .work の
+   gap(18px) より詰めることで、追加した枠のぶんを相殺している。
+   ここは説明を増やす場所ではない（入る要素はステージ名と課題文だけ）。 */
+.case {
+  background: color-mix(in srgb, var(--surface-2) 60%, transparent);
+  border-left: 3px solid var(--accent);
+  padding: 10px 14px 11px;
+  display: flex; flex-direction: column; gap: 4px;
+  transition: background-color .78s ease, border-color .78s ease;
+}
+/* Stage 1 だけは課題文を持たない（続くのは受信トレイの件数と締切）ので、
+   同じ .case でも上下を詰めて1行の帯にする。Stage 1 の .work は
+   overflow:hidden ＋ flex でメール本文の高さを決めており、カードが高いぶん
+   そのまま本文の可視領域が削れるため（Issue #145・codex Sol の指摘）。 */
+.case.slim { padding-top: 3px; padding-bottom: 4px; }
+.stage-title { font-size: calc(22px * var(--fs-scale)); font-weight: 700; display: flex; align-items: center; gap: 9px; }
 .stage-title::before { content: "▸"; color: var(--accent); }
-.brief { font-size: calc(18px * var(--fs-scale)); line-height: 1.75; max-width: 60ch; }
+.brief { font-size: calc(16px * var(--fs-scale)); line-height: 1.7; max-width: 60ch; }
 .cols {
-  font-family: var(--font-num); font-size: calc(13px * var(--fs-scale)); color: var(--fg-muted);
+  font-family: var(--font-num); font-size: calc(13px * var(--fs-scale)); color: var(--fg-note);
   border-left: 2px solid var(--rule); padding-left: 12px; line-height: 1.9;
 }
 .box { border: 1px solid var(--rule); background: var(--surface); transition: background-color .78s ease, border-color .78s ease; }
 .box > .hd {
   padding: 8px 13px; font-size: calc(13px * var(--fs-scale)); font-weight: 700; letter-spacing: .05em;
-  color: var(--fg-muted); border-bottom: 1px solid var(--rule);
+  color: var(--fg-note); border-bottom: 1px solid var(--rule);
+}
+/* 入力中の枠を中立色で示す（Issue #147）。1画面を3〜4人で囲むので、
+   操作担当以外も「いまどこへ書いているか」を追えるようにする。
+   .warn（誤り・不足の橙）には掛けない——警告の意味を持つ色を、入力中の
+   案内と混ぜない。.box.ctx-hi と同じく --accent は案内の強調として使う。 */
+.box:not(.warn):focus-within {
+  border-color: var(--accent);
+  box-shadow: 0 0 0 2px color-mix(in srgb, var(--accent) 22%, transparent);
 }
 /* Stage 3：差し戻し（不足）の枠。橙のみ、赤は使わない（Stage 2 §3の絶対条件を継続）。 */
 .box.warn { border-color: var(--warn); }
@@ -322,9 +354,9 @@
   background: transparent; color: var(--fg); border: 0; padding: 13px;
   font-family: var(--font-num); font-size: calc(14px * var(--fs-scale)); line-height: 1.7;
 }
-.submit-area::placeholder { color: var(--fg-muted); }
+.submit-area::placeholder { color: var(--fg-note); }
 .recog {
-  font-family: var(--font-num); font-size: calc(13px * var(--fs-scale)); color: var(--fg-muted);
+  font-family: var(--font-num); font-size: calc(13px * var(--fs-scale)); color: var(--fg-note);
   padding: 0 13px 11px; min-height: 1.4em;
 }
 
@@ -333,7 +365,7 @@
    なので1本。超えても提出は止めない——止めた瞬間「詰まらせない」が壊れる。 */
 .s2-dl {
   display: flex; align-items: center; gap: 12px;
-  font-family: var(--font-num); font-size: 14px; color: var(--fg-muted);
+  font-family: var(--font-num); font-size: 14px; color: var(--fg-note);
 }
 .s2-dl .bar { flex: 0 0 190px; height: 5px; background: var(--surface-2); position: relative; }
 .s2-dl .bar i { position: absolute; inset: 0 auto 0 0; background: var(--ok); transition: width .25s linear; }
@@ -350,7 +382,7 @@
 .grid th, .grid td { border: 1px solid var(--rule); padding: 0; }
 .grid th {
   position: sticky; top: 0; z-index: 1; background: var(--surface-2);
-  font-size: 12px; font-weight: 700; color: var(--fg-muted);
+  font-size: 12px; font-weight: 700; color: var(--fg-note);
   padding: 5px 7px; text-align: left; white-space: nowrap;
 }
 .grid td input {
@@ -373,12 +405,12 @@
 .grid.landed { animation: gridLanded .9s ease-out; }
 .grid .n { width: 1%; white-space: nowrap; background: var(--surface-2); }
 .grid .n button {
-  background: transparent; border: 0; color: var(--fg-muted);
+  background: transparent; border: 0; color: var(--fg-note);
   font-family: var(--font-num); font-size: 12px; padding: 4px 6px; letter-spacing: .06em;
 }
 .grid .n button:hover { color: var(--warn); }
 .grid tfoot button {
-  background: transparent; border: 0; color: var(--fg-muted);
+  background: transparent; border: 0; color: var(--fg-note);
   font-family: var(--font-num); font-size: 13px; padding: 7px 9px;
 }
 .grid tfoot button:hover { color: var(--fg); }
@@ -396,7 +428,7 @@
 .folded {
   display: flex; align-items: center; gap: 14px;
   border: 1px solid var(--rule); background: var(--surface);
-  padding: 11px 13px; font-family: var(--font-num); font-size: 14px; color: var(--fg-muted);
+  padding: 11px 13px; font-family: var(--font-num); font-size: 14px; color: var(--fg-note);
 }
 .folded .grow { flex: 1; }
 /* 提出ボタンは中央ペインの中に置く。誰かが「待って」と言える距離に。 */
@@ -415,7 +447,7 @@
 
 /* --- 判定：1項目ずつ点いていく2秒間 ------------------------------------ */
 .verdict { display: flex; flex-direction: column; gap: 9px; }
-.verdict .lead { font-size: calc(15px * var(--fs-scale)); color: var(--fg-muted); }
+.verdict .lead { font-size: calc(15px * var(--fs-scale)); color: var(--fg-note); }
 .check {
   display: flex; gap: 11px; align-items: flex-start; font-size: calc(16px * var(--fs-scale));
   opacity: 0; transform: translateY(3px); transition: opacity .22s ease, transform .22s ease;
@@ -424,7 +456,7 @@
 .check .mark { font-family: var(--font-num); font-weight: 700; flex: 0 0 auto; }
 .check.pass .mark { color: var(--ok); }
 .check.fail .mark { color: var(--warn); }
-.check.halt { color: var(--fg-muted); }
+.check.halt { color: var(--fg-note); }
 .check .why {
   display: block; font-size: calc(14px * var(--fs-scale)); color: var(--warn);
   font-family: var(--font-legacy); margin-top: 4px;
@@ -437,7 +469,7 @@
 .verdict .checking::before {
   content: ""; display: inline-block; width: 12px; height: 12px; margin-right: 8px;
   vertical-align: -1px; border-radius: 50%;
-  border: 2px solid var(--fg-muted); border-top-color: transparent;
+  border: 2px solid var(--fg-note); border-top-color: transparent;
   animation: verdictSpin .8s linear infinite;
 }
 /* 結果の行が下に付いたら輪は止める。JS側で消し忘れないようCSSで自動にする。 */
@@ -447,7 +479,24 @@
 
 /* --- AIチャット：暗い病院の中で、ここだけが白い ------------------------ */
 .ai { background: var(--ai-surface); color: var(--ai-fg); display: flex; flex-direction: column; min-height: 0; }
-.ai .log { flex: 1; overflow-y: auto; padding: 18px 16px; display: flex; flex-direction: column; gap: 14px; }
+/* 固定ヘッダー（Issue #146）。会話ログが上端から始まると、横から画面を見る
+   参加者に右ペインの役割が伝わらない。高さは38px固定で --fs-scale を掛けない
+   ——ペインの固定幅やボタンの寸法と同じ扱いで、文字サイズの段階が変わっても
+   「右のAI」と指せる配置を動かさないため。補助表示の「このステージ」は、
+   ここに出ているのが今のステージの会話1本だけであることを示す（挙動は不変）。 */
+.ai-hd {
+  flex: 0 0 auto; height: 38px; padding: 0 14px;
+  display: flex; align-items: center; gap: 10px;
+  border-bottom: 1px solid var(--ai-rule); background: var(--ai-surface-2);
+  font-size: 13px; font-weight: 700; letter-spacing: .04em; color: var(--ai-fg);
+}
+.ai-hd .sub {
+  margin-left: auto; font-size: 11px; font-weight: 500;
+  letter-spacing: .02em; color: var(--ai-muted);
+}
+/* ログの上下余白を18px→12pxへ詰め、ヘッダー38pxの増分を一部相殺する
+   （Stage 2 の20〜30行の表は従来どおりログ内でスクロールする）。 */
+.ai .log { flex: 1; overflow-y: auto; padding: 12px 16px; display: flex; flex-direction: column; gap: 14px; }
 /* :not(.bubble)としているのは、AIの挨拶（空状態）を灰色の案内文ではなく
    aiBubbleと同じ体裁の吹き出しにしたため——「.emptyがあれば消してから
    吹き出しを足す」既存ロジック（aiBubble/aiPlaceholderBubble/s6Generate）と
@@ -893,10 +942,10 @@
 /* Stage 5：提出候補の枠。.box を土台にする（枠の見た目だけを借りる——Stage 5 に
    判定は無いので .warn は使わない。docs/ui/06_Stage5.md §2）。 */
 .s6cand { padding: 14px; display: flex; gap: 14px; align-items: flex-start; min-height: 120px; }
-.s6cand .empty { color: var(--fg-muted); font-size: 15px; }
+.s6cand .empty { color: var(--fg-note); font-size: 15px; }
 .s6cand .thumb { width: 120px; height: 120px; object-fit: cover; border: 1px solid var(--rule); flex: 0 0 auto; background: var(--surface-2); cursor: zoom-in; }
 .s6cand .thumb.broken { display: none; cursor: default; }
-.s6cand .thumb-fallback { width: 120px; flex: 0 0 auto; font-size: 12px; line-height: 1.6; color: var(--fg-muted); border: 1px dashed var(--rule); padding: 8px; }
+.s6cand .thumb-fallback { width: 120px; flex: 0 0 auto; font-size: 12px; line-height: 1.6; color: var(--fg-note); border: 1px dashed var(--rule); padding: 8px; }
 .s6cand .thumb-fallback.hide { display: none; }
 
 /* Stage 4：事務長の督促ポップアップ（2026-08-22再設計で近藤さんから差し替え）。
@@ -1052,7 +1101,7 @@
 }
 .fpiece.ready { opacity: 1; filter: grayscale(0); border-style: solid; }
 .fpiece.done { border-color: var(--accent); }
-.fpiece-label { font-size: 12px; color: var(--fg-muted); letter-spacing: .08em; margin-bottom: 8px; }
+.fpiece-label { font-size: 12px; color: var(--fg-note); letter-spacing: .08em; margin-bottom: 8px; }
 .fpiece-body { display: flex; flex-direction: column; gap: 10px; align-items: stretch; }
 .fpiece-prompt { font-size: 14px; color: var(--fg); text-align: left; }
 .fpiece-body input {
@@ -1067,7 +1116,7 @@
    「祝いの一言は出さない」流儀を締めのメッセージ（.fclose）でも踏襲する。 */
 .fboard.done .ftile { animation: fPulse .9s ease-out; }
 @keyframes fPulse { 0% { box-shadow: 0 0 0 rgba(0,0,0,0); } 40% { box-shadow: 0 0 0 3px var(--accent); } 100% { box-shadow: 0 0 0 rgba(0,0,0,0); } }
-.fclose { font-size: 15px; line-height: 1.9; color: var(--fg-muted); max-width: 56ch; text-align: center; margin: 4px auto 0; }
+.fclose { font-size: 15px; line-height: 1.9; color: var(--fg-note); max-width: 56ch; text-align: center; margin: 4px auto 0; }
 .fclose .fclose-head { color: var(--fg); font-weight: 700; margin-bottom: 4px; }
 
 /* Final：②感謝状（2026-08-22追加、同日ユーザー確認で「記念品」寄りの
@@ -1358,6 +1407,9 @@
 
           <!-- 右：AIチャット -->
           <div class="pane-r ai hide" id="pane-r">
+            <!-- 右ペインの役割を上端に固定で置く（Issue #146）。中身は静的で、
+                 ステージが変わっても書き換えない。 -->
+            <div class="ai-hd"><span>AIアシスタント</span><span class="sub">このステージ</span></div>
             <!-- 初期値はgo()（AI_GREETING_HTML）が起動直後に必ず上書きするので、ここは
                  JS実行前の一瞬だけ見える保険。文言はJS側と揃えてある。 -->
             <div class="log" id="ai-log">
@@ -5637,7 +5689,7 @@
     const cur = s1.items.find((x) => x.key === s1.open && x.state === "live");
     const roundLabel = s1.round === 2 ? "　（2回目・AIあり）" : s1.round === 3 ? "　（3回目・コンテキストあり）" : "";
     const head =
-      '<div class="stage-title">Stage 1　平常運転' + roundLabel + "</div>" +
+      '<div class="case slim"><div class="stage-title">Stage 1　平常運転' + roundLabel + "</div></div>" +
       '<div class="s2-hd">' +
         '<div class="s2-count">返信済み　<b>' + doneThisRound + " / " + defs.length + "</b></div>" +
         '<div class="grow"></div>' +
@@ -5649,7 +5701,7 @@
     // （ウィンドウそのものは #ov-s1res という別要素で全画面を覆うので、
     // 背後にどちらが描かれていても見え方に影響しない）。
     if (s1.open === "memo") {
-      paneC.innerHTML = '<div class="work" style="padding:14px 24px 78px;gap:8px;overflow:hidden">' + head +
+      paneC.innerHTML = '<div class="work" style="padding:4px 24px 78px;gap:8px;overflow:hidden">' + head +
         '<div class="reader" style="padding:0;overflow-y:auto;flex:1 1 auto;min-height:0">' + mailBodyHTML(S1_MEMO) + "</div>" +
         '<div class="row-end" style="flex:0 0 auto"><button class="btn ghost" id="s1-memo-copy">本文をコピー</button></div>' +
         "</div>";
@@ -5722,7 +5774,7 @@
     // 高さ44px）を送信ボタンが隠さないための実測クリアランス。ログは行数が読めず
     // ここに置くと再びボタンを押し出すので、この画面では出さない
     // （ログは未開封・クリア後の画面でのみ表示する）。
-    paneC.innerHTML = '<div class="work" style="padding:14px 24px 78px;gap:8px;overflow:hidden">' + head +
+    paneC.innerHTML = '<div class="work" style="padding:4px 24px 78px;gap:8px;overflow:hidden">' + head +
       '<div class="reader" style="padding:0;overflow-y:auto;flex:1 1 auto;min-height:0">' + mailBodyHTML(cur.def) + "</div>" +
       replyHTML +
       '<div class="row-end" style="flex:0 0 auto"><button class="btn" id="s1-send">送信する</button></div>' +
@@ -6142,9 +6194,11 @@
     s2Hot = []; s2AddTaken = false; s2AddLanded = false;
     paneC.innerHTML =
       '<div class="work">' +
-        '<div class="stage-title">Stage 2　火の手</div>' +
-        // 正規化ルールの表は出さない。要件の言語化そのものが学習目標だから。
-        '<div class="brief">流行曲線が描けるよう、各列の書き方を統一して提出せよ。</div>' +
+        '<div class="case">' +
+          '<div class="stage-title">Stage 2　火の手</div>' +
+          // 正規化ルールの表は出さない。要件の言語化そのものが学習目標だから。
+          '<div class="brief">流行曲線が描けるよう、各列の書き方を統一して提出せよ。</div>' +
+        "</div>" +
         // 締切は課題カードの中に1本。ヘッダーに逃がすと判定と同じ画面に収まらない。
         '<div class="s2-dl" id="s2-dl"><span>7:00 申し送りまで</span>' +
           '<b id="s2-dl-t">05:00</b><span class="bar"><i id="s2-dl-b" style="width:100%"></i></span></div>' +
@@ -6772,8 +6826,10 @@
 
     paneC.innerHTML =
       '<div class="work">' +
-        '<div class="stage-title">Stage 3　方針</div>' +
-        '<div class="brief">転院患者3名（3B・5B・6A病棟）への疥癬対応方針を至急まとめよ。</div>' +
+        '<div class="case">' +
+          '<div class="stage-title">Stage 3　方針</div>' +
+          '<div class="brief">転院患者3名（3B・5B・6A病棟）への疥癬対応方針を至急まとめよ。</div>' +
+        "</div>" +
         '<div class="box" id="s3-box-ppe"><div class="hd">PPE・隔離</div>' +
           '<textarea class="submit-area" id="s3-ppe" placeholder="個室隔離・PPEの要否など" style="min-height:70px"></textarea></div>' +
         '<div class="box" id="s3-box-release"><div class="hd">接触予防策の解除基準</div>' +
@@ -7198,8 +7254,10 @@
     // 課題文に書かない（docs/scenario/04_Stage3_5_新情報の解釈.md §課題と提出物）。
     paneC.innerHTML =
       '<div class="work">' +
-        '<div class="stage-title">Stage 4　新情報の解釈</div>' +
-        '<div class="brief">速報論文を要約して院長へ報告してください。</div>' +
+        '<div class="case">' +
+          '<div class="stage-title">Stage 4　新情報の解釈</div>' +
+          '<div class="brief">速報論文を要約して院長へ報告してください。</div>' +
+        "</div>" +
         '<div class="box" id="s4-box"><div class="hd">院長への要約</div>' +
           '<textarea class="submit-area" id="s4-summary" style="min-height:160px"></textarea></div>' +
         '<div class="row-end"><button class="btn" id="btn-s4-submit">院長へ報告</button></div>' +
@@ -7481,8 +7539,10 @@
 
     paneC.innerHTML =
       '<div class="work">' +
-        '<div class="stage-title">Stage 5　報告</div>' +
-        '<div class="brief">保健所へ提出する発熱患者一覧を整えよ。</div>' +
+        '<div class="case">' +
+          '<div class="stage-title">Stage 5　報告</div>' +
+          '<div class="brief">保健所へ提出する発熱患者一覧を整えよ。</div>' +
+        "</div>" +
         // 締切は課題カードの中に1本（Stage 2 §「締切は課題カードの中に1本」と同じ配置）。
         // .s2-dl は Stage 2 発の名前だがステージ非依存の見た目なので、そのまま再利用する。
         // 表示文言だけ「電話でお待ちです」から「保健所の提出期限」へ差し替える
@@ -8000,8 +8060,10 @@
 
     paneC.innerHTML =
       '<div class="work">' +
-        '<div class="stage-title">Stage 6　掲示</div>' +
-        '<div class="brief">面会制限のお知らせを作り、掲示用に提出せよ。</div>' +
+        '<div class="case">' +
+          '<div class="stage-title">Stage 6　掲示</div>' +
+          '<div class="brief">面会制限のお知らせを作り、掲示用に提出せよ。</div>' +
+        "</div>" +
         '<div class="s6cand box" id="s6-cand"></div>' +
         '<div class="row-end"><button class="btn" id="btn-s6-submit" disabled>提出する</button></div>' +
         '<div id="s6-verdict"></div>' +
@@ -8210,8 +8272,10 @@
 
     paneC.innerHTML =
       '<div class="work">' +
-        '<div class="stage-title">Final　振り返り</div>' +
-        '<div class="brief">これまでの対応を振り返り、次のICTチームへ渡す引き継ぎメモの一言を残せ。</div>' +
+        '<div class="case">' +
+          '<div class="stage-title">Final　振り返り</div>' +
+          '<div class="brief">これまでの対応を振り返り、次のICTチームへ渡す引き継ぎメモの一言を残せ。</div>' +
+        "</div>" +
         '<div class="fboard" id="f-board">' +
           '<div class="ftiles" id="f-tiles">' + tilesHtml + '</div>' +
           '<div class="fpiece" id="f-piece">' +
