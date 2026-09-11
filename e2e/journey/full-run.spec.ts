@@ -111,6 +111,11 @@ const clearStage1 = async (page: Page): Promise<void> => {
   // 段落は BRIEF_BEATS（最後は5.3秒）で1つずつ出る。参加者と同じく、
   // 本文をクリックして早送りしてから［了解しました］を押す。
   await page.locator("#ov-brief .tb").click();
+  // 交代の案内（#ov-handover）が2回入ることは、ここで先に予告してある
+  // （Issue #148）。どのステージで来るかは明かさない。
+  await expect(page.locator("#ov-brief")).toContainText(
+    "操作する担当は、途中で2回交代していただきます",
+  );
   await page.getByRole("button", { name: "了解しました" }).click();
   await expect(page.locator("#ov-brief")).toBeHidden();
   // 経過時間の帯はここで動き出す（s1Begin → startClock）。
@@ -158,9 +163,11 @@ const clearStage2 = async (page: Page): Promise<void> => {
   await expect(page.locator("#verdict")).toContainText("Stage 2 をクリアしました", {
     timeout: 20_000,
   });
+  // Stage 2 のクリア後だけ、④操作担当の交代の案内が続く（1回目。Issue #148）。
   await passClearPopups(page, {
     title: "Stage 2 をクリアしました",
     sub: "方針 — 転院患者の対応",
+    handover: true,
   });
 };
 
@@ -224,9 +231,11 @@ const clearStage4 = async (page: Page): Promise<void> => {
   await expect(page.locator("#s4-talk")).toBeVisible({ timeout: 20_000 });
   await page.locator("#s4-action").fill(S4_ACTION);
   await page.getByRole("button", { name: "送信する" }).click();
+  // 2回目にして最後の交代の案内（Issue #148）。以降のステージでは出ない。
   await passClearPopups(page, {
     title: "Stage 4 をクリアしました",
     sub: "報告 — 保健所への発熱患者一覧",
+    handover: true,
   });
 };
 

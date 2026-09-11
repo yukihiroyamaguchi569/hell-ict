@@ -83,13 +83,18 @@ const expectPortrait = async (page: Page, overlay: string): Promise<void> => {
  * ③は開いた直後の押下を連打対策（CLEAR_POP_GRACE_MS＝400ms）で捨てるので、
  * 閉じるまで押し直す。
  *
+ * Stage 2・4 のクリアだけは、③の次に④操作担当の交代の案内（#ov-handover）が
+ * 続く4段になる（Issue #148）。`handover: true` を渡すとそこまで送る。既定は
+ * false で、渡さなかったステージでは④が出ないことまで確かめる——出すべきでない
+ * 場所（特に Stage 6。直後にゴール演出が続く）へ紛れ込んだら落ちる側へ倒す。
+ *
  * expected を渡すと、クリア告知の見出し（.t）と次ステージ名（.s）も確かめる。
  * ①は数秒で閉じるが、文言は startClearPopups() が②を出す前に入れており、
  * 閉じた後も DOM に残る——②が見えてから読んでも取り違えは起きない。
  */
 export const passClearPopups = async (
   page: Page,
-  expected?: { title?: string; sub?: string },
+  expected?: { title?: string; sub?: string; handover?: boolean },
 ): Promise<void> => {
   await expect(page.locator("#ov-field")).toBeVisible({ timeout: 20_000 });
   if (expected?.title !== undefined) {
@@ -108,6 +113,19 @@ export const passClearPopups = async (
     await page.locator("#btn-exec-next").click();
     await expect(page.locator("#ov-exec")).toBeHidden({ timeout: 1_000 });
   }).toPass();
+  if (expected?.handover) {
+    // ④交代の案内。肖像は持たない（登場人物の台詞ではなく進行の案内なので）。
+    await expect(page.locator("#ov-handover")).toBeVisible();
+    await expect(page.locator("#ov-handover .por")).toHaveCount(0);
+    await expect(page.locator("#ov-handover")).toContainText("操作する人を交代してください");
+    // 開いた直後の押下は連打対策（CLEAR_POP_GRACE_MS＝400ms）で捨てられる。
+    await expect(async () => {
+      await page.locator("#btn-handover-next").click();
+      await expect(page.locator("#ov-handover")).toBeHidden({ timeout: 1_000 });
+    }).toPass();
+  } else {
+    await expect(page.locator("#ov-handover")).toBeHidden();
+  }
 };
 
 /** Stage 5：事務長メールを開いて添付ビューア（発熱患者一覧）を出す。 */
