@@ -778,6 +778,57 @@
 }
 .callin .reflect div + div { margin-top: 7px; }
 
+/* 操作担当の交代を促す幕（#ov-handover。Issue #148）。
+   ⚠️ この器だけは病院のUIに見せない。中身は登場人物の台詞ではなく、画面から
+   チームへの進行の案内だからで、2026-09-11 のユーザー確認でも「それまでの
+   ポップアップとちょっと違う感じに」と指示が出ている。初版は .sysdlg（2003年風の
+   タイトルバー付きウィンドウ）を借りて肖像だけ落としていたが、器が同じままだと
+   4枚目も「院内連絡システムが喋っている」に見えたため、器ごと別物にした。
+   何が違うか：
+   ・タイトルバーと □ ✕ の飾りが無い（＝どの部署からの通達でもない）。
+   ・角が丸く、淡い紙色で、中央揃え。病院の器は .sysdlg も .viewer も直角の
+     白い業務ウィンドウ、.unlock は暗い幕なので、どれとも重ならない。
+   ・色をテーマ（peace/alert/crisis）に追従させない。--accent は crisis で赤に
+     なるので、この器の中だけは固定の落ち着いた緑で塗る——罰でも失敗でもない
+     案内が、赤い画面の後で不穏に見えては困る。
+   ・文字は大きめ・行間広め。1台を3〜4人で囲むので、離れた席から読ませる。 */
+.opnote { background: rgba(8,9,10,.62); padding: 40px; }
+.opnote .card {
+  display: flex; flex-direction: column; align-items: center; gap: 16px;
+  /* 横幅は本文1行（33字）が標準サイズで折り返さずに収まる値。狭いと
+     「ください。」だけが次の行へ落ちて読みにくい（2026-09-11 実測）。 */
+  width: 100%; max-width: 660px; max-height: 100%; overflow-y: auto;
+  padding: 38px 46px 34px; border-radius: 18px; text-align: center;
+  background: linear-gradient(180deg, #f5f8f6 0%, #e9efeb 100%);
+  color: #1d2a27; box-shadow: 0 20px 54px rgba(0,0,0,.5);
+}
+/* 交代そのものを指す印。人や役割ではなく「順番が回る」ことだけを表す絵にする
+   ——椅子や手の絵にすると「打つ人」「読む人」を割り当てる印象が出る。 */
+.opnote .mark {
+  flex: 0 0 auto;
+  width: calc(64px * var(--fs-scale)); height: calc(64px * var(--fs-scale));
+  border-radius: 50%; background: #dce7e2;
+  display: flex; align-items: center; justify-content: center;
+  font-size: calc(30px * var(--fs-scale)); line-height: 1;
+}
+.opnote .hd {
+  font-size: calc(26px * var(--fs-scale)); font-weight: 700; line-height: 1.5;
+  letter-spacing: .02em;
+}
+/* text-wrap: pretty は、折り返したときに最終行へ1〜2字だけ残るのを避ける
+   （大きい文字サイズでは必ず折り返す）。未対応ブラウザでは無視されるだけ。 */
+.opnote .ln {
+  font-size: calc(16px * var(--fs-scale)); line-height: 2; color: #47534f;
+  text-wrap: pretty;
+}
+.opnote .ln + .ln { margin-top: 8px; }
+/* ボタンだけは .btn の var(--accent) を上書きする（crisis では赤になるため）。 */
+.opnote .btn {
+  margin-top: 6px; background: #3f7d78; border-color: #3f7d78;
+  border-radius: 999px; padding: 12px 38px;
+  font-size: calc(16px * var(--fs-scale));
+}
+
 /* Final：ゴール。#ov-unlock とは別の器——「次のステージへの解錠」ではなく
    「レースの終端」であることを見た目で区別する（docs/ui/07_Final.md §4）。
    停留所のトラックを全画面サイズに拡大した構図にする。
@@ -1560,7 +1611,20 @@
             <div class="say beat">
               <em>他の職員は5分ですが</em>——優秀な皆さんなら、1分もあれば十分でしょう？
             </div>
+            <!-- 操作担当の交代の予告（2026-09-11・Issue #148）。不意に交代を
+                 求められるより、最初に「2回ある」と知らされているほうがチームは
+                 動きやすい（ユーザー決定）。本番の案内は #ov-handover が出すので、
+                 ここでは回数と「画面で知らせる」ことだけを言い、どのステージで
+                 来るかは言わない——ステージの中身も順番も明かさない。
+                 事務長に言わせるのは、この器が最初から最後まで彼の一方通行で、
+                 別の声を差し込むと器を増やすことになるため（#ov-handover 側は
+                 逆に、進行の案内なので話者を立てない）。
+                 締めの一言と同じ拍に置くのは、.bd が縦に詰まっているから——
+                 拍を1つ足すと標準サイズでも通達枠がスクロールの外へ落ちる
+                 （実測。特大では元から溢れている）。事務長が最後に事務連絡を
+                 付け足して締める、という運びは口調にも合う。 -->
             <div class="say beat">
+              操作する担当は、途中で2回交代していただきます。画面でお知らせします。<br>
               では、よろしくお願いします。
             </div>
             <div class="notice beat">院内メールシステムのご利用について（総務課）
@@ -1689,6 +1753,35 @@
               <div class="main" id="exec-main"></div>
             </div>
             <div class="ft"><button class="btn" id="btn-exec-next">次へ</button></div>
+          </div>
+        </div>
+
+        <!-- クリア時の④：操作担当の交代を促す案内（Issue #148）。
+             Stage 2・Stage 4 のクリア後にだけ、③の次に開く。3人1組なので、
+             全員が一度は操作するのに要る交代は2回——毎ステージは多すぎる
+             （2026-09-11 ユーザー決定）。Stage 6 のクリア後に出さないのは、
+             直後にゴール演出（#ov-goal）が続くため。
+             ⚠️ これは病院の登場人物の台詞ではなく、画面からチームへの進行の
+             案内である。話者を立てず、肖像もタイトルの部署名も置かない
+             （#ov-field の .reflect と同じ扱い）。次のステージに何があるかを
+             一言も匂わせないこと——Stage 2 の直後に出る回は Stage 3 の直前に
+             当たるので、「よく確かめて」の類は罠を殺す。
+             交代したかどうかは確認しない（ユーザー決定）。入力欄もチェックも
+             置かず、読んで閉じるだけの1枚にする。
+             見出しは2回とも同じなのでHTMLに置き、回ごとに変わる本文だけを
+             showHandoverPopup() が HANDOVER_NOTE からセットする。
+             ［次へ］と背景クリックで閉じる（②③と同じ）。
+             器は .sysdlg を借りない——2003年風のウィンドウ（タイトルバーと
+             □ ✕）を着せると、肖像を落としても「院内連絡システムからの通達」に
+             見える（2026-09-11 ユーザー指示で作り直した）。角の丸い淡色の面を
+             中央に置くだけにして、病院のどのUIとも重ならない佇まいにする。
+             詳細は .opnote のコメント参照。 -->
+        <div class="veil opnote hide" id="ov-handover">
+          <div class="card">
+            <div class="mark" aria-hidden="true">🔁</div>
+            <div class="hd">操作する人を交代してください</div>
+            <div id="handover-body"></div>
+            <button class="btn" id="btn-handover-next">次へ</button>
           </div>
         </div>
 
@@ -2304,6 +2397,25 @@
     }
   };
 
+  /* 操作担当の交代を促す案内（#ov-handover。Issue #148）。
+     チームは3人1組でPCは1台。全員が一度は真ん中に座るのに要る交代は2回なので、
+     区切りは Stage 2 クリア後と Stage 4 クリア後の2か所だけにする——1人目が
+     Stage 1〜2、2人目が Stage 3〜4、3人目が Stage 5〜Final（2026-09-11
+     ユーザー決定。当初案の毎ステージ＝6回は過剰だった）。
+     ここに載っているステージのキーが、そのまま「④を出すステージ」の定義に
+     なる。s1・s3・s5・s6 を足さないこと——特に s6 は直後にゴール演出が続く。
+     文面の決まりごと：
+     ・役割（「打つ人」「読む人」）を固定する言い方をしない。回ってくるのは
+       操作の順番であって、担当ではない（S3_RECOVERY_LINES と同じ流儀）。
+     ・解法もAIへの依頼の型も、次のステージの中身も匂わせない。s2 の回は
+       Stage 3 の罠の直前に出るので、ここは特に厳しく守る。
+     ・病院の登場人物の口調に寄せない。これは進行の案内で、台詞ではない。 */
+  const HANDOVER_SWAP_LINE = "まだ操作していない人と席を替わってから、［次へ］を押してください。";
+  const HANDOVER_NOTE = {
+    s2: [HANDOVER_SWAP_LINE, "交代のご案内は、この先でもう一度あります。"],
+    s4: [HANDOVER_SWAP_LINE, "交代のご案内は、これで最後です。"]
+  };
+
   /* クリアの記録（停留所・サーバへのクリア報告・チェックポイント）。解錠演出も
      現場反応の余韻も待たず、判定が成立した瞬間に確定させる——レースの到達時刻と
      順位が、演出の長さや prefers-reduced-motion の設定で動いてはいけない
@@ -2367,7 +2479,11 @@
   function startClearPopups(stage, after, extra, execLines) {
     const conf = STAGE_CLEAR[stage];
     if (!conf) return;
-    clearPop = { view: view, conf: conf, after: after || null, exec: execLines || conf.exec };
+    // stage は④（交代の案内）を出すかどうかの判定にだけ使う（HANDOVER_NOTE）。
+    clearPop = {
+      view: view, stage: stage, conf: conf, after: after || null,
+      exec: execLines || conf.exec
+    };
     setPopupPortrait("field-por-img", "field-por-cap", conf.field);
     setPopupPortrait("exec-por-img", "exec-por-cap", conf.voice);
     $("field-main").innerHTML = clearPopSayHTML(conf.field.lines) +
@@ -2408,9 +2524,33 @@
   function finishClearPopups() {
     if (!clearPop) return;
     if (Date.now() - clearPopExecOpenedAt < CLEAR_POP_GRACE_MS) return;
+    $("ov-exec").classList.add("hide");
+    if (view !== clearPop.view) { clearPop = null; return; }   // 判断C
+    // ④交代の案内があるステージ（Stage 2・4）は、ここで続きへ進まず1枚挟む。
+    if (HANDOVER_NOTE[clearPop.stage]) { showHandoverPopup(); return; }
     const seq = clearPop;
     clearPop = null;
-    $("ov-exec").classList.add("hide");
+    if (seq.after) seq.after();
+  }
+
+  /* ④操作担当の交代（#ov-handover）。③を閉じた直後に開くので、③と同じ理由で
+     開いた直後の連打を吸う——ここで after を取りこぼすと次ステージへ進めない。 */
+  let clearPopHandoverOpenedAt = 0;
+
+  function showHandoverPopup() {
+    if (!clearPop) return;
+    $("handover-body").innerHTML =
+      HANDOVER_NOTE[clearPop.stage].map((t) => '<div class="ln">' + esc(t) + "</div>").join("");
+    $("ov-handover").classList.remove("hide");
+    clearPopHandoverOpenedAt = Date.now();
+  }
+
+  function finishHandoverPopup() {
+    if (!clearPop) return;
+    if (Date.now() - clearPopHandoverOpenedAt < CLEAR_POP_GRACE_MS) return;
+    const seq = clearPop;
+    clearPop = null;
+    $("ov-handover").classList.add("hide");
     if (view !== seq.view) return;   // 判断C：読んでいる間にシーンを離れていたら進めない
     if (seq.after) seq.after();
   }
@@ -3986,7 +4126,7 @@
   let view = "entry";
 
   function hideOverlays() {
-    ["ov-entry", "ov-brief", "ov-viewer", "ov-unlock", "ov-field", "ov-exec", "ov-goal", "ov-epilogue", "ov-s1res", "ov-blackout", "ov-s3notice", "ov-s3scold", "ov-alarm", "ov-s5scold", "ov-lock", "ov-s5call", "ov-s4-director", "ov-s4-report", "ov-s6jimu-task", "ov-f-relay", "ov-f-handover", "ov-lightbox"].forEach((id) => $(id).classList.add("hide"));
+    ["ov-entry", "ov-brief", "ov-viewer", "ov-unlock", "ov-field", "ov-exec", "ov-handover", "ov-goal", "ov-epilogue", "ov-s1res", "ov-blackout", "ov-s3notice", "ov-s3scold", "ov-alarm", "ov-s5scold", "ov-lock", "ov-s5call", "ov-s4-director", "ov-s4-report", "ov-s6jimu-task", "ov-f-relay", "ov-f-handover", "ov-lightbox"].forEach((id) => $(id).classList.add("hide"));
     // #ov-lock の中身（拡大対応業務のボトル棚／インシデント報告書）は
     // startPenalty()/startS5Penalty() が動的に注入したもの。.hide を付けるだけでは
     // DOM とリスナーが残り続けるので、シーンを離れるたびに必ず空にする
@@ -10110,6 +10250,8 @@
   // 静的オーバーレイなので配線は一度だけ——表示のたびに張ると after が多重発火する。
   $("ov-field").addEventListener("click", showExecPopup);
   $("ov-exec").addEventListener("click", finishClearPopups);
+  // ④交代の案内（Stage 2・4 だけ③の次に開く）。②③と同じ作法で受ける。
+  $("ov-handover").addEventListener("click", finishHandoverPopup);
   // Final：労いリレーの早送り。s1BriefAll と同じ「画面のどこを押しても
   // 進む」思想だが、全部を一気に見せるのではなく1人ずつ次へ進める
   // （fAdvanceRelay は最後の話者では何もしないので、ここで誤って
