@@ -2,8 +2,10 @@
  * ローカル開発とE2Eが使うポートの単一のソース。
  *
  * worktreeを2つ同時に走らせると、既定のポートを両方が掴んで衝突する。
- * 片方を `WORKER_PORT=8801 OPENAI_STUB_PORT=8802 pnpm test:e2e` のように
- * ずらせるよう、ポート番号はここだけで決める。specから直接 process.env を
+ * 片方を `WORKER_PORT=8801 OPENAI_STUB_PORT=8802 WEB_PORT=4183 pnpm test:e2e`
+ * のようにずらせるよう、ポート番号はここだけで決める。WEB_PORTも必ず一緒に
+ * ずらす——Vite開発サーバーだけはreuseExistingServerで、別のworktreeが同じ
+ * ポートで持っているものを掴んでしまう。specから直接 process.env を
  * 読むと、1箇所の読み漏れで「クリップボード権限が付かない」「スタブ照会が
  * 空を返す」といった無関係に見える失敗になる。
  */
