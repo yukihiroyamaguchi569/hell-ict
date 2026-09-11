@@ -41,7 +41,7 @@ WORKER_PORT=8801 pnpm dev:worker
 
 **`WEB_PORT`も一緒にずらす。** E2EのVite開発サーバーだけは`reuseExistingServer: !CI`で、すでに起動しているものを再利用する。別のworktreeが同じポートで開発サーバーを持っていると、そちらのViteを掴み、`/api`のproxyがそちらの`WORKER_PORT`——つまり別のworkerへ向く。テストは動いているように見えて、見ているものが違う。
 
-TypeScript側の正は`e2e/ports.ts`で、`playwright.config.ts`と`e2e/`配下はここをimportする。specから直接`process.env`を読まない——1箇所の読み漏れが、クリップボード権限の付与漏れやスタブ照会の空振りという無関係に見える失敗になる。`apps/web/vite.config.ts`と`apps/worker`の`dev` script、`e2e/openai-stub.mjs`は、アプリ側の設定をE2Eコードへ依存させないため、同じ変数名・既定値・受け付ける書式（10進数字だけ）をそれぞれ`process.env`とシェル展開で読み直す。
+TypeScript側の正は`e2e/ports.ts`で、`playwright.config.ts`と`e2e/`配下はここをimportする。specから直接`process.env`を読まない——1箇所の読み漏れが、クリップボード権限の付与漏れやスタブ照会の空振りという無関係に見える失敗になる。`apps/web/vite.config.ts`と`e2e/openai-stub.mjs`は、アプリ側の設定をE2Eコードへ依存させないため、同じ変数名・既定値・受け付ける書式（10進数字だけ、1〜65535）を`process.env`から読み直す。`apps/worker`の`dev` scriptは`${WORKER_PORT:-8787}`のシェル展開で、未設定と空文字のときの既定値だけをそろえる——書式と範囲の解釈はwranglerに委ねる。
 
 `pnpm verify`はformat、lint、型検査、React/ViteとWorkerのbuild、domain、教材整合、Worker統合、主要E2Eを実行する。`pnpm verify:full`は全E2E、domainへのMutation Testing、重複検査、production dependency監査を追加する。CIも同じscriptを実行し、通常PRは`verify`、手動監査は`verify:full`を使う。
 
