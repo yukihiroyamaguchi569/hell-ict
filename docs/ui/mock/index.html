@@ -2155,23 +2155,38 @@
      肖像の下のキャプション（org／role）へ移してある。
      org は所属（無い話者は空文字にすると肩書の行だけが出る。#ov-s3notice の
      看護部長と同じ見せ方）、role は役職または氏名、img は
-     assets/images/production/ のファイル名。 */
+     assets/images/production/ のファイル名。
+     2026-09-11（さらに続き）：lines を配列にした（旧 line は文字列1本）。
+     Stage 1 だけ1行では短すぎるという指摘への対応で、器は全ステージ共通のまま
+     1要素＝1つの .say として出す——要素が1つなら見え方は文字列だった頃と
+     まったく同じなので、**Stage 2〜6 は1行のまま**据え置く。行を増やすのは
+     「短くて物足りない」ときだけにする。窓（.sysdlg .bd）は縦スクロールする
+     作りだが、肖像の横に収まる長さ（3行程度）を上限の目安とする。 */
   const FIELD_ECHO = {
+    /* Stage 1 だけ3行（2026-09-11 ユーザー指示）。R1・R2で在庫を問い合わせて
+       きた当人が、返事が届いたことと、それで何が進んだかを短く言う。
+       感謝は述べるが大げさにしない——疲れている現場の人の口調。最後の一言が
+       詫びになるのは、前任者の退職後に問い合わせ先が消えていたせいで、
+       着任初日のチームへ全部が流れ込んだから。矛先は組織と状況へ向ける。 */
     s1: { img: "stage1-ward-3b-nurse.png", org: "3B病棟", role: "看護師",
-          line: "返信が届きました。確認の電話を何本もかけずに済みます。" },
+          lines: [
+            "返信、ぜんぶ届きました。ありがとうございます。",
+            "マスクもガウンも、申請先が分かりました。前の方が辞めてから、誰に聞けばいいのか分からなくて。",
+            "また何かあったら、聞いてもいいですか。……すみません、着任初日にこんなに投げてしまって。"
+          ] },
     s2: { img: "stage2-ward-5a-head-nurse.png", org: "5A病棟", role: "師長",
-          line: "整った一覧をいただきました。今夜の夜勤への引き継ぎに、このまま使えます。" },
+          lines: ["整った一覧をいただきました。今夜の夜勤への引き継ぎに、このまま使えます。"] },
     s3: { img: "stage3-ward-3b-head-nurse.png", org: "3B病棟", role: "看護師長",
-          line: "方針を受け取りました。3名は個室を空けて、通常の病室でお迎えできます。" },
+          lines: ["方針を受け取りました。3名は個室を空けて、通常の病室でお迎えできます。"] },
     // 夜勤師長に所属病棟は無い（夜勤帯は病棟をまたいで見る）ので org は空。
     s4: { img: "stage4-night-shift-head-nurse.png", org: "", role: "夜勤師長",
-          line: "確認の依頼が届きました。今夜の申し送りで、目の痛みを全員に聞いてみます。" },
+          lines: ["確認の依頼が届きました。今夜の申し送りで、目の痛みを全員に聞いてみます。"] },
     s5: { img: "stage5-ward-5b-head-nurse.png", org: "5B病棟", role: "師長",
-          line: "保健所への報告が通ったそうですね。病棟で数え直しを頼まれずに済みます。" },
+          lines: ["保健所への報告が通ったそうですね。病棟で数え直しを頼まれずに済みます。"] },
     // Stage 6 だけは既存の肖像を流用する。ファイル名の stage4 はステージ改番前の
     // 名残で、近藤さんは改番後も患者相談窓口のまま——リネームはしない。
     s6: { img: "stage4-patient-relations-kondo.png", org: "患者相談窓口", role: "近藤",
-          line: "受付と病棟入口へ掲示しました。さっそく、絵を指さして面会時間を確かめる方がいます。" }
+          lines: ["受付と病棟入口へ掲示しました。さっそく、絵を指さして面会時間を確かめる方がいます。"] }
   };
   /* 幹部の肖像（#ov-exec のキャプション。2026-09-11 ユーザー決定で②と同じ
      作りへ揃えた）。現場（FIELD_ECHO）と違い話者は3人しかおらず複数ステージで
@@ -2355,7 +2370,7 @@
     clearPop = { view: view, conf: conf, after: after || null, exec: execLines || conf.exec };
     setPopupPortrait("field-por-img", "field-por-cap", conf.field);
     setPopupPortrait("exec-por-img", "exec-por-cap", conf.voice);
-    $("field-main").innerHTML = clearPopSayHTML([conf.field.line]) +
+    $("field-main").innerHTML = clearPopSayHTML(conf.field.lines) +
       (extra && extra.length
         ? '<div class="reflect">' + extra.map((t) => "<div>" + esc(t) + "</div>").join("") + "</div>"
         : "");
