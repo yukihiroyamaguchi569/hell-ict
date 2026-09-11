@@ -55,28 +55,55 @@ export const bubbleText = (bubble: Locator): Promise<string> =>
   });
 
 /**
- * クリア時の2段ポップアップを、参加者と同じ操作で送る。
+ * 肖像つきポップアップ（クリアの②③）の顔・キャプション・台詞を確かめる。
  *
- * ①現場の反応（#ov-field）→ ②幹部の反応＋クリア告知（#ov-exec）の順に開き、
- * 自動で閉じるタイマーは持たない（読む速さはチームに委ねる設計）。②を閉じた
- * ときに初めて次のステージへ進む。②は開いた直後の押下を連打対策
- * （CLEAR_POP_GRACE_MS＝400ms）で捨てるので、閉じるまで押し直す。
+ * naturalWidth まで見るのは、404 でも <img> 自体は「見えている」ことになるため
+ * ——当日に顔が欠けるのをここで止める。所属と役職はキャプションが示すので、
+ * 台詞側に `〔〕` の話者表記は残っていない（肖像を持つ器の流儀）。
+ */
+const expectPortrait = async (page: Page, overlay: string): Promise<void> => {
+  await expect
+    .poll(() =>
+      page
+        .locator(`${overlay} .por img`)
+        .evaluate((el) => (el instanceof HTMLImageElement ? el.naturalWidth : 0)),
+    )
+    .toBeGreaterThan(0);
+  await expect(page.locator(`${overlay} .por .cap`)).not.toBeEmpty();
+  await expect(page.locator(`${overlay} .main`)).not.toContainText("〔");
+};
+
+/**
+ * クリア時の3段演出を、参加者と同じ操作で送る。
+ *
+ * ①クリアの告知（#ov-unlock）→ ②現場の反応（#ov-field）→ ③幹部の反応
+ * （#ov-exec）の順に開く。①だけは押させず 1900ms で②へ自動で送るので、
+ * 参加者が押すのは②③の2回だけ。②③は自動で閉じるタイマーを持たない
+ * （読む速さはチームに委ねる設計）。③を閉じたときに初めて次のステージへ進む。
+ * ③は開いた直後の押下を連打対策（CLEAR_POP_GRACE_MS＝400ms）で捨てるので、
+ * 閉じるまで押し直す。
  *
  * expected を渡すと、クリア告知の見出し（.t）と次ステージ名（.s）も確かめる。
+ * ①は数秒で閉じるが、文言は startClearPopups() が②を出す前に入れており、
+ * 閉じた後も DOM に残る——②が見えてから読んでも取り違えは起きない。
  */
 export const passClearPopups = async (
   page: Page,
   expected?: { title?: string; sub?: string },
 ): Promise<void> => {
   await expect(page.locator("#ov-field")).toBeVisible({ timeout: 20_000 });
-  await page.locator("#btn-field-next").click();
-  await expect(page.locator("#ov-exec")).toBeVisible();
   if (expected?.title !== undefined) {
-    await expect(page.locator("#ov-exec .clear-note .t")).toHaveText(expected.title);
+    await expect(page.locator("#ov-unlock .t")).toHaveText(expected.title);
   }
   if (expected?.sub !== undefined) {
-    await expect(page.locator("#ov-exec .clear-note .s")).toHaveText(expected.sub);
+    await expect(page.locator("#ov-unlock .s")).toHaveText(expected.sub);
   }
+  // ②③はどちらも話者の肖像を持つ（③は2026-09-11に②へ揃えた）。片方だけ顔が
+  // 欠けたりキャプションが空になったりするのを防ぐため、同じ確かめ方を両方へ当てる。
+  await expectPortrait(page, "#ov-field");
+  await page.locator("#btn-field-next").click();
+  await expect(page.locator("#ov-exec")).toBeVisible();
+  await expectPortrait(page, "#ov-exec");
   await expect(async () => {
     await page.locator("#btn-exec-next").click();
     await expect(page.locator("#ov-exec")).toBeHidden({ timeout: 1_000 });

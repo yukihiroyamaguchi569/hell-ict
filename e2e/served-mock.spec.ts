@@ -104,11 +104,26 @@ test.describe("配信版モック", () => {
     expect(html.status()).toBe(200);
     expect(await html.text()).not.toContain("../../../assets/");
 
-    const image = await page.request.get(
-      `${SERVED_MOCK}assets/images/production/stage1-administrative-director.png`,
-    );
-    expect(image.status()).toBe(200);
-    // 200だけでは足りない——見つからないパスへHTMLを返す構成でも200になる。
-    expect(image.headers()["content-type"]).toMatch(/^image\/png/);
+    // クリアの現場反応（#ov-field）と幹部の反応（#ov-exec）の肖像は6ステージ
+    // ぶんあり、出るのは各ステージのクリア時だけ——1枚でも欠けると、その回の
+    // ポップアップだけが当日になって顔無しで出る。まとめてここで見る。
+    // 幹部は3人（事務長・看護部長・院長）で、6ステージを使い回す。
+    const portraits = [
+      "stage1-administrative-director.png",
+      "stage3-nursing-director.png",
+      "stage35-director.png",
+      "stage1-ward-3b-nurse.png",
+      "stage2-ward-5a-head-nurse.png",
+      "stage3-ward-3b-head-nurse.png",
+      "stage4-night-shift-head-nurse.png",
+      "stage5-ward-5b-head-nurse.png",
+      "stage4-patient-relations-kondo.png",
+    ];
+    for (const name of portraits) {
+      const image = await page.request.get(`${SERVED_MOCK}assets/images/production/${name}`);
+      expect(image.status(), name).toBe(200);
+      // 200だけでは足りない——見つからないパスへHTMLを返す構成でも200になる。
+      expect(image.headers()["content-type"], name).toMatch(/^image\/png/);
+    }
   });
 });

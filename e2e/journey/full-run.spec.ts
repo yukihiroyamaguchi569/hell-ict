@@ -131,7 +131,7 @@ const clearStage1 = async (page: Page): Promise<void> => {
   await expect(page.locator("#ov-s1res")).toBeVisible({ timeout: 30_000 });
   await expect(page.locator("#s1res-main")).toContainText("受信トレイが落ち着きました");
   await page.getByRole("button", { name: "確認した（次へ）" }).click();
-  // 結果ウィンドウを閉じると、他ステージと同じクリアの2段ポップアップが続く。
+  // 結果ウィンドウを閉じると、他ステージと同じクリアの3段演出が続く。
   // Stage 1 だけ副題（次ステージ名）を持たない——この直後の赤帯が「火の手」の
   // 一報そのものなので、先に名前を出すと一報が死ぬ。
   await passClearPopups(page, { title: "Stage 1 をクリアしました" });
