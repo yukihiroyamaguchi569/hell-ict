@@ -146,7 +146,7 @@ test("Stage 1：R2で詰まってもR3をやり直してクリアできる", asy
   await replyToAll(page, CURT_REPLY);
   await expect(page.locator("#s1res-main .hd2")).toHaveText("3回目、終了", { timeout: 60_000 });
   // 「次へ」ではなく「もう一度」と分かる文言で送り出す。
-  await page.getByRole("button", { name: "もう一度、受け取る" }).click();
+  await page.getByRole("button", { name: "もう一度挑戦する" }).click();
   await expect(page.locator("#ov-s1res")).toBeHidden();
 
   // ── ③続き：やり直しの回 ────────────────────────────────
