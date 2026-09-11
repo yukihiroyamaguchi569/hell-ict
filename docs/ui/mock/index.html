@@ -781,22 +781,56 @@
 }
 .callin .reflect div + div { margin-top: 7px; }
 
-/* 操作担当の交代を促す幕（#ov-handover。Issue #148）。器は他のポップアップと
-   同じ院内システムの窓（.sysdlg）を借りるが、中身は病院の登場人物の台詞ではなく
-   進行の案内なので、肖像を置かず、タイトルバーにも人物や部署を出さない
-   （#ov-field の .reflect と同じ「画面からチームへの言葉」の扱い）。
-   台詞（.say）より一段小さく、地の文の色で組む——誰かに言われた言葉ではない
-   ことを、読む前に見た目で分からせる。 */
-.opnote { background: rgba(8,9,10,.6); }
-/* 案内は2〜3行しかない。台詞用の 880px まで広げると、短い文が横に間延びする。
-   .sysdlg .win より後ろに書かれるとは限らないので、詳細度で勝たせる。 */
-.sysdlg.opnote .win { max-width: 620px; }
-.opnote .hd {
-  font-size: calc(19px * var(--fs-scale)); font-weight: 700; line-height: 1.6;
-  color: #16181a;
+/* 操作担当の交代を促す幕（#ov-handover。Issue #148）。
+   ⚠️ この器だけは病院のUIに見せない。中身は登場人物の台詞ではなく、画面から
+   チームへの進行の案内だからで、2026-09-11 のユーザー確認でも「それまでの
+   ポップアップとちょっと違う感じに」と指示が出ている。初版は .sysdlg（2003年風の
+   タイトルバー付きウィンドウ）を借りて肖像だけ落としていたが、器が同じままだと
+   4枚目も「院内連絡システムが喋っている」に見えたため、器ごと別物にした。
+   何が違うか：
+   ・タイトルバーと □ ✕ の飾りが無い（＝どの部署からの通達でもない）。
+   ・角が丸く、淡い紙色で、中央揃え。病院の器は .sysdlg も .viewer も直角の
+     白い業務ウィンドウ、.unlock は暗い幕なので、どれとも重ならない。
+   ・色をテーマ（peace/alert/crisis）に追従させない。--accent は crisis で赤に
+     なるので、この器の中だけは固定の落ち着いた緑で塗る——罰でも失敗でもない
+     案内が、赤い画面の後で不穏に見えては困る。
+   ・文字は大きめ・行間広め。1台を3〜4人で囲むので、離れた席から読ませる。 */
+.opnote { background: rgba(8,9,10,.62); padding: 40px; }
+.opnote .card {
+  display: flex; flex-direction: column; align-items: center; gap: 16px;
+  /* 横幅は本文1行（33字）が標準サイズで折り返さずに収まる値。狭いと
+     「ください。」だけが次の行へ落ちて読みにくい（2026-09-11 実測）。 */
+  width: 100%; max-width: 660px; max-height: 100%; overflow-y: auto;
+  padding: 38px 46px 34px; border-radius: 18px; text-align: center;
+  background: linear-gradient(180deg, #f5f8f6 0%, #e9efeb 100%);
+  color: #1d2a27; box-shadow: 0 20px 54px rgba(0,0,0,.5);
 }
-.opnote .ln { font-size: calc(15px * var(--fs-scale)); line-height: 1.9; color: #4a514c; }
-.opnote .ln + .ln { margin-top: 6px; }
+/* 交代そのものを指す印。人や役割ではなく「順番が回る」ことだけを表す絵にする
+   ——椅子や手の絵にすると「打つ人」「読む人」を割り当てる印象が出る。 */
+.opnote .mark {
+  flex: 0 0 auto;
+  width: calc(64px * var(--fs-scale)); height: calc(64px * var(--fs-scale));
+  border-radius: 50%; background: #dce7e2;
+  display: flex; align-items: center; justify-content: center;
+  font-size: calc(30px * var(--fs-scale)); line-height: 1;
+}
+.opnote .hd {
+  font-size: calc(26px * var(--fs-scale)); font-weight: 700; line-height: 1.5;
+  letter-spacing: .02em;
+}
+/* text-wrap: pretty は、折り返したときに最終行へ1〜2字だけ残るのを避ける
+   （大きい文字サイズでは必ず折り返す）。未対応ブラウザでは無視されるだけ。 */
+.opnote .ln {
+  font-size: calc(16px * var(--fs-scale)); line-height: 2; color: #47534f;
+  text-wrap: pretty;
+}
+.opnote .ln + .ln { margin-top: 8px; }
+/* ボタンだけは .btn の var(--accent) を上書きする（crisis では赤になるため）。 */
+.opnote .btn {
+  margin-top: 6px; background: #3f7d78; border-color: #3f7d78;
+  border-radius: 999px; padding: 12px 38px;
+  font-size: calc(16px * var(--fs-scale));
+}
 
 /* Final：ゴール。#ov-unlock とは別の器——「次のステージへの解錠」ではなく
    「レースの終端」であることを見た目で区別する（docs/ui/07_Final.md §4）。
@@ -1718,20 +1752,18 @@
              置かず、読んで閉じるだけの1枚にする。
              見出しは2回とも同じなのでHTMLに置き、回ごとに変わる本文だけを
              showHandoverPopup() が HANDOVER_NOTE からセットする。
-             ［次へ］と背景クリックで閉じる（②③と同じ）。 -->
-        <div class="veil sysdlg opnote hide" id="ov-handover">
-          <div class="win">
-            <div class="tb">
-              <span class="grow">進行のご案内</span>
-              <span class="ctl">□ ✕</span>
-            </div>
-            <div class="bd">
-              <div class="main">
-                <div class="hd">操作する人を交代してください</div>
-                <div id="handover-body"></div>
-              </div>
-            </div>
-            <div class="ft"><button class="btn" id="btn-handover-next">次へ</button></div>
+             ［次へ］と背景クリックで閉じる（②③と同じ）。
+             器は .sysdlg を借りない——2003年風のウィンドウ（タイトルバーと
+             □ ✕）を着せると、肖像を落としても「院内連絡システムからの通達」に
+             見える（2026-09-11 ユーザー指示で作り直した）。角の丸い淡色の面を
+             中央に置くだけにして、病院のどのUIとも重ならない佇まいにする。
+             詳細は .opnote のコメント参照。 -->
+        <div class="veil opnote hide" id="ov-handover">
+          <div class="card">
+            <div class="mark" aria-hidden="true">🔁</div>
+            <div class="hd">操作する人を交代してください</div>
+            <div id="handover-body"></div>
+            <button class="btn" id="btn-handover-next">次へ</button>
           </div>
         </div>
 

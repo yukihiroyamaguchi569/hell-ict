@@ -60,16 +60,26 @@ test.describe("操作担当の交代（#ov-handover）", () => {
       await expect(page.locator("#ov-exec")).toBeHidden({ timeout: 1_000 });
     }).toPass();
 
-    // 進行の案内であって登場人物の台詞ではないので、肖像もタイトルの部署名も無い。
+    // 進行の案内であって登場人物の台詞ではないので、肖像は無い。器も病院のUI
+    // （2003年風のウィンドウ）を借りない——タイトルバーごと持たない別の面にする。
     await expect(page.locator("#ov-handover")).toBeVisible();
     await expect(page.locator("#ov-handover .por")).toHaveCount(0);
-    await expect(page.locator("#ov-handover .tb .grow")).toHaveText("進行のご案内");
+    await expect(page.locator("#ov-handover .win, #ov-handover .tb")).toHaveCount(0);
+    await expect(page.locator("#ov-handover")).not.toHaveClass(/sysdlg/);
+    await expect(page.locator("#ov-handover .card")).toBeVisible();
     await expect(page.locator("#ov-handover")).toContainText("操作する人を交代してください");
     await expect(page.locator("#ov-handover")).toContainText("まだ操作していない人と席を替わって");
     // 2回目＝最後の交代。次のステージに何があるかは一言も書かない。
     await expect(page.locator("#ov-handover")).toContainText("これで最後です");
     // 交代したかどうかは確認しない（ユーザー決定）。入力欄もチェックも置かない。
     await expect(page.locator("#ov-handover input, #ov-handover textarea")).toHaveCount(0);
+    // Stage 4 は crisis テーマ（--accent が赤）。罰でも失敗でもない案内なので、
+    // この器の中だけはテーマに追従せず落ち着いた緑のままであること。
+    await expect(page.locator("#screen")).toHaveAttribute("data-mode", "crisis");
+    await expect(page.locator("#btn-handover-next")).toHaveCSS(
+      "background-color",
+      "rgb(63, 125, 120)",
+    );
 
     await expect(async () => {
       await page.locator("#btn-handover-next").click();
