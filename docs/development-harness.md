@@ -24,6 +24,25 @@ pnpm verify
 pnpm verify:full
 ```
 
+### ポートの切り替え
+
+ローカル開発とE2Eが使うポートは環境変数で上書きできる。既定のままなら設定は要らない。worktreeを2つ同時に走らせるときだけ、片方をずらす。
+
+| 変数 | 既定 | 何のポートか |
+|---|---|---|
+| `WORKER_PORT` | 8787 | `wrangler dev`（Worker/DO、配信版モックの配信元）。`pnpm dev`のViteが`/api`をproxyする先でもある |
+| `OPENAI_STUB_PORT` | 8789 | E2EのOpenAIスタブ（`e2e/openai-stub.mjs`）。Workerへは`--var OPENAI_BASE_URL`で渡る |
+| `WEB_PORT` | 4173 | E2Eが起動するVite開発サーバー（Reactハーネス）。Playwrightの`baseURL`でもある |
+
+```sh
+WORKER_PORT=8801 OPENAI_STUB_PORT=8802 WEB_PORT=4183 pnpm test:e2e
+WORKER_PORT=8801 pnpm dev:worker
+```
+
+**`WEB_PORT`も一緒にずらす。** E2EのVite開発サーバーだけは`reuseExistingServer: !CI`で、すでに起動しているものを再利用する。別のworktreeが同じポートで開発サーバーを持っていると、そちらのViteを掴み、`/api`のproxyがそちらの`WORKER_PORT`——つまり別のworkerへ向く。テストは動いているように見えて、見ているものが違う。
+
+TypeScript側の正は`e2e/ports.ts`で、`playwright.config.ts`と`e2e/`配下はここをimportする。specから直接`process.env`を読まない——1箇所の読み漏れが、クリップボード権限の付与漏れやスタブ照会の空振りという無関係に見える失敗になる。`apps/web/vite.config.ts`と`e2e/openai-stub.mjs`は、アプリ側の設定をE2Eコードへ依存させないため、同じ変数名・既定値・受け付ける書式（10進数字だけ、1〜65535）を`process.env`から読み直す。`apps/worker`の`dev` scriptは`${WORKER_PORT:-8787}`のシェル展開で、未設定と空文字のときの既定値だけをそろえる——書式と範囲の解釈はwranglerに委ねる。
+
 `pnpm verify`はformat、lint、型検査、React/ViteとWorkerのbuild、domain、教材整合、Worker統合、主要E2Eを実行する。`pnpm verify:full`は全E2E、domainへのMutation Testing、重複検査、production dependency監査を追加する。CIも同じscriptを実行し、通常PRは`verify`、手動監査は`verify:full`を使う。
 
 ## Cloudflare構成

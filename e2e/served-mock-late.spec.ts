@@ -9,6 +9,7 @@ import {
   sendToAi,
   SERVED_MOCK,
 } from "./served-mock-helpers";
+import { OPENAI_STUB_ORIGIN, WORKER_ORIGIN } from "./ports";
 
 /**
  * 配信版モックの後半ステージ（Stage 5 報告／Stage 6 掲示／Final）のE2E。
@@ -23,7 +24,7 @@ import {
 /** OpenAIスタブが受け取った本文のうち、`query`を含むものの件数。 */
 const stubSeenCount = async (page: Page, query: string): Promise<number> => {
   const response = await page.request.get(
-    `http://127.0.0.1:8789/seen?q=${encodeURIComponent(query)}`,
+    `${OPENAI_STUB_ORIGIN}/seen?q=${encodeURIComponent(query)}`,
   );
   expect(response.status()).toBe(200);
   const body: unknown = await response.json();
@@ -40,7 +41,7 @@ test.describe("配信版モック（後半ステージ）", () => {
     // 添付ビューアのコピーは navigator.clipboard を使う。参加者と同じ経路
     // （コピー→貼り付け）でなぞるため、読み書きの両方を許可する。
     await context.grantPermissions(["clipboard-read", "clipboard-write"], {
-      origin: "http://127.0.0.1:8787",
+      origin: WORKER_ORIGIN,
     });
   });
 
