@@ -32,11 +32,14 @@ pnpm verify:full
 |---|---|---|
 | `WORKER_PORT` | 8787 | `wrangler dev`（Worker/DO、配信版モックの配信元）。`pnpm dev`のViteが`/api`をproxyする先でもある |
 | `OPENAI_STUB_PORT` | 8789 | E2EのOpenAIスタブ（`e2e/openai-stub.mjs`）。Workerへは`--var OPENAI_BASE_URL`で渡る |
+| `WEB_PORT` | 4173 | E2Eが起動するVite開発サーバー（Reactハーネス）。Playwrightの`baseURL`でもある |
 
 ```sh
-WORKER_PORT=8801 OPENAI_STUB_PORT=8802 pnpm test:e2e
+WORKER_PORT=8801 OPENAI_STUB_PORT=8802 WEB_PORT=4183 pnpm test:e2e
 WORKER_PORT=8801 pnpm dev:worker
 ```
+
+**`WEB_PORT`も一緒にずらす。** E2EのVite開発サーバーだけは`reuseExistingServer: !CI`で、すでに起動しているものを再利用する。別のworktreeが同じポートで開発サーバーを持っていると、そちらのViteを掴み、`/api`のproxyがそちらの`WORKER_PORT`——つまり別のworkerへ向く。テストは動いているように見えて、見ているものが違う。
 
 TypeScript側の正は`e2e/ports.ts`で、`playwright.config.ts`と`e2e/`配下はここをimportする。specから直接`process.env`を読まない——1箇所の読み漏れが、クリップボード権限の付与漏れやスタブ照会の空振りという無関係に見える失敗になる。`apps/web/vite.config.ts`と`apps/worker`の`dev` scriptはimportできないので、同じ変数名と既定値をそれぞれ`process.env`とシェル展開で読む。
 
