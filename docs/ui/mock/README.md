@@ -88,7 +88,7 @@ JS 構造そのものは資産ではない。単一ファイル・フレーム�
   採らなかった）。`table` を持つものだけが列選択コピーを出す（下記 Stage 4）。
 - **`hideOverlays()`**（2128-）— オーバーレイIDの配列を舐めて閉じる。新しいオーバーレイを足したらこの配列に追加。Stage 3.5 の `#ov-s4-report` もここに入っている（`#ov-s4-kanbu` は2026-09-05に廃止・Issue #88）。
 - **`transition()`**（5125-）— 急変（Stage 1→2 の転調）専用。`go()` を経由しない。
-- **自動遷移は3か所ある**（2026-08-22追加。それまではファシリテーターがdevbarで送っていた）。
+- **自動遷移は5か所ある**（2026-08-22追加。それまではファシリテーターがdevbarで送っていた）。
   Prologue→Stage 1（`inboxFrame()`——3通すべてが「返信済み」か「時間切れ」になったら `go("s1")`）、
   Stage 2クリア→Stage 3（`afterStage2Clear()` 末尾）、Stage 5クリア→Stage 6
   （`afterStage5Clear()` 末尾）。既存の Stage 3クリア→Stage 4（`afterStage3Clear()`）、
