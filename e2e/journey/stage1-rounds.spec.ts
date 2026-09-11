@@ -54,6 +54,20 @@ const waitForAllMails = async (page: Page): Promise<void> => {
   );
 };
 
+/** 開いているメールの残り時間（mm:ss）を秒で読む。 */
+const openMailSecondsLeft = async (page: Page): Promise<number> => {
+  const label = (await page.locator("#s1-timer").innerText()).trim();
+  const parts = label.split(":");
+  // 添字アクセスは undefined を返しうる（Number(undefined) は NaN）。
+  // 読めない表示を 0 秒として通さないよう、ここで落とす。
+  const minutes = Number(parts[0]);
+  const seconds = Number(parts[1]);
+  if (!Number.isFinite(minutes) || !Number.isFinite(seconds)) {
+    throw new Error(`残り時間が mm:ss として読めません: ${label}`);
+  }
+  return minutes * 60 + seconds;
+};
+
 /** そのラウンドの5通へ同じ本文で返信する。 */
 const replyToAll = async (page: Page, body: string): Promise<void> => {
   for (const subject of await roundSubjects(page)) {
@@ -138,15 +152,42 @@ test("Stage 1：R2で詰まってもR3をやり直してクリアできる", asy
 
   // ── ③続き：やり直しの回 ────────────────────────────────
   await expect(page.locator(".stage-title")).toContainText("（4回目・コンテキストあり）");
+
+  // 着弾が at = 0/5/11/17/23 で**やり直す**こと。ここが s1.t0 の打ち直しを
+  // 検査している唯一の場所——打ち直さないと s1Now() が大きいままなので、次の
+  // s1Frame で5通が一斉に着弾する（そのとき due は着弾時刻から数え直されるため、
+  // 残り時間だけを見ても差が出ない）。まず「まだ1通目しか来ていない」を見る。
+  const retryStartedAt = Date.now();
+  await expect(
+    page.locator("#mails button.mail"),
+    "やり直し直後は引き継ぎメモ＋1通目だけ",
+  ).toHaveCount(2, { timeout: 4_000 });
+
+  // 5通そろうまでに、2通目以降の着弾ぶんの時間（最後は23秒）がかかること。
   await waitForAllMails(page);
+  const landingSeconds = (Date.now() - retryStartedAt) / 1000;
+  expect(
+    landingSeconds,
+    `やり直しの5通目は23秒かけて着弾するはず（実測 ${landingSeconds.toFixed(1)}秒）`,
+  ).toBeGreaterThan(15);
+  expect(landingSeconds).toBeLessThan(45);
+
   // 同じ5通が降り直す。
   expect(await roundSubjects(page)).toEqual(firstRoundSubjects);
   // doneIds が消えている（前回返した分が「返信済み」のまま残っていない）。
   // 残っていると、1通も返さないまま clean が成立して通過してしまう。
   await expect(page.locator(".s2-count")).toContainText("0 / 5");
-  await page.locator("#mails button.mail").filter({ hasText: firstRoundSubjects[0] }).click();
-  // 締切が打ち直されている（開いた1通に持ち時間がまるまる残っている）。
-  await expect(page.locator("#s1-timer")).toContainText("00:");
+
+  // 締切も打ち直されている。いま着弾したばかりの1通は、持ち時間（60秒）が
+  // ほぼ丸ごと残っているはず——「00:」の前方一致では残り1秒でも通ってしまうので、
+  // 秒数で見る。
+  await page.locator("#mails button.mail").last().click();
+  const secondsLeft = await openMailSecondsLeft(page);
+  expect(secondsLeft, `着弾直後の残り時間は60秒近いはず（実測 ${secondsLeft}秒）`).toBeGreaterThan(
+    45,
+  );
+  expect(secondsLeft).toBeLessThanOrEqual(60);
+
   // 貼ったコンテキストは残っている——やり直しのたびに消えると、やり直し自体が罰になる。
   expect((await page.locator("#s1-ctx").inputValue()).length).toBeGreaterThanOrEqual(CTX_MIN);
 
