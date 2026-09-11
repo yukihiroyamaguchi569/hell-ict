@@ -5,7 +5,19 @@ import { createServer } from "node:http";
  * wrangler devへ `--var OPENAI_BASE_URL:http://127.0.0.1:<port>` で
  * このサーバーを指させる（本番コードに分岐を足さず、設定値だけを差し替える）。
  */
-const port = Number(process.env.OPENAI_STUB_PORT ?? "8789");
+const readPort = () => {
+  const raw = process.env.OPENAI_STUB_PORT;
+  if (raw === undefined || raw === "") return 8789;
+  const port = /^\d+$/.test(raw) ? Number(raw) : Number.NaN;
+  if (!Number.isInteger(port) || port < 1 || port > 65535) {
+    throw new Error(`OPENAI_STUB_PORT にポート番号として使えない値が指定されている: ${raw}`);
+  }
+  return port;
+};
+
+// 既定値と受け付ける書式はe2e/ports.tsにそろえる。空文字をNumberが0にして
+// 無作為ポートへbindすると、Playwrightは既定の8789を待ち続ける。
+const port = readPort();
 
 /** 既定の応答。Stage 5 の整形依頼以外は、中身を読まずこれを返す。 */
 const DEFAULT_REPLY = "（スタブ応答）承知しました。";
