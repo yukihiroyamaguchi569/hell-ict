@@ -54,6 +54,35 @@ export const bubbleText = (bubble: Locator): Promise<string> =>
     return holder.textContent ?? "";
   });
 
+/**
+ * クリア時の2段ポップアップを、参加者と同じ操作で送る。
+ *
+ * ①現場の反応（#ov-field）→ ②幹部の反応＋クリア告知（#ov-exec）の順に開き、
+ * 自動で閉じるタイマーは持たない（読む速さはチームに委ねる設計）。②を閉じた
+ * ときに初めて次のステージへ進む。②は開いた直後の押下を連打対策
+ * （CLEAR_POP_GRACE_MS＝400ms）で捨てるので、閉じるまで押し直す。
+ *
+ * expected を渡すと、クリア告知の見出し（.t）と次ステージ名（.s）も確かめる。
+ */
+export const passClearPopups = async (
+  page: Page,
+  expected?: { title?: string; sub?: string },
+): Promise<void> => {
+  await expect(page.locator("#ov-field")).toBeVisible({ timeout: 20_000 });
+  await page.locator("#btn-field-next").click();
+  await expect(page.locator("#ov-exec")).toBeVisible();
+  if (expected?.title !== undefined) {
+    await expect(page.locator("#ov-exec .clear-note .t")).toHaveText(expected.title);
+  }
+  if (expected?.sub !== undefined) {
+    await expect(page.locator("#ov-exec .clear-note .s")).toHaveText(expected.sub);
+  }
+  await expect(async () => {
+    await page.locator("#btn-exec-next").click();
+    await expect(page.locator("#ov-exec")).toBeHidden({ timeout: 1_000 });
+  }).toPass();
+};
+
 /** Stage 5：事務長メールを開いて添付ビューア（発熱患者一覧）を出す。 */
 export const openFeverLinelist = async (page: Page): Promise<void> => {
   await page
