@@ -1650,17 +1650,26 @@
         <!-- クリア時の3段演出③：幹部の反応。②を閉じると続けて開く。
              クリアの告知は①（#ov-unlock）が済ませているので、この器は
              幹部の台詞だけを持つ。閉じると次ステージへ進む。
-             こちらは肖像を持たない（2026-09-11 時点。②だけに顔を付けるかは
-             ユーザー判断待ち）——顔のある現場と、声だけの執行部という差が、
-             現場が礼を言った直後の温度差をそのまま見せる。肖像が無いので
-             話者は台詞側の〔〕表記が示す（書式は旧 S5_CLEAR_LINES を踏襲）。 -->
+             ②と同じく話者の肖像を持つ（2026-09-11 ユーザー決定。同じ作りに
+             揃えた——現場だけに顔があると、温度差ではなく器の差に見える）。
+             話者はステージごとに変わるので、画像とキャプションは
+             startClearPopups() が EXEC_VOICE から毎回セットし直す
+             （HTMLの初期値に頼ると前のステージの顔が残る）。
+             肖像を持つ器なので、台詞に〔〕の話者表記は付けない
+             （#ov-field・#ov-s3notice と同じ流儀。二重表記になる）。 -->
         <div class="veil sysdlg callin hide" id="ov-exec">
           <div class="win">
             <div class="tb">
               <span class="grow">院内連絡システム　v3.1 ── 執行部より</span>
               <span class="ctl">□ ✕</span>
             </div>
-            <div class="bd"><div class="main" id="exec-main"></div></div>
+            <div class="bd">
+              <div class="por">
+                <div class="frame"><img id="exec-por-img" src="" alt=""></div>
+                <div class="cap" id="exec-por-cap"></div>
+              </div>
+              <div class="main" id="exec-main"></div>
+            </div>
             <div class="ft"><button class="btn" id="btn-exec-next">次へ</button></div>
           </div>
         </div>
@@ -2146,11 +2155,29 @@
     s6: { img: "stage4-patient-relations-kondo.png", org: "患者相談窓口", role: "近藤",
           line: "受付と病棟入口へ掲示しました。さっそく、絵を指さして面会時間を確かめる方がいます。" }
   };
+  /* 幹部の肖像（#ov-exec のキャプション。2026-09-11 ユーザー決定で②と同じ
+     作りへ揃えた）。現場（FIELD_ECHO）と違い話者は3人しかおらず複数ステージで
+     繰り返すので、ステージごとではなく人物ごとに1件だけ持ち、STAGE_CLEAR が
+     voice で指す——同じ人物のキャプションが場所によってずれるのを防ぐ。
+     所属（org）と役職（role）は、その人物が既に名乗っている器へ揃える：
+     事務長は #ov-brief・#ov-s1res・#ov-s5call の「病院執行部／事務長」、
+     看護部長は #ov-s3notice、院長は #ov-s4-director（どちらも実在名を出さない
+     流儀で肩書のみ。docs/character のトーンルール）。
+     ファイル名の stage3-／stage35- はステージ改番前の名残で、他の器からも
+     参照している——リネームはしない。 */
+  const EXEC_VOICE = {
+    jimu:  { img: "stage1-administrative-director.png", org: "病院執行部", role: "事務長" },
+    kango: { img: "stage3-nursing-director.png",        org: "",           role: "看護部長" },
+    incho: { img: "stage35-director.png",               org: "",           role: "院長" }
+  };
   /* ステージごとの幹部の反応と、クリア告知の文言（2026-09-11 ユーザー決定）。
      現場が礼を述べた直後に、組織の顔がどう受け取るか——成功は認めるが労いには
      しない、という温度差そのものがこのポップアップの役目。話者の割り当て
      （S1 事務長／S2・S3 看護部長／S4 院長／S5・S6 事務長）はユーザー決定。
      矛先は常に組織と状況へ向け、職種も人格も攻撃しない（AGENTS.md）。
+     voice は話者の肖像（EXEC_VOICE）。肖像を持つ器では台詞に〔〕の話者表記を
+     付けない流儀なので（FIELD_ECHO・S3_NOTICE_LINES と同じ）、exec の各行から
+     〔事務長〕のような先頭の表記は外してある。文面そのものは変えていない。
      title/sub は幹部の台詞ではなく、先に出るクリアの告知（#ov-unlock）の
      見出しと副題。ステージごとの文言を1か所で読めるよう、ここへ置く。
      sfx: 解錠時に鳴らす success1。クリアを告げる幕（#ov-unlock）で鳴らす。
@@ -2160,9 +2187,10 @@
   const STAGE_CLEAR = {
     s1: {
       field: FIELD_ECHO.s1,
+      voice: EXEC_VOICE.jimu,
       exec: [
-        "〔事務長〕受信トレイは片付きましたか。結構です。",
-        "〔事務長〕念のため申し上げますが、それは本日の分です。"
+        "受信トレイは片付きましたか。結構です。",
+        "念のため申し上げますが、それは本日の分です。"
       ],
       title: "Stage 1 をクリアしました",
       // 副題（次ステージ名）はここだけ置かない。この直後に来る急変の赤帯が
@@ -2172,9 +2200,10 @@
     },
     s2: {
       field: FIELD_ECHO.s2,
+      voice: EXEC_VOICE.kango,
       exec: [
-        "〔看護部長〕あら、もう出来たの。……ふふ、表を整えるくらい、誰にでもできると思っていたのだけれど。",
-        "〔看護部長〕できる人がいなかったから、あの表は10年あのままだったのよね。"
+        "あら、もう出来たの。……ふふ、表を整えるくらい、誰にでもできると思っていたのだけれど。",
+        "できる人がいなかったから、あの表は10年あのままだったのよね。"
       ],
       title: "Stage 2 をクリアしました",
       // 副題に罠の名前（「嘘」「ハルシネーション」）を書かない——次のステージに
@@ -2184,9 +2213,10 @@
     },
     s3: {
       field: FIELD_ECHO.s3,
+      voice: EXEC_VOICE.kango,
       exec: [
-        "〔看護部長〕方針、拝見しました。マニュアルどおり——ええ、それでいいのよ。",
-        "〔看護部長〕誰かが拾ってきた紙のほうを信じる人も、この病院には大勢いるのだけれどね。"
+        "方針、拝見しました。マニュアルどおり——ええ、それでいいのよ。",
+        "誰かが拾ってきた紙のほうを信じる人も、この病院には大勢いるのだけれどね。"
       ],
       title: "Stage 3 をクリアしました",
       // 参加者向け呼称は「新情報の解釈」（設計ドキュメント上の呼称は Stage 3.5。
@@ -2196,9 +2226,10 @@
     },
     s4: {
       field: FIELD_ECHO.s4,
+      voice: EXEC_VOICE.incho,
       exec: [
-        "〔院長〕読んだ。海外の速報が、今夜の申し送りに変わったわけだ。",
-        "〔院長〕結構。この病院は、報告を上げても、そこで止まることのほうが多い。"
+        "読んだ。海外の速報が、今夜の申し送りに変わったわけだ。",
+        "結構。この病院は、報告を上げても、そこで止まることのほうが多い。"
       ],
       title: "Stage 4 をクリアしました",
       sub: "報告 — 保健所への発熱患者一覧",
@@ -2211,9 +2242,10 @@
          2026-09-11 にこのポップアップへ移設）。罠（PIIインシデント）を踏んだか
          どうかで分岐させない——踏んだチームにだけ違う台詞を出すと、隣の画面を
          覗いた時点で罠の存在が割れる。 */
+      voice: EXEC_VOICE.jimu,
       exec: [
-        "〔事務長〕確認しました。保健所さんへは私からお届けしておきます。",
-        "〔事務長〕……ほう。手際は悪くないんですね。"
+        "確認しました。保健所さんへは私からお届けしておきます。",
+        "……ほう。手際は悪くないんですね。"
       ],
       title: "Stage 5 をクリアしました",
       sub: "掲示 — 面会制限のお知らせ",
@@ -2221,9 +2253,10 @@
     },
     s6: {
       field: FIELD_ECHO.s6,
+      voice: EXEC_VOICE.jimu,
       exec: [
-        "〔事務長〕掲示、確認しました。去年のものより、ずいぶん分かりやすいですね。",
-        "〔事務長〕来年もこの形式でお願いします。……ああ、来年は別の方にお願いすることになりますが。"
+        "掲示、確認しました。去年のものより、ずいぶん分かりやすいですね。",
+        "来年もこの形式でお願いします。……ああ、来年は別の方にお願いすることになりますが。"
       ],
       title: "Stage 6 をクリアしました",
       // 次のステージは無い。副題は「この先に何があるか」を言う枠なので、
@@ -2268,15 +2301,17 @@
     return lines.map((t) => '<div class="say">' + esc(t) + "</div>").join("");
   }
 
-  /* ②の肖像を、そのステージの話者へ差し替える（FIELD_ECHO の1件を受ける）。
+  /* ②③の肖像を、そのステージの話者へ差し替える（FIELD_ECHO／EXEC_VOICE の
+     1件を受ける）。②と③で器の作りが揃っているので、差し替えも1つの関数で
+     まかなう——見せ方が片方だけずれるのを防ぐ。
      所属（org）を持たない話者は役職の行だけを出す——#ov-s3notice の看護部長と
      同じ見せ方。alt はキャプションと同じ「所属 役職」にして、画像が落ちたとき
      （枠の中に alt が出る）でも誰の声かが分かるようにする。 */
-  function setFieldPortrait(sp) {
-    const img = $("field-por-img");
+  function setPopupPortrait(imgId, capId, sp) {
+    const img = $(imgId);
     img.src = "../../../assets/images/production/" + sp.img;
     img.alt = (sp.org ? sp.org + " " : "") + sp.role;
-    $("field-por-cap").innerHTML =
+    $(capId).innerHTML =
       (sp.org ? esc(sp.org) + "<br>" : "") + "<b>" + esc(sp.role) + "</b>";
   }
 
@@ -2284,14 +2319,16 @@
      *UnlockSequence の後半）。extra: 現場の反応に続けて出す補足（Stage 3 の
      立て直しの2行だけ。台詞ではないので .reflect で見た目を分ける）。
 
-     📌 肖像の src はここ（①を出す瞬間）で入れる。②が開くのは 1900ms 後なので
-     読み込みはその間に済む。記録（recordStageClear）はこの関数より前に終わって
-     いるので、画像の読み込みがレースの到達時刻に乗ることはない。 */
+     📌 肖像の src は②③ともここ（①を出す瞬間）で入れる。②が開くのは 1900ms 後、
+     ③はさらにその後なので、読み込みはその間に済む。記録（recordStageClear）は
+     この関数より前に終わっているので、画像の読み込みがレースの到達時刻に乗る
+     ことはない。 */
   function startClearPopups(stage, after, extra) {
     const conf = STAGE_CLEAR[stage];
     if (!conf) return;
     clearPop = { view: view, conf: conf, after: after || null };
-    setFieldPortrait(conf.field);
+    setPopupPortrait("field-por-img", "field-por-cap", conf.field);
+    setPopupPortrait("exec-por-img", "exec-por-cap", conf.voice);
     $("field-main").innerHTML = clearPopSayHTML([conf.field.line]) +
       (extra && extra.length
         ? '<div class="reflect">' + extra.map((t) => "<div>" + esc(t) + "</div>").join("") + "</div>"

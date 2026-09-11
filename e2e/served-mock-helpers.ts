@@ -55,6 +55,25 @@ export const bubbleText = (bubble: Locator): Promise<string> =>
   });
 
 /**
+ * 肖像つきポップアップ（クリアの②③）の顔・キャプション・台詞を確かめる。
+ *
+ * naturalWidth まで見るのは、404 でも <img> 自体は「見えている」ことになるため
+ * ——当日に顔が欠けるのをここで止める。所属と役職はキャプションが示すので、
+ * 台詞側に `〔〕` の話者表記は残っていない（肖像を持つ器の流儀）。
+ */
+const expectPortrait = async (page: Page, overlay: string): Promise<void> => {
+  await expect
+    .poll(() =>
+      page
+        .locator(`${overlay} .por img`)
+        .evaluate((el) => (el instanceof HTMLImageElement ? el.naturalWidth : 0)),
+    )
+    .toBeGreaterThan(0);
+  await expect(page.locator(`${overlay} .por .cap`)).not.toBeEmpty();
+  await expect(page.locator(`${overlay} .main`)).not.toContainText("〔");
+};
+
+/**
  * クリア時の3段演出を、参加者と同じ操作で送る。
  *
  * ①クリアの告知（#ov-unlock）→ ②現場の反応（#ov-field）→ ③幹部の反応
@@ -79,20 +98,12 @@ export const passClearPopups = async (
   if (expected?.sub !== undefined) {
     await expect(page.locator("#ov-unlock .s")).toHaveText(expected.sub);
   }
-  // ②は話者の肖像を持つ。naturalWidth まで見るのは、404 でも <img> 自体は
-  // 「見えている」ことになるため——当日に顔が欠けるのをここで止める。
-  await expect
-    .poll(() =>
-      page
-        .locator("#ov-field .por img")
-        .evaluate((el) => (el instanceof HTMLImageElement ? el.naturalWidth : 0)),
-    )
-    .toBeGreaterThan(0);
-  // 所属と役職はキャプションが示すので、台詞側に〔〕の話者表記は残っていない。
-  await expect(page.locator("#ov-field .por .cap")).not.toBeEmpty();
-  await expect(page.locator("#ov-field .main")).not.toContainText("〔");
+  // ②③はどちらも話者の肖像を持つ（③は2026-09-11に②へ揃えた）。片方だけ顔が
+  // 欠けたりキャプションが空になったりするのを防ぐため、同じ確かめ方を両方へ当てる。
+  await expectPortrait(page, "#ov-field");
   await page.locator("#btn-field-next").click();
   await expect(page.locator("#ov-exec")).toBeVisible();
+  await expectPortrait(page, "#ov-exec");
   await expect(async () => {
     await page.locator("#btn-exec-next").click();
     await expect(page.locator("#ov-exec")).toBeHidden({ timeout: 1_000 });
