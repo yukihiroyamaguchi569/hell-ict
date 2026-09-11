@@ -5,6 +5,7 @@ import {
   copyFromViewer,
   enterTeam,
   openFeverLinelist,
+  passClearPopups,
   sendToAi,
   SERVED_MOCK,
 } from "./served-mock-helpers";
@@ -80,8 +81,12 @@ test.describe("配信版モック（後半ステージ）", () => {
     await page.getByRole("button", { name: "保健所へ提出" }).click();
     await expect(page.locator("#s5-verdict")).toContainText("Stage 5 をクリアしました");
 
-    // 解錠オーバーレイを経て、Stage 6 へ自動で進む（stage5UnlockSequence）。
-    await expect(page.locator("#ov-unlock")).toBeVisible();
+    // 現場 → 幹部の2段ポップアップを閉じると、Stage 6 へ自動で進む
+    // （afterStage5Clear）。
+    await passClearPopups(page, {
+      title: "Stage 5 をクリアしました",
+      sub: "掲示 — 面会制限のお知らせ",
+    });
     await expect(page.locator(".stage-title")).toHaveText("Stage 6　掲示", { timeout: 15_000 });
   });
 
@@ -168,6 +173,12 @@ test.describe("配信版モック（後半ステージ）", () => {
     await submit.click();
     await expect(page.locator("#s6-verdict")).toContainText("Stage 6 をクリアしました");
 
+    // 最終ステージも同じ2段ポップアップを通る。閉じた後に、従来どおりの
+    // ゴール演出（#ov-goal）が続く。
+    await passClearPopups(page, {
+      title: "Stage 6 をクリアしました",
+      sub: "全ステージ完了 — このあとゴールです",
+    });
     await expect(page.locator("#ov-goal")).toBeVisible();
     await expect(page.locator("#goal-s")).toHaveText("レース終了 — このあと振り返りへ進みます");
     await page.locator("#goal-next").click();

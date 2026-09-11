@@ -747,29 +747,39 @@
 @keyframes bandIn { to { transform: translateX(0); } }
 @keyframes bandOut { from { transform: translateX(0); opacity: 1; } to { transform: translateX(0); opacity: 0; } }
 
-/* 解錠 */
-.unlock { background: rgba(8,9,10,.72); }
-.unlock .panel {
-  display: flex; flex-direction: column; align-items: center; gap: 14px;
-  padding: 44px 72px 40px; border-radius: 14px;
-  background: rgba(12,14,16,.88); border: 1px solid rgba(255,255,255,.12);
-  box-shadow: 0 18px 48px rgba(0,0,0,.5);
+/* 解錠（2026-09-11 改修）。全画面の暗い幕（旧 #ov-unlock）はやめ、幹部の反応
+   ポップアップ（#ov-exec）の中の一枚として置く。緑の帯が伸びる合図だけは
+   旧実装からそのまま引き継ぐ——「通った」ことを文字より先に伝える記号。
+   帯は幅を固定し、伸びる見た目は scaleX で作る——width を動かすと包んでいる
+   親の幅まで一緒に伸び縮みしてしまう（2026-09-06 レビュー指摘）。 */
+.clear-note {
+  margin-top: 6px; padding-top: 14px; border-top: 1px solid #c8ccc4;
+  display: flex; flex-direction: column; gap: 7px;
 }
-/* 帯は幅を 600px に固定し、伸びる見た目は scaleX で作る——width を動かすと
-   包んでいる .panel の幅まで一緒に伸び縮みしてしまう（2026-09-06 レビュー指摘）。 */
-.unlock .bar {
-  height: 5px; width: 600px; background: var(--ok);
+.clear-note .bar {
+  height: 4px; width: 100%; max-width: 320px; background: var(--ok);
   transform: scaleX(0); transform-origin: left;
   animation: sweep .5s ease-out forwards;
 }
 @keyframes sweep { to { transform: scaleX(1); } }
-.unlock .t { font-size: 42px; font-weight: 700; color: #fff; letter-spacing: .05em; }
-.unlock .s { font-size: 20px; color: #b9c2c9; }
+.clear-note .t { font-size: calc(22px * var(--fs-scale)); font-weight: 700; color: #16181a; letter-spacing: .03em; }
+.clear-note .s { font-size: calc(15px * var(--fs-scale)); color: #6b736e; }
 
-/* Final：ゴール。#ov-unlock とは別の器——「次のステージへの解錠」ではなく
+/* 現場の反応ポップアップ（#ov-field）の中で、登場人物の台詞ではない
+   「振り返りの促し」（Stage 3 の罠から立て直したチームだけに出る2行）を
+   見分ける枠。台詞（.say）と同じ地の文で続けると、誰かに言われた言葉に
+   読めてしまう——これは画面からチームへの促しなので、罫で区切って落とす。 */
+.callin .reflect {
+  margin-top: 4px; padding: 12px 14px;
+  border-left: 3px solid #c8ccc4; background: #f2f3ee;
+  font-size: calc(14px * var(--fs-scale)); line-height: 1.8; color: #4a514c;
+}
+.callin .reflect div + div { margin-top: 7px; }
+
+/* Final：ゴール。クリアのポップアップ（#ov-exec）とは別の器——「次のステージへの解錠」ではなく
    「レースの終端」であることを見た目で区別する（docs/ui/07_Final.md §4）。
    停留所のトラックを全画面サイズに拡大した構図にする。
-   自動では閉じない（.unlock の1900ms自動クローズとは違う）。
+   自動では閉じない（この点はクリアのポップアップと同じ）。
    2026-08-22 改修（ユーザーフィードバック）：暗い背景＋控えめな紙吹雪だと
    「演出が加わらない」ように見えてしまったため、白系の明るい祝祭背景へ
    反転した。#ov-goal は他の data-mode（peace/alert/crisis）から独立した
@@ -1588,19 +1598,46 @@
           </div>
         </div>
 
-        <div class="veil unlock hide" id="ov-unlock">
-          <!-- 文字の背後に半透明のパネルを敷く（2026-09-06 ユーザー指示）。全面の
-               薄暗い幕だけだと、下の画面の文字と重なって読みにくかった。 -->
-          <div class="panel">
-            <div class="bar"></div>
-            <div class="t">Stage 2 をクリアしました</div>
-            <div class="s">方針 — 転院患者の対応</div>
+        <!-- クリア時の2段ポップアップ①：現場の反応（2026-09-11 ユーザー決定）。
+             提出が通った成果が病院のどこへ届いたのかを、当事者の声で1行返す
+             （旧実装は判定枠へ .lead として積んでいた——提出フォームの下なので
+             行が増えるほど画面外へ落ちた）。器は院内システムの窓（.sysdlg）で、
+             肖像は持たない——病棟の看護師や窓口の職員には production art が
+             無く、話者は本文の〔〕表記が示す。
+             ［次へ］と背景クリックだけで送る。自動で閉じるタイマーは置かない
+             （#ov-f-relay と同じ流儀——読む速さはチームに委ねる）。 -->
+        <div class="veil sysdlg callin hide" id="ov-field">
+          <div class="win">
+            <div class="tb">
+              <span class="grow">院内連絡システム　v3.1 ── 現場からの連絡</span>
+              <span class="ctl">□ ✕</span>
+            </div>
+            <div class="bd"><div class="main" id="field-main"></div></div>
+            <div class="ft"><button class="btn" id="btn-field-next">次へ</button></div>
           </div>
         </div>
 
-        <!-- レースのゴール（Stage 5 クリア）。#ov-unlock とは別の器で
-             「レースの終端」を見せる（docs/ui/07_Final.md §4）。文言は
-             goalSequence() が毎回明示的にセットし直す（#ov-unlock と同じ
+        <!-- クリア時の2段ポップアップ②：幹部の反応＋クリア告知。①を閉じると
+             続けて開く。これが旧 #ov-unlock（解錠演出）を兼ねる——器を増やさず、
+             幹部の台詞と「Stage N をクリアしました」「次ステージ名」を1つに
+             収める（.clear-note）。閉じると次ステージへ進む。
+             こちらも肖像は持たない：①と同じ器のまま話者だけが幹部へ変わる
+             ことで、現場が礼を言った直後の温度差そのものが見える。
+             台詞の書式（〔事務長〕…）は、旧 S5_CLEAR_LINES のそれを踏襲する。 -->
+        <div class="veil sysdlg callin hide" id="ov-exec">
+          <div class="win">
+            <div class="tb">
+              <span class="grow">院内連絡システム　v3.1 ── 執行部より</span>
+              <span class="ctl">□ ✕</span>
+            </div>
+            <div class="bd"><div class="main" id="exec-main"></div></div>
+            <div class="ft"><button class="btn" id="btn-exec-next">次へ</button></div>
+          </div>
+        </div>
+
+        <!-- レースのゴール（Stage 6 クリア）。クリアのポップアップ（#ov-exec）
+             とは別の器で「レースの終端」を見せる（docs/ui/07_Final.md §4）。文言は
+             goalSequence() が毎回明示的にセットし直す（#ov-exec と同じ
              流儀）。自動では閉じない——2026-08-22 改修で「振り返りへ進む」
              ボタンを追加し、押すとエピローグ（#ov-epilogue）を挟んでから
              go("final") で進む（stage6GoalSequence() が押すたびハンドラを
@@ -2048,13 +2085,13 @@
     return v.firstElementChild;
   }
 
-  /* ステージごとの現場反応（Issue #150）。既にあるクリア表示（.verdict の判定枠、
-     Stage 1 だけは結果ウィンドウの声の欄）へ1行だけ足して、提出した成果が病院の
-     どこへ届いたのかを短く返す。新しいオーバーレイ・アニメーション・効果音は
-     増やさない。判定・順位・AIの応答には一切触れない——出す文言と場所だけ。
-     話者は現場の当事者に限る。ここで幹部を出すと、既にある事務長（S5_CLEAR_LINES）
-     や院長の台詞と役目がぶつかる。矛先は組織と状況へ向け、職種は貶めない
-     （AGENTS.md トーンルール）。 */
+  /* ステージごとの現場反応（Issue #150）。提出した成果が病院のどこへ届いたのかを
+     短く返す。話者は現場の当事者に限る——幹部の言い分は次のポップアップ
+     （STAGE_CLEAR.exec）が引き受ける。矛先は組織と状況へ向け、職種は貶めない
+     （AGENTS.md トーンルール）。
+     2026-09-11：判定枠へのインライン表示からポップアップ（#ov-field）へ移した
+     （ユーザー決定）。判定枠は提出フォームの下にあり、行が増えるほど画面外へ
+     落ちていた。 */
   const FIELD_ECHO = {
     s1: "〔3B病棟 看護師〕返信が届きました。確認の電話を何本もかけずに済みます。",
     s2: "〔5A病棟 師長〕整った一覧をいただきました。今夜の夜勤への引き継ぎに、このまま使えます。",
@@ -2063,36 +2100,158 @@
     s5: "〔5B病棟 師長〕保健所への報告が通ったそうですね。病棟で数え直しを頼まれずに済みます。",
     s6: "〔患者相談窓口 近藤〕受付と病棟入口へ掲示しました。さっそく、絵を指さして面会時間を確かめる方がいます。"
   };
-  /* 現場反応を読む一拍。解錠演出が画面を覆う前に置く——Stage 5 が S5_CLEAR_LINES の
-     後に later(stage5UnlockSequence, 2200) で取っている間合いと同じ値に揃える
-     （新しい演出ではなく、既にある解錠の呼び出しを一拍遅らせるだけ）。
-     prefers-reduced-motion では later() が 0 になる（既存挙動）。 */
-  const FIELD_ECHO_HOLD_MS = 2200;
+  /* ステージごとの幹部の反応と、クリア告知の文言（2026-09-11 ユーザー決定）。
+     現場が礼を述べた直後に、組織の顔がどう受け取るか——成功は認めるが労いには
+     しない、という温度差そのものがこのポップアップの役目。話者の割り当て
+     （S1 事務長／S2・S3 看護部長／S4 院長／S5・S6 事務長）はユーザー決定。
+     矛先は常に組織と状況へ向け、職種も人格も攻撃しない（AGENTS.md）。
+     title/sub は旧 #ov-unlock（解錠演出）が言っていた文言をそのまま引き継ぐ
+     ——この器が解錠演出を兼ねるので、解錠をもう一段出さない。
+     sfx: 旧実装で解錠時に鳴っていた success1 を、同じ「クリアを告げる器」で
+     鳴らす。Stage 1 は結果ウィンドウ（s1ShowResultWin）が既に鳴らしており、
+     Stage 6 は直後のゴール演出が拍手を鳴らすので、どちらもここでは鳴らさない
+     ——音は1ステージにつき1回に保ち、新しい音源も足さない。 */
+  const STAGE_CLEAR = {
+    s1: {
+      field: [FIELD_ECHO.s1],
+      exec: [
+        "〔事務長〕受信トレイは片付きましたか。結構です。",
+        "〔事務長〕念のため申し上げますが、それは本日の分です。"
+      ],
+      title: "Stage 1 をクリアしました",
+      // 副題（次ステージ名）はここだけ置かない。この直後に来る急変の赤帯が
+      // 「火の手」の一報そのものなので、先に名前を出すと一報が死ぬ。
+      sub: "",
+      sfx: ""
+    },
+    s2: {
+      field: [FIELD_ECHO.s2],
+      exec: [
+        "〔看護部長〕あら、もう出来たの。……ふふ、表を整えるくらい、誰にでもできると思っていたのだけれど。",
+        "〔看護部長〕できる人がいなかったから、あの表は10年あのままだったのよね。"
+      ],
+      title: "Stage 2 をクリアしました",
+      // 副題に罠の名前（「嘘」「ハルシネーション」）を書かない——次のステージに
+      // 何が待っているかを予告した時点で罠が死ぬ（docs/ui/04_Stage3.md 冒頭の ⚠️）。
+      sub: "方針 — 転院患者の対応",
+      sfx: "success1"
+    },
+    s3: {
+      field: [FIELD_ECHO.s3],
+      exec: [
+        "〔看護部長〕方針、拝見しました。マニュアルどおり——ええ、それでいいのよ。",
+        "〔看護部長〕誰かが拾ってきた紙のほうを信じる人も、この病院には大勢いるのだけれどね。"
+      ],
+      title: "Stage 3 をクリアしました",
+      // 参加者向け呼称は「新情報の解釈」（設計ドキュメント上の呼称は Stage 3.5。
+      // 罠ステージではないので番号を出しても予告の心配は無い）。
+      sub: "新情報の解釈 — 海外速報",
+      sfx: "success1"
+    },
+    s4: {
+      field: [FIELD_ECHO.s4],
+      exec: [
+        "〔院長〕読んだ。海外の速報が、今夜の申し送りに変わったわけだ。",
+        "〔院長〕結構。この病院は、報告を上げても、そこで止まることのほうが多い。"
+      ],
+      title: "Stage 4 をクリアしました",
+      sub: "報告 — 保健所への発熱患者一覧",
+      sfx: "success1"
+    },
+    s5: {
+      field: [FIELD_ECHO.s5],
+      /* 話者は依頼主であり督促役でもある事務長——ここで別の幹部を出すと、この
+         一件の担当が誰なのか濁る（2026-08-22 ユーザー指示で追加した2行を、
+         2026-09-11 にこのポップアップへ移設）。罠（PIIインシデント）を踏んだか
+         どうかで分岐させない——踏んだチームにだけ違う台詞を出すと、隣の画面を
+         覗いた時点で罠の存在が割れる。 */
+      exec: [
+        "〔事務長〕確認しました。保健所さんへは私からお届けしておきます。",
+        "〔事務長〕……ほう。手際は悪くないんですね。"
+      ],
+      title: "Stage 5 をクリアしました",
+      sub: "掲示 — 面会制限のお知らせ",
+      sfx: "success1"
+    },
+    s6: {
+      field: [FIELD_ECHO.s6],
+      exec: [
+        "〔事務長〕掲示、確認しました。去年のものより、ずいぶん分かりやすいですね。",
+        "〔事務長〕来年もこの形式でお願いします。……ああ、来年は別の方にお願いすることになりますが。"
+      ],
+      title: "Stage 6 をクリアしました",
+      // 次のステージは無い。副題は「この先に何があるか」を言う枠なので、
+      // ゴール演出が続くことをそのまま書く（レースの終端は #ov-goal が示す）。
+      sub: "全ステージ完了 — このあとゴールです",
+      sfx: ""
+    }
+  };
 
   /* クリアの記録（停留所・サーバへのクリア報告・チェックポイント）。現場反応の
      余韻も解錠演出も待たず、判定が成立した瞬間に確定させる——レースの到達時刻と
      順位が、演出の長さや prefers-reduced-motion の設定で動いてはいけない
-     （Stage 1 の s1Result と同じ扱い）。遅らせてよいのは #ov-unlock の表示と
-     その後の go() だけ。 */
+     （Stage 1 の s1Result と同じ扱い）。遅らせてよいのはクリアのポップアップ
+     （#ov-field → #ov-exec）とその後の go() だけ。 */
   function recordStageClear(pos) {
     TEAMS[2].pos = pos;
     reportProgress(pos, "clear");
     saveCheckpoint("stage-clear");
   }
 
-  /* 現場反応を判定枠へ積む。行は .lead——既存の差し戻し文と同じ地の文の見た目に
-     揃え、クリアの見出し（.done）より前に置く（Stage 5 の並びと同じ）。 */
-  function appendFieldEcho(box, lines) {
-    lines.forEach((text) => {
-      const l = document.createElement("div");
-      l.className = "lead";
-      l.textContent = text;
-      box.appendChild(l);
-    });
-    // 判定枠は提出フォームの下にあるので、行が増えるほど画面の外へ落ちる。
-    // Stage 4 の s4ScrollTalkIntoView() と同じ操作で中央ペインを末尾まで送る。
-    const work = paneC.querySelector(".work");
-    if (work) work.scrollTo({ top: work.scrollHeight, behavior: "smooth" });
+  /* クリア時の2段ポップアップ（2026-09-11 ユーザー決定）。
+     ①現場の反応（#ov-field）→ ②幹部の反応＋クリア告知（#ov-exec）→ 次へ、
+     の順に送る。②が旧 #ov-unlock（解錠演出）を兼ねるので、解錠はもう出さない。
+
+     📌 自動で送るタイマーは置かない。読み終える速さはチームに委ねる
+     （#ov-f-relay・#ov-s1res と同じ流儀）。［次へ］ボタンでも背景クリックでも
+     進む——120分のレースなので、進める操作は軽くしておく。
+
+     📌 記録（recordStageClear）はここへ来る前に済んでいる。クリック待ちは
+     いくらでも伸びうるので、ここがレースの到達時刻に乗ってはいけない。 */
+  const CLEAR_POP_GRACE_MS = 400;   // ②を開いた直後の連打を吸う（#ov-epilogue と同じ理由）
+  let clearPop = null;              // 表示中だけ立つ {view, conf, after}
+  let clearPopExecOpenedAt = 0;
+
+  function clearPopSayHTML(lines) {
+    return lines.map((t) => '<div class="say">' + esc(t) + "</div>").join("");
+  }
+
+  /* stage: STAGE_CLEAR のキー。after: ②を閉じた後に走らせる続き（旧
+     *UnlockSequence の後半）。extra: 現場の反応に続けて出す補足（Stage 3 の
+     立て直しの2行だけ。台詞ではないので .reflect で見た目を分ける）。 */
+  function startClearPopups(stage, after, extra) {
+    const conf = STAGE_CLEAR[stage];
+    if (!conf) return;
+    clearPop = { view: view, conf: conf, after: after || null };
+    $("field-main").innerHTML = clearPopSayHTML(conf.field) +
+      (extra && extra.length
+        ? '<div class="reflect">' + extra.map((t) => "<div>" + esc(t) + "</div>").join("") + "</div>"
+        : "");
+    $("ov-exec").classList.add("hide");
+    $("ov-field").classList.remove("hide");
+  }
+
+  function showExecPopup() {
+    if (!clearPop) return;
+    const conf = clearPop.conf;
+    $("exec-main").innerHTML = clearPopSayHTML(conf.exec) +
+      '<div class="clear-note"><div class="bar"></div>' +
+      '<div class="t">' + esc(conf.title) + "</div>" +
+      (conf.sub ? '<div class="s">' + esc(conf.sub) + "</div>" : "") + "</div>";
+    $("ov-field").classList.add("hide");
+    $("ov-exec").classList.remove("hide");
+    clearPopExecOpenedAt = Date.now();
+    if (conf.sfx) sfx(conf.sfx);
+  }
+
+  function finishClearPopups() {
+    if (!clearPop) return;
+    if (Date.now() - clearPopExecOpenedAt < CLEAR_POP_GRACE_MS) return;
+    const seq = clearPop;
+    clearPop = null;
+    $("ov-exec").classList.add("hide");
+    if (view !== seq.view) return;   // 判断C：読んでいる間にシーンを離れていたら進めない
+    if (seq.after) seq.after();
   }
   let timers = [];
   const later = (fn, ms) => { timers.push(setTimeout(fn, reduce ? 0 : ms)); };
@@ -2608,10 +2767,6 @@
     "一度出した方針を、自分たちで確かめ直して差し替えました。早見表のとおりに動いていたら、3名は今夜も個室のままでした。",
     "どの記述を根拠に判断を変えたのか、いま操作していない人からも一言ずつ聞いてみてください。"
   ];
-  /* 立て直したチームは読む行が2行増えるので、解錠までの一拍を長めに取る
-     （FIELD_ECHO_HOLD_MS の 2200ms に対して）。新しい演出は足さず、既にある
-     解錠の呼び出しを遅らせるだけ。 */
-  const S3_RECOVERY_HOLD_MS = 4600;
 
   /* ------------------------------------------------------------------ */
   /* Stage 4：新情報の解釈 —— AI要約を次の一手へ変える                      */
@@ -3041,16 +3196,9 @@
     return [S5_SCRIPTED_COLS].concat(rows).map((r) => r.join("\t")).join("\n");
   }
 
-  /* クリア時の一言（2026-08-22 ユーザー指示で追加）。話者は依頼主であり督促役
-     でもある事務長——ここで別の幹部を出すと、この一件の担当が誰なのか濁る。
-     提出判定の verdict へ出し、新しいオーバーレイは増やさない。
-     罠（PIIインシデント）を踏んだかどうかで分岐させない——踏んだチームにだけ
-     違う台詞を出すと、隣の画面を覗いた時点で罠の存在が割れる。
-     成功を認めるが、労いにはしない。事務長は最後まで組織の顔のままでいる。 */
-  const S5_CLEAR_LINES = [
-    "〔事務長〕確認しました。保健所さんへは私からお届けしておきます。",
-    "〔事務長〕……ほう。手際は悪くないんですね。"
-  ];
+  /* クリア時の事務長の一言（2026-08-22 ユーザー指示で追加）は、2026-09-11 に
+     幹部の反応ポップアップへ移した（STAGE_CLEAR.s5.exec）。全ステージ分の
+     クリア台詞を1か所で読めるようにするため、ここには置かない。 */
 
   /* 苅部さんはこのステージに登場しない（2026-08-22 ユーザー決定）。旧実装は入場12秒後に
      着信させて「保健所も、さすがに名前までは要らないと思いますけどね。」を出し、罰ゲーム明けにも
@@ -3657,7 +3805,7 @@
   let view = "entry";
 
   function hideOverlays() {
-    ["ov-entry", "ov-brief", "ov-viewer", "ov-unlock", "ov-goal", "ov-epilogue", "ov-s1res", "ov-blackout", "ov-s3notice", "ov-s3scold", "ov-alarm", "ov-s5scold", "ov-lock", "ov-s5call", "ov-s4-director", "ov-s4-report", "ov-s6jimu-task", "ov-f-relay", "ov-f-handover", "ov-lightbox"].forEach((id) => $(id).classList.add("hide"));
+    ["ov-entry", "ov-brief", "ov-viewer", "ov-field", "ov-exec", "ov-goal", "ov-epilogue", "ov-s1res", "ov-blackout", "ov-s3notice", "ov-s3scold", "ov-alarm", "ov-s5scold", "ov-lock", "ov-s5call", "ov-s4-director", "ov-s4-report", "ov-s6jimu-task", "ov-f-relay", "ov-f-handover", "ov-lightbox"].forEach((id) => $(id).classList.add("hide"));
     // #ov-lock の中身（拡大対応業務のボトル棚／インシデント報告書）は
     // startPenalty()/startS5Penalty() が動的に注入したもの。.hide を付けるだけでは
     // DOM とリスナーが残り続けるので、シーンを離れるたびに必ず空にする
@@ -3666,6 +3814,9 @@
     if (host) { host.innerHTML = ""; host.classList.remove("shelf"); }
     // Stage 4 の罰（AI使用ロック）が付けた沈み込みも、シーンを離れたら必ず外す。
     paneR.classList.remove("locked");
+    // クリアの2段ポップアップも畳む。器を隠すだけだと進行中の状態が残り、
+    // 別のステージへ移った後のクリックで前ステージの続き（after）が走りうる。
+    clearPop = null;
   }
 
   /* ------------------------------------------------------------------ */
@@ -5567,15 +5718,14 @@
 
   // R2・R3・手動クリア・詰み防止用の簡易表示。R1失敗（kind "round1"）は
   // 内容量が多いので、こちらではなく専用の s1ThreadHTML を使う。
-  // lead: クリア時の現場反応（Issue #150）。器を増やさず、同じ .voices の
-  // 先頭行として出す——そっけない返信の声が0件でも、この行だけで箱を開く。
-  function s1VoicesHTML(lead) {
-    if (!s1.curt.length && !lead) return "";
+  // クリア時の現場反応は、2026-09-11 にここから2段ポップアップ（#ov-field）へ
+  // 移した——他ステージと同じ流れに揃えるため（旧実装はこの .voices の先頭行）。
+  function s1VoicesHTML() {
+    if (!s1.curt.length) return "";
     const rows = s1.curt.slice(0, S1_CURT_SHOWN).map((c, i) =>
       "〔" + c.def.from + "〕" + S1_CURT_VOICES[i % S1_CURT_VOICES.length]);
     const rest = s1.curt.length - S1_CURT_SHOWN;
     if (rest > 0) rows.push("……ほか " + rest + "件、同じような返事が届いています。");
-    if (lead) rows.unshift(lead);
     return '<div class="voices">' + rows.map((r) => "<div>" + esc(r) + "</div>").join("") + "</div>";
   }
 
@@ -5660,7 +5810,7 @@
       '<div class="sum">' + sum + "</div>" +
       restLine +
       '<div class="said">' + esc(s1AdminLine(kind, missed, s1.curt.length)) + "</div>" +
-      (kind === "round1" ? s1ThreadItemsHTML() : s1VoicesHTML(kind === "round2" ? "" : FIELD_ECHO.s1)) +
+      (kind === "round1" ? s1ThreadItemsHTML() : s1VoicesHTML()) +
       okHTML;
     $("ov-s1res").classList.remove("hide");
     // クリア（manual/ai/partial）だけ鳴らす。round1・round2 は失敗の結果窓だが、
@@ -5673,9 +5823,10 @@
       s1HideResultWin();
       if (kind === "round1") s1DeliverAIAndRetry();
       else if (kind === "round2") s1StartRound3();
-      // 成功系（manual/ai/partial）は、窓が閉じた一拍あとに急変の赤帯が来る
-      // （「片付いたと思った直後」の間は transition() 側の演出に任せる）。
-      else later(() => transition(), 700);
+      // 成功系（manual/ai/partial）は、他ステージと同じクリアの2段ポップアップ
+      // （現場 → 幹部）を通してから急変へ。窓が閉じた一拍あとに赤帯が来る
+      // 「片付いたと思った直後」の間は transition() 側の演出に任せる。
+      else startClearPopups("s1", () => later(() => transition(), 700));
     }, { once: true });
   }
   function s1HideResultWin() { $("ov-s1res").classList.add("hide"); }
@@ -6712,15 +6863,13 @@
     if (!bad) {
       s2Hot = [];
       s2StopDeadline();
-      appendFieldEcho(box, [FIELD_ECHO.s2]);
       const d = document.createElement("div");
       d.className = "done"; d.textContent = "Stage 2 をクリアしました";
       box.appendChild(d);
-      // 到達は今この瞬間。余韻の前に記録する（recordStageClear のコメント参照）。
+      // 到達は今この瞬間。ポップアップを読む時間の前に記録する
+      // （recordStageClear のコメント参照）。
       recordStageClear(3);
-      // 現場反応を読む一拍を置いてから解錠へ（Stage 5 と同じ間合い）。即座に
-      // 呼ぶと、足した1行が出た瞬間に解錠オーバーレイで隠れて読めない。
-      later(unlockSequence, FIELD_ECHO_HOLD_MS);
+      startClearPopups("s2", afterStage2Clear);
     } else {
       // 該当セルを光らせておく。[提出に戻る] でグリッドが開いた瞬間に、
       // 直すべき場所が既に指されている。探す時間がゼロになる。
@@ -6734,18 +6883,10 @@
     }
   }
 
-  async function unlockSequence() {
-    // Stage 3 の stage3UnlockSequence() がこの同じオーバーレイの文言を書き換えるので、
-    // 毎回明示的にセットし直す（どちらが先に使われても正しい文言になるように）。
-    // 副題に罠の名前（「嘘」「ハルシネーション」）を書かない——次のステージに何が
-    // 待っているかを予告した時点で罠が死ぬ（docs/ui/04_Stage3.md 冒頭の ⚠️）。
-    $("ov-unlock").querySelector(".t").textContent = "Stage 2 をクリアしました";
-    $("ov-unlock").querySelector(".s").textContent = "方針 — 転院患者の対応";
-    $("ov-unlock").classList.remove("hide");
-    sfx("success1");   // 解錠
-    await wait(1900);
+  /* クリアのポップアップを閉じた後の続き（旧 unlockSequence の後半）。
+     解錠の告知そのものは #ov-exec が済ませている。 */
+  async function afterStage2Clear() {
     if (view !== "s2") return;   // 判断C：判定中にシーンを離れていたらよそへ着弾させない
-    $("ov-unlock").classList.add("hide");
     // 承認だけが報酬。スコアも星も出さない。
     hasUnlockMail = true; renderMails("u");
     sfx("decision1");   // 師長の承認メールが着弾する
@@ -6755,9 +6896,9 @@
     if (view !== "s2") return;   // 判断C
     // 解錠の喜びの陰で、誰も見ていない数字が増える。演出はつけない。
     $("fever").textContent = "5";
-    // 2026-08-22追加：Stage 3 へ自動で進む（stage3UnlockSequence() と同じ流儀）。
+    // 2026-08-22追加：Stage 3 へ自動で進む（afterStage3Clear と同じ流儀）。
     // それまではファシリテーターがdevbarで送る必要があった。解錠メールと発熱の
-    // 数字を見せる間（上の 1900ms + 700ms）を取ってから、もう一拍置いて遷移する。
+    // 数字を見せる間（上の 700ms）を取ってから、もう一拍置いて遷移する。
     await wait(1400);
     if (view !== "s2") return;   // 判断C
     go("s3");
@@ -6944,37 +7085,26 @@
       return;
     }
 
-    appendFieldEcho(box, [FIELD_ECHO.s3]);
     // 罠を踏んだうえで正典を照合して立て直したチームにだけ、余韻と振り返りの
     // 促しを足す（Issue #149）。s3TrapUsed はチェックポイント復帰でも復元される
     // ので、罰ゲームを挟んでリロードしたチームでもここへ届く。
     const s3Recovered = s3TrapUsed;
-    if (s3Recovered) appendFieldEcho(box, S3_RECOVERY_LINES);
     const d = document.createElement("div");
     // 見出しは「今クリアしたステージ」を言う（Issue #79。解錠は次のステージが
     // 開くという意味だが、参加者には自分が何を終えたのかを伝えるほうが分かりやすい）。
     // 次に開くのは Stage 4「新情報の解釈」で、そちらは
-    // stage3UnlockSequence() の副題が言う。
+    // STAGE_CLEAR.s3.sub（幹部のポップアップの副題）が言う。
     d.className = "done"; d.textContent = "Stage 3 をクリアしました";
     box.appendChild(d);
     s3Verdicting = false;
     // 到達は今この瞬間。立て直しの2行を読む間も、記録の時刻は動かさない。
     recordStageClear(4);
-    // 現場反応を読む一拍（Stage 2・5 と同じ間合い）。立て直したチームは行が
-    // 増えるぶん長めに取る。
-    later(stage3UnlockSequence, s3Recovered ? S3_RECOVERY_HOLD_MS : FIELD_ECHO_HOLD_MS);
+    // 立て直したチームだけ、現場の反応に続けて振り返りの促しを出す。
+    startClearPopups("s3", afterStage3Clear, s3Recovered ? S3_RECOVERY_LINES : null);
   }
 
-  async function stage3UnlockSequence() {
-    // 参加者向け呼称は「新情報の解釈」（設計ドキュメント上の呼称は Stage 3.5。罠ステージでは
-    // ないので番号を出しても予告の心配は無い）。
-    $("ov-unlock").querySelector(".t").textContent = "Stage 3 をクリアしました";
-    $("ov-unlock").querySelector(".s").textContent = "新情報の解釈 — 海外速報";
-    $("ov-unlock").classList.remove("hide");
-    sfx("success1");   // 解錠
-    await wait(1900);
+  function afterStage3Clear() {
     if (view !== "s3") return;   // 判断C
-    $("ov-unlock").classList.add("hide");
     // 発熱の値はここでは触らない——9→14 の急増は次ステージの開始演出が担う
     // （先に 14 にすると急変の一報が死ぬ）。
     // 停留所とクリア報告は runStage3Verdict() 側で済んでいる（recordStageClear。
@@ -7169,7 +7299,7 @@
   /* Stage 4：新情報の解釈 —— AI要約を次の一手へ変える（判定・演出）        */
   /*                                                                    */
   /* 定数群は S3 の定数帯の末尾（Stage 4 の定数帯の直前）にある。          */
-  /* renderStageN/checkStageN/runStageNVerdict/stageNUnlockSequence の    */
+  /* renderStageN/checkStageN/runStageNVerdict/afterStageNClear の        */
   /* 実装パターンを踏襲するが、罠・罰が無いので triggerXxx()/startXxxPenalty() */
   /* に相当する関数は無い（Stage 5・Final と同じ）。                      */
   /* ------------------------------------------------------------------ */
@@ -7397,23 +7527,14 @@
     $("btn-s4-action-submit").classList.add("hide");
     s4ActionVerdicting = false;
     // 結果演出（院長の結果報告3行 → クリアカード）は 2026-09-06 ユーザー決定で削除。
-    // 通過したら、他ステージと同じクリア画面（#ov-unlock）へそのまま送る。
-    appendFieldEcho(box, [FIELD_ECHO.s4]);   // 対話の下端まで送るのは appendFieldEcho の側
+    // 通過したら、他ステージと同じクリアのポップアップへそのまま送る。
     // 到達は今この瞬間（表示番号振り直し後、このクリアで進むのは S5 の停留所）。
     recordStageClear(5);
-    // 現場反応を読む一拍（Stage 2・5 と同じ間合い）。
-    later(stage4UnlockSequence, FIELD_ECHO_HOLD_MS);
+    startClearPopups("s4", afterStage4Clear);
   }
 
-  async function stage4UnlockSequence() {
+  function afterStage4Clear() {
     if (view !== "s4") return;   // 判断C
-    $("ov-unlock").querySelector(".t").textContent = "Stage 4 をクリアしました";
-    $("ov-unlock").querySelector(".s").textContent = "報告 — 保健所への発熱患者一覧";
-    $("ov-unlock").classList.remove("hide");
-    sfx("success1");   // 解錠
-    await wait(1900);
-    if (view !== "s4") return;   // 判断C
-    $("ov-unlock").classList.add("hide");
     // 停留所とクリア報告は runS4ActionVerdict() 側で済んでいる（recordStageClear）。
     // このステージだけ、クリア後に次のシーンへ実際に遷移する（devbar・URLハッシュ
     // 単体起動でも詰まないようにするため。docs/ui/mock/README.md の他ステージは
@@ -7454,7 +7575,7 @@
   /* 正典は docs/scenario/05_Stage4_情報漏洩.md ・ docs/ui/05_Stage4.md。 */
   /* Stage 3 と違い、罠は提出フォームではなく AIチャットの送信前ゲート     */
   /* （sendAI() 内）で発火する。ここにある関数群は Stage 3 の実装パターン  */
-  /* （renderStageN/checkStageN/runStageNVerdict/stageNUnlockSequence/    */
+  /* （renderStageN/checkStageN/runStageNVerdict/afterStageNClear/        */
   /* stopN/NudgeKarube）を1対1で踏襲する。                               */
   /* ------------------------------------------------------------------ */
   let s5Verdicting = false;
@@ -7719,46 +7840,27 @@
       return;
     }
 
-    // 回答期限はこの時点で止める。解錠は 2.2 秒後（下）なので、
-    // stage5UnlockSequence() 側の停止に任せると、その隙に事務長の督促が
-    // 割り込んで「出したのに催促される」が起きうる。
+    // 回答期限はこの時点で止める。クリアのポップアップはクリック待ちで
+    // いくらでも伸びうるので、閉じた後の afterStage5Clear へ任せると、その隙に
+    // 事務長の督促が割り込んで「出したのに催促される」が起きうる。
     s5StopDeadline();
-    // 先に事務長の一言を出してから解錠を告げる（S5_CLEAR_LINES のコメント参照）。
-    // Stage 4 の院長の結果報告と同じ組み方——lead で台詞、done で解錠の事実。
-    S5_CLEAR_LINES.forEach((line) => {
-      const l = document.createElement("div");
-      l.className = "lead"; l.textContent = line;
-      box.appendChild(l);
-    });
-    // 現場反応は事務長の一言の後に置く（Issue #150）——「私からお届けしておきます」
-    // より先に受理を告げると、順序が逆になる。
-    appendFieldEcho(box, [FIELD_ECHO.s5]);
     const d = document.createElement("div");
     // 見出しは「今クリアしたステージ」を言う（Issue #79）。次に開く Stage 6 は
-    // stage5UnlockSequence() の副題が言う。
+    // STAGE_CLEAR.s5.sub（幹部のポップアップの副題）が言う。
     d.className = "done"; d.textContent = "Stage 5 をクリアしました";
     box.appendChild(d);
     s5Verdicting = false;
-    // 到達は今この瞬間。他ステージと同じく、余韻より先に記録を確定させる
-    // （この2200msの間はもともと記録が止まっていたが、同じ器へ現場反応を
-    // 1行足したのでここも揃える）。
+    // 到達は今この瞬間。他ステージと同じく、ポップアップを読む時間より先に
+    // 記録を確定させる。
     recordStageClear(6);
-    // 台詞を読む一拍を置いてから解錠オーバーレイへ。即座に覆うと、追加した
-    // 事務長の一言が出た瞬間に隠れて読めない（Stage 4 の 2200ms と同じ間合い）。
-    later(stage5UnlockSequence, 2200);
+    startClearPopups("s5", afterStage5Clear);
   }
 
-  async function stage5UnlockSequence() {
-    s5StopDeadline();   // クリア済みなので回答期限は止める（罰は時間＝クリア後に事務長の督促を割り込ませない）
-    $("ov-unlock").querySelector(".t").textContent = "Stage 5 をクリアしました";
-    $("ov-unlock").querySelector(".s").textContent = "掲示 — 面会制限のお知らせ";
-    $("ov-unlock").classList.remove("hide");
-    sfx("success1");   // 解錠
-    await wait(1900);
+  async function afterStage5Clear() {
     if (view !== "s5") return;   // 判断C
-    $("ov-unlock").classList.add("hide");
+    s5StopDeadline();   // クリア済みなので回答期限は止める（罰は時間＝クリア後に事務長の督促を割り込ませない）
     // 停留所とクリア報告は runStage5Verdict() 側で済んでいる（recordStageClear）。
-    // ここは Stage 6 へ自動で進むだけ（2026-08-22追加。stage3UnlockSequence() と
+    // ここは Stage 6 へ自動で進むだけ（2026-08-22追加。afterStage3Clear と
     // 同じ流儀——それまではファシリテーターがdevbarで送る必要があった）。
     // 発熱インジケータは動かさない——Stage 4・5 は 14 のまま継続
     // （docs/scenario/00_未知ウイルスの通奏低音.md §3「●●●継続」）。
@@ -8146,19 +8248,19 @@
       return;
     }
 
-    appendFieldEcho(box, [FIELD_ECHO.s6]);
     const d = document.createElement("div");
     d.className = "done"; d.textContent = "Stage 6 をクリアしました（テストプレイ完走）";
     box.appendChild(d);
     s6Verdicting = false;
-    // ゴールは今この瞬間。余韻の長さでレースの着順を動かさない。
+    // ゴールは今この瞬間。ポップアップを読む長さでレースの着順を動かさない。
     recordStageClear(7);
-    // 現場反応を読む一拍（Stage 2・5 と同じ間合い）。ゴール演出は変えない。
-    later(stage6GoalSequence, FIELD_ECHO_HOLD_MS);
+    // 現場 → 幹部 と送ってから、既存のゴール演出へ。ゴール演出はレースの終端を
+    // 見せる別物なので、幹部のポップアップで置き換えも省略もしない。
+    startClearPopups("s6", stage6GoalSequence);
   }
 
-  /* Stage 5 クリア＝レースのゴール。Stage 4 までと同じ「次のステージを
-     解錠しました」の #ov-unlock 導線は使わず、goalSequence()（#ov-goal）を
+  /* Stage 6 クリア＝レースのゴール。幹部のポップアップ（#ov-exec）を閉じた
+     後は、Stage 5 までのような次ステージへの遷移ではなく goalSequence()（#ov-goal）を
      流用して「レース終了」を示す——goalSequence() 自体は変更せず、副題
      だけこちら側で上書きする。
      2026-08-22 改修：Final は「保留中」ではなくなった（振り返りボードへ
@@ -8469,7 +8571,7 @@
     sfx("hall-clapping-hands1");   // 感謝状。ゴール演出と同じ拍手
   }
 
-  /* レース終了演出の本体。#ov-unlock ではなく専用オーバーレイ #ov-goal を
+  /* レース終了演出の本体。クリアのポップアップではなく専用オーバーレイ #ov-goal を
      開く——次のステージへの解錠ではなくレースの終端であることを見た目で
      区別する（docs/ui/07_Final.md §4）。unlock と違い自動では閉じない。
      2026-08-22 改修：呼び出し元は Stage 5 の stage6GoalSequence() のみに
@@ -8925,7 +9027,7 @@
      除く。pos 0（Prologue）はまだステージに入っていないので welcome へ落とす。
 
      復帰でこれが要る理由：クリア処理は「画面遷移より先に TEAMS[2].pos を進める」
-     （unlockSequence・stage5UnlockSequence 等）。クリアカードや解錠演出を見ている
+     （recordStageClear）。クリアの2段ポップアップを読んでいる
      数秒の間にリロードされると { view: 前のステージ, pos: 次の停留所 } という
      ねじれた状態が保存され、view をそのまま信じるとクリア済みのステージへ
      戻してしまう——Stage 6 では { view:"s6", pos:7 } になり、ゴール演出の手前で
@@ -9418,6 +9520,11 @@
   $("btn-s6jimu-task-close").addEventListener("click", () => {
     $("ov-s6jimu-task").classList.add("hide");
   });
+  // クリアの2段ポップアップ。［次へ］ボタンも背景も同じ1つのハンドラで受ける
+  // （ボタンのクリックはオーバーレイまで上がってくるので、二重には発火しない）。
+  // 静的オーバーレイなので配線は一度だけ——表示のたびに張ると after が多重発火する。
+  $("ov-field").addEventListener("click", showExecPopup);
+  $("ov-exec").addEventListener("click", finishClearPopups);
   // Final：労いリレーの早送り。s1BriefAll と同じ「画面のどこを押しても
   // 進む」思想だが、全部を一気に見せるのではなく1人ずつ次へ進める
   // （fAdvanceRelay は最後の話者では何もしないので、ここで誤って
