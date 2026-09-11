@@ -24,6 +24,22 @@ pnpm verify
 pnpm verify:full
 ```
 
+### ポートの切り替え
+
+ローカル開発とE2Eが使うポートは環境変数で上書きできる。既定のままなら設定は要らない。worktreeを2つ同時に走らせるときだけ、片方をずらす。
+
+| 変数 | 既定 | 何のポートか |
+|---|---|---|
+| `WORKER_PORT` | 8787 | `wrangler dev`（Worker/DO、配信版モックの配信元）。`pnpm dev`のViteが`/api`をproxyする先でもある |
+| `OPENAI_STUB_PORT` | 8789 | E2EのOpenAIスタブ（`e2e/openai-stub.mjs`）。Workerへは`--var OPENAI_BASE_URL`で渡る |
+
+```sh
+WORKER_PORT=8801 OPENAI_STUB_PORT=8802 pnpm test:e2e
+WORKER_PORT=8801 pnpm dev:worker
+```
+
+TypeScript側の正は`e2e/ports.ts`で、`playwright.config.ts`と`e2e/`配下はここをimportする。specから直接`process.env`を読まない——1箇所の読み漏れが、クリップボード権限の付与漏れやスタブ照会の空振りという無関係に見える失敗になる。`apps/web/vite.config.ts`と`apps/worker`の`dev` scriptはimportできないので、同じ変数名と既定値をそれぞれ`process.env`とシェル展開で読む。
+
 `pnpm verify`はformat、lint、型検査、React/ViteとWorkerのbuild、domain、教材整合、Worker統合、主要E2Eを実行する。`pnpm verify:full`は全E2E、domainへのMutation Testing、重複検査、production dependency監査を追加する。CIも同じscriptを実行し、通常PRは`verify`、手動監査は`verify:full`を使う。
 
 ## Cloudflare構成
