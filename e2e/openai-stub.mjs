@@ -124,13 +124,25 @@ const S1_FROM = /^差出人:\s*(.+)$/m;
 
 /**
  * Stage 1 の返信下書き。S1_MIN_LEN（70文字）とS1_POLITE（丁寧語）を必ず満たす
- * 長さと文面にする。内容は「確認して折り返す」だけ——この世界に正しい答えは
- * 存在しない（架空の病院なので実モデルも知らない）ので、院内固有の連絡先や
- * 数値を作り話で埋めない。モックの draftPlain と同じ建て付け。
+ * 長さと文面にする（宛名を除いて103文字。差出人名を足して109〜115文字——いちばん
+ * 短い「外来」で109、いちばん長い「3B病棟 看護師」で115。どれも70文字を超える）。
+ * 内容は「確認して折り返す」だけ
+ * ——この世界に正しい答えは存在しない（架空の病院なので実モデルも知らない）ので、
+ * 院内固有の連絡先や数値を作り話で埋めない。モックの draftPlain と同じ建て付け。
+ *
+ * 📌 差出人は**いちばん新しい依頼**から取る。userText() は同じスレッドのユーザー
+ * 発言を全部繋いで渡してくるので、素直に先頭から探すと2通目以降の宛名が1通目の
+ * 差出人（例：給食課）のままになる——LIVEで複数通に下書きを使うと必ず起きる。
+ * 最後の S1_DRAFT_HEAD 以降へ切り詰め、さらに【受信メール】以降だけを見る
+ * （コンテキスト欄に貼られた資料の中の「差出人:」を拾わないため）。
  */
 const draftStage1Reply = (text) => {
-  if (!text.includes(S1_DRAFT_HEAD) || !text.includes(S1_MAIL_BLOCK)) return null;
-  const matched = S1_FROM.exec(text);
+  const headIndex = text.lastIndexOf(S1_DRAFT_HEAD);
+  if (headIndex < 0) return null;
+  const request = text.slice(headIndex);
+  const blockIndex = request.indexOf(S1_MAIL_BLOCK);
+  if (blockIndex < 0) return null;
+  const matched = S1_FROM.exec(request.slice(blockIndex));
   const salutation = matched === null ? "" : `${matched[1].trim()} 各位\n`;
   return (
     "（スタブ応答）\n" +
