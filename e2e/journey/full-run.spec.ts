@@ -5,6 +5,7 @@ import {
   copyFromViewer,
   enterTeam,
   openFeverLinelist,
+  passClearPopups,
   sendToAi,
   SERVED_MOCK,
 } from "../served-mock-helpers";
@@ -19,7 +20,7 @@ import {
  * この1本がその受け渡しを見る。
  *
  * 演出の待ちは実時間で受ける（prefers-reduced-motion を立てると later()/wait()
- * が0msへ潰れ、解錠オーバーレイや判定結果が一瞬で消えて検証できなくなる。
+ * が0msへ潰れ、判定結果や各ステージの演出が一瞬で消えて検証できなくなる。
  * page.clock でタイマーを進める手も、WorkerへのfetchとWebSocketが同じ
  * タイマーに乗っているため採らない）。所要は実測でおよそ2分半。
  */
@@ -130,6 +131,10 @@ const clearStage1 = async (page: Page): Promise<void> => {
   await expect(page.locator("#ov-s1res")).toBeVisible({ timeout: 30_000 });
   await expect(page.locator("#s1res-main")).toContainText("受信トレイが落ち着きました");
   await page.getByRole("button", { name: "確認した（次へ）" }).click();
+  // 結果ウィンドウを閉じると、他ステージと同じクリアの2段ポップアップが続く。
+  // Stage 1 だけ副題（次ステージ名）を持たない——この直後の赤帯が「火の手」の
+  // 一報そのものなので、先に名前を出すと一報が死ぬ。
+  await passClearPopups(page, { title: "Stage 1 をクリアしました" });
 };
 
 const clearStage2 = async (page: Page): Promise<void> => {
@@ -153,7 +158,10 @@ const clearStage2 = async (page: Page): Promise<void> => {
   await expect(page.locator("#verdict")).toContainText("Stage 2 をクリアしました", {
     timeout: 20_000,
   });
-  await expect(page.locator("#ov-unlock .s")).toHaveText("方針 — 転院患者の対応");
+  await passClearPopups(page, {
+    title: "Stage 2 をクリアしました",
+    sub: "方針 — 転院患者の対応",
+  });
 };
 
 const clearStage3 = async (page: Page): Promise<void> => {
@@ -179,7 +187,13 @@ const clearStage3 = async (page: Page): Promise<void> => {
   });
   // 罠を踏むと暗転して発熱が12へ跳ねる。踏んでいないことを画面でも見る。
   await expect(page.locator("#ov-blackout")).toBeHidden();
-  await expect(page.locator("#ov-unlock .s")).toHaveText("新情報の解釈 — 海外速報");
+  // 罠を踏んでいないので、現場の反応に振り返りの促し（.reflect）は付かない。
+  await expect(page.locator("#ov-field")).toBeVisible({ timeout: 20_000 });
+  await expect(page.locator("#ov-field .reflect")).toHaveCount(0);
+  await passClearPopups(page, {
+    title: "Stage 3 をクリアしました",
+    sub: "新情報の解釈 — 海外速報",
+  });
 };
 
 const clearStage4 = async (page: Page): Promise<void> => {
@@ -210,8 +224,9 @@ const clearStage4 = async (page: Page): Promise<void> => {
   await expect(page.locator("#s4-talk")).toBeVisible({ timeout: 20_000 });
   await page.locator("#s4-action").fill(S4_ACTION);
   await page.getByRole("button", { name: "送信する" }).click();
-  await expect(page.locator("#ov-unlock .s")).toHaveText("報告 — 保健所への発熱患者一覧", {
-    timeout: 20_000,
+  await passClearPopups(page, {
+    title: "Stage 4 をクリアしました",
+    sub: "報告 — 保健所への発熱患者一覧",
   });
 };
 
@@ -235,6 +250,10 @@ const clearStage5 = async (page: Page): Promise<void> => {
   await expect(page.locator("#s5-verdict")).toContainText("Stage 5 をクリアしました", {
     timeout: 20_000,
   });
+  await passClearPopups(page, {
+    title: "Stage 5 をクリアしました",
+    sub: "掲示 — 面会制限のお知らせ",
+  });
 };
 
 const clearStage6 = async (page: Page): Promise<void> => {
@@ -251,6 +270,10 @@ const clearStage6 = async (page: Page): Promise<void> => {
   await page.getByRole("button", { name: "提出する" }).click();
   await expect(page.locator("#s6-verdict")).toContainText("Stage 6 をクリアしました", {
     timeout: 20_000,
+  });
+  await passClearPopups(page, {
+    title: "Stage 6 をクリアしました",
+    sub: "全ステージ完了 — このあとゴールです",
   });
 };
 
