@@ -1,0 +1,11 @@
+{
+  "files": [],
+  "references": [
+    { "path": "./packages/domain" },
+    { "path": "./packages/content" },
+    { "path": "./apps/web" },
+    { "path": "./apps/worker" },
+    { "path": "./apps/worker/tsconfig.test.json" },
+    { "path": "./tsconfig.tests.json" }
+  ]
+}

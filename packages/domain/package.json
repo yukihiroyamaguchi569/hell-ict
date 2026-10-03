@@ -1,0 +1,15 @@
+{
+  "name": "@hell-ict/domain",
+  "private": true,
+  "version": "0.1.0",
+  "type": "module",
+  "exports": {
+    ".": "./src/index.ts",
+    "./ports": "./src/ports/index.ts",
+    "./fakes": "./src/fakes/index.ts"
+  },
+  "dependencies": {
+    "@hell-ict/content": "workspace:*",
+    "zod": "4.1.12"
+  }
+}

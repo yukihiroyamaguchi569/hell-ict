@@ -1,0 +1,25 @@
+node_modules/
+.pnpm-store/
+.DS_Store
+dist/
+coverage/
+playwright-report/
+test-results/
+.wrangler/
+.stryker-tmp/
+apps/worker/public/*
+!apps/worker/public/.gitkeep
+# 効果音（効果音ラボ）の音源。規約が素材の再配布を禁じており、このリポジトリは
+# 公開なのでmp3そのものはコミットしない。各自が assets/sounds/ へ置き、
+# scripts/upload-sounds.sh で配信元のR2へ投入する。
+assets/sounds/
+# テストプレイのアンケート回答。参加者の自由記述を含み、このリポジトリは公開なので
+# CSVはコミットしない。ローカルの docs/testplay/ に置いて参照する。
+docs/testplay/*.csv
+.dev.vars*
+*.tsbuildinfo
+.mulmoterminal.json
+# 本番のURLなど、公開リポジトリに置かない手元の値（scripts/deploy-prod.sh が読む）。
+.deploy.env
+# 本物のシナリオを overlay した印（scripts/lib/scenario-overlay.sh）。
+.scenario-overlay

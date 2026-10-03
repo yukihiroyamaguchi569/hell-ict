@@ -1,0 +1,12 @@
+{
+  "extends": "../../tsconfig.base.json",
+  "compilerOptions": {
+    "lib": ["ES2024"],
+    "outDir": "./dist",
+    "rootDir": "./src",
+    "tsBuildInfoFile": "./dist/tsconfig.tsbuildinfo",
+    "types": []
+  },
+  "references": [{ "path": "../../packages/domain" }, { "path": "../../packages/content" }],
+  "include": ["src/**/*.ts", "worker-configuration.d.ts"]
+}

@@ -1,0 +1,15 @@
+AGENTS.md
+CLAUDE.md
+assets/
+docs/
+.mulmoterminal.json
+apps/worker/worker-configuration.d.ts
+pnpm-lock.yaml
+node_modules/
+.claude/worktrees/
+dist/
+coverage/
+playwright-report/
+test-results/
+.stryker-tmp/
+.wrangler/

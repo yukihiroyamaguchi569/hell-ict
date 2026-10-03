@@ -1,0 +1,216 @@
+<!doctype html>
+<html lang="ja">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>次のICTへの申し送り | 地獄のICT</title>
+    <!--
+      デブリーフィングで会場へ映す「次のICTへの申し送り」。scripts/ranking-board/server.mjs が配り、
+      GET /api/handover を30秒間隔でポーリングして描画する。単一ファイル・依存ゼロ。見た目は番付（index.html）に揃える。
+      チーム名と一言は参加者の入力なので、必ず textContent で差し込む。
+    -->
+    <style>
+      :root {
+        --bg: #0b0f14;
+        --panel: #121924;
+        --panel-edge: #1e2a3a;
+        --ink: #e8eef6;
+        --ink-dim: #8ea0b8;
+        --gold: #f5b942;
+        --accent: #4cc2ff;
+        --alert: #ff6b5e;
+      }
+      * {
+        box-sizing: border-box;
+      }
+      /* 1画面（1600×900想定）に収めるため、本文の高さをビューポートに固定する。 */
+      body {
+        margin: 0;
+        height: 100vh;
+        background: var(--bg);
+        color: var(--ink);
+        font-family: "Hiragino Kaku Gothic ProN", "Yu Gothic", "Meiryo", system-ui, sans-serif;
+        font-size: clamp(16px, 1.4vw, 26px);
+        display: flex;
+        flex-direction: column;
+        align-items: center;
+        padding: 1.2em 1.2em 1em;
+      }
+      h1 {
+        margin: 0 0 0.6em;
+        font-size: 2.2em;
+        letter-spacing: 0.1em;
+        color: var(--gold);
+      }
+      main {
+        flex: 1;
+        min-height: 0;
+        width: 100%;
+        display: grid;
+        grid-template-columns: repeat(var(--cols, 3), minmax(0, 1fr));
+        grid-auto-rows: minmax(0, 1fr);
+        gap: 1em;
+      }
+      .card {
+        min-height: 0;
+        background: var(--panel);
+        border: 2px solid var(--panel-edge);
+        border-radius: 0.6em;
+        padding: 0.8em 1.1em;
+        display: flex;
+        flex-direction: column;
+        gap: 0.4em;
+      }
+      .name {
+        margin: 0;
+        font-size: 1.3em;
+        font-weight: bold;
+        color: var(--accent);
+        overflow-wrap: anywhere;
+      }
+      /* 長文は折り返し、それでも溢れるカードだけ fitText が文字を小さくする。 */
+      .text {
+        flex: 1;
+        min-height: 0;
+        margin: 0;
+        overflow: hidden;
+        line-height: 1.45;
+        white-space: pre-wrap;
+        overflow-wrap: anywhere;
+      }
+      .text.none,
+      .empty {
+        color: var(--ink-dim);
+      }
+      .empty {
+        grid-column: 1 / -1;
+        align-self: center;
+        text-align: center;
+        font-size: 1.6em;
+        margin: 0;
+      }
+      footer {
+        margin-top: 0.8em;
+        color: var(--ink-dim);
+        font-size: 0.75em;
+      }
+      footer a {
+        color: var(--ink-dim);
+      }
+      .error {
+        color: var(--alert);
+      }
+    </style>
+  </head>
+  <body>
+    <h1>次のICTへの申し送り</h1>
+    <main id="handovers"><p class="empty">読み込み中…</p></main>
+    <footer><span id="status"></span> ・ 30秒ごとに自動更新 ・ <a href="/">番付へ</a></footer>
+
+    <script>
+      "use strict";
+      const POLL_MS = 30_000;
+      const FETCH_TIMEOUT_MS = 90_000;
+      // 一言の文字サイズ（em）。溢れるカードだけ MIN_EM まで段階的に小さくする。
+      const MAX_EM = 1.6;
+      const MIN_EM = 0.8;
+      const STEP_EM = 0.1;
+
+      const displayName = (name) => (name === "" ? "（チーム名なし）" : name);
+
+      const el = (tag, className, text) => {
+        const node = document.createElement(tag);
+        if (className) node.className = className;
+        if (text !== undefined) node.textContent = text;
+        return node;
+      };
+
+      const fitText = (node) => {
+        let em = MAX_EM;
+        node.style.fontSize = `${String(em)}em`;
+        while (node.scrollHeight > node.clientHeight && em > MIN_EM) {
+          em = Math.max(MIN_EM, em - STEP_EM);
+          node.style.fontSize = `${String(em)}em`;
+        }
+      };
+
+      const fitAll = () => {
+        document.querySelectorAll("#handovers .text").forEach(fitText);
+      };
+
+      // text が空の行は、PIIゲートで本文ごと保存されなかった一言（pii_redacted = 1）。
+      const card = (handover) => {
+        const node = el("article", "card");
+        node.append(
+          el("h2", "name", displayName(handover.teamName)),
+          handover.text === ""
+            ? el("p", "text none", "（記録なし）")
+            : el("p", "text", handover.text),
+        );
+        return node;
+      };
+
+      const renderHandovers = (handovers) => {
+        const box = document.getElementById("handovers");
+        if (handovers.length === 0) {
+          box.replaceChildren(el("p", "empty", "まだ申し送りはありません"));
+          return;
+        }
+        // 2段に並べる列数（2〜4列）。4チームまでは2×2、6チームで3×2、8チームで4×2。
+        const cols = Math.min(4, Math.max(2, Math.ceil(handovers.length / 2)));
+        box.style.setProperty("--cols", String(cols));
+        box.replaceChildren(...handovers.map(card));
+        fitAll();
+      };
+
+      const isHandover = (item) =>
+        typeof item === "object" &&
+        item !== null &&
+        typeof item.teamName === "string" &&
+        typeof item.text === "string";
+
+      const isHandovers = (data) =>
+        typeof data === "object" &&
+        data !== null &&
+        Array.isArray(data.handovers) &&
+        data.handovers.every(isHandover);
+
+      const setStatus = (text, isError) => {
+        const status = document.getElementById("status");
+        status.textContent = text;
+        status.className = isError ? "error" : "";
+      };
+
+      // 失敗しても直前の表示は残し、フッターにだけ知らせる（発表中に画面を空にしない）。
+      const refresh = async () => {
+        const controller = new AbortController();
+        const timer = setTimeout(() => controller.abort(), FETCH_TIMEOUT_MS);
+        try {
+          const response = await fetch("/api/handover", {
+            signal: controller.signal,
+            cache: "no-store",
+          });
+          const data = await response.json();
+          if (!response.ok) throw new Error(data.error ?? `HTTP ${String(response.status)}`);
+          if (!isHandovers(data)) throw new Error("結果の形が想定と違う");
+          renderHandovers(data.handovers);
+          setStatus(
+            `開催回 ${data.eventNo} ・ ${new Date(data.fetchedAt).toLocaleTimeString("ja-JP")} 更新`,
+            false,
+          );
+        } catch (error) {
+          setStatus(
+            `更新に失敗しました（${error instanceof Error ? error.message : String(error)}）`,
+            true,
+          );
+        } finally {
+          clearTimeout(timer);
+        }
+      };
+
+      window.addEventListener("resize", fitAll);
+      void refresh();
+      setInterval(() => void refresh(), POLL_MS);
+    </script>
+  </body>
+</html>

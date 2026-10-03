@@ -1,0 +1,158 @@
+# 地獄のICT — AI開発ガイド
+
+このファイルは、Claude CodeとCodexが共通で従うプロジェクト指示の正典である。設計内容そのものは転記せず、正典の場所、変更時の境界、検証方法を示す。
+
+## プロジェクト概要
+
+医療従事者向けのゲーム型AI研修Webアプリ。複数のアウトブレイクが同時進行する架空の病院に放り込まれた参加者が、AIを駆使して難問を突破する。クリアした頃にはAI活用スキルが身についている、という研修。
+
+現在は企画段階。企画方針の正典は scenario repo の `docs/企画書.md` であり、バージョンは同ファイルのヘッダーを正とする。
+
+- 設計文書（企画書・シナリオ・UI・キャラクター・教材・テストプレイの記録）は、private repo `hell-ict-scenario`（以下 scenario repo。手元は `~/hell-ai/hell-ict-scenario`）の `docs/` にある。このファイルで「scenario repo の `docs/…`」と書いたものはそこを指す。public の hell-ict の `docs/` には、`docs/development-harness.md` と `docs/p1b-minimal-team-state.md` だけを置く。
+- Issue・PR の番号のうち #394 以前は `hell-ict-archive`（private）のものである。
+
+## 大前提
+
+- ICTはInformation and Communication Technologyではなく、Infection Control Team（感染制御チーム）を指す。この取り違えは企画全体を壊す。
+- 参加者は3〜4人1組で、ゲームに使うPCはチームに1台。所要120分の集合研修である。
+- 前作「地獄のAI」の後継であり、最初にゴールしたチームが優勝するレース形式を踏襲する。
+
+## 想定スタック
+
+技術構成は scenario repo の `docs/企画書.md` §7を正とする。
+
+- Cloudflare Pages（Vue 3/Vite）
+- Workers
+- Durable Objects（WebSocket、チーム状態、リーダーボード）
+- D1 / KV / R2
+- OpenAI API（GPT-4o、gpt-image-1）
+
+## 壊してはいけない設計判断
+
+理由は scenario repo の企画書に記載されている。変更提案は歓迎するが、次を独断で変更しない。
+
+- 罰はスコア減点ではなく時間で払う。レースでは時間が最も痛い。
+- PII検知はOpenAIへ送信する前にWorkers側で止める。Stage 4のダミー個人情報を実際に外部へ送信しない。
+- Stage 3の罠をモデルの気まぐれに依存させず、復旧も外部ツールへ依存させない。仕組みの詳細は scenario repo の設計文書を正とする。
+- AIチャットは今のステージの1本だけを表示する。過去ステージの会話は見せない（現在地の迷いを避ける）。
+
+## コードは小さな責務と明示的な境界で構成する
+
+- ゲームルール、判定、時間処理は、可能な限り副作用のないPure Functionとして実装する。
+- 関数は短さそのものを目的にせず、一つの責務を持ち、名前から役割が分かる単位へ分ける。
+- UI、ゲームルール、外部サービス接続を分離する。Vueコンポーネントへ判定や永続化のロジックを書かない。
+- 時刻、乱数、ID生成、OpenAI、Cloudflareの各ストレージは交換可能な境界を設け、テストからFakeを注入できるようにする。
+- 重複を避ける。ただし、見かけが似ているだけの処理を早すぎる抽象化でまとめない。
+- 人間とAIが一度に理解・テスト・レビューできる範囲へ変更を小さく保つ。
+
+## シナリオは content に閉じ、public にはダミーを置く
+
+- 判定の値（語・正規表現）は domain に書かず、`packages/content` の `rules.ts` から読む。domain は判定の順序と理由だけを持つ。
+- `@hell-ict/content/prompts` と `@hell-ict/content/answers` はサブパスからだけ import する。web と `packages/domain/src` からは import しない（answers は worker の src からも import しない）。
+- このリポジトリの `packages/content` はダミーシナリオで、本物は private repo `hell-ict-scenario` にある。本番はデプロイ時に本物を重ねる（`docs/development-harness.md`「シナリオの overlay」）。
+- content の文言やシナリオを変えるときは、ダミー（hell-ict）と本物（hell-ict-scenario）の両方を直す。足し忘れや形の食い違いは、デプロイ時の overlay の検査と `scripts/scenario-check.sh` のテストで止まる。
+
+## 型安全性は外部入力の検証から守る
+
+- `any`を使用しない。外部ライブラリの型が不足する場合も、境界を限定して`unknown`から絞り込む。
+- `as unknown as T`のように型検査を迂回するunsafe cast、根拠のない型アサーション、安易なnon-null assertionを禁止する。
+- `as const`と`satisfies`は、型を狭めたり構造を検査したりする用途で使用してよい。
+- API、WebSocket、D1、KV、R2、OpenAIから受け取る値は、実行時schemaで検証してからドメインへ渡す。
+- schemaとTypeScript型を別々に手書きしない。型は可能な限りschemaから推論する。
+- 例外的に型アサーションが必要な場合は、適用範囲を最小化し、コード上で安全性の根拠を説明する。
+
+## 静的解析は複雑さを止めるために使う
+
+- LintとTypeScriptのstrict設定を厳格に運用する。
+- 循環的複雑度、認知的複雑度、ネストの深さ、引数の数、unsafeな型操作はCIで検出する。
+- ファイル行数と関数行数は、導入当初はwarningとして観測する。VueのSFC（template）や宣言的なシナリオ定義を、行数だけを理由に不自然に分割しない。
+- 閾値は実装を計測してから決める。警告を無視するために上限を一律に緩めず、違反ごとに責務分割か例外指定かを判断する。
+- 重複検知では、生成物、fixture、意図的に比較する教材データを対象外にできるようにする。
+
+## テストは正常系だけで終わらせない
+
+- 正常系、境界値、Edge Case、Corner Case、Error Caseを扱う。
+- 状態遷移では、許可された遷移だけでなく、禁止された遷移が拒否されることも確認する。
+- Fake AI、Fake Clock、Fake Storageから、タイムアウト、レート制限、切断、重複イベント、保存失敗を意図的に発生させる。
+- エラー表示だけで満足せず、副作用が起きていないことを確認する。Stage 4のPII検知では、OpenAI呼び出し回数が0であることまで検証する。
+- 再接続では画面が復元されることに加え、イベントや提出が二重適用されないことを検証する。
+- テストのためだけに本番コードへ不自然な分岐を追加しない。交換可能な境界とFakeで制御する。
+
+## Mutation Testingは中核ロジックを重点的に検査する
+
+- Mutation Testingの主対象は、ゲーム状態遷移、ステージ判定、PIIゲート、時間処理、罠、罰ゲーム、再接続時の重複防止とする。
+- Vueの表示層、薄い外部サービスadapter、自動生成コードまで一律に対象にしない。
+- PRでは変更された中核ロジックを中心に実行し、全体Mutation Testingは定期実行または手動の監査レーンへ分ける。
+- 生存したmutationは、テスト不足と同値mutationを区別して判断する。mutation scoreだけを上げるための価値がないテストを増やさない。
+
+## 検証コマンドは高速レーンと監査レーンに分ける
+
+本番コード基盤の導入後、ローカルとCIで同じpackage scriptsを使用する。
+
+- `pnpm verify`: format、lint、型検査、ドメインテスト、教材（`packages/content`）テスト、Worker統合テスト、主要E2Eを実行する。PRの必須チェックとし、数分で終わる状態を保つ。
+- `pnpm verify:full`: 全E2E、全体Mutation Testing、重複検査、依存関係監査を実行する。手動実行と、中核ロジックを大きく変更したPRで使用する。
+  - 実 Worker と実時間で通す長いE2Eは、Playwrightの`journey`プロジェクトに置き、高速レーンには入れない（監査レーンと、下記の通しE2Eワークフローで走る）。高速レーンの`pnpm test:e2e`は`--project=chromium`なので走らない。
+  - Vue 版 Stage 1 のラウンド遷移（`e2e/journey/vue-stage1-rounds.spec.ts`）を`journey`プロジェクトに置く。実 Worker と実時間で通すため約4〜5分かかる。
+  - Vue 版を入室から感謝状まで1本で通すテスト（`e2e/journey/vue-full-run.spec.ts`）も`journey`プロジェクトに置く。実 Worker と OpenAI スタブで通し、約1分半かかる。
+
+CIでは `pnpm verify` を、コードに影響しうる変更を含む全PRで実行し、`pnpm verify:full` は既定でスキップする。`docs/` とリポジトリ直下の `*.md` だけを変更したPRは、CI設定（`.github/workflows/verify.yml` の `paths-ignore`）により `pnpm verify` 自体をスキップする。コード・テスト・CIは `docs/` を読まない（教材の正は `packages/content`）。ゲーム状態遷移、ステージ判定、PIIゲート、時間処理、罰ゲーム、再接続の重複防止を変更したPRには `監査レーン` ラベルを付け、監査レーンをCIで実行する。CIの監査レーンは `pnpm verify:full` を1ジョブで回さず、同じ実行で必ず走る `pnpm verify` のジョブと重なる部分を除いて、journey E2E・Mutation Testing（どちらもshard）・重複検査と依存関係監査の並列ジョブに分けて走らせる（`.github/workflows/verify.yml`）。ラベルを付けた時点で実行され、以後そのPRへpushするたびに再実行される。ただし、mainを衝突なく取り込んだマージコミットだけのpushでは再実行しない（判定は `scripts/audit-lane-skip-check.sh`）。衝突を手で解いたマージは再実行する。同じPRの実行が重なったときは、古い実行を取り消して最新だけを残す。ラベルなしでも手動実行（Actionsの Run workflow）で任意のブランチに対して実行できる。journey E2E だけは、ラベルが無くても次のPRで走らせる。journey（`e2e/journey/`）は、新アプリ・Worker・E2E・その配信経路を変えたPRで `.github/workflows/journey.yml` が走らせる（対象パスは同ファイルの `paths` を正とする）。演出だけを変えるPRにはラベルが付かず、journey がCIで回らないまま書き換えられていたためである。
+
+## 読む地図
+
+タスクに必要なものだけを読む。矛盾を見つけたら、優先順位が高い正典を修正する。個別ステージのファイルへ矛盾のパッチを当てて済ませない。
+
+読むものはすべて scenario repo の `docs/` にある（手元 `~/hell-ai/hell-ict-scenario/docs/`）。優先順位は、`docs/企画書.md`、通奏低音、各ステージのscenario/uiの順とする。
+
+> 📌 **新アプリが正典**（2026-10-02 ユーザー決定。2026-09-06 の「モックが正典」を置き換える）。新アプリ（`apps/web`、`packages/content` など）を直すとき、scenario repo の `docs/企画書.md`、`docs/scenario/`、`docs/ui/*.md`、`docs/character/`、`docs/materials/` は**更新も整合確認もしない**。新アプリと文書の食い違いはレビューでも指摘しない。モック（旧 `docs/ui/mock/`）は削除した（#373）。上記の優先順位は、本番実装で設計を読み直す段になってから再び適用する。
+
+| やること | 読むもの（scenario repo） |
+|---|---|
+| 本番基盤・技術構成 | `docs/企画書.md` §7〜9 |
+| ステージに関わる作業 | `docs/企画書.md` §5の該当ステージ節 |
+| ステージの設計・執筆 | `docs/scenario/00_未知ウイルスの通奏低音.md`と、前後ステージの`scenario/NN_*.md`、`ui/NN_*.md` |
+| UI・演出 | `docs/ui/00_共通シェルと通奏低音.md` |
+| お助けキャラの台詞 | `docs/character/苅部さん.md`。機構の不変条件は`docs/character/00_お助けキャラの原則.md` |
+| 教材データ | `docs/materials/README.md` |
+
+1ステージの作業単位は、`scenario/NN_StageN_*.md`、`ui/NN_StageN.md`、必要な`materials/`である。
+
+## 教材とUI文言のトーン
+
+- ドキュメントとUI文言は日本語で記述する。
+- ブラックユーモアを使うが、理不尽の矛先は常に組織と状況へ向ける。
+- 実在の病院や人物名を出さない。特定職種を貶めない。罰ゲームで人格を攻撃しない。
+- 舞台は聖クロノス総合病院（400床、地方中核、電子カルテは2003年製）である。
+
+## Codex使用時のエージェント分担
+
+この節はCodexを使用している場合だけ適用する。Claude Codeなど、ほかの開発ツールには適用しない。
+
+- 設計と実装計画は、`.codex/agents/planner.toml`で定義した`planner`へ委譲する。
+- 作業ブランチの作成、コード・テスト・設定・ドキュメントの変更と検証、stage、コミット、push、Pull Requestの作成・更新は、`.codex/agents/implementer.toml`で定義した`implementer`へ委譲する。親エージェント自身はファイルやGitHubの状態を変更しない。
+- `implementer`は、タスク対象と差分を確認したうえで、stageとコミットの前にユーザーへ個別確認を求めず実行してよい。この許可は恒常的に適用する。
+- 計画と実装を含む依頼では、先に`planner`が計画を作り、その結果を`implementer`へ渡す。
+- 親エージェントは、ユーザーとの対話、スコープの判断、結果の統合を担当する。Pull Requestのマージは、ユーザーから明示的に依頼された場合だけ行う。
+- 重要な選択肢が残っている場合は、`implementer`を起動する前に親エージェントがユーザーへ確認する。
+
+## Git・GitHubワークフロー
+
+- AIは、タスクの変更がまとまり検証が完了したら、必要に応じてコミット、push、Pull Requestの作成または更新までを個別確認なしで進めてよい。ただし、対象ファイルと差分を確認し、タスクに無関係な変更を含めない。
+- 個人開発を含む、すべての変更をPull Requestベースで進める。
+- `main`、`master`などのデフォルトブランチへ直接コミットまたは直接pushしない。
+- タスクの最初のコミット前に、デフォルトブランチから目的に合った作業ブランチを作成する。
+- すでにデフォルトブランチ以外の適切な作業ブランチにいる場合は、そのブランチを継続して使う。コミットごとにブランチを作らない。
+- ブランチ名は、`feat/`、`fix/`、`docs/`、`chore/`などの接頭辞と、内容が分かる英語のkebab-caseを組み合わせる。
+- コミットメッセージ、Pull Requestのタイトルと本文は日本語で記述する。Conventional Commitsの英語接頭辞は使用してよい。
+- 作業ブランチを初めてpushするときは、GitHub上にそのブランチからデフォルトブランチへのPull Requestを作成する。
+- 同じブランチのPull Requestが存在する場合は、重複作成せず既存のPull Requestを更新する。
+- 実装が未完了ならDraft Pull Request、完了しているなら通常のPull Requestを作成する。
+- Pull Requestをマージするのは、ユーザーから明示的に依頼された場合だけとする。
+- GitHubへの接続、認証、remote設定が不足してPull Requestを作成できない場合は、デフォルトブランチへの直接pushで回避しない。状況を報告してユーザーへ確認する。
+
+## ドキュメント運用
+
+- 企画書を改訂したら、scenario repo の `docs/企画書.md` ヘッダーのversionを上げる。
+- AGENTS.mdに設計内容を複製しない。ここには正典への導線、作業規則、検証条件だけを置く。
+- 共通ルールはAGENTS.mdだけで管理する。CLAUDE.mdへ重複して書かない。
+- ツール固有の指示が必要な場合だけ、対応する入口ファイルへ最小限を追記する。
+- scenario repo の `docs/testplay/2026-08-23_進行台本.md` は 2026-08-23 の実施記録であり、9/26 本番向けの改訂は実装が出揃った後にまとめて行う（2026-09-05 決定）。それまでは環境変数名・画面文言・行数などが実装と食い違っていても**修正しない**。レビューでもこの食い違いを指摘しない。当日準備の手順は（このリポジトリの）`docs/development-harness.md` を正とする。

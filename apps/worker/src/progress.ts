@@ -1,0 +1,605 @@
+import { z } from "zod";
+
+import {
+  gameStagePosition,
+  normalizeLegacyViewField,
+  normalizeLegacyViewId,
+  PII_REDACTION,
+  publicTeamId,
+  redactPii,
+  resetGenerationSchema,
+  teamCodeSchema,
+  viewIdSchema,
+} from "@hell-ict/domain";
+import type { GameEvent, GameStageId, TeamCode, ViewId } from "@hell-ict/domain";
+
+import { isTeamCodeAllowed, parseTeamCodeRule } from "./guard.js";
+import type { TeamCodeRule } from "./guard.js";
+import { bodyErrorResponse, error, json, parseJson } from "./http.js";
+import { isDuplicateColumn } from "./sqlite.js";
+
+/**
+ * テストプレイ当日の進捗記録。参加者のブラウザから位置イベントをD1へ積み、
+ * 会場前面のダッシュボード（apps/worker/dashboard/index.html）が
+ * GET /api/progress/summary をポーリングして表示する。
+ *
+ * 研修一回分の使い捨てデータであり、ゲーム進行そのもの（TeamRoom / RaceLeaderboard）
+ * とは独立している。記録が落ちてもゲームは進む、という前提で全体を組む。
+ */
+
+/**
+ * schema/progress.sqlと同じ内容。D1の`exec`は改行で文を区切るため、1文＝1行で書く
+ * （複数文を1行へ詰めると実行時に弾かれる）。テストからも同じ定義を使い、
+ * 本番とテストでスキーマがずれないようにする。
+ */
+export const progressSchemaSql = [
+  "CREATE TABLE IF NOT EXISTS progress_events (id INTEGER PRIMARY KEY AUTOINCREMENT, team_code TEXT NOT NULL, team_name TEXT NOT NULL DEFAULT '', pos INTEGER NOT NULL, view TEXT NOT NULL DEFAULT '', kind TEXT NOT NULL, generation INTEGER NOT NULL DEFAULT 0, client_at TEXT NOT NULL DEFAULT '', created_at TEXT NOT NULL DEFAULT (datetime('now')));",
+  "CREATE INDEX IF NOT EXISTS idx_progress_team ON progress_events(team_code, id);",
+  // リセット世代の集計（RESET_GENERATION_CTE）専用の部分インデックス。reset行は
+  // 全体のごく一部なので、これが無いとサマリーの2本が毎回テーブル全体を1回ずつ
+  // 余計に走査する（Issue #125）。列を(team_code, generation)の順に持たせて
+  // GROUP BY team_code / MAX(generation) をインデックスだけで賄う。
+  "CREATE INDEX IF NOT EXISTS idx_progress_reset ON progress_events(team_code, generation) WHERE kind = 'reset';",
+  "CREATE TABLE IF NOT EXISTS migrations (name TEXT PRIMARY KEY);",
+].join("\n");
+
+/**
+ * 既にテーブルを持つD1には`CREATE TABLE IF NOT EXISTS`が効かないので、列は後から足す。
+ * SQLiteの`ADD COLUMN`に`IF NOT EXISTS`は無く、2度目以降は必ず失敗する。既存行の
+ * 世代は既定の0になり、リセット前のイベントとして扱われる。
+ */
+const PROGRESS_ALTERS = [
+  "ALTER TABLE progress_events ADD COLUMN generation INTEGER NOT NULL DEFAULT 0;",
+];
+
+/**
+ * schema/progress.sqlの適用忘れで当日リクエストが全滅しないよう、初回アクセス時に
+ * テーブルを作る。毎リクエストでDDLを流さないようモジュールスコープで1回に抑える。
+ *
+ * 「実行中」を真偽値ではなくPromiseそのもので覚える。コールドスタート直後に複数の
+ * リクエストが重なると、真偽値では2本目が初期化の完了を待たずに先へ進み、まだ
+ * テーブルが無い状態でINSERTして503になる。全員が同じPromiseをawaitすれば、
+ * DDLは1回だけ流れ、後続は完了を待ってから進む。
+ *
+ * 失敗したときはnullへ戻し、次のリクエストで作り直しを試みる（1度の失敗で以後ずっと
+ * テーブル無しのまま動き続ける状態を作らない）。
+ */
+/** ensureSchemaが必要とするのはexecだけ。テストからFakeを渡せるよう最小限へ絞る。 */
+export type SchemaRunner = Pick<D1Database, "exec">;
+
+/**
+ * CREATE群を流してから、既存DB向けのALTERを順に当てる。ensureSchemaが1回だけ
+ * 呼ぶが、握る失敗の範囲を直接検証できるよう単体で公開する。
+ */
+export const migrateSchema = async (db: SchemaRunner): Promise<void> => {
+  await db.exec(progressSchemaSql);
+  for (const statement of PROGRESS_ALTERS) {
+    await db.exec(statement).catch((caught: unknown) => {
+      if (!isDuplicateColumn(caught)) throw caught;
+    });
+  }
+};
+
+let schemaReady: Promise<void> | null = null;
+export const ensureSchema = (db: SchemaRunner): Promise<void> => {
+  if (schemaReady !== null) return schemaReady;
+  schemaReady = migrateSchema(db).catch((caught: unknown) => {
+    schemaReady = null;
+    throw caught;
+  });
+  return schemaReady;
+};
+
+/** 完了印の名前。D1のmigrationsに残るので、変えると移行がもう一度走る。 */
+const PROGRESS_PII_MIGRATION = "progress-pii-redaction";
+
+/** DISTINCTで拾う組。SQLiteは列の型を強制しないので、読み出しも検証してから使う。 */
+const progressTextPairSchema = z.object({ team_name: z.string(), view: z.string() });
+
+/**
+ * 伏せ字化を入れる前にD1へ積まれた行の平文PIIを、一度だけ消しに行く。
+ *
+ * 読み出し側の伏せ字化（redactDisplayText）は公開される値を守るだけで、D1の行は
+ * 平文のまま残る。研修が終わってもデータベースに氏名が残るのは、表に出るか出ないかとは
+ * 別の問題なので、行そのものを書き換える。
+ *
+ * 「済んだかどうか」はD1のmigrations行だけで判断し、プロセス内のフラグでは覚えない
+ * ——覚えると、Workerのインスタンスごとに1回ずつ走るうえ、状態がテストから戻せなくなる。
+ * 主キー1行の参照はサマリー1回あたりの負荷として無視できる。
+ *
+ * 伏せ字化にはredactPiiだけを使い、6桁コードの伏せ字化（redactDisplayText）は掛けない
+ * ——あちらは現在のEVENT_NOに依存する判定で、設定が入る前にこの移行が走ると
+ * 「そのとき対象外だったコード」を取りこぼしたまま完了印が付く。コードの伏せ字化は
+ * 読み出し側が毎回やり直すので、行の移行はPIIだけに絞るのが安全側になる。
+ *
+ * 失敗しても握りつぶし、次のリクエストでやり直す。移行が転けたせいで当日の
+ * ダッシュボードが落ちるほうが害が大きい（公開される値は読み出し側が守っている）。
+ */
+export const migrateProgressPii = async (db: D1Database): Promise<void> => {
+  try {
+    await runProgressPiiMigration(db);
+  } catch {
+    // 次のサマリーでやり直す。
+  }
+};
+
+const runProgressPiiMigration = async (db: D1Database): Promise<void> => {
+  const done = await db
+    .prepare("SELECT name FROM migrations WHERE name = ?")
+    .bind(PROGRESS_PII_MIGRATION)
+    .first();
+  if (done !== null) return;
+  const pairs = await db.prepare("SELECT DISTINCT team_name, view FROM progress_events").all();
+  // 組ごとに1文へまとめる。行ごとにUPDATEを撃つと、当日の行数次第で移行が長引く。
+  const updates = z
+    .array(progressTextPairSchema)
+    .parse(pairs.results)
+    .map((pair) => ({ pair, name: redactPii(pair.team_name), view: redactPii(pair.view) }))
+    .filter(({ pair, name, view }) => name !== pair.team_name || view !== pair.view)
+    .map(({ pair, name, view }) =>
+      db
+        .prepare(
+          "UPDATE progress_events SET team_name = ?, view = ? WHERE team_name = ? AND view = ?",
+        )
+        .bind(name, view, pair.team_name, pair.view),
+    );
+  // 完了印はOR IGNORE。サマリーが同時に2本来ても、UPDATEは伏せ字済みの行に対して
+  // 何も選ばないので繰り返して害がなく、印の重複だけを避ければよい。
+  await db.batch([
+    ...updates,
+    db.prepare("INSERT OR IGNORE INTO migrations (name) VALUES (?)").bind(PROGRESS_PII_MIGRATION),
+  ]);
+};
+
+/**
+ * 表示専用の自由文字列。上限超過を400にすると、当日クライアントが1文字でも長い値を
+ * 送った瞬間にそのチームだけダッシュボードから消える。仕様どおりの長さしか送らない
+ * クライアントには影響しないので、暴走だけ粗い上限で止めて規定長へ切り詰める。
+ */
+const displayText = (limit: number): z.ZodType<string> =>
+  z
+    .string()
+    .max(2000)
+    .transform((value) => value.slice(0, limit));
+
+/**
+ * 意味を持つ値は切り詰めずに拒否する。posの範囲は8停留所（Prologue..Final）に対応する。
+ * kindは、entry=停留所に入った、clear=突破した、jump=devbarやURLハッシュでの手動復帰、
+ * resume=チェックポイントからの自動復帰。
+ */
+const progressEventSchema = z.object({
+  teamCode: z.string().regex(/^\d{6}$/),
+  teamName: displayText(24),
+  pos: z.number().int().min(0).max(7),
+  // 既知の画面idだけを受ける（checkpoint・活動ログと同じenum）。
+  view: viewIdSchema,
+  kind: z.enum(["entry", "clear", "jump", "resume"]),
+  // 入室時に受け取ったリセット世代。未指定は0（リセットを持たない古いクライアント）。
+  generation: resetGenerationSchema,
+  // 活動ログと同じくISO 8601で厳密に検証する。自由文字列のままだと、表示用の列に
+  // 何でも入れられる経路が1つ残る（モックはtoISOString()を送るので互換性は保たれる）。
+  clientAt: z.iso.datetime(),
+});
+
+const teamRowSchema = z.object({
+  teamCode: z.string(),
+  teamName: z.string(),
+  pos: z.number().int(),
+  updatedAt: z.string(),
+});
+
+const eventRowSchema = z.object({
+  teamCode: z.string(),
+  teamName: z.string(),
+  pos: z.number().int(),
+  view: z.string(),
+  kind: z.string(),
+  createdAt: z.string(),
+});
+
+/**
+ * チームごとの現在位置。
+ * - pos: 復帰イベント（jump=手動復帰、resume=チェックポイントからの自動復帰）は
+ *   自力で進んだわけではないので集計から外す。復帰以外のイベントが1件も無いチームは
+ *   0（Prologue）として扱う。ゲームマスターのリセット（kind=reset）より前のイベントも
+ *   同じく外す——MAXで畳むだけでは、消したはずの最高到達点が残り続けて位置が戻らない。
+ *   古いかどうかはidではなくgenerationで見る。世代の照合（DOへの問い合わせ）と
+ *   INSERTは別の操作なので、その隙にリセットが入ると、古い行がreset行より後の
+ *   idで積まれる——「idが後か」では守れない。行に世代を持たせて列で判定する。
+ * - teamName: 空文字で送られてくることがあるため、最新の「非空」の名前を採る。
+ *   位置と同じく世代で絞る——絞らないと、照合の後に積まれた古い世代の行の名前が、
+ *   リセット後のチーム名として表示され続ける。
+ * - updatedAt: 生存確認なので復帰を含む全イベントの最新時刻を使う。
+ */
+/**
+ * 規則の絞り込みはSQLへ入れる。取得後に落とすと、eventsのLIMIT 20を対象外チームの
+ * 行が食い潰し、対象チームの最新イベントがダッシュボードから消える——「絞ってから
+ * LIMIT」でなければ意味がない。
+ *
+ * 規則が無い（open）なら条件を付けず全件を返す。不正な設定はfail-closedで、
+ * 常に偽の条件を置く。
+ */
+/**
+ * チームごとの最後のリセット世代を、1回のGROUP BYで畳むCTE。各クエリはこれを
+ * `LEFT JOIN gen ON gen.team_code = <alias>.team_code` で連結して使う。
+ * resetを一度もしていないチームはこのCTEに行が無く、COALESCE(gen.g, 0)で0になる
+ * ——「reset行が無ければ全件が今の世代」という従来の意味と同じ。
+ *
+ * 行ごとの相関サブクエリ（`SELECT MAX(generation) ... WHERE team_code = e.team_code`）を
+ * やめた理由はrows read。あの形は O(チーム数 × 1チームの行数²) で読むため、当日の
+ * ポーリングだけで無料プランの上限（D1 rows read 500万/日）を大きく超える
+ * （Issue #125。実測で1回あたり約18,000行→約1,570行）。返す結果は変えない。
+ */
+const RESET_GENERATION_CTE = `WITH gen AS (
+  SELECT team_code, MAX(generation) AS g FROM progress_events WHERE kind = 'reset' GROUP BY team_code
+)`;
+
+/**
+ * その行が「今の世代」に属するかの述語。チームごとに、最後のreset行の世代以上の行だけを
+ * 数える（resetを一度もしていないチームは0以上＝全件）。照合を通った後にリセットが
+ * 入って積まれた古い行は、世代が小さいのでここで落ちる。
+ *
+ * 世代はRESET_GENERATION_CTEの`gen`から引く。この述語を使うクエリは必ず`gen`を
+ * LEFT JOINしていること（サブクエリの中から使う場合は、外側の結合行を参照する）。
+ */
+const currentGeneration = (alias: string): string => `${alias}.generation >= COALESCE(gen.g, 0)`;
+
+/** 規則の絞り込みへ世代の述語をANDで足す。規則が無ければ世代だけのWHEREになる。 */
+const currentRowsFilter = (
+  rule: TeamCodeRule,
+  alias: string,
+): { clause: string; params: (string | number)[] } => {
+  const filter = teamFilter(rule, `${alias}.team_code`);
+  return {
+    clause:
+      filter.clause === ""
+        ? `WHERE ${currentGeneration(alias)}`
+        : `${filter.clause} AND ${currentGeneration(alias)}`,
+    params: filter.params,
+  };
+};
+
+const teamFilter = (
+  rule: TeamCodeRule,
+  column: string,
+): { clause: string; params: (string | number)[] } => {
+  if (rule.kind === "open") return { clause: "", params: [] };
+  if (rule.kind === "invalid") return { clause: `WHERE 0`, params: [] };
+  // 長さと下4桁の字種も見る。INの列挙と違い、規則だけでは`4200015`のような桁違いや
+  // `42001x`のような壊れた行が、substrとCASTの結果（`1x`→1）で紛れ込みうる。
+  return {
+    clause: `WHERE length(${column}) = 6 AND substr(${column}, 1, 2) = ? AND substr(${column}, 3) GLOB '[0-9][0-9][0-9][0-9]' AND CAST(substr(${column}, 3) AS INTEGER) BETWEEN 1 AND ?`,
+    params: [rule.eventNo, rule.teamMax],
+  };
+};
+
+/**
+ * 並び順（Issue #159）。posが大きい順、同じposの中は「そのposへ着いた時刻」が早い順。
+ * 到達時刻は、そのposを持つentry/clear行（＝前の停留所のclear、またはそのステージへの
+ * entry）の最も早い時刻。最終イベント時刻（updatedAt）で並べると、着いた後も操作を
+ * 続けるチームほど後ろへ下がり、到達順として読めない。updatedAtは「◯秒前」の表示用に
+ * 最終イベント時刻のまま返す。
+ *
+ * 時刻はclient_at（新アプリではサーバがコマンドを適用した時刻）を優先する。created_atは
+ * D1へ積めた時刻で、D1が落ちていた間の再送では遅れる（集計SQLのwinner.sqlと同じ判断）。
+ * client_atが空か読めない行（reset行、列を足す前の行）だけcreated_atで補う。
+ *
+ * posと到達時刻を1回の走査で出すため、「99 - pos」と正規化した時刻を連結した文字列の
+ * MINを採る（最大のposの中で最も早い時刻の行が選ばれる）。先頭が同じ2桁なので、同じpos
+ * 同士は時刻の順で比べられる。(チーム, pos)で畳んでから引き直す形は、同じデータで
+ * rows readが約1.5倍になった（Issue #125の上限を超える）。条件をposと同じ
+ * `NOT IN ('jump', 'resume', 'reset')`で書かないのも同じ理由——3値のNOT INは
+ * 行ごとに一時表を引き、rows readへ1行ずつ上乗せされる（2値のINは比較で済む）。
+ * 対象のkindは同じ（POSTが受けるのはentry/clear/jump/resume、サーバが書くのはそれとreset）。
+ * 同着は起きにくいが、チームコードで順を固定し、ポーリングのたびに入れ替わらないようにする。
+ */
+const ARRIVAL_TIME = `COALESCE(strftime('%Y-%m-%d %H:%M:%f', NULLIF(e.client_at, '')), strftime('%Y-%m-%d %H:%M:%f', e.created_at))`;
+
+const teamsSql = (filter: string): string => `${RESET_GENERATION_CTE}
+SELECT
+  e.team_code AS teamCode,
+  COALESCE((
+    SELECT i.team_name FROM progress_events i
+    WHERE i.team_code = e.team_code AND i.team_name <> '' AND ${currentGeneration("i")}
+    ORDER BY i.id DESC LIMIT 1
+  ), '') AS teamName,
+  COALESCE(MAX(CASE WHEN e.kind NOT IN ('jump', 'resume', 'reset') THEN e.pos END), 0) AS pos,
+  MAX(e.created_at) AS updatedAt,
+  MIN(CASE WHEN e.kind IN ('entry', 'clear')
+    THEN printf('%02d', 99 - e.pos) || ${ARRIVAL_TIME} END) AS arrivalKey
+FROM progress_events e
+LEFT JOIN gen ON gen.team_code = e.team_code
+${filter}
+GROUP BY e.team_code
+ORDER BY pos DESC, arrivalKey IS NULL, arrivalKey ASC, teamCode ASC`;
+
+const eventsSql = (filter: string): string => `${RESET_GENERATION_CTE}
+SELECT
+  p.team_code AS teamCode,
+  p.team_name AS teamName,
+  p.pos,
+  p.view,
+  p.kind,
+  p.created_at AS createdAt
+FROM progress_events p
+LEFT JOIN gen ON gen.team_code = p.team_code
+${filter}
+ORDER BY p.id DESC
+LIMIT 20`;
+
+export const handleProgressPost = async (request: Request, env: Env): Promise<Response> => {
+  // 本文の読み取り失敗（大きすぎる／壊れている）と、schema違反を区別して返す。
+  const read = await parseJson(request).then(
+    (body) => ({ ok: true as const, body }),
+    (caught: unknown) => ({ ok: false as const, caught }),
+  );
+  if (!read.ok) return bodyErrorResponse(read.caught, "進捗イベントの形式が不正です。");
+  // デプロイ後も開いたままの旧タブは旧番号の画面id（s35）を送ってくる。enumで弾くと
+  // その端末の位置がダッシュボードから消えるので、schemaの手前で新名へ直す
+  // （判別できないs4・s5は素通り。Issue #118）。
+  const parsed = progressEventSchema.safeParse(normalizeLegacyViewField(read.body));
+  if (!parsed.success) return error("進捗イベントの形式が不正です。", 400);
+
+  const event = parsed.data;
+  // チームコードは本文にあるため入口ガードでは見られない。D1へ書く前にここで当てる
+  // （規則に合わないチームの行をダッシュボードへ混ぜない）。応答は存在を明かさない404に揃える。
+  if (!isTeamCodeAllowed(event.teamCode, parseTeamCodeRule(env))) {
+    return new Response("Not found", { status: 404 });
+  }
+
+  // ゲームマスターのリセットより前に入室した端末からの記録を弾く。リセット後に
+  // 遅れて届いた位置イベントをそのまま積むと、初期へ戻したはずの帯が復活する。
+  // D1へ触れる前に確かめ、拒否したときは1行も書かない。
+  const fresh = await env.TEAM_ROOM.getByName(event.teamCode)
+    .matchesResetGeneration(event.teamCode, event.generation)
+    .catch(() => null);
+  if (fresh === null) return error("進捗の記録に失敗しました。", 503);
+  if (!fresh) {
+    return error(
+      "この端末の状態は古くなっています。ページを再読み込みしてください。",
+      409,
+      "stale-generation",
+    );
+  }
+
+  try {
+    await ensureSchema(env.PROGRESS_DB);
+    await env.PROGRESS_DB.prepare(
+      `INSERT INTO progress_events (team_code, team_name, pos, view, kind, generation, client_at)
+       VALUES (?, ?, ?, ?, ?, ?, ?)`,
+    )
+      .bind(
+        event.teamCode,
+        // teamNameは参加者が自由に入れられる表示用の値で、D1にも公開サマリーにも
+        // そのまま出る。PIIと配布コードを伏せ字化してから保存する——拒否にしないのは、
+        // 進捗記録が落ちるとダッシュボードからそのチームが消えて当日の進行が
+        // 見えなくなるため。記録は残し、危ないものだけを落とす。
+        // viewはschemaで既知の画面idに固定済みなので、そのまま入れてよい。
+        redactDisplayText(event.teamName, parseTeamCodeRule(env)),
+        event.pos,
+        event.view,
+        event.kind,
+        // クライアントが名乗った世代をそのまま行へ残す。DOへの事前照合は早期拒否で
+        // あって、正しさはこの列が担保する（集計はreset行の世代より古い行を数えない）。
+        event.generation,
+        event.clientAt,
+      )
+      .run();
+    return json({ ok: true });
+  } catch {
+    return error("進捗の記録に失敗しました。", 503);
+  }
+};
+
+/**
+ * 会場前面のダッシュボードが読む集計。POST側でも規則を当てているが、当日の
+ * 設定が途中で入った場合や、設定前に積まれた行が残っている場合に、知らないチームが
+ * 並ぶのを防ぐため、読み出し側でも絞る。
+ */
+/** 6桁の連続数字。配布コードが分からないときは、これを配布コードとみなして伏せる。 */
+const SIX_DIGITS = /(?<!\d)\d{6}(?!\d)/g;
+
+/**
+ * 表示用テキストの伏せ字化。PIIに加えて配布チームコードも落とす——teamNameへ自分の
+ * コードを入れられると、公開サマリー経由で他チームの端末へそのまま渡り、publicIdで
+ * 隠した意味が無くなる（コードが唯一の入室資格）。
+ *
+ * 規則があるときは、規則に合うコードだけを伏せる（無関係な6桁の数字をむやみに
+ * 潰さない）。未設定・不正のときは配布コードが分からないので、6桁の連続数字を
+ * 一律で伏せる。
+ *
+ * 保存時と読み出し時の両方で通す。読み出し側にも掛けるのは、この伏せ字化を入れる前に
+ * 積まれた行が既にD1へ残っているため——保存時だけでは過去の行が公開され続ける。
+ */
+const redactDisplayText = (text: string, rule: TeamCodeRule): string => {
+  const withoutPii = redactPii(text);
+  return rule.kind === "rule"
+    ? withoutPii.replace(SIX_DIGITS, (code) =>
+        isTeamCodeAllowed(code, rule) ? PII_REDACTION : code,
+      )
+    : withoutPii.replace(SIX_DIGITS, PII_REDACTION);
+};
+
+type PublicRowContext = { selfCode: string | null; rule: TeamCodeRule };
+
+/**
+ * 行のteamCodeを公開用IDへ差し替え、表示用テキストを伏せ字化する。生のチームコードは
+ * 返さない——サマリーは参加者の端末からも読めるので、他チームのコードが見えると
+ * そのまま入室に使えてしまう。自分の行だけ`isSelf`で見分けられるようにする。
+ */
+const toPublicRow = async <Row extends { teamCode: string; teamName: string }>(
+  row: Row,
+  context: PublicRowContext,
+): Promise<Omit<Row, "teamCode"> & { publicId: string; isSelf?: true }> => {
+  const { teamCode, ...rest } = row;
+  const publicId = await publicTeamId(teamCode);
+  const base = { ...rest, teamName: redactDisplayText(row.teamName, context.rule) };
+  return context.selfCode !== null && teamCode === context.selfCode
+    ? { ...base, publicId, isSelf: true }
+    : { ...base, publicId };
+};
+
+/**
+ * eventsはviewも表示用テキストなので同じ伏せ字化を通す（enum化より前の行のため）。
+ * あわせて、2026-09-06の内部名振り直し（Issue #118）より前に積んだ行の画面idを
+ * 新名へ読み替える——D1の過去行は書き換えない方針なので、読む側で吸収する。
+ */
+const toPublicEventRow = async (
+  row: z.infer<typeof eventRowSchema>,
+  context: PublicRowContext,
+): Promise<Omit<z.infer<typeof eventRowSchema>, "teamCode"> & { publicId: string }> => {
+  const publicRow = await toPublicRow(row, context);
+  return {
+    ...publicRow,
+    view: normalizeLegacyViewId(redactDisplayText(row.view, context.rule)),
+  };
+};
+
+/**
+ * `?teamCode=`で自分の行を指定できる。規則を通らないコードは無視する
+ * （対象外のコードで他チームの行へisSelfを立てさせない）。
+ */
+const selfTeamCode = (url: URL, rule: TeamCodeRule): string | null => {
+  const parsed = teamCodeSchema.safeParse(url.searchParams.get("teamCode"));
+  if (!parsed.success) return null;
+  return isTeamCodeAllowed(parsed.data, rule) ? parsed.data : null;
+};
+
+/**
+ * サマリー1回が投げる2本（teams / events）。当日のD1 rows readはここが支配的なので、
+ * 同じ文をテストからも測れるよう公開する（test/progress.test.ts の rows read 回帰）。
+ */
+export const summaryStatements = (
+  db: D1Database,
+  rule: TeamCodeRule,
+): [D1PreparedStatement, D1PreparedStatement] => {
+  const teamsFilter = currentRowsFilter(rule, "e");
+  const eventsFilter = currentRowsFilter(rule, "p");
+  return [
+    db.prepare(teamsSql(teamsFilter.clause)).bind(...teamsFilter.params),
+    db.prepare(eventsSql(eventsFilter.clause)).bind(...eventsFilter.params),
+  ];
+};
+
+export const handleProgressSummary = async (env: Env, url: URL): Promise<Response> => {
+  try {
+    await ensureSchema(env.PROGRESS_DB);
+    await migrateProgressPii(env.PROGRESS_DB);
+    const rule = parseTeamCodeRule(env);
+    const selfCode = selfTeamCode(url, rule);
+    const [teamsStatement, eventsStatement] = summaryStatements(env.PROGRESS_DB, rule);
+    const [teams, events] = await Promise.all([teamsStatement.all(), eventsStatement.all()]);
+    const context: PublicRowContext = { selfCode, rule };
+    return json({
+      teams: await Promise.all(
+        z
+          .array(teamRowSchema)
+          .parse(teams.results)
+          .map((row) => toPublicRow(row, context)),
+      ),
+      events: await Promise.all(
+        z
+          .array(eventRowSchema)
+          .parse(events.results)
+          .map((row) => toPublicEventRow(row, context)),
+      ),
+    });
+  } catch {
+    return error("進捗の取得に失敗しました。", 503);
+  }
+};
+
+/**
+ * ゲームマスターのリセットを進捗イベントとして残す。位置は初期（pos 0・welcome）へ戻り、
+ * 集計はこの行の世代より古い行を数えない。`generation`はリセット後の（＝1つ進んだ）値で、
+ * これが以後の集計の下限になる。
+ *
+ * クライアントが送れるkind（progressEventSchema）には`reset`を含めない——含めると
+ * 参加者の端末から自分の位置を初期へ戻せてしまう。サーバ側でだけ書く。
+ */
+export const recordProgressReset = async (
+  env: Env,
+  teamCode: string,
+  generation: number,
+): Promise<void> => {
+  await ensureSchema(env.PROGRESS_DB);
+  await env.PROGRESS_DB.prepare(
+    `INSERT INTO progress_events (team_code, team_name, pos, view, kind, generation, client_at)
+     VALUES (?, '', 0, 'welcome', 'reset', ?, '')`,
+  )
+    .bind(teamCode, generation)
+    .run();
+};
+
+/** ゲームのステージから、ダッシュボードの画面id。Prologueは受信トレイの画面にいる。 */
+export const VIEW_OF_STAGE = {
+  prologue: "inbox",
+  s1: "s1",
+  s2: "s2",
+  s3: "s3",
+  s4: "s4",
+  s5: "s5",
+  s6: "s6",
+  final: "final",
+} as const satisfies Record<GameStageId, ViewId>;
+
+/**
+ * ゲーム状態の遷移（Issue #234）を進捗イベントとしてサーバ側で積む。クリアは`clear`で
+ * そのステージの次の停留所（モックの`recordStageClear(pos)`と同じ）、前進は`entry`で
+ * 入ったステージの停留所。クライアントが送る進捗（POST /api/progress）と同じ表・同じ
+ * 集計に載るので、ダッシュボードはどちらから来た行も同じに扱う。
+ *
+ * チーム名はサーバが知らないので空で積む（集計は最新の非空の名前を採る）。
+ * 世代はコマンドを適用したときのもの。記録の失敗はゲームを止めない（呼び出し側で握る）。
+ */
+export const recordGameProgress = async (
+  env: Env,
+  teamCode: TeamCode,
+  generation: number,
+  events: readonly GameEvent[],
+): Promise<void> => {
+  const rows = events.flatMap((event) => {
+    if (event.type === "stage-cleared") {
+      return [
+        {
+          stage: event.stage,
+          pos: gameStagePosition(event.stage) + 1,
+          kind: "clear",
+          at: event.at,
+        },
+      ];
+    }
+    if (event.type === "stage-entered") {
+      return [
+        { stage: event.stage, pos: gameStagePosition(event.stage), kind: "entry", at: event.at },
+      ];
+    }
+    return [];
+  });
+  if (rows.length === 0) return;
+  await ensureSchema(env.PROGRESS_DB);
+  await env.PROGRESS_DB.batch(
+    rows.map((row) =>
+      env.PROGRESS_DB.prepare(
+        `INSERT INTO progress_events (team_code, team_name, pos, view, kind, generation, client_at)
+         VALUES (?, '', ?, ?, ?, ?, ?)`,
+      ).bind(teamCode, row.pos, VIEW_OF_STAGE[row.stage], row.kind, generation, row.at),
+    ),
+  );
+};
+
+/**
+ * publicId（`publicTeamId`＝SHA-256の先頭8桁）からチームコードを引くための候補集合。
+ * ダッシュボードの行はまさにこのテーブルの集計なので、画面に出ているチームは必ずここに居る。
+ *
+ * 逆引きが要るのは、ダッシュボードがチームコードを表示しない設計だからである
+ * （見えた時点でそのチームへ入室できてしまう）。
+ */
+export const listProgressTeamCodes = async (db: D1Database): Promise<string[]> => {
+  await ensureSchema(db);
+  const rows = await db.prepare("SELECT DISTINCT team_code FROM progress_events").all();
+  return z
+    .array(z.object({ team_code: z.string() }))
+    .parse(rows.results)
+    .map((row) => row.team_code);
+};

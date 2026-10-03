@@ -1,0 +1,17 @@
+{
+  "extends": "./tsconfig.base.json",
+  "compilerOptions": {
+    "allowJs": true,
+    "checkJs": false,
+    "composite": false,
+    "lib": ["DOM", "DOM.Iterable", "ES2024"],
+    "noEmit": true
+  },
+  "include": [
+    "apps/web/src/**/*.ts",
+    "apps/web/src/**/*.vue",
+    "apps/web/eslint-vue-shim.d.ts",
+    "packages/domain/src/**/*.ts",
+    "packages/content/src/**/*.ts"
+  ]
+}

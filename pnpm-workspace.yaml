@@ -1,0 +1,27 @@
+packages:
+  - apps/*
+  - packages/*
+engineStrict: true
+overrides:
+  qs: ">=6.16.0"
+  fast-uri: "^3.1.8"
+  sharp: "^0.35.4"
+  js-yaml: "^4.3.2"
+  # @cloudflare/vitest-pool-workers 0.22.0（最新）が wrangler 4.124.0 と miniflare 5.20260815.0-alpha を
+  # 厳密固定し、その miniflare が undici 7.29.0（GHSA-8436-99hf-9mmv ほか high を含む）を厳密指定している。
+  # 直接依存の更新では外せないため、7.x の脆弱な版だけを patched 版へ寄せる（5.x・6.x は巻き込まない）。
+  # miniflare が 7.29.1 以上を指すようになればこの行は効かなくなるので、その時点で消してよい。
+  "undici@>=7.0.0 <7.29.1": "7.29.1"
+allowBuilds:
+  esbuild: true
+  workerd: true
+minimumReleaseAgeExclude:
+  - "@cloudflare/workers-types@5.20260820.1"
+  - vite@8.2.2
+patchedDependencies:
+  # macOSの製品版Chrome（PLAYWRIGHT_CHANNEL=chrome）は、Chromeのstdoutを GoogleUpdater に、
+  # stderrを chrome_crashpad_handler に引き継がせる。Chrome終了後もこれらが居残るため "close"
+  # が来ず browser.close() が返らない（E2Eが全件✓のあと終わらない）。Playwrightを更新したら
+  # このパッチを作り直し、この Mac（製品版Chrome）で pnpm test:e2e が最後まで終わることを確かめる。
+  playwright-core@1.57.0: patches/playwright-core@1.57.0.patch
+  wrangler@4.124.0: patches/wrangler@4.124.0.patch

@@ -1,0 +1,1240 @@
+import { env, exports } from "cloudflare:workers";
+import {
+  createExecutionContext,
+  runInDurableObject,
+  waitOnExecutionContext,
+} from "cloudflare:test";
+import {
+  chatMessageSchema,
+  chatSnapshotSchema,
+  createThreadResultSchema,
+  PII_REDACTION,
+} from "@hell-ict/domain";
+import { FakeAiGateway } from "@hell-ict/domain/fakes";
+import type { AiGateway, PromptProfile } from "@hell-ict/domain";
+import { beforeEach, describe, expect, it } from "vitest";
+import { z } from "zod";
+
+import {
+  ACTIVITY_RATE_LIMIT_PER_MINUTE,
+  DEFAULT_CHAT_RATE_LIMIT,
+  RATE_LIMIT_WINDOW_MS,
+} from "../src/guard.js";
+import { activityEventId, activitySchemaSql, handleActivityPost } from "../src/activity-log.js";
+import { handleChatMessage, handleCreateThread } from "../src/index.js";
+import { AiRouteState, createAiGateway } from "../src/ai-failover.js";
+import { OpenAiGateway, OpenAiRefusalError, OpenAiRequestError } from "../src/openai-gateway.js";
+import { postJson, session } from "./support.js";
+import { PII_NAME, PII_NAME_BROKEN } from "./pii-support.js";
+
+const rowSchema = z.object({
+  eventId: z.string(),
+  teamCode: z.string(),
+  kind: z.string(),
+  view: z.string(),
+  threadId: z.string(),
+  messageId: z.string(),
+  commandId: z.string(),
+  role: z.string(),
+  text: z.string(),
+  meta: z.string(),
+  clientAt: z.string(),
+  createdAt: z.string(),
+});
+
+type Row = z.infer<typeof rowSchema>;
+
+const ROWS_SQL = `SELECT
+  event_id AS eventId,
+  team_code AS teamCode,
+  kind,
+  view,
+  thread_id AS threadId,
+  message_id AS messageId,
+  command_id AS commandId,
+  role,
+  text,
+  meta,
+  client_at AS clientAt,
+  created_at AS createdAt
+FROM activity_events`;
+
+/**
+ * activity_eventsの行を、指定したチームのぶんだけ読む。
+ *
+ * 全件を読むとテスト同士が独立しない。vitestはタイムアウトした（あるいは途中で
+ * 失敗した）テストの非同期処理を止められないため、中断したテストの書き込みが
+ * 後続のテストの最中にD1へ届く。beforeEachのDROP後に届いた行は白紙のはずの
+ * テーブルに残り、1本の失敗が芋づる式に他を落とす。チームで絞れば、他のテストの
+ * 取りこぼしが自分の検証へ混ざらない。
+ */
+const rows = async (teamCode: string, ...moreTeamCodes: string[]): Promise<Row[]> => {
+  const teamCodes = [teamCode, ...moreTeamCodes];
+  const placeholders = teamCodes.map(() => "?").join(", ");
+  const result = await env.PROGRESS_DB.prepare(
+    `${ROWS_SQL} WHERE team_code IN (${placeholders}) ORDER BY id`,
+  )
+    .bind(...teamCodes)
+    .all();
+  return z.array(rowSchema).parse(result.results);
+};
+
+/**
+ * commandIdでチームを横断して行を読む。
+ *
+ * 「拒否したら行を増やさない」の検証をチームで絞ると、誤って別チームのteam_codeで
+ * 書いてしまう不具合を見逃す（絞る前の全件読みはこれを捕まえていた）。commandIdは
+ * リクエストが載せた値なので、どのチームへ書かれても見つけられる。中断した他の
+ * テストが漏らすPOSTは別のcommandIdを使うため、全件読みと違って連鎖もしない。
+ */
+const rowsByCommandId = async (commandId: string, ...moreCommandIds: string[]): Promise<Row[]> => {
+  const commandIds = [commandId, ...moreCommandIds];
+  const placeholders = commandIds.map(() => "?").join(", ");
+  const result = await env.PROGRESS_DB.prepare(
+    `${ROWS_SQL} WHERE command_id IN (${placeholders}) ORDER BY id`,
+  )
+    .bind(...commandIds)
+    .all();
+  return z.array(rowSchema).parse(result.results);
+};
+
+const metaOf = (row: Row | undefined): unknown => JSON.parse(row?.meta ?? "null");
+
+const DROP_TABLE = "DROP TABLE IF EXISTS activity_events;";
+
+/** ミリ秒まで刻んだISO 8601（前作で取れなかった発言単位の時刻）。 */
+const MILLISECOND_ISO = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3}Z$/;
+
+/** `waitUntil`へ逃がした活動ログの書き込み完了まで待ってから応答を返す。 */
+const chat = async (
+  teamCode: string,
+  command: { commandId: string; threadId: string; text: string; promptProfile?: PromptProfile },
+  aiGateway: AiGateway,
+  nowMs = Date.now(),
+): Promise<Response> => {
+  const ctx = createExecutionContext();
+  const response = await handleChatMessage(
+    new Request(`https://example.test/api/teams/${teamCode}/chat/messages`, {
+      method: "POST",
+      body: JSON.stringify({ type: "send-message", ...command }),
+    }),
+    { env, ctx },
+    teamCode,
+    { aiGateway, nowMs },
+  );
+  await waitOnExecutionContext(ctx);
+  return response;
+};
+
+const createThread = async (
+  teamCode: string,
+  commandId: string,
+  title: string,
+  kind?: "stage" | "manual",
+): Promise<Response> => {
+  const ctx = createExecutionContext();
+  const response = await handleCreateThread(
+    new Request(`https://example.test/api/teams/${teamCode}/chat/threads`, {
+      method: "POST",
+      body: JSON.stringify({ type: "create-thread", commandId, title, kind }),
+    }),
+    { env, ctx },
+    teamCode,
+  );
+  await waitOnExecutionContext(ctx);
+  return response;
+};
+
+/** メインスレッドのthreadIdを取り出す。各テストの前置きを短くするための切り出し。 */
+const mainThreadId = async (teamCode: string, commandId: string): Promise<string> => {
+  await session(teamCode);
+  const created = await createThread(teamCode, commandId, "副");
+  const { snapshot } = createThreadResultSchema.parse(await created.json());
+  const threadId = snapshot.threads[0]?.threadId;
+  if (threadId === undefined) throw new Error("unexpected");
+  return threadId;
+};
+
+const activity = (overrides: Record<string, unknown> = {}): Record<string, unknown> => ({
+  commandId: "00000000-0000-4000-8000-0000000000a1",
+  kind: "verdict.s1",
+  view: "s1",
+  text: "判定に出した本文",
+  meta: { verdict: "pass", score: 82 },
+  clientAt: "2026-09-03T02:00:00.000Z",
+  ...overrides,
+});
+
+/**
+ * 400を期待する入力のcommandId。反復ごとに別の値にする——it.eachで1つのIDを共有すると、
+ * ある反復が漏らした書き込みを後続の反復が自分のものとして拾い、連鎖防止が崩れる。
+ * activity()の既定のcommandIdは多くのテストが共有していて識別子にならないので使わない。
+ */
+const rejectedInputCommandId = (index: number): string =>
+  `00000000-0000-4000-8000-00000000a5${String(index).padStart(2, "0")}`;
+
+/** [説明, 本文の組み立て, 横断検索で見るcommandId（省略時は反復ごとのID）]。 */
+type RejectedInputCase = readonly [
+  label: string,
+  build: (commandId: string) => unknown,
+  searchCommandId?: string,
+];
+
+/** 連番からUUID形式のcommandIdを作る（活動ログのschemaはUUIDを要求する）。 */
+const uniqueCommandId = (index: number): string =>
+  `00000000-0000-4000-8000-${String(index).padStart(12, "0")}`;
+
+/**
+ * 活動ログの枠を`count`件ぶん消費した状態にする。
+ *
+ * 本番と同じ`consumeActivityAttempt`を通すが、DOの中でループを回すのでWorkerとの
+ * 往復は1回で済む。上限（120件/分）ぶんHTTPを叩いて枠を埋めると、往復がそのまま
+ * 上限の数だけ積み上がり、遅いランナーでvitestの既定タイムアウトを超える。
+ */
+const fillActivityBudget = (teamCode: string, nowMs: number, count: number): Promise<void> =>
+  runInDurableObject(env.TEAM_ROOM.getByName(teamCode), async (instance) => {
+    for (let index = 0; index < count; index += 1) {
+      await instance.consumeActivityAttempt(nowMs, ACTIVITY_RATE_LIMIT_PER_MINUTE, 0);
+    }
+  });
+
+const jsonBytes = (value: unknown): number =>
+  new TextEncoder().encode(JSON.stringify(value)).length;
+
+/**
+ * JSONが4096バイト（`tail`が"x"のとき）ちょうどになるmeta。値ごとの200文字上限を
+ * 守るため、「あ」を複数キーへ分けて積む。末尾を1文字増やすと4097バイトになる。
+ */
+const sizedMeta = (tail: string): Record<string, string> => {
+  const meta: Record<string, string> = {};
+  for (let index = 0; index < 9; index += 1) meta[`k${String(index)}`] = "あ".repeat(136);
+  meta.k9 = "あ".repeat(114) + tail;
+  return meta;
+};
+
+// progress.test.tsと同じく、このpoolではD1の中身がテスト間で巻き戻らないため、
+// 各テストの冒頭でテーブルごと作り直して白紙から始める。
+describe("活動ログ", () => {
+  beforeEach(async () => {
+    await env.PROGRESS_DB.exec(DROP_TABLE);
+    await env.PROGRESS_DB.exec(activitySchemaSql);
+  });
+
+  // event_idは入室ガードのEVENT_NOから導出する。開催回を持つ設定を1つに保つための
+  // 導出なので、規則（2桁数字ちょうど）が両者で食い違わないことをここで押さえる。
+  describe("開催回の識別子（event_id）", () => {
+    it("EVENT_NOが2桁数字ならその値をそのまま使う", () => {
+      expect(activityEventId({ EVENT_NO: "42" })).toBe("42");
+      // 入室ガードと同じく前後の空白は落とす。
+      expect(activityEventId({ EVENT_NO: " 42 " })).toBe("42");
+    });
+
+    it("未設定と2桁数字でない値は空文字へ倒す", () => {
+      for (const raw of [undefined, "2", "002", "abc", "", " ", "0a"]) {
+        expect(activityEventId({ EVENT_NO: raw })).toBe("");
+      }
+    });
+
+    it("EVENT_NO設定時、D1へ書かれた行のevent_idが開催回と一致する", async () => {
+      const saved = { EVENT_NO: env.EVENT_NO };
+      env.EVENT_NO = "50";
+      try {
+        const response = await postJson("/api/teams/500061/activity", activity());
+        expect(response.status).toBe(200);
+        expect((await rows("500061")).map((row) => row.eventId)).toEqual(["50"]);
+      } finally {
+        Object.assign(env, saved);
+      }
+    });
+  });
+
+  describe("サーバ側の自動記録", () => {
+    it("1往復でchat.userとchat.assistantを各1行、ミリ秒精度の時刻付きで残す", async () => {
+      const threadId = await mainThreadId("500001", "00000000-0000-4000-8000-000000000101");
+      const gateway = new FakeAiGateway([{ kind: "success", response: "応答本文" }]);
+      const response = await chat(
+        "500001",
+        {
+          commandId: "00000000-0000-4000-8000-000000000102",
+          threadId,
+          text: "質問本文",
+          promptProfile: "s3",
+        },
+        gateway,
+      );
+      expect(response.status).toBe(200);
+
+      const chatRows = (await rows("500001")).filter((row) => row.kind.startsWith("chat."));
+      expect(chatRows.map((row) => [row.kind, row.role, row.text])).toEqual([
+        ["chat.user", "user", "質問本文"],
+        ["chat.assistant", "assistant", "応答本文"],
+      ]);
+      for (const row of chatRows) {
+        expect(row.eventId).toBe("");
+        expect(row.teamCode).toBe("500001");
+        expect(row.threadId).toBe(threadId);
+        expect(row.commandId).toBe("00000000-0000-4000-8000-000000000102");
+        expect(row.createdAt).toMatch(MILLISECOND_ISO);
+      }
+      expect(metaOf(chatRows[0])).toEqual({ promptProfile: "s3" });
+      // messageIdはDOが採番したassistantメッセージのものが入る。
+      expect(chatRows[1]?.messageId).not.toBe("");
+    });
+
+    it("同一commandIdの再送では行が増えない", async () => {
+      const threadId = await mainThreadId("500002", "00000000-0000-4000-8000-000000000201");
+      const gateway = new FakeAiGateway([{ kind: "success", response: "応答" }]);
+      const command = {
+        commandId: "00000000-0000-4000-8000-000000000202",
+        threadId,
+        text: "本文",
+      };
+      await chat("500002", command, gateway);
+      await chat("500002", command, gateway);
+
+      const chatRows = (await rows("500002")).filter((row) => row.kind.startsWith("chat."));
+      expect(chatRows.map((row) => row.kind)).toEqual(["chat.user", "chat.assistant"]);
+    });
+
+    it("AI失敗後に同じcommandIdで再送しても、chat.userは1行のままでchat.failureが残る", async () => {
+      const threadId = await mainThreadId("500003", "00000000-0000-4000-8000-000000000301");
+      const gateway = new FakeAiGateway([
+        { kind: "failure", error: new Error("rate limited") },
+        { kind: "success", response: "応答" },
+      ]);
+      const command = {
+        commandId: "00000000-0000-4000-8000-000000000302",
+        threadId,
+        text: "本文",
+      };
+      expect((await chat("500003", command, gateway)).status).toBe(503);
+      const failureRows = (await rows("500003")).filter((row) => row.kind.startsWith("chat."));
+      expect(failureRows.map((row) => row.kind)).toEqual(["chat.user", "chat.failure"]);
+
+      expect((await chat("500003", command, gateway)).status).toBe(200);
+      const retriedRows = (await rows("500003")).filter((row) => row.kind.startsWith("chat."));
+      expect(retriedRows.map((row) => row.kind)).toEqual([
+        "chat.user",
+        "chat.failure",
+        "chat.assistant",
+      ]);
+      // OpenAiRequestError以外の例外は原因を持たないのでunknown。messageは残さない。
+      expect(metaOf(failureRows[1])).toEqual({
+        promptProfile: "default",
+        failureReason: "unknown",
+      });
+    });
+
+    it("OpenAIの429 insufficient_quotaはchat.failureのmetaにstatusとcodeを残し、本文は残さない", async () => {
+      const teamCode = "500070";
+      const threadId = await mainThreadId(teamCode, "00000000-0000-4000-8000-000000007001");
+      const command = {
+        commandId: "00000000-0000-4000-8000-000000007002",
+        threadId,
+        text: "発注の文面を考えてください",
+      };
+      const quotaBody = JSON.stringify({
+        error: {
+          message: "You exceeded your current quota, please check your plan and billing details.",
+          type: "insufficient_quota",
+          param: null,
+          code: "insufficient_quota",
+        },
+      });
+      let calls = 0;
+      const originalFetch = globalThis.fetch;
+      globalThis.fetch = (() => {
+        calls += 1;
+        return Promise.resolve(new Response(quotaBody, { status: 429 }));
+      }) as typeof fetch;
+      let response: Response;
+      try {
+        const gateway = new OpenAiGateway("https://example.test/v1", "sk-secret-key", "gpt-4o");
+        response = await chat(teamCode, command, gateway);
+      } finally {
+        globalThis.fetch = originalFetch;
+      }
+      expect(calls).toBe(1);
+
+      // 参加者への応答は従来どおり（原因は画面へ出さない）。
+      expect(response.status).toBe(503);
+      const responseText = await response.text();
+      expect(responseText).toContain("AI応答の取得に失敗しました。再試行してください。");
+      expect(responseText).not.toContain("insufficient_quota");
+
+      const chatRows = (await rows(teamCode)).filter((row) => row.kind.startsWith("chat."));
+      expect(chatRows.map((row) => row.kind)).toEqual(["chat.user", "chat.failure"]);
+      const failure = chatRows[1];
+      expect(failure?.text).toBe("");
+      expect(metaOf(failure)).toEqual({
+        promptProfile: "default",
+        failureReason: "http_error",
+        httpStatus: 429,
+        errorCode: "insufficient_quota",
+        errorType: "insufficient_quota",
+      });
+      const stored = JSON.stringify(failure);
+      expect(stored).not.toContain("You exceeded");
+      expect(stored).not.toContain("sk-secret-key");
+      expect(stored).not.toContain("発注の文面");
+    });
+
+    it("ポリシー拒否はchat.refusalのままで、失敗の原因を足さない", async () => {
+      const teamCode = "500071";
+      const threadId = await mainThreadId(teamCode, "00000000-0000-4000-8000-000000007101");
+      const gateway = new FakeAiGateway([
+        { kind: "failure", error: new OpenAiRefusalError("対応できません") },
+      ]);
+      const response = await chat(
+        teamCode,
+        { commandId: "00000000-0000-4000-8000-000000007102", threadId, text: "本文" },
+        gateway,
+      );
+      expect(response.status).toBe(422);
+      const chatRows = (await rows(teamCode)).filter((row) => row.kind.startsWith("chat."));
+      expect(chatRows.map((row) => row.kind)).toEqual(["chat.user", "chat.refusal"]);
+      expect(metaOf(chatRows[1])).toEqual({ promptProfile: "default", refusal: "対応できません" });
+    });
+
+    it("タイムアウトはfailureReason: timeoutとして残す", async () => {
+      const teamCode = "500072";
+      const threadId = await mainThreadId(teamCode, "00000000-0000-4000-8000-000000007201");
+      const gateway = new FakeAiGateway([
+        {
+          kind: "failure",
+          error: new OpenAiRequestError("timeout", {
+            reason: "timeout",
+            status: null,
+            code: null,
+            type: null,
+          }),
+        },
+      ]);
+      const response = await chat(
+        teamCode,
+        { commandId: "00000000-0000-4000-8000-000000007202", threadId, text: "本文" },
+        gateway,
+      );
+      expect(response.status).toBe(503);
+      const chatRows = (await rows(teamCode)).filter((row) => row.kind === "chat.failure");
+      expect(metaOf(chatRows[0])).toEqual({ promptProfile: "default", failureReason: "timeout" });
+    });
+
+    describe("予備キーへの切り替え", () => {
+      const quotaBody = JSON.stringify({
+        error: {
+          message: "You exceeded your current quota, please check your plan and billing details.",
+          type: "insufficient_quota",
+          code: "insufficient_quota",
+        },
+      });
+
+      /**
+       * 主キーはクレジット切れ、予備キーは`backup`の応答を返すfetchで1回送る。
+       * 切り替え状態はテストごとに新しく作り、isolateで共有する状態を汚さない。
+       */
+      const chatWithBackupKey = async (
+        teamCode: string,
+        command: { commandId: string; threadId: string; text: string },
+        backup: () => Response,
+      ): Promise<{ response: Response; authorizations: string[] }> => {
+        const authorizations: string[] = [];
+        const originalFetch = globalThis.fetch;
+        globalThis.fetch = ((_url: string, init?: RequestInit) => {
+          const authorization = new Headers(init?.headers).get("authorization") ?? "";
+          authorizations.push(authorization);
+          return Promise.resolve(
+            authorization === "Bearer sk-primary-secret"
+              ? new Response(quotaBody, { status: 429 })
+              : backup(),
+          );
+        }) as typeof fetch;
+        try {
+          const gateway = createAiGateway(
+            {
+              OPENAI_MODEL: "gpt-4o",
+              OPENAI_BASE_URL: "https://example.test/v1",
+              OPENAI_API_KEY: "sk-primary-secret",
+              OPENAI_API_KEY_BACKUP: "sk-backup-secret",
+            },
+            new AiRouteState(),
+          );
+          return { response: await chat(teamCode, command, gateway), authorizations };
+        } finally {
+          globalThis.fetch = originalFetch;
+        }
+      };
+
+      it("主キーが429 insufficient_quotaなら予備キーで応答し、経路をmetaに残す", async () => {
+        const teamCode = "500073";
+        const threadId = await mainThreadId(teamCode, "00000000-0000-4000-8000-000000007301");
+        const { response, authorizations } = await chatWithBackupKey(
+          teamCode,
+          { commandId: "00000000-0000-4000-8000-000000007302", threadId, text: "発注の文面" },
+          () =>
+            new Response(JSON.stringify({ choices: [{ message: { content: "予備の応答" } }] }), {
+              status: 200,
+            }),
+        );
+        // 主系1回・予備1回。応答の形は従来どおり。
+        expect(authorizations).toEqual(["Bearer sk-primary-secret", "Bearer sk-backup-secret"]);
+        expect(response.status).toBe(200);
+        const body = z.object({ assistant: chatMessageSchema }).parse(await response.json());
+        expect(body.assistant.text).toBe("予備の応答");
+
+        const chatRows = (await rows(teamCode)).filter((row) => row.kind.startsWith("chat."));
+        expect(chatRows.map((row) => row.kind)).toEqual(["chat.user", "chat.assistant"]);
+        expect(metaOf(chatRows[1])).toEqual({
+          promptProfile: "default",
+          aiRoute: "backup-key",
+          aiSwitchCause: "key",
+        });
+        const stored = JSON.stringify(chatRows);
+        expect(stored).not.toContain("sk-primary-secret");
+        expect(stored).not.toContain("sk-backup-secret");
+      });
+
+      it("予備キーも失敗したら従来どおり503で、予備の失敗と経路をchat.failureに残す", async () => {
+        const teamCode = "500074";
+        const threadId = await mainThreadId(teamCode, "00000000-0000-4000-8000-000000007401");
+        const { response, authorizations } = await chatWithBackupKey(
+          teamCode,
+          { commandId: "00000000-0000-4000-8000-000000007402", threadId, text: "発注の文面" },
+          () => new Response(quotaBody, { status: 429 }),
+        );
+        expect(authorizations).toHaveLength(2);
+        expect(response.status).toBe(503);
+        expect(await response.text()).toContain("AI応答の取得に失敗しました。再試行してください。");
+
+        const chatRows = (await rows(teamCode)).filter((row) => row.kind.startsWith("chat."));
+        expect(chatRows.map((row) => row.kind)).toEqual(["chat.user", "chat.failure"]);
+        expect(metaOf(chatRows[1])).toEqual({
+          promptProfile: "default",
+          failureReason: "http_error",
+          httpStatus: 429,
+          errorCode: "insufficient_quota",
+          errorType: "insufficient_quota",
+          aiRoute: "backup-key",
+          aiSwitchCause: "key",
+        });
+        const stored = JSON.stringify(chatRows);
+        expect(stored).not.toContain("sk-backup-secret");
+        expect(stored).not.toContain("You exceeded");
+      });
+
+      it("同じcommandIdの再送は保存済みの応答を返し、AIをもう一度呼ばない", async () => {
+        const teamCode = "500075";
+        const threadId = await mainThreadId(teamCode, "00000000-0000-4000-8000-000000007501");
+        const command = {
+          commandId: "00000000-0000-4000-8000-000000007502",
+          threadId,
+          text: "発注の文面",
+        };
+        const ok = () =>
+          new Response(JSON.stringify({ choices: [{ message: { content: "予備の応答" } }] }), {
+            status: 200,
+          });
+        const first = await chatWithBackupKey(teamCode, command, ok);
+        expect(first.response.status).toBe(200);
+        const second = await chatWithBackupKey(teamCode, command, ok);
+        expect(second.response.status).toBe(200);
+        expect(second.authorizations).toEqual([]);
+        const assistants = (await rows(teamCode)).filter((row) => row.kind === "chat.assistant");
+        expect(assistants).toHaveLength(1);
+      });
+    });
+
+    it("PIIブロックはchat.pii_blockedを1行だけ残し、本文を保存せずAIも呼ばない", async () => {
+      const threadId = await mainThreadId("500004", "00000000-0000-4000-8000-000000000401");
+      const gateway = new FakeAiGateway([]);
+      const response = await chat(
+        "500004",
+        {
+          commandId: "00000000-0000-4000-8000-000000000402",
+          threadId,
+          text: `${PII_NAME}さんの件で返信文を書いてください`,
+        },
+        gateway,
+      );
+      expect(response.status).toBe(422);
+      expect(gateway.requests).toHaveLength(0);
+
+      const chatRows = (await rows("500004")).filter((row) => row.kind.startsWith("chat."));
+      expect(chatRows.map((row) => row.kind)).toEqual(["chat.pii_blocked"]);
+      expect(chatRows[0]?.text).toBe("");
+      expect(metaOf(chatRows[0])).toEqual({ promptProfile: "default", length: 21 });
+    });
+
+    // 送信前ゲートはユーザー本文しか見ない。AI応答にPIIが混ざる経路は現に想定して
+    // おり（blockHistoryPii）、その本文をD1へ残さないことをここで固定する。
+    it("PIIを含むAI応答は伏せ字で保存され、活動ログにも平文が残らない", async () => {
+      const threadId = await mainThreadId("500008", "00000000-0000-4000-8000-000000000801");
+      const gateway = new FakeAiGateway([
+        { kind: "success", response: `${PII_NAME}さんの件、承知しました` },
+      ]);
+      const response = await chat(
+        "500008",
+        { commandId: "00000000-0000-4000-8000-000000000802", threadId, text: "本文" },
+        gateway,
+      );
+      expect(response.status).toBe(200);
+
+      const chatRows = (await rows("500008")).filter((row) => row.kind.startsWith("chat."));
+      expect(chatRows.map((row) => row.kind)).toEqual(["chat.user", "chat.assistant"]);
+      // ユーザー本文はPIIを含まないのでそのまま残る。
+      expect(chatRows[0]?.text).toBe("本文");
+      expect(metaOf(chatRows[0])).toEqual({ promptProfile: "default" });
+      // AI応答はDOへ保存される時点で伏せ字化済み。活動ログにも平文は届かないので、
+      // 活動ログ側のtext空化（piiRedacted）は発動しない。
+      expect(chatRows[1]?.text).not.toContain(PII_NAME);
+      expect(chatRows[1]?.text).toContain(PII_REDACTION);
+      expect(metaOf(chatRows[1])).toEqual({ promptProfile: "default" });
+      expect(chatRows[1]?.messageId).not.toBe("");
+    });
+
+    it("活動ログへ平文のPIIが渡った場合は、textを捨ててpiiRedactedを立てる", async () => {
+      // AI応答は保存前に伏せ字化されるので通常はここへ来ないが、活動ログ側の防御は
+      // 全ての書き込みに掛かる最後の砦として残す。ユーザー本文の経路で確かめる。
+      const threadId = await mainThreadId("500019", "00000000-0000-4000-8000-000000001901");
+      const gateway = new FakeAiGateway([]);
+      const blocked = await chat(
+        "500019",
+        {
+          commandId: "00000000-0000-4000-8000-000000001902",
+          threadId,
+          text: `${PII_NAME}さんの件で返信文を書いてください`,
+        },
+        gateway,
+      );
+      expect(blocked.status).toBe(422);
+
+      const piiRows = (await rows("500019")).filter((row) => row.kind === "chat.pii_blocked");
+      expect(piiRows).toHaveLength(1);
+      expect(piiRows[0]?.text).toBe("");
+    });
+
+    it("伏せ字化より前に保存された平文があっても、送信は通り伏せ字で記録される", async () => {
+      const threadId = await mainThreadId("500005", "00000000-0000-4000-8000-000000000501");
+      const gateway = new FakeAiGateway([
+        { kind: "success", response: "応答" },
+        { kind: "success", response: "二度目の応答" },
+      ]);
+      await chat(
+        "500005",
+        { commandId: "00000000-0000-4000-8000-000000000502", threadId, text: "本文" },
+        gateway,
+      );
+      // 伏せ字化を入れる前に保存された行を再現する。読み出し時に伏せ字化されるので、
+      // 履歴ゲート（chat.history_pii）はもう踏まれない。
+      await runInDurableObject(env.TEAM_ROOM.getByName("500005"), (_instance, state) => {
+        const row = state.storage.sql
+          .exec("SELECT snapshot FROM chat_state WHERE id = 1")
+          .toArray()[0];
+        const parsed = chatSnapshotSchema.parse(JSON.parse(String(row?.snapshot)) as unknown);
+        parsed.threads[0]?.messages.push(
+          chatMessageSchema.parse({
+            messageId: "00000000-0000-4000-8000-000000000504",
+            role: "assistant",
+            text: `${PII_NAME}さんの件、承知しました`,
+            createdAt: "2026-09-04T00:00:00.000Z",
+          }),
+        );
+        state.storage.sql.exec(
+          "UPDATE chat_state SET snapshot = ? WHERE id = 1",
+          JSON.stringify(parsed),
+        );
+      });
+
+      const response = await chat(
+        "500005",
+        { commandId: "00000000-0000-4000-8000-000000000503", threadId, text: "別の本文" },
+        gateway,
+      );
+      expect(response.status).toBe(200);
+
+      const kinds = (await rows("500005")).map((row) => row.kind);
+      expect(kinds).not.toContain("chat.history_pii");
+      // 活動ログへ渡る本文にも平文は残らない。
+      const stored = JSON.stringify(await rows("500005"));
+      expect(stored).not.toContain(PII_NAME);
+    });
+
+    it("スレッド作成はthread.createとしてtitleごと残る", async () => {
+      const teamCode = "500006";
+      await session(teamCode);
+      const created = await createThread(
+        teamCode,
+        "00000000-0000-4000-8000-000000000601",
+        "Stage 3",
+      );
+      const { snapshot } = createThreadResultSchema.parse(await created.json());
+
+      const threadRows = (await rows(teamCode)).filter((row) => row.kind === "thread.create");
+      expect(threadRows).toHaveLength(1);
+      expect(threadRows[0]?.threadId).toBe(snapshot.threads.at(-1)?.threadId);
+      expect(metaOf(threadRows[0])).toEqual({ title: "Stage 3" });
+    });
+
+    it("既存のステージスレッドを返しただけのときはthread.createを記録しない", async () => {
+      // ステージスレッドはtitleで一意。リロードやタブの競合で作成要求が二重に来ても
+      // スレッドは増えない。増えていないのに記録が積まれると、分析上は「文脈を
+      // 分けた回数」が水増しされ、しかも末尾スレッドの無関係なIDが載る。
+      const teamCode = "500011";
+      await session(teamCode);
+      const first = await createThread(
+        teamCode,
+        "00000000-0000-4000-8000-000000001101",
+        "Stage 3",
+        "stage",
+      );
+      const { snapshot } = createThreadResultSchema.parse(await first.json());
+      const created = snapshot.threads.at(-1)?.threadId;
+
+      // 参加者が手動スレッドを足し、末尾が別のスレッドになった状態を作る。
+      await createThread(teamCode, "00000000-0000-4000-8000-000000001102", "メモ", "manual");
+
+      // 別のcommandIdで同じステージスレッドをもう一度要求する（冪等台帳では止まらない）。
+      const again = await createThread(
+        teamCode,
+        "00000000-0000-4000-8000-000000001103",
+        "Stage 3",
+        "stage",
+      );
+      expect(again.status).toBe(200);
+      const replay = createThreadResultSchema.parse(await again.json());
+      // 入室時からあるメインスレッドを含めて3本。Stage 3 は増えていない。
+      expect(replay.snapshot.threads).toHaveLength(3);
+
+      const threadRows = (await rows(teamCode)).filter((row) => row.kind === "thread.create");
+      // 記録は実際に増えた2本ぶんだけ。3本目（重複抑止）は積まれない。
+      expect(threadRows).toHaveLength(2);
+      expect(threadRows.map((row) => row.threadId)).toContain(created);
+    });
+
+    // metaにはサーバ生成のものでも利用者入力が混ざる（スレッドのtitleがそれ）。
+    // textだけ見ていては塞げない口なので、meta側でも落ちることを固定する。
+    it("PIIを含むスレッドtitleは、thread.createのmetaごと捨てられる", async () => {
+      const teamCode = "500009";
+      await session(teamCode);
+      await createThread(teamCode, "00000000-0000-4000-8000-000000000901", `${PII_NAME}さんの件`);
+
+      const threadRows = (await rows(teamCode)).filter((row) => row.kind === "thread.create");
+      expect(threadRows).toHaveLength(1);
+      expect(metaOf(threadRows[0])).toEqual({ piiRedacted: true });
+      // titleを捨てても、いつスレッドが増えたかは追える。
+      expect(threadRows[0]?.threadId).not.toBe("");
+      expect(threadRows[0]?.text).toBe("");
+    });
+
+    // 記録はゲーム進行より優先度が低い。テーブルが消えていても応答は成功のままであること
+    // （ログのためにチャットを落とさない）を、実際にDROPして確かめる。
+    it("D1への書き込みが失敗しても、チャットの応答は成功のまま", async () => {
+      const threadId = await mainThreadId("500007", "00000000-0000-4000-8000-000000000701");
+      await env.PROGRESS_DB.exec(DROP_TABLE);
+
+      const gateway = new FakeAiGateway([{ kind: "success", response: "応答" }]);
+      const response = await chat(
+        "500007",
+        { commandId: "00000000-0000-4000-8000-000000000702", threadId, text: "本文" },
+        gateway,
+      );
+
+      expect(response.status).toBe(200);
+      expect(gateway.requests).toHaveLength(1);
+      await env.PROGRESS_DB.exec(activitySchemaSql);
+      expect(await rows("500007")).toEqual([]);
+    });
+  });
+
+  describe("旧インデックスからの移行", () => {
+    it("旧定義のUNIQUEが残ったD1でも、新しいインデックスへ置き換わる", async () => {
+      // CREATE INDEX IF NOT EXISTS は「同じ名前が既にある」だけで何もしない。
+      // 名前を変えずにキー構成だけ直しても既存のD1には反映されず、狭いキーで
+      // 本物のイベントが捨てられ続ける。
+      await env.PROGRESS_DB.exec(DROP_TABLE);
+      await env.PROGRESS_DB.exec(
+        "CREATE TABLE IF NOT EXISTS activity_events (id INTEGER PRIMARY KEY AUTOINCREMENT, event_id TEXT NOT NULL DEFAULT '', team_code TEXT NOT NULL, kind TEXT NOT NULL, view TEXT NOT NULL DEFAULT '', thread_id TEXT NOT NULL DEFAULT '', message_id TEXT NOT NULL DEFAULT '', command_id TEXT NOT NULL DEFAULT '', role TEXT NOT NULL DEFAULT '', text TEXT NOT NULL DEFAULT '', meta TEXT NOT NULL DEFAULT '{}', client_at TEXT NOT NULL DEFAULT '', created_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ','now')));",
+      );
+      // 旧定義: command_idだけの狭いキー。別チームの同じcommandIdが衝突する。
+      await env.PROGRESS_DB.exec(
+        "CREATE UNIQUE INDEX IF NOT EXISTS idx_activity_command ON activity_events(command_id) WHERE command_id <> '';",
+      );
+
+      await env.PROGRESS_DB.exec(activitySchemaSql);
+
+      const indexes = await env.PROGRESS_DB.prepare(
+        "SELECT name FROM sqlite_master WHERE type = 'index' AND tbl_name = 'activity_events'",
+      ).all();
+      const names = z
+        .array(z.object({ name: z.string() }))
+        .parse(indexes.results)
+        .map((row) => row.name);
+      expect(names).toContain("idx_activity_idempotency_v2");
+      expect(names).not.toContain("idx_activity_command");
+
+      // 別チームの同じcommandIdが両方入る（旧定義なら片方が黙って捨てられていた）。
+      const commandId = uniqueCommandId(700);
+      const insert = env.PROGRESS_DB.prepare(
+        "INSERT OR IGNORE INTO activity_events (team_code, kind, command_id) VALUES (?, 'verdict.s1', ?)",
+      );
+      await env.PROGRESS_DB.batch([
+        insert.bind("500180", commandId),
+        insert.bind("500181", commandId),
+      ]);
+      const stored = await rows("500180", "500181");
+      expect(stored.filter((row) => row.commandId === commandId)).toHaveLength(2);
+    });
+  });
+
+  describe("クライアントからの記録（POST /api/teams/:code/activity）", () => {
+    it("提出と判定を1行として受け取る", async () => {
+      const response = await postJson("/api/teams/500101/activity", activity());
+      expect(response.status).toBe(200);
+      await expect(response.json()).resolves.toEqual({ ok: true });
+
+      const stored = await rows("500101");
+      expect(stored).toHaveLength(1);
+      expect(stored[0]).toMatchObject({
+        eventId: "",
+        teamCode: "500101",
+        kind: "verdict.s1",
+        view: "s1",
+        text: "判定に出した本文",
+        clientAt: "2026-09-03T02:00:00.000Z",
+        role: "",
+        threadId: "",
+      });
+      expect(metaOf(stored[0])).toEqual({ verdict: "pass", score: 82 });
+      expect(stored[0]?.createdAt).toMatch(MILLISECOND_ISO);
+    });
+
+    it("同一commandIdの再送でも1行のまま", async () => {
+      await postJson("/api/teams/500102/activity", activity());
+      const repeated = await postJson("/api/teams/500102/activity", activity({ text: "書き直し" }));
+      expect(repeated.status).toBe(200);
+
+      const stored = await rows("500102");
+      expect(stored).toHaveLength(1);
+      expect(stored[0]?.text).toBe("判定に出した本文");
+    });
+
+    // commandIdはクライアント採番なので、別チームで衝突しうる。冪等性のキーが
+    // 狭いと、後から来た本物のイベントがINSERT OR IGNOREで黙って消える。
+    it("別チームが同じcommandId・kindを送っても、両方が保存される", async () => {
+      const first = await postJson("/api/teams/500110/activity", activity());
+      const second = await postJson("/api/teams/500111/activity", activity());
+      expect([first.status, second.status]).toEqual([200, 200]);
+
+      const stored = await rows("500110", "500111");
+      expect(stored.map((row) => row.teamCode)).toEqual(["500110", "500111"]);
+      expect(new Set(stored.map((row) => row.commandId)).size).toBe(1);
+    });
+
+    it("同じcommandIdでもkindが違えば別の行として残る", async () => {
+      await postJson("/api/teams/500103/activity", activity({ kind: "submit.s1-reply" }));
+      await postJson("/api/teams/500103/activity", activity({ kind: "verdict.s1" }));
+      expect((await rows("500103")).map((row) => row.kind)).toEqual([
+        "submit.s1-reply",
+        "verdict.s1",
+      ]);
+    });
+
+    it("PIIを含む本文はtextを捨て、piiRedactedを立てて記録だけ残す", async () => {
+      const response = await postJson(
+        "/api/teams/500104/activity",
+        activity({ kind: "submit.s5", view: "s5", text: `${PII_NAME}さんの一覧を提出します` }),
+      );
+      expect(response.status).toBe(200);
+
+      const stored = await rows("500104");
+      expect(stored).toHaveLength(1);
+      expect(stored[0]?.text).toBe("");
+      expect(metaOf(stored[0])).toEqual({ verdict: "pass", score: 82, piiRedacted: true });
+    });
+
+    // クライアントは任意のmetaを送れる。textが綺麗でもmetaへPIIを詰められるので、
+    // metaだけが反応したケースを独立に固定する。
+    it("metaにPIIが混ざると、metaは丸ごと捨てられるがtextは残る", async () => {
+      const response = await postJson(
+        "/api/teams/500108/activity",
+        activity({
+          kind: "submit.s5",
+          view: "s5",
+          text: "匿名化した一覧を提出します",
+          meta: { verdict: "fail", contact: "090-0000-5678" },
+        }),
+      );
+      expect(response.status).toBe(200);
+
+      const stored = await rows("500108");
+      expect(stored).toHaveLength(1);
+      // 一致したキーだけでなくmeta全体を置き換える（どのキーに入るか決められないため）。
+      expect(metaOf(stored[0])).toEqual({ piiRedacted: true });
+      // metaが理由でtextまで捨てない。
+      expect(stored[0]?.text).toBe("匿名化した一覧を提出します");
+    });
+
+    // 値が複数フィールドへ分かれるとJSON全体の検査では拾えないため、各string値も
+    // 個別に通している。片方だけでは電話番号として成立しない分割は検知されない——
+    // 検出器の語彙を跨ぐ分割（姓と名を別フィールドへ置くなど）は原理的に拾えず、
+    // これはdetectPiiの限界であることを、期待値として明示しておく。
+    it("値が分断されたPIIは検知されず、そのまま保存される（検出器の限界）", async () => {
+      const response = await postJson(
+        "/api/teams/500112/activity",
+        activity({ meta: { a: "090-1234", b: "-5678" } }),
+      );
+      expect(response.status).toBe(200);
+      expect(metaOf((await rows("500112"))[0])).toEqual({ a: "090-1234", b: "-5678" });
+    });
+
+    // JSON全体の検査だけでは足りない実例。改行を含む値はJSON化で `\n` の2文字へ
+    // 変換されるため、氏名パターンの `\s*` が一致しなくなる。各string値を素のまま
+    // 個別に通しているので落とせる。
+    it("JSON化で崩れる値のPIIも、string値の個別検査で落とす", async () => {
+      const response = await postJson(
+        "/api/teams/500114/activity",
+        activity({ meta: { note: `${PII_NAME_BROKEN}さんの件` } }),
+      );
+      expect(response.status).toBe(200);
+      expect(metaOf((await rows("500114"))[0])).toEqual({ piiRedacted: true });
+    });
+
+    it("識別子として妥当なキー（英数字と_.-）は受け付ける", async () => {
+      const response = await postJson(
+        "/api/teams/500115/activity",
+        activity({ meta: { "stage_2.ok": true, "k-1": 1, [`${"k".repeat(64)}`]: null } }),
+      );
+      expect(response.status).toBe(200);
+      expect(metaOf((await rows("500115"))[0])).toEqual({
+        "stage_2.ok": true,
+        "k-1": 1,
+        [`${"k".repeat(64)}`]: null,
+      });
+    });
+
+    it("1つのフィールドに収まった電話番号は、meta全体の置換で落とす", async () => {
+      const response = await postJson(
+        "/api/teams/500113/activity",
+        activity({ meta: { phone: "090-0000-5678" } }),
+      );
+      expect(response.status).toBe(200);
+      expect(metaOf((await rows("500113"))[0])).toEqual({ piiRedacted: true });
+    });
+
+    const rejectedInputCases: readonly RejectedInputCase[] = [
+      ["kindが列挙外", (id) => activity({ commandId: id, kind: "submit.unknown" })],
+      // commandId自体が不正な場合だけは、その値のまま書かれていないかを見る。
+      ["commandIdがUUIDでない", () => activity({ commandId: "not-a-uuid" }), "not-a-uuid"],
+      ["viewが空", (id) => activity({ commandId: id, view: "" })],
+      ["viewに大文字", (id) => activity({ commandId: id, view: "S1" })],
+      ["viewが33文字", (id) => activity({ commandId: id, view: "a".repeat(33) })],
+      ["textが上限超過", (id) => activity({ commandId: id, text: "あ".repeat(20001) })],
+      ["metaが4KB超", (id) => activity({ commandId: id, meta: sizedMeta("xx") })],
+      ["metaが配列", (id) => activity({ commandId: id, meta: [1, 2, 3] })],
+      // 平坦なrecordに限る——ネストや配列を許すと、PII検査が全てのstring値を
+      // 漏れなく見て回る保証が持てない。
+      [
+        "metaの値がネストしたobject",
+        (id) => activity({ commandId: id, meta: { nested: { a: 1 } } }),
+      ],
+      ["metaの値が配列", (id) => activity({ commandId: id, meta: { arr: [1, 2] } })],
+      ["metaの値が201文字", (id) => activity({ commandId: id, meta: { long: "x".repeat(201) } })],
+      // キーは識別子に限る。自由文を許すと、値ではなくキー側にPIIを書けてしまう——
+      // boolean値のキーは値の個別検査に掛からず、JSON全体の検査も改行のエスケープで
+      // すり抜けるため、入口の書式制限が唯一の防波堤になる。
+      [
+        "metaのキーが日本語（PII）",
+        (id) => activity({ commandId: id, meta: { [`${PII_NAME_BROKEN}さん`]: true } }),
+      ],
+      ["metaのキーに空白", (id) => activity({ commandId: id, meta: { "a b": 1 } })],
+      ["metaのキーが65文字", (id) => activity({ commandId: id, meta: { ["k".repeat(65)]: 1 } })],
+      ["clientAtが欠落", (id) => ({ commandId: id, kind: "resume", view: "s1" })],
+      // 任意文字列のままだとPIIゲートを通らない列が残る。書式で塞いだことを固定する。
+      ["clientAtが電話番号", (id) => activity({ commandId: id, clientAt: "090-0000-5678" })],
+      [
+        "clientAtがISO 8601でない",
+        (id) => activity({ commandId: id, clientAt: "2026年9月3日 11時" }),
+      ],
+      ["bodyが配列", () => []],
+      ["bodyがnull", () => null],
+    ];
+
+    it.each(
+      rejectedInputCases.map(([label, build, searchCommandId], index) => {
+        const commandId = rejectedInputCommandId(index);
+        return [label, build(commandId), searchCommandId ?? commandId] as const;
+      }),
+    )("不正な入力(%s)は400で拒否し、行を増やさない", async (_label, body, commandId) => {
+      const response = await postJson("/api/teams/500105/activity", body);
+      expect(response.status).toBe(400);
+      // どのチームのteam_codeで書かれても捕まえる。
+      await expect(rowsByCommandId(commandId)).resolves.toEqual([]);
+      // 配列・nullの本文はcommandIdを持たないので、この経路はチームで見る。
+      await expect(rows("500105")).resolves.toEqual([]);
+    });
+
+    // `String.length`で測るとUTF-16のコード単位になり、日本語のmetaでは上限が
+    // 実質3倍に緩む。バイト数で測っていることを境界の両側で固定する。
+    // 値ごとの200文字上限があるので、キーを分けて目標バイト数へ寄せる。
+    it("マルチバイトのmetaは4096バイトちょうどまで受け付け、1バイト超で拒否する", async () => {
+      expect(jsonBytes(sizedMeta("x"))).toBe(4096);
+      expect(jsonBytes(sizedMeta("xx"))).toBe(4097);
+
+      const accepted = await postJson(
+        "/api/teams/500109/activity",
+        activity({ meta: sizedMeta("x") }),
+      );
+      expect(accepted.status).toBe(200);
+      await expect(rows("500109")).resolves.toHaveLength(1);
+
+      const rejected = await postJson(
+        "/api/teams/500109/activity",
+        activity({
+          commandId: "00000000-0000-4000-8000-0000000000a2",
+          meta: sizedMeta("xx"),
+        }),
+      );
+      expect(rejected.status).toBe(400);
+      // 拒否した本文はどのチームにも書かれない。
+      await expect(rowsByCommandId("00000000-0000-4000-8000-0000000000a2")).resolves.toEqual([]);
+      await expect(rows("500109")).resolves.toHaveLength(1);
+    });
+
+    // schemaの検証は本文をJSONへ展開した後にしか効かない。展開前にバイト数で
+    // 打ち切ることを、Content-Lengthを見る経路と実バイト数を測る経路の両方で固定する。
+    // commandIdは反復ごとに変える（1つを共有すると、ある反復が漏らした行を
+    // 後続の反復が自分のものとして拾ってしまう）。
+    it.each([
+      ["Content-Lengthどおりの巨大な本文", {}, "00000000-0000-4000-8000-00000000a300"],
+      // ヘッダは偽装できるので、小さく申告された巨大な本文も実バイト数で弾く。
+      [
+        "Content-Lengthを小さく偽装した本文",
+        { "Content-Length": "42" },
+        "00000000-0000-4000-8000-00000000a301",
+      ],
+    ])(
+      "64KBを超える本文(%s)は413で拒否し、行を増やさない",
+      async (_label, headers, oversizedCommandId) => {
+        const huge = JSON.stringify({
+          ...activity({ commandId: oversizedCommandId }),
+          pad: "x".repeat(65 * 1024),
+        });
+        const response = await exports.default.fetch(
+          new Request("https://example.test/api/teams/500116/activity", {
+            method: "POST",
+            body: huge,
+            // 入口ガードを通すため、ブラウザと同じくOriginを付ける。
+            headers: { Origin: "https://example.test", ...headers },
+          }),
+        );
+        expect(response.status).toBe(413);
+        await expect(rowsByCommandId(oversizedCommandId)).resolves.toEqual([]);
+        await expect(rows("500116")).resolves.toEqual([]);
+      },
+    );
+
+    it("上限を超えた活動ログは429で、D1に書かない", async () => {
+      const teamCode = "500170";
+      const windowStartMs = 1_756_300_000_000;
+      const post = (index: number, nowMs = windowStartMs): Promise<Response> =>
+        handleActivityPost(
+          new Request(`https://example.test/api/teams/${teamCode}/activity`, {
+            method: "POST",
+            headers: { Origin: "https://example.test" },
+            body: JSON.stringify({ ...activity(), commandId: uniqueCommandId(index) }),
+          }),
+          env,
+          teamCode,
+          nowMs,
+        );
+
+      // 1件目で枠が実際に減ることを確かめる。
+      expect((await post(0)).status).toBe(200);
+      await expect(rows(teamCode)).resolves.toHaveLength(1);
+
+      // 残りの枠はDOの中でまとめて使い切る。上限ぶんPOSTを直列に投げると1テストで
+      // 121往復になり、テストの所要時間が本番の定数（120件/分）に引きずられる。
+      await fillActivityBudget(teamCode, windowStartMs, ACTIVITY_RATE_LIMIT_PER_MINUTE - 2);
+
+      // 上限ちょうどの1件はまだ通り、その次から断られる。境界の両側を押さえる。
+      expect((await post(1)).status).toBe(200);
+      await expect(rows(teamCode)).resolves.toHaveLength(2);
+
+      const blocked = await post(2);
+      expect(blocked.status).toBe(429);
+      expect(blocked.headers.get("Retry-After")).not.toBeNull();
+      await expect(rowsByCommandId(uniqueCommandId(2))).resolves.toEqual([]);
+      await expect(rows(teamCode)).resolves.toHaveLength(2);
+
+      // 窓が明ければまた書ける。
+      const revived = await post(900, windowStartMs + RATE_LIMIT_WINDOW_MS);
+      expect(revived.status).toBe(200);
+      await expect(rows(teamCode)).resolves.toHaveLength(3);
+    });
+
+    it("活動ログの枠はチャットの枠と独立している", async () => {
+      const teamCode = "500171";
+      const windowStartMs = 1_756_400_000_000;
+      const room = env.TEAM_ROOM.getByName(teamCode);
+      // チャット枠を使い切っても、活動ログは書ける。
+      for (let index = 0; index < DEFAULT_CHAT_RATE_LIMIT; index += 1) {
+        await room.consumeChatAttempt(windowStartMs, DEFAULT_CHAT_RATE_LIMIT, 0);
+      }
+      await expect(
+        room.consumeChatAttempt(windowStartMs, DEFAULT_CHAT_RATE_LIMIT, 0),
+      ).resolves.toMatchObject({ allowed: false });
+
+      const response = await handleActivityPost(
+        new Request(`https://example.test/api/teams/${teamCode}/activity`, {
+          method: "POST",
+          headers: { Origin: "https://example.test" },
+          body: JSON.stringify({ ...activity(), commandId: uniqueCommandId(901) }),
+        }),
+        env,
+        teamCode,
+        windowStartMs,
+      );
+      expect(response.status).toBe(200);
+    });
+
+    // commandIdは反復ごとに変える（1つを共有すると、ある反復が漏らした行を
+    // 後続の反復が自分のものとして拾ってしまう）。
+    it.each([
+      ["電話番号のような文字列", "090-0000-5678", "00000000-0000-4000-8000-00000000a400"],
+      ["未知の画面id", "stage3-manual", "00000000-0000-4000-8000-00000000a401"],
+      ["空文字", "", "00000000-0000-4000-8000-00000000a402"],
+    ])(
+      "viewが既知の画面idでない(%s)ときは400で拒否し、行を増やさない",
+      async (_label, view, unknownViewCommandId) => {
+        // `/^[a-z0-9-]+$/`は電話番号を通してしまい、text・metaのPIIゲートを素通りして
+        // D1へ残る。画面idは有限なのでenumで固定する。
+        const response = await postJson("/api/teams/500118/activity", {
+          ...activity({ commandId: unknownViewCommandId }),
+          view,
+        });
+        expect(response.status).toBe(400);
+        await expect(rowsByCommandId(unknownViewCommandId)).resolves.toEqual([]);
+        await expect(rows("500118")).resolves.toEqual([]);
+      },
+    );
+
+    it("既知の画面idは受け付ける", async () => {
+      const response = await postJson("/api/teams/500119/activity", {
+        ...activity(),
+        view: "s4",
+      });
+      expect(response.status).toBe(200);
+      await expect(rows("500119")).resolves.toHaveLength(1);
+    });
+
+    it("旧UIのタブが送る旧名s35の画面idは、新名s4へ直して受け付ける", async () => {
+      // 1行まるごと捨てると、旧タブのチームの記録だけが分析から抜け落ちる。
+      // kindは値だけでは新旧を判別できないので読み替えない（分析側で時刻で切る）。
+      const response = await postJson("/api/teams/500120/activity", {
+        ...activity(),
+        kind: "verdict.s4",
+        view: "s35",
+      });
+      expect(response.status).toBe(200);
+      const saved = await rows("500120");
+      expect(saved).toHaveLength(1);
+      expect(saved[0]?.view).toBe("s4");
+      expect(saved[0]?.kind).toBe("verdict.s4");
+    });
+
+    it("上限以内の本文はこれまでどおり処理される", async () => {
+      // 上限判定がバイト数で行われ、通常の本文を巻き込まないことの確認。
+      const response = await postJson("/api/teams/500117/activity", activity());
+      expect(response.status).toBe(200);
+      await expect(rows("500117")).resolves.toHaveLength(1);
+    });
+
+    it("D1が失敗したら503を返す", async () => {
+      await env.PROGRESS_DB.exec(DROP_TABLE);
+      const response = await postJson("/api/teams/500107/activity", activity());
+      expect(response.status).toBe(503);
+      await env.PROGRESS_DB.exec(activitySchemaSql);
+    });
+  });
+  describe("PII拒否の連投", () => {
+    // PII拒否はbeginChatMessageへ進まないため通常の枠消費を通らず、以前は
+    // PII入りの本文を連投するだけでactivity_eventsを無限に増やせた。
+    it("上限を超えたPII送信は429になり、活動ログも増えない", async () => {
+      const teamCode = "500150";
+      const threadId = await mainThreadId(teamCode, "00000000-0000-4000-8000-000000005150");
+      const windowStartMs = 1_756_000_000_000;
+      const gateway = new FakeAiGateway([]);
+      const piiText = `${PII_NAME}さんの件で返信文を書いてください`;
+      const before = (await rows(teamCode)).length;
+
+      for (let index = 0; index < DEFAULT_CHAT_RATE_LIMIT; index += 1) {
+        const response = await chat(
+          teamCode,
+          {
+            commandId: `00000000-0000-4000-8000-${String(5200 + index).padStart(12, "0")}`,
+            threadId,
+            text: piiText,
+          },
+          gateway,
+          windowStartMs,
+        );
+        expect(response.status, `#${String(index)}`).toBe(422);
+      }
+      const afterLimit = (await rows(teamCode)).length;
+      expect(afterLimit).toBe(before + DEFAULT_CHAT_RATE_LIMIT);
+
+      const blocked = await chat(
+        teamCode,
+        {
+          commandId: "00000000-0000-4000-8000-000000005300",
+          threadId,
+          text: piiText,
+        },
+        gateway,
+        windowStartMs,
+      );
+
+      expect(blocked.status).toBe(429);
+      expect(blocked.headers.get("Retry-After")).not.toBeNull();
+      // 429の経路はログを書かない。
+      await expect(rowsByCommandId("00000000-0000-4000-8000-000000005300")).resolves.toEqual([]);
+      await expect(rows(teamCode)).resolves.toHaveLength(afterLimit);
+      expect(gateway.requests).toHaveLength(0);
+    });
+
+    it("PII拒否で消費した枠は通常送信の枠と同じものを使う", async () => {
+      const teamCode = "500151";
+      const threadId = await mainThreadId(teamCode, "00000000-0000-4000-8000-000000005151");
+      const windowStartMs = 1_756_100_000_000;
+      const gateway = new FakeAiGateway([{ kind: "success", response: "応答" }]);
+
+      // PII拒否で上限ぶん使い切ると、正当な送信も同じ窓では通らない（二重計上せず、
+      // 同じテーブル・同じ窓を共有していることの確認）。
+      for (let index = 0; index < DEFAULT_CHAT_RATE_LIMIT; index += 1) {
+        await chat(
+          teamCode,
+          {
+            commandId: `00000000-0000-4000-8000-${String(5400 + index).padStart(12, "0")}`,
+            threadId,
+            text: `${PII_NAME}さんの件で返信文を書いてください`,
+          },
+          gateway,
+          windowStartMs,
+        );
+      }
+
+      const normal = await chat(
+        teamCode,
+        {
+          commandId: "00000000-0000-4000-8000-000000005500",
+          threadId,
+          text: "ふつうの本文",
+        },
+        gateway,
+        windowStartMs,
+      );
+      expect(normal.status).toBe(429);
+      expect(gateway.requests).toHaveLength(0);
+    });
+  });
+});

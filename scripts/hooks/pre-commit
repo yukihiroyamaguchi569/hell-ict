@@ -1,0 +1,62 @@
+#!/usr/bin/env bash
+# 本物のシナリオを public へ誤ってコミットする事故を防ぐ。入れ方は docs/development-harness.md
+# 「デプロイの流れ」。フックはどの worktree からも同じものが呼ばれるので、リポジトリ
+# （--git-common-dir）ではなく、いまコミットしようとしている作業ツリーのトップを見る。
+#   1. 本物のシナリオを overlay した作業ツリー（マーカー .scenario-overlay がある）ではコミットさせない。
+#   2. ステージした差分の追加行がネタバレ語のリストの語に当たればコミットさせない。リストは
+#      docs/public-banned-words.txt、無ければ HELL_ICT_BANNED_WORDS（環境変数か .deploy.env）が指す
+#      hell-ict-scenario の写しを読む。公開から外すパス（scripts/public-exclude.txt）の変更は見ない。
+#      語のリストが無ければ飛ばし、変数が指すファイルが無いときと、リストに語が1つも無いときは止める。
+set -euo pipefail
+
+top="$(git rev-parse --show-toplevel)"
+if [ -e "${top}/.scenario-overlay" ]; then
+  echo "エラー: ${top} は本物のシナリオを overlay 中なのでコミットできない。" >&2
+  echo "bash scripts/scenario-overlay.sh restore で戻してからコミットする。" >&2
+  exit 1
+fi
+
+exclude_list="${top}/scripts/public-exclude.txt"
+lib="${top}/scripts/lib/public-lists.sh"
+[ -f "${exclude_list}" ] && [ -f "${lib}" ] || exit 0
+# shellcheck source=scripts/lib/public-lists.sh
+source "${lib}"
+# 語のリストは docs/ か、HELL_ICT_BANNED_WORDS（環境変数か .deploy.env）から探す（public-lists.sh）。
+banned_list="$(public_banned_words_file "${top}")" || exit 1
+[ -n "${banned_list}" ] || exit 0
+
+work="$(mktemp -d)"
+trap 'rm -rf "${work}"' EXIT
+public_banned_words "${banned_list}" >"${work}/words.txt"
+if [ ! -s "${work}/words.txt" ]; then
+  # リストがあるのに語が無いのは設定の誤り。黙って通すと検査が効かなくなる。
+  echo "エラー: ネタバレ語のリスト（${banned_list}）に語が1つも無い。語を戻してからコミットする。" >&2
+  exit 1
+fi
+public_strip_list "${exclude_list}" >"${work}/rules.txt"
+
+# 公開から外れるパスか。除外リストは1行1パスなので、改行を含む名前は外れない（検査する）側に倒す。
+is_excluded() {
+  case "$1" in *$'\n'*) return 1 ;; esac
+  [ -n "$(printf '%s\n' "$1" | public_apply_rules "${work}/rules.txt")" ]
+}
+
+# ステージした（追加・変更・コピー・改名の）ファイルのうち公開に残るものの、差分の追加行
+# （最初のハンク見出し @@ より後の + で始まる行。ファイル見出しの +++ は含めない）だけを見る。名前は NUL 区切りのまま読む。
+hits=""
+while IFS= read -r -d '' path; do
+  is_excluded "${path}" && continue
+  found="$(git -C "${top}" diff --cached --no-color --unified=0 -- "${path}" |
+    awk '/^@@/ { in_hunk = 1; next } in_hunk && /^\+/' |
+    LC_ALL=C grep -oF -f "${work}/words.txt" | LC_ALL=C sort -u || true)"
+  while IFS= read -r word; do
+    [ -z "${word}" ] || hits+="  ${path}: ${word}"$'\n'
+  done <<<"${found}"
+done < <(git -C "${top}" diff --cached --name-only -z --diff-filter=ACMR)
+
+if [ -n "${hits}" ]; then
+  echo "エラー: 公開に残るファイルへ、ネタバレ語（${banned_list}）を足そうとしている。" >&2
+  printf '%s' "${hits}" >&2
+  echo "本物のシナリオは hell-ict-scenario に書く。public の content はダミーのまま保つ。" >&2
+  exit 1
+fi

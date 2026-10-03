@@ -1,0 +1,95 @@
+{
+  "$schema": "../../node_modules/wrangler/config-schema.json",
+  "name": "hell-ict",
+  "main": "./src/index.ts",
+  "compatibility_date": "2026-08-20",
+  "compatibility_flags": ["nodejs_compat"],
+  // ALLOWED_ORIGINS / EVENT_NO / TEAM_MAX / CHAT_RATE_LIMIT_PER_MINUTE は入口ガード
+  // （src/guard.ts）の運用値。会ごとに変わるのでここへ値を書かず、本番デプロイ前に
+  // `wrangler secret put NAME` で与える（`apps/worker`で実行）。**ダッシュボードの
+  // Variables と `wrangler deploy --var` は使わない**——`wrangler deploy`は設定ファイルに
+  // 無い通常の変数を消すため、デプロイ（`pnpm deploy:prod`。scripts/deploy-prod.sh）の
+  // たびに失われる。secretは消えない。
+  // いずれも未設定のままでも既定動作で動く。
+  //
+  // - ALLOWED_ORIGINS: 「追加で」許可するOriginをカンマ区切りで列挙（末尾スラッシュと
+  //   空白は無視）。同一オリジンは設定の有無に関わらず常に許可されるので書かなくてよい。配信版はVueアプリを
+  //   Assetsから同一オリジンで配るので、本番は未設定でよい。別オリジンのページから
+  //   叩く場合（開発時に localStorage.hellApiBase で別ポートのwrangler devへ向ける等）
+  //   だけ設定する。例: "http://127.0.0.1:8788,http://localhost:8788"
+  // - EVENT_NO: 開催回の2桁数字。チームコードは [開催回2桁][チーム番号4桁] で、
+  //   上2桁が一致し下4桁が1〜TEAM_MAXのコードだけを通す（未設定なら6桁なら何でも
+  //   入室できる）。2桁数字でない値は全コードを拒否する（fail-closed）。
+  //   例: 開催回 NN のチーム1は "NN0001"。事前登録は要らないので、予備は次の番号を配ればよい。
+  //   活動ログ（activity_events.event_id）にもこの値がそのまま書かれるので、開催回を
+  //   持つ設定はこれ1つだけである。
+  // - TEAM_MAX: チーム番号の上限。未設定なら100。1〜9999の数字以外は全拒否（fail-closed）。
+  //   設定できているかは GET /api/health の guards.eventNo と guards.teamMax で確認する。
+  // - CHAT_RATE_LIMIT_PER_MINUTE: 1チームが1分あたりに送れるチャット数。未設定なら20。
+  //   受け付けるのは1〜600の整数のみで、範囲外・非数値は既定の20へ倒す。
+  "vars": {
+    "OPENAI_BASE_URL": "https://api.openai.com/v1",
+    "OPENAI_MODEL": "gpt-4o",
+  },
+  // テストプレイ用の静的配信。/api/* と /sounds/* は必ずWorkerへ届かせ、それ以外の
+  // パスだけAssetsから返す（scripts/build-testplay.shが生成するpublic/を配信対象とする）。
+  // `/` は本番のVueアプリ（public/index.html と public/app/。apps/web のViteビルド）、
+  // 画像は /assets/ に置く。SPA fallback（not_found_handling）は入れない——Vueアプリは `/` だけで動き（画面の切り替えにURLを使わない）、無いパスは404のまま。
+  // /sounds/* をWorkerへ回すのは、効果音mp3の配信元がR2（下のr2_buckets）だからである。
+  // public/sounds/ はもう作らないので、Assetsを先に見ても404になるだけだが、
+  // 経路の所在をここで明示する。
+  "assets": {
+    "directory": "./public",
+    "run_worker_first": ["/api/*", "/sounds/*"],
+  },
+  // 効果音mp3（効果音ラボ）の配信元。素材の再配布が規約で禁じられており、
+  // このリポジトリは公開なので `.gitignore` で assets/sounds/ ごと除外してある。
+  // デプロイ（scripts/deploy-prod.sh）は origin/main を一時worktreeへ取り出して組み立てる
+  // ので音源を持たず、静的アセットとして配ると本番で全て404になる。
+  // 投入は `bash scripts/upload-sounds.sh`（手元の assets/sounds/ から入れる）。
+  // 配信は src/sounds.ts が許可リスト7点に限って行う。
+  "r2_buckets": [
+    {
+      "binding": "SOUNDS",
+      "bucket_name": "hell-ict-sounds",
+    },
+  ],
+  // テストプレイ当日の進捗記録・活動ログ用（2026-08-23に `wrangler d1 create hell-ict-testplay` で作成）。
+  // スキーマは ./schema/progress.sql と ./schema/activity.sql。src/progress.tsと
+  // src/activity-log.tsのensureSchemaが初回アクセス時にもCREATE TABLE IF NOT EXISTSを
+  // 流すので、適用忘れでリクエストが落ちることはない。
+  "d1_databases": [
+    {
+      "binding": "PROGRESS_DB",
+      "database_name": "hell-ict-testplay",
+      "database_id": "cac14ad2-c5d1-44de-9a5a-c644cabbc146",
+    },
+  ],
+  "durable_objects": {
+    "bindings": [
+      {
+        "name": "TEAM_ROOM",
+        "class_name": "TeamRoom",
+      },
+      {
+        "name": "RACE_LEADERBOARD",
+        "class_name": "RaceLeaderboard",
+      },
+    ],
+  },
+  "migrations": [
+    {
+      "tag": "v1",
+      "new_sqlite_classes": ["HarnessCounter"],
+    },
+    {
+      "tag": "v2",
+      "deleted_classes": ["HarnessCounter"],
+      "new_sqlite_classes": ["TeamRoom", "RaceLeaderboard"],
+    },
+  ],
+  "observability": {
+    "enabled": true,
+    "head_sampling_rate": 1,
+  },
+}

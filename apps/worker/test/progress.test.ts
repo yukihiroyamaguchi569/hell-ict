@@ -1,0 +1,876 @@
+import { env, exports } from "cloudflare:workers";
+import { beforeEach, describe, expect, it } from "vitest";
+import { PII_REDACTION, publicTeamId, stage5Patient } from "@hell-ict/domain";
+import { z } from "zod";
+
+import { parseTeamCodeRule } from "../src/guard.js";
+import { progressSchemaSql, summaryStatements } from "../src/progress.js";
+import { get, postJson, TEST_ORIGIN } from "./support.js";
+import { PII_NAME } from "./pii-support.js";
+
+// サマリーは生のチームコードを返さない。publicId（SHA-256の先頭8桁）と、
+// ?teamCode= で指定した自分の行だけに付くisSelfで構成される。
+const summarySchema = z.object({
+  teams: z.array(
+    z.object({
+      publicId: z.string().regex(/^[0-9a-f]{8}$/),
+      isSelf: z.literal(true).optional(),
+      teamName: z.string(),
+      pos: z.number(),
+      updatedAt: z.string(),
+    }),
+  ),
+  events: z.array(
+    z.object({
+      publicId: z.string().regex(/^[0-9a-f]{8}$/),
+      isSelf: z.literal(true).optional(),
+      teamName: z.string(),
+      pos: z.number(),
+      view: z.string(),
+      kind: z.string(),
+      createdAt: z.string(),
+    }),
+  ),
+});
+
+type Summary = z.infer<typeof summarySchema>;
+
+/** 期待値を組むための公開ID。実装と同じ導出（SHA-256の先頭8桁）を使う。 */
+const idOf = (teamCode: string): Promise<string> => publicTeamId(teamCode);
+
+const event = (overrides: Record<string, unknown> = {}): Record<string, unknown> => ({
+  teamCode: "100001",
+  teamName: "感染対策室",
+  pos: 1,
+  view: "s1",
+  kind: "clear",
+  clientAt: "2026-08-23T02:00:00.000Z",
+  ...overrides,
+});
+
+const summary = async (query = ""): Promise<Summary> => {
+  const response = await get(`/api/progress/summary${query}`);
+  expect(response.status).toBe(200);
+  return summarySchema.parse(await response.json());
+};
+
+/** JSONとして壊れた本文や本文なしを送るため、support.tsのpostJsonを経由しない。 */
+const postRaw = async (body: BodyInit | null): Promise<Response> =>
+  exports.default.fetch(
+    new Request(`${TEST_ORIGIN}/api/progress`, {
+      method: "POST",
+      body,
+      headers: { Origin: TEST_ORIGIN },
+    }),
+  );
+
+const rowCount = async (): Promise<number> => {
+  const row = await env.PROGRESS_DB.prepare("SELECT COUNT(*) AS n FROM progress_events").first("n");
+  return z.number().parse(row);
+};
+
+// migrationsも一緒に落とす。完了印が残っていると、白紙のつもりのテストで
+// 一度きりの移行が走らない。
+const DROP_TABLE = [
+  "DROP TABLE IF EXISTS progress_events;",
+  "DROP TABLE IF EXISTS migrations;",
+].join("\n");
+
+// このpoolではD1の中身がテスト間で巻き戻らない（KVやDOと違い持ち越される）ため、
+// 各テストの冒頭でテーブルごと作り直して白紙から始める。
+//
+// ensureSchemaの初期化状態はモジュールスコープのPromiseで、テストファイル内で
+// 持ち越される。「まだ一度も初期化していない」状態を踏めるのはファイル先頭の
+// このテストだけなので、コールドスタート関連はここへ集約する。
+// スキーマは流さずDROPだけして、Worker自身にテーブルを作らせる。
+describe("進捗記録: スキーマ未適用のD1", () => {
+  it("マイグレーション未適用でも、同時に届いた複数リクエストを取りこぼさない", async () => {
+    await env.PROGRESS_DB.exec(DROP_TABLE);
+
+    // 初期化が1回きりのフラグ方式だと、2本目がテーブル作成の完了を待たずに
+    // INSERTへ進んで503になる。共有Promiseを待つので両方とも200になる。
+    const responses = await Promise.all([
+      postJson("/api/progress", event({ pos: 1, view: "s1" })),
+      postJson("/api/progress", event({ teamCode: "100002", teamName: "第二班", pos: 3 })),
+    ]);
+
+    expect(responses.map((response) => response.status)).toEqual([200, 200]);
+    await expect(responses[0]?.json()).resolves.toEqual({ ok: true });
+    expect((await summary()).teams).toMatchObject([
+      { publicId: await idOf("100002"), pos: 3 },
+      { publicId: await idOf("100001"), pos: 1 },
+    ]);
+  });
+});
+
+describe("進捗記録", () => {
+  beforeEach(async () => {
+    await env.PROGRESS_DB.exec(DROP_TABLE);
+    await env.PROGRESS_DB.exec(progressSchemaSql);
+  });
+
+  it("伏せ字化を入れる前にD1へ積まれた平文PIIを、サマリー1回で行ごと消す", async () => {
+    // 読み出し側の伏せ字化は公開される値を守るだけで、D1の行は平文のまま残る。
+    // 保存経路（POST /api/progress）を通さず直接入れて、その状態を作る。
+    await env.PROGRESS_DB.prepare(
+      `INSERT INTO progress_events (team_code, team_name, pos, view, kind, client_at)
+       VALUES (?, ?, ?, ?, ?, ?)`,
+    )
+      .bind("100001", `${PII_NAME} 班`, 2, "s2", "clear", "2026-08-23T02:00:00.000Z")
+      .run();
+
+    await summary();
+
+    const stored = await env.PROGRESS_DB.prepare(
+      "SELECT team_name FROM progress_events WHERE team_code = ?",
+    )
+      .bind("100001")
+      .first("team_name");
+    expect(z.string().parse(stored)).not.toContain(PII_NAME);
+    expect(z.string().parse(stored)).toContain(PII_REDACTION);
+  });
+
+  it("完了印が付いた後は、D1の行を書き換え直さない", async () => {
+    // 移行は一度きり。印が付いた後も走るなら、当日のサマリーのたびに全行走査が
+    // 走ることになる。印を残したまま平文を差し戻し、変化しないことで確かめる。
+    await env.PROGRESS_DB.prepare(
+      `INSERT INTO progress_events (team_code, team_name, pos, view, kind, client_at)
+       VALUES (?, ?, ?, ?, ?, ?)`,
+    )
+      .bind("100003", `${PII_NAME} 班`, 2, "s2", "clear", "2026-08-23T02:00:00.000Z")
+      .run();
+    await summary();
+
+    await env.PROGRESS_DB.prepare("UPDATE progress_events SET team_name = ? WHERE team_code = ?")
+      .bind(`${PII_NAME} 班`, "100003")
+      .run();
+    await summary();
+
+    const stored = await env.PROGRESS_DB.prepare(
+      "SELECT team_name FROM progress_events WHERE team_code = ?",
+    )
+      .bind("100003")
+      .first("team_name");
+    expect(z.string().parse(stored)).toBe(`${PII_NAME} 班`);
+  });
+
+  it("イベントが1件も無いときteamsとeventsは空配列を返す", async () => {
+    await expect(summary()).resolves.toEqual({ teams: [], events: [] });
+  });
+
+  it("POSTした進捗がteamsとeventsの両方へ反映される", async () => {
+    expect((await postJson("/api/progress", event({ pos: 2, view: "s2" }))).status).toBe(200);
+
+    const result = await summary();
+    expect(result.teams).toMatchObject([
+      { publicId: await idOf("100001"), teamName: "感染対策室", pos: 2 },
+    ]);
+    expect(result.teams[0]?.updatedAt).not.toBe("");
+    expect(result.events).toMatchObject([
+      { publicId: await idOf("100001"), pos: 2, view: "s2", kind: "clear" },
+    ]);
+  });
+
+  it("jumpはposへ算入しないが、最終更新時刻とeventsには残す", async () => {
+    await postJson("/api/progress", event({ pos: 2, kind: "clear", view: "s2" }));
+    await postJson("/api/progress", event({ pos: 5, kind: "jump", view: "s6" }));
+
+    const result = await summary();
+    expect(result.teams).toMatchObject([{ publicId: await idOf("100001"), pos: 2 }]);
+    expect(result.events[0]).toMatchObject({ kind: "jump", pos: 5 });
+    expect(result.events).toHaveLength(2);
+  });
+
+  it("非jumpが1件も無いチームはpos 0として扱う", async () => {
+    await postJson("/api/progress", event({ pos: 6, kind: "jump" }));
+    expect((await summary()).teams).toMatchObject([{ publicId: await idOf("100001"), pos: 0 }]);
+  });
+
+  it("resumeは200で記録するが、jumpと同じくposへ算入しない", async () => {
+    await postJson("/api/progress", event({ pos: 2, kind: "clear", view: "s2" }));
+    const response = await postJson("/api/progress", event({ pos: 5, kind: "resume", view: "s6" }));
+
+    expect(response.status).toBe(200);
+    const result = await summary();
+    expect(result.teams).toMatchObject([{ publicId: await idOf("100001"), pos: 2 }]);
+    expect(result.events[0]).toMatchObject({ kind: "resume", pos: 5 });
+    expect(result.events).toHaveLength(2);
+  });
+
+  it("resumeしか無いチームはpos 0として扱う", async () => {
+    await postJson("/api/progress", event({ pos: 6, kind: "resume" }));
+    expect((await summary()).teams).toMatchObject([{ publicId: await idOf("100001"), pos: 0 }]);
+  });
+
+  it("posは最大値を採る（戻る操作で後退させない）", async () => {
+    await postJson("/api/progress", event({ pos: 4, kind: "clear" }));
+    await postJson("/api/progress", event({ pos: 1, kind: "entry" }));
+    expect((await summary()).teams).toMatchObject([{ publicId: await idOf("100001"), pos: 4 }]);
+  });
+
+  it("teamNameは最新の非空の値を採る", async () => {
+    await postJson("/api/progress", event({ teamName: "第一波", pos: 1 }));
+    await postJson("/api/progress", event({ teamName: "", pos: 2 }));
+    expect((await summary()).teams).toMatchObject([{ teamName: "第一波", pos: 2 }]);
+  });
+
+  it("teamNameは拒否せず規定長へ切り詰める", async () => {
+    const response = await postJson("/api/progress", event({ teamName: "あ".repeat(50) }));
+    expect(response.status).toBe(200);
+
+    const result = await summary();
+    expect(result.teams[0]?.teamName).toHaveLength(24);
+  });
+
+  it.each([
+    ["電話番号のような文字列", "090-0000-5678"],
+    ["未知の画面id", "stage3-manual"],
+    ["空文字", ""],
+  ])("viewが既知の画面idでない(%s)ときは400で拒否する", async (_label, view) => {
+    // 自由文字列だと、表示用の列がPIIの抜け道になる（text・metaのゲートを素通りする）。
+    const response = await postJson("/api/progress", event({ view }));
+    expect(response.status).toBe(400);
+    await expect(rowCount()).resolves.toBe(0);
+  });
+
+  it("既知の画面idは受け付ける", async () => {
+    for (const view of ["entry", "s1", "s4", "final"]) {
+      const response = await postJson("/api/progress", event({ view }));
+      expect(response.status, view).toBe(200);
+    }
+  });
+
+  it.each([
+    ["自由文字列", "c".repeat(80)],
+    ["空文字", ""],
+    ["日付だけ", "2026-08-23"],
+    ["タイムゾーン無し", "2026-08-23T02:00:00"],
+  ])("clientAtがISO 8601でない(%s)ときは400で拒否する", async (_label, clientAt) => {
+    // 表示用の列に何でも入れられる経路を残さない（活動ログと同じ厳密さに揃える）。
+    const response = await postJson("/api/progress", event({ clientAt }));
+    expect(response.status).toBe(400);
+    await expect(rowCount()).resolves.toBe(0);
+  });
+
+  it("teamNameのPIIは伏せ字で保存され、summaryにも伏せ字で出る", async () => {
+    // 進捗記録は落とさない（拒否にするとダッシュボードからそのチームが消える）。
+    // 記録は残し、PIIだけを落とす。
+    const response = await postJson(
+      "/api/progress",
+      event({ teamName: `${stage5Patient.name}班` }),
+    );
+    expect(response.status).toBe(200);
+
+    const result = await summary();
+    expect(result.teams[0]?.teamName).not.toContain(stage5Patient.name);
+    expect(result.teams[0]?.teamName).toContain(PII_REDACTION);
+    // D1にも平文は残っていない。
+    const stored = await env.PROGRESS_DB.prepare(
+      "SELECT team_name FROM progress_events LIMIT 1",
+    ).first();
+    expect(JSON.stringify(stored)).not.toContain(stage5Patient.name);
+  });
+
+  it.each([
+    ["kindが列挙外", event({ kind: "warp" })],
+    ["kindが欠落", { teamCode: "100001", teamName: "", pos: 1, view: "", clientAt: "" }],
+    ["posが上限超過", event({ pos: 8 })],
+    ["posが負", event({ pos: -1 })],
+    ["posが小数", event({ pos: 1.5 })],
+    ["posが文字列", event({ pos: "3" })],
+    ["teamCodeが5桁", event({ teamCode: "10001" })],
+    ["teamCodeが全角", event({ teamCode: "１２３４５６" })],
+    ["teamCodeが英字混じり", event({ teamCode: "10000a" })],
+    ["bodyが配列", []],
+    ["bodyがnull", null],
+  ])("不正な入力(%s)は400で拒否し、行を増やさない", async (_label, body) => {
+    const response = await postJson("/api/progress", body);
+    expect(response.status).toBe(400);
+    await expect(rowCount()).resolves.toBe(0);
+  });
+
+  it("EVENT_NO設定時、規則外チームの進捗は404で拒否しD1へ書かない", async () => {
+    const saved = { EVENT_NO: env.EVENT_NO, TEAM_MAX: env.TEAM_MAX };
+    env.EVENT_NO = "10";
+    env.TEAM_MAX = "2";
+    try {
+      // 別の開催回。
+      expect((await postJson("/api/progress", event({ teamCode: "110001" }))).status).toBe(404);
+      // TEAM_MAXを超えるチーム番号。
+      expect((await postJson("/api/progress", event({ teamCode: "100003" }))).status).toBe(404);
+      // チーム番号0。
+      expect((await postJson("/api/progress", event({ teamCode: "100000" }))).status).toBe(404);
+      await expect(rowCount()).resolves.toBe(0);
+
+      const accepted = await postJson("/api/progress", event({ teamCode: "100001" }));
+      expect(accepted.status).toBe(200);
+      await expect(rowCount()).resolves.toBe(1);
+    } finally {
+      Object.assign(env, saved);
+    }
+  });
+
+  it("EVENT_NO未設定なら任意の6桁の進捗を受け付ける", async () => {
+    const response = await postJson("/api/progress", event({ teamCode: "987654" }));
+    expect(response.status).toBe(200);
+    await expect(rowCount()).resolves.toBe(1);
+  });
+
+  it("JSONとして壊れた本文と空bodyは400で拒否し、行を増やさない", async () => {
+    expect((await postRaw("{not json")).status).toBe(400);
+    expect((await postRaw("")).status).toBe(400);
+    expect((await postRaw(null)).status).toBe(400);
+    await expect(rowCount()).resolves.toBe(0);
+  });
+
+  it("EVENT_NO設定時、summaryは規則に合う行だけを返す", async () => {
+    const insert = env.PROGRESS_DB.prepare(
+      `INSERT INTO progress_events (team_code, team_name, pos, view, kind, client_at, created_at)
+       VALUES (?, ?, ?, '', 'clear', '', ?)`,
+    );
+    await env.PROGRESS_DB.batch([
+      insert.bind("100001", "許可A", 3, "2026-08-23 01:00:00"),
+      insert.bind("100002", "許可B", 5, "2026-08-23 01:00:01"),
+      insert.bind("999999", "未登録", 7, "2026-08-23 01:00:02"),
+    ]);
+
+    const saved = { EVENT_NO: env.EVENT_NO, TEAM_MAX: env.TEAM_MAX };
+    try {
+      env.EVENT_NO = "10";
+      env.TEAM_MAX = "2";
+      const filtered = await summary();
+      expect(filtered.teams.map((team) => team.publicId)).toEqual([
+        await idOf("100002"),
+        await idOf("100001"),
+      ]);
+      expect(filtered.events.map((event) => event.publicId)).not.toContain(await idOf("999999"));
+      expect(filtered.events).toHaveLength(2);
+    } finally {
+      Object.assign(env, saved);
+    }
+
+    // 未設定なら従来どおり全件。
+    const all = await summary();
+    expect(all.teams.map((team) => team.publicId)).toEqual([
+      await idOf("999999"),
+      await idOf("100002"),
+      await idOf("100001"),
+    ]);
+    expect(all.events).toHaveLength(3);
+  });
+
+  it("下4桁が数字でない壊れた行は、CASTで丸められてsummaryへ混ざらない", async () => {
+    // `42001x`はCAST(substr(...) AS INTEGER)が1になるため、字種を見ないと
+    // チーム1として並んでしまう。POST側のschemaが弾く値なので、D1へ直接入れる。
+    await env.PROGRESS_DB.prepare(
+      `INSERT INTO progress_events (team_code, team_name, pos, view, kind, client_at)
+       VALUES (?, '壊れた', 3, '', 'clear', '')`,
+    )
+      .bind("42001x")
+      .run();
+
+    const saved = { EVENT_NO: env.EVENT_NO, TEAM_MAX: env.TEAM_MAX };
+    try {
+      env.EVENT_NO = "42";
+      const result = await summary();
+      expect(result.teams).toEqual([]);
+      expect(result.events).toEqual([]);
+    } finally {
+      Object.assign(env, saved);
+    }
+  });
+
+  it("未許可チームのイベントが多くても、許可チームの最新イベントは埋もれない", async () => {
+    // 絞り込みがLIMIT 20の後だと、未登録チームの25件が枠を食い潰して許可チームの
+    // イベントがダッシュボードから消える。「絞ってからLIMIT」であることを固定する。
+    const insert = env.PROGRESS_DB.prepare(
+      `INSERT INTO progress_events (team_code, team_name, pos, view, kind, client_at)
+       VALUES (?, ?, 1, ?, 'clear', '')`,
+    );
+    await env.PROGRESS_DB.batch([
+      insert.bind("100001", "許可", "allowed-old"),
+      ...Array.from({ length: 25 }, (_unused, index) =>
+        insert.bind("999999", "未登録", `noise${String(index)}`),
+      ),
+    ]);
+
+    const saved = { EVENT_NO: env.EVENT_NO, TEAM_MAX: env.TEAM_MAX };
+    try {
+      env.EVENT_NO = "10";
+      env.TEAM_MAX = "1";
+      const result = await summary();
+      expect(result.events.map((event) => event.view)).toEqual(["allowed-old"]);
+      expect(result.teams.map((team) => team.publicId)).toEqual([await idOf("100001")]);
+    } finally {
+      Object.assign(env, saved);
+    }
+
+    // 未設定なら従来どおり全チームから最新20件。
+    const all = await summary();
+    expect(all.events).toHaveLength(20);
+    const noiseId = await idOf("999999");
+    expect(all.events.every((event) => event.publicId === noiseId)).toBe(true);
+  });
+
+  it("応答に生の6桁チームコードが含まれない", async () => {
+    // サマリーは参加者の端末からも読める。生のコードが見えると、そのまま入室に使えてしまう。
+    await postJson("/api/progress", event({ teamCode: "100001", teamName: "感染対策室" }));
+    await postJson("/api/progress", event({ teamCode: "100002", teamName: "第二班" }));
+
+    const response = await get("/api/progress/summary");
+    const body = await response.text();
+    expect(body).not.toContain("100001");
+    expect(body).not.toContain("100002");
+    expect(body).toContain(await idOf("100001"));
+  });
+
+  it("?teamCodeを付けると自分の行だけisSelfが立つ", async () => {
+    await postJson("/api/progress", event({ teamCode: "100001", teamName: "自分" }));
+    await postJson("/api/progress", event({ teamCode: "100002", teamName: "他所" }));
+
+    const result = await summary("?teamCode=100001");
+    const selfId = await idOf("100001");
+    const selfRows = result.teams.filter((team) => team.isSelf === true);
+    expect(selfRows.map((team) => team.publicId)).toEqual([selfId]);
+    expect(result.teams.filter((team) => team.publicId !== selfId)).toSatisfy(
+      (rows: { isSelf?: true }[]) => rows.every((row) => row.isSelf === undefined),
+    );
+    expect(result.events.filter((e) => e.isSelf === true).map((e) => e.publicId)).toEqual([selfId]);
+  });
+
+  it("規則に合わないコードを?teamCodeに付けてもisSelfは立たない", async () => {
+    await postJson("/api/progress", event({ teamCode: "100001", teamName: "自分" }));
+
+    const saved = { EVENT_NO: env.EVENT_NO, TEAM_MAX: env.TEAM_MAX };
+    try {
+      env.EVENT_NO = "10";
+      env.TEAM_MAX = "1";
+      // 規則外のコードで他チームの行へisSelfを立てさせない。
+      const result = await summary("?teamCode=999999");
+      expect(result.teams.some((team) => team.isSelf === true)).toBe(false);
+      expect(result.events.some((e) => e.isSelf === true)).toBe(false);
+    } finally {
+      Object.assign(env, saved);
+    }
+  });
+
+  it("?teamCodeを付けなければisSelfは付かない", async () => {
+    await postJson("/api/progress", event({ teamCode: "100001" }));
+    const result = await summary();
+    expect(result.teams.some((team) => team.isSelf === true)).toBe(false);
+  });
+
+  it("teamNameに入れた配布コードはsummaryで伏せ字になる", async () => {
+    // publicIdで隠した意味が無くならないよう、teamName経由でコードが漏れる経路も塞ぐ。
+    const saved = { EVENT_NO: env.EVENT_NO, TEAM_MAX: env.TEAM_MAX };
+    try {
+      env.EVENT_NO = "10";
+      env.TEAM_MAX = "2";
+      await postJson("/api/progress", event({ teamCode: "100001", teamName: "100001" }));
+
+      const result = await summary();
+      expect(result.teams[0]?.teamName).toBe(PII_REDACTION);
+      const body = await (await get("/api/progress/summary")).text();
+      expect(body).not.toContain("100001");
+    } finally {
+      Object.assign(env, saved);
+    }
+  });
+
+  it("規則が無いときは6桁連続数字を一律で伏せる", async () => {
+    // 配布コードが分からないので、6桁の並びはすべて配布コードとみなす。
+    await postJson("/api/progress", event({ teamName: "班 100001" }));
+    const result = await summary();
+    expect(result.teams[0]?.teamName).toBe(`班 ${PII_REDACTION}`);
+  });
+
+  it("規則に合うコードだけを伏せ、無関係な6桁は残す", async () => {
+    const saved = { EVENT_NO: env.EVENT_NO, TEAM_MAX: env.TEAM_MAX };
+    try {
+      env.EVENT_NO = "10";
+      env.TEAM_MAX = "1";
+      await postJson("/api/progress", event({ teamCode: "100001", teamName: "病床 400000" }));
+      const result = await summary();
+      expect(result.teams[0]?.teamName).toBe("病床 400000");
+    } finally {
+      Object.assign(env, saved);
+    }
+  });
+
+  it("伏せ字化を入れる前に積まれた行も、summaryでは伏せ字で出る", async () => {
+    // 保存時だけでは過去の行が公開され続ける。読み出し側にも同じ伏せ字化を掛ける。
+    await env.PROGRESS_DB.prepare(
+      `INSERT INTO progress_events (team_code, team_name, pos, view, kind, client_at)
+       VALUES (?, ?, 1, ?, 'clear', '')`,
+    )
+      .bind("100001", `${stage5Patient.name}班`, `連絡先 ${stage5Patient.phone}`)
+      .run();
+
+    const result = await summary();
+    expect(result.teams[0]?.teamName).not.toContain(stage5Patient.name);
+    expect(result.teams[0]?.teamName).toContain(PII_REDACTION);
+    expect(result.events[0]?.view).not.toContain(stage5Patient.phone);
+    expect(result.events[0]?.view).toContain(PII_REDACTION);
+  });
+
+  it("振り直し前に積まれたs35の行は、summaryでは新名s4で出る", async () => {
+    // D1の過去行は書き換えない（Issue #118）。読む側で新名へ読み替える。
+    await env.PROGRESS_DB.prepare(
+      `INSERT INTO progress_events (team_code, team_name, pos, view, kind, client_at)
+       VALUES ('100002', 'C班', 4, 's35', 'clear', '')`,
+    ).run();
+
+    const result = await summary();
+    expect(result.events[0]?.view).toBe("s4");
+  });
+
+  it("s4・s5の行は新旧の判別が付かないのでずらさない", async () => {
+    // 一律にずらすと、振り直し後に積まれた行まで1つ後ろへ動く。
+    await env.PROGRESS_DB.prepare(
+      `INSERT INTO progress_events (team_code, team_name, pos, view, kind, client_at)
+       VALUES ('100003', 'D班', 5, 's4', 'clear', '')`,
+    ).run();
+
+    const result = await summary();
+    expect(result.events[0]?.view).toBe("s4");
+  });
+
+  it("旧UIのタブが送る旧名s35のPOSTを400で弾かず、新名s4で保存する", async () => {
+    // 旧UIは保存の失敗を通知しないので、弾くとその端末の位置が帯から消えたままになる。
+    const response = await postJson("/api/progress", event({ pos: 4, view: "s35" }));
+
+    expect(response.status).toBe(200);
+    const result = await summary();
+    expect(result.events[0]?.view).toBe("s4");
+  });
+
+  it("teamsはpos降順、同順位は最終更新が古い順に並ぶ", async () => {
+    const insert = env.PROGRESS_DB.prepare(
+      `INSERT INTO progress_events (team_code, team_name, pos, view, kind, client_at, created_at)
+       VALUES (?, ?, ?, '', 'clear', '', ?)`,
+    );
+    await env.PROGRESS_DB.batch([
+      insert.bind("100001", "先行", 3, "2026-08-23 01:00:00"),
+      insert.bind("100002", "同着先着", 5, "2026-08-23 01:00:01"),
+      insert.bind("100003", "同着後着", 5, "2026-08-23 01:00:05"),
+    ]);
+
+    const result = await summary();
+    expect(result.teams.map((team) => team.publicId)).toEqual([
+      await idOf("100002"),
+      await idOf("100003"),
+      await idOf("100001"),
+    ]);
+  });
+
+  it("eventsは新しい順に最大20件まで返す", async () => {
+    const insert = env.PROGRESS_DB.prepare(
+      `INSERT INTO progress_events (team_code, team_name, pos, view, kind, client_at)
+       VALUES ('100001', 'ろぐ', 1, ?, 'entry', '')`,
+    );
+    await env.PROGRESS_DB.batch(
+      Array.from({ length: 25 }, (_unused, index) => insert.bind(`v${String(index)}`)),
+    );
+
+    const result = await summary();
+    expect(result.events).toHaveLength(20);
+    expect(result.events[0]?.view).toBe("v24");
+    expect(result.events[19]?.view).toBe("v5");
+  });
+});
+
+/**
+ * ゲームマスターのリセット世代による絞り込み。相関サブクエリからCTE＋LEFT JOINへ
+ * 書き換えた（Issue #125のrows read対策）ので、書き換えの前後で結果が変わらないことを
+ * 固定する。resetが無い／複数回ある／reset後にイベントが無い、の3ケースを揃える。
+ *
+ * 行はPOSTを通さずD1へ直接入れる。kind=resetはクライアントから送れず（サーバだけが書く）、
+ * 世代の古い行が後のidで積まれる状況もPOST経由では作れないため。
+ */
+describe("進捗記録: リセット世代の絞り込み", () => {
+  beforeEach(async () => {
+    await env.PROGRESS_DB.exec(DROP_TABLE);
+    await env.PROGRESS_DB.exec(progressSchemaSql);
+  });
+
+  /** created_atも指定する（updatedAtと並び順の期待値を固定するため）。 */
+  type Row = {
+    teamCode: string;
+    teamName?: string;
+    pos?: number;
+    view?: string;
+    kind?: string;
+    generation?: number;
+    clientAt?: string;
+    createdAt: string;
+  };
+
+  const insertRow = (row: Row): D1PreparedStatement =>
+    env.PROGRESS_DB.prepare(
+      `INSERT INTO progress_events (team_code, team_name, pos, view, kind, generation, client_at, created_at)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+    ).bind(
+      row.teamCode,
+      row.teamName ?? "",
+      row.pos ?? 0,
+      row.view ?? "welcome",
+      row.kind ?? "clear",
+      row.generation ?? 0,
+      row.clientAt ?? "",
+      row.createdAt,
+    );
+
+  /** サーバだけが書くリセット行。 */
+  const resetRow = (teamCode: string, generation: number, createdAt: string): D1PreparedStatement =>
+    insertRow({ teamCode, kind: "reset", generation, createdAt });
+
+  it("resetが1件も無いチームは、世代に関係なく全イベントを数える", async () => {
+    // reset行が無いチームの下限は0。世代が進んだ行（generation 2）も落とさない。
+    await env.PROGRESS_DB.batch([
+      insertRow({
+        teamCode: "100001",
+        teamName: "無リセット",
+        pos: 3,
+        view: "s3",
+        createdAt: "2026-08-23 01:00:00",
+      }),
+      insertRow({
+        teamCode: "100001",
+        pos: 5,
+        view: "s6",
+        generation: 2,
+        createdAt: "2026-08-23 01:00:05",
+      }),
+      insertRow({
+        teamCode: "100001",
+        pos: 7,
+        view: "final",
+        kind: "jump",
+        generation: 2,
+        createdAt: "2026-08-23 01:00:09",
+      }),
+    ]);
+
+    const result = await summary();
+    expect(result.teams).toMatchObject([
+      { publicId: await idOf("100001"), teamName: "無リセット", pos: 5 },
+    ]);
+    expect(result.teams[0]?.updatedAt).toBe("2026-08-23 01:00:09");
+    expect(result.events).toHaveLength(3);
+  });
+
+  it("resetが複数回あるチームは、最後のreset世代以降の行だけを数える", async () => {
+    // 世代1・2のresetを跨いだうえ、reset後に遅れて届いた古い世代の行（idは最大）も混ぜる。
+    // idではなくgenerationで落とすので、最後のリセット以降の2行だけが残る。
+    await env.PROGRESS_DB.batch([
+      insertRow({
+        teamCode: "100002",
+        teamName: "第一世代",
+        pos: 5,
+        view: "s6",
+        createdAt: "2026-08-23 01:00:00",
+      }),
+      resetRow("100002", 1, "2026-08-23 01:01:00"),
+      insertRow({
+        teamCode: "100002",
+        teamName: "第二世代",
+        pos: 6,
+        view: "s6",
+        generation: 1,
+        createdAt: "2026-08-23 01:02:00",
+      }),
+      resetRow("100002", 2, "2026-08-23 01:03:00"),
+      insertRow({
+        teamCode: "100002",
+        teamName: "第三世代",
+        pos: 2,
+        view: "s2",
+        generation: 2,
+        createdAt: "2026-08-23 01:04:00",
+      }),
+      insertRow({
+        teamCode: "100002",
+        teamName: "遅れて届いた",
+        pos: 7,
+        view: "final",
+        generation: 1,
+        createdAt: "2026-08-23 01:05:00",
+      }),
+    ]);
+
+    const result = await summary();
+    expect(result.teams).toMatchObject([
+      { publicId: await idOf("100002"), teamName: "第三世代", pos: 2 },
+    ]);
+    expect(result.teams[0]?.updatedAt).toBe("2026-08-23 01:04:00");
+    expect(result.events.map((event) => event.view)).toEqual(["s2", "welcome"]);
+  });
+
+  it("reset後にイベントが無いチームは、pos 0・チーム名なしへ戻る", async () => {
+    await env.PROGRESS_DB.batch([
+      insertRow({
+        teamCode: "100003",
+        teamName: "リセット前",
+        pos: 4,
+        view: "s5",
+        createdAt: "2026-08-23 01:00:00",
+      }),
+      resetRow("100003", 1, "2026-08-23 01:01:00"),
+    ]);
+
+    const result = await summary();
+    expect(result.teams).toMatchObject([{ publicId: await idOf("100003"), teamName: "", pos: 0 }]);
+    expect(result.teams[0]?.updatedAt).toBe("2026-08-23 01:01:00");
+    expect(result.events.map((event) => event.kind)).toEqual(["reset"]);
+  });
+
+  it("あるチームのリセットは、他チームの行を落とさない", async () => {
+    // 世代をチーム単位で畳んでいることの確認。全体のMAXで絞ると、リセットしていない
+    // チームの行（generation 0）まで消える。
+    await env.PROGRESS_DB.batch([
+      insertRow({
+        teamCode: "100004",
+        teamName: "リセット済",
+        pos: 6,
+        view: "s6",
+        createdAt: "2026-08-23 01:00:00",
+      }),
+      resetRow("100004", 3, "2026-08-23 01:01:00"),
+      insertRow({
+        teamCode: "100005",
+        teamName: "無関係",
+        pos: 4,
+        view: "s5",
+        createdAt: "2026-08-23 01:02:00",
+      }),
+    ]);
+
+    const result = await summary();
+    expect(result.teams).toMatchObject([
+      { publicId: await idOf("100005"), teamName: "無関係", pos: 4 },
+      { publicId: await idOf("100004"), teamName: "", pos: 0 },
+    ]);
+  });
+
+  it("同じ停留所の中は到達順に並び、到達後に操作を続けても順位が下がらない（Issue #159）", async () => {
+    // 甲が先にStage 3を突破（pos 4）、乙が後。その後、甲だけがjumpや再入室を続けて
+    // 最終イベント時刻が乙より後になる。ゴール（pos 7）の丙は最後に動いても先頭のまま。
+    await env.PROGRESS_DB.batch([
+      insertRow({
+        teamCode: "100011",
+        teamName: "甲",
+        pos: 4,
+        kind: "clear",
+        createdAt: "2026-08-23 01:00:00",
+      }),
+      insertRow({
+        teamCode: "100012",
+        teamName: "乙",
+        pos: 4,
+        kind: "clear",
+        createdAt: "2026-08-23 01:00:30",
+      }),
+      insertRow({ teamCode: "100012", pos: 4, kind: "entry", createdAt: "2026-08-23 01:00:31" }),
+      insertRow({ teamCode: "100011", pos: 4, kind: "entry", createdAt: "2026-08-23 01:01:00" }),
+      insertRow({ teamCode: "100011", pos: 4, kind: "jump", createdAt: "2026-08-23 01:02:00" }),
+      insertRow({
+        teamCode: "100013",
+        teamName: "丙",
+        pos: 7,
+        kind: "clear",
+        createdAt: "2026-08-23 01:01:30",
+      }),
+      insertRow({ teamCode: "100013", pos: 7, kind: "resume", createdAt: "2026-08-23 01:03:00" }),
+    ]);
+
+    const result = await summary();
+    expect(result.teams.map((team) => team.teamName)).toEqual(["丙", "甲", "乙"]);
+    // 「◯秒前」の表示に使う値は、並び替えとは別に最終イベントの時刻のまま。
+    expect(result.teams.map((team) => team.updatedAt)).toEqual([
+      "2026-08-23 01:03:00",
+      "2026-08-23 01:02:00",
+      "2026-08-23 01:00:31",
+    ]);
+  });
+
+  it("到達時刻はD1に届いた時刻ではなく、サーバが適用した時刻（client_at）で比べる", async () => {
+    // 甲は乙より先にクリアしたが、D1が落ちていた間の再送で積まれたのは乙より後。
+    await env.PROGRESS_DB.batch([
+      insertRow({
+        teamCode: "100021",
+        teamName: "甲",
+        pos: 3,
+        clientAt: "2026-08-23T01:00:00.000Z",
+        createdAt: "2026-08-23 01:05:00",
+      }),
+      insertRow({
+        teamCode: "100022",
+        teamName: "乙",
+        pos: 3,
+        clientAt: "2026-08-23T01:02:00.000Z",
+        createdAt: "2026-08-23 01:02:00",
+      }),
+    ]);
+
+    const result = await summary();
+    expect(result.teams.map((team) => team.teamName)).toEqual(["甲", "乙"]);
+  });
+
+  it("GMリセットしたチームの到達順は、リセット後の到達だけで決まる", async () => {
+    // 甲はリセット前に乙より早くpos 3へ着いていたが、リセット後の再到達は乙より遅い。
+    // 乙はその後も操作を続けるので、最終イベント時刻で並べると甲が先に来てしまう。
+    await env.PROGRESS_DB.batch([
+      insertRow({ teamCode: "100031", teamName: "甲", pos: 3, createdAt: "2026-08-23 01:00:00" }),
+      resetRow("100031", 1, "2026-08-23 01:01:00"),
+      insertRow({ teamCode: "100032", teamName: "乙", pos: 3, createdAt: "2026-08-23 01:02:00" }),
+      insertRow({
+        teamCode: "100031",
+        teamName: "甲",
+        pos: 3,
+        generation: 1,
+        createdAt: "2026-08-23 01:03:00",
+      }),
+      insertRow({ teamCode: "100032", pos: 3, kind: "jump", createdAt: "2026-08-23 01:04:00" }),
+    ]);
+
+    const result = await summary();
+    expect(result.teams.map((team) => team.teamName)).toEqual(["乙", "甲"]);
+  });
+
+  it("サマリー1回のrows readは、行数の二乗にならない", async () => {
+    // 相関サブクエリ版は行ごとにMAX(generation)を引くためO(チーム数 × 1チームの行数²)で、
+    // 当日のポーリングだけで無料プランの上限（D1 rows read 500万/日）を超えていた
+    // （Issue #125）。10チーム×400行の同じデータでの実測は、相関サブクエリ版が
+    // 約18,400行、CTE版が約2,060行、CTE＋部分インデックス（idx_progress_reset）版が
+    // 約1,260行。行数に対して線形であること、かつ部分インデックスが効いていることを
+    // 固定する（インデックスを落とすと約5.2倍/行へ戻り、この上限を超える）。
+    const rows = 400;
+    const teams = 10;
+    await env.PROGRESS_DB.batch(
+      Array.from({ length: rows }, (_unused, index) =>
+        insertRow({
+          teamCode: `1000${String(10 + (index % teams))}`,
+          teamName: "計測",
+          pos: index % 8,
+          view: "s1",
+          createdAt: "2026-08-23 01:00:00",
+        }),
+      ),
+    );
+
+    const [teamsStatement, eventsStatement] = summaryStatements(
+      env.PROGRESS_DB,
+      parseTeamCodeRule(env),
+    );
+    const measured = await Promise.all([teamsStatement.all(), eventsStatement.all()]);
+    const metaSchema = z.object({ rows_read: z.number() });
+    const rowsRead = measured.reduce(
+      (total, result) => total + metaSchema.parse(result.meta).rows_read,
+      0,
+    );
+
+    // 1行あたり4行未満（実測3.2行/行）。二乗なら桁が変わり（旧版は46倍/行）、
+    // 部分インデックスが無ければ5.2倍/行なので、どちらの後退もここで落ちる。
+    expect(rowsRead).toBeLessThan(rows * 4);
+  });
+});

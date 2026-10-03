@@ -1,0 +1,213 @@
+name: 検証
+
+on:
+  pull_request:
+    types: [opened, synchronize, reopened, labeled]
+    paths-ignore:
+      - "docs/**"
+      - "*.md"
+  # mainへのpushでも走らせる。本番へは手元の scripts/deploy-prod.sh で出し、
+  # そのスクリプトが origin/main に対するこの実行の結果（success）を確かめてから出す
+  # （Issue #366）。docsだけの変更では走らないので、deploy-prod.sh は直近の検証済み
+  # コミットまで遡り、そこからの変更が下の規則で省いたファイルだけかを確かめる。
+  # push の規則は paths で書く。行の順序に意味があり、後の行が前の行を上書きする
+  # （すべてを対象にしたうえで docs/ を除き、直下の *.md を除く）。
+  # この規則を変えたら scripts/lib/deploy-checks.sh の ci_skippable_path も変える。
+  push:
+    branches: [main]
+    paths:
+      - "**"
+      - "!docs/**"
+      - "!*.md"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+# 同じPRの実行は最新だけを残し、古い実行は取り消す（PR作成とラベル付与で同じコミットに
+# 2本走る、pushを重ねると古いコミットの検証も最後まで走る、を防ぐ）。
+# 手動実行・mainへのpush・「監査レーン」以外のラベル付与は run_id で自分だけのグループにし、
+# ほかの実行に取り消されない・取り消さない（無関係なラベルで進行中の検証を止めない。
+# mainの各コミットの検証は最後まで走らせ、deploy-prod.shが見る結果を cancelled にしない）。
+# 無関係なラベルでもジョブ自体は省かない。省くと skipped のチェックが同じコミットの
+# 失敗したチェックを覆い隠すため。
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event_name == 'pull_request' && (github.event.action != 'labeled' || github.event.label.name == '監査レーン') && github.event.pull_request.number || github.run_id }}
+  cancel-in-progress: true
+
+jobs:
+  # pnpm verify を CI では2つに分けて並列に走らせる。中身は pnpm verify と同じで、
+  # E2E 以外（verify:checks）と chromium E2E（test:e2e）を別ジョブにし、E2E はさらに
+  # --shard で分ける。E2E が verify の所要時間の大半を占め、1ジョブでは Playwright が
+  # 1 worker でしか走らないため。
+  verify:
+    name: pnpm verify:checks
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          persist-credentials: false
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 11.22.0
+      - uses: actions/setup-node@v6
+        with:
+          node-version: 24
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm verify:checks
+
+  e2e:
+    name: pnpm test:e2e (${{ matrix.shard }}/${{ strategy.job-total }})
+    runs-on: ubuntu-24.04
+    strategy:
+      # ほかの shard の失敗で打ち切らず、落ちたテストを全部出す。
+      fail-fast: false
+      matrix:
+        # shard 数はこの配列の長さ（strategy.job-total）で決まる。増減はここだけ直す。
+        shard: [1, 2, 3]
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          persist-credentials: false
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 11.22.0
+      - uses: actions/setup-node@v6
+        with:
+          node-version: 24
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm exec playwright install --with-deps chromium
+      - run: pnpm test:e2e --shard=${{ matrix.shard }}/${{ strategy.job-total }}
+      # E2Eの失敗は、wrangler dev 自身が落ちて以降が全部 ECONNREFUSED になる形で
+      # 現れることがある（ProxyWorkerの「Network connection lost.」で自死する既知の
+      # 不具合）。Playwrightの出力にはその理由が出ず、wranglerのデバッグログにしか
+      # 残らないので、失敗時だけ中身を出す。
+      - if: failure()
+        run: for f in ~/.config/.wrangler/logs/*.log; do echo "===== $f"; cat "$f"; done
+
+  # ラベル付きPRへのpushのうち、mainを衝突なく取り込んだだけのものは監査レーンを省く。
+  # 判定は scripts/audit-lane-skip-check.sh。ラベル付与（labeled）・PR作成・手動実行では
+  # このジョブ自体が走らず、監査レーンは必ず実行される。
+  audit-lane-gate:
+    name: 監査レーンの要否
+    if: >-
+      github.event_name == 'pull_request'
+      && github.event.action == 'synchronize'
+      && contains(github.event.pull_request.labels.*.name, '監査レーン')
+    runs-on: ubuntu-24.04
+    outputs:
+      skip: ${{ steps.check.outputs.skip }}
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          persist-credentials: false
+          ref: ${{ github.event.pull_request.head.sha }}
+          fetch-depth: 0
+      # 判定スクリプトはPRのheadではなく origin/main の版を使う（PR内で書き換えて
+      # 監査を飛ばせないように）。main にまだ無いときは監査レーンを実行する。
+      - id: check
+        run: |
+          if ! git show origin/main:scripts/audit-lane-skip-check.sh >"$RUNNER_TEMP/audit-lane-skip-check.sh"; then
+            echo "skip=false" >>"$GITHUB_OUTPUT"
+            echo "監査レーンを実行: origin/main に判定スクリプトが無い" >>"$GITHUB_STEP_SUMMARY"
+            exit 0
+          fi
+          bash "$RUNNER_TEMP/audit-lane-skip-check.sh"
+        env:
+          HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+          BEFORE_SHA: ${{ github.event.before }}
+          BASE_REF: ${{ github.base_ref }}
+
+  # 監査レーン（pnpm verify:full）を CI では中身ごとの並列ジョブに分ける。1ジョブで直列に
+  # 回すと40分前後かかるため（Issue #349）。中身のうち pnpm verify（verify:checks と chromium
+  # E2E）は、上の verify・e2e ジョブが条件なしで同じ実行に必ず走るので、ここでは重ねない。
+  # 残りの journey E2E・Mutation Testing・重複検査と依存の監査を、下の3つに分ける。
+  # 起動条件は3つとも同じ（下の if をアンカーで共有する）。中核ロジックを大きく変更した
+  # PRは「監査レーン」ラベルを付けて実行する。audit-lane-gate が走らなかった・失敗した
+  # ときは skip が空なので実行する。
+  audit-journey:
+    name: 監査レーン journey
+    needs: audit-lane-gate
+    if: &audit-lane-if >-
+      !cancelled()
+      && needs.audit-lane-gate.outputs.skip != 'true'
+      && (github.event_name == 'workflow_dispatch'
+        || contains(github.event.pull_request.labels.*.name, '監査レーン'))
+    # test:e2e:all のうち chromium は e2e ジョブと同じなので、journey project だけを走らせる。
+    uses: ./.github/workflows/journey-shards.yml
+
+  audit-mutation:
+    name: 監査レーン pnpm mutation (${{ matrix.shard }}/${{ strategy.job-total }})
+    needs: audit-lane-gate
+    if: *audit-lane-if
+    runs-on: ubuntu-24.04
+    strategy:
+      # ほかの shard の失敗で打ち切らず、生き残った mutant を全部出す。
+      fail-fast: false
+      matrix:
+        # Stryker は1ジョブ15分前後かかり、監査レーンで最も長い。対象ファイルを shard 数で
+        # 分け、shard ごとに別の Stryker を走らせる。shard 数はこの配列の長さで決まる。
+        shard: [1, 2, 3]
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          persist-credentials: false
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 11.22.0
+      - uses: actions/setup-node@v6
+        with:
+          node-version: 24
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      # stryker.config.mjs の mutate に合うファイルを並べ、名前順で shard 数ごとに1つずつ
+      # 割り振る。どの shard にも入らないファイルは出ない。break の閾値は shard ごとに
+      # 判定されるが、全 shard が閾値以上なら全体も閾値以上になる（逆は保証しない）。
+      - id: files
+        run: |
+          node --input-type=module <<'JS' >>"$GITHUB_OUTPUT"
+          import { globSync } from "node:fs";
+          import config from "./stryker.config.mjs";
+          const shard = Number(process.env.SHARD);
+          const total = Number(process.env.TOTAL);
+          // 除外パターン（!）は globSync の引数として意味を持たないので、ここでは扱わない。
+          if (config.mutate.some((pattern) => pattern.startsWith("!"))) {
+            console.error("stryker.config.mjs の mutate に除外パターンがある。shard の割り振りを直す");
+            process.exit(1);
+          }
+          const files = globSync(config.mutate).sort();
+          const mine = files.filter((_, index) => index % total === shard - 1);
+          if (mine.length === 0) {
+            console.error(`shard ${shard}/${total} に割り振るファイルが無い（全${files.length}件）`);
+            process.exit(1);
+          }
+          console.log(`mutate=${mine.join(",")}`);
+          JS
+        env:
+          SHARD: ${{ matrix.shard }}
+          TOTAL: ${{ strategy.job-total }}
+      - run: pnpm mutation --mutate "$MUTATE"
+        env:
+          MUTATE: ${{ steps.files.outputs.mutate }}
+
+  audit-deps:
+    name: 監査レーン pnpm duplicates・audit
+    needs: audit-lane-gate
+    if: *audit-lane-if
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          persist-credentials: false
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 11.22.0
+      - uses: actions/setup-node@v6
+        with:
+          node-version: 24
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm duplicates
+      - run: pnpm audit
