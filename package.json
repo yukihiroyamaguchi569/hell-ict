@@ -1,0 +1,52 @@
+{
+  "name": "hell-ict",
+  "private": true,
+  "type": "module",
+  "version": "0.1.0",
+  "packageManager": "pnpm@11.22.0",
+  "engines": {
+    "node": "^22.18.0 || >=23.6.0"
+  },
+  "scripts": {
+    "build": "pnpm --filter @hell-ict/web build && pnpm --filter @hell-ict/worker build",
+    "build:testplay": "bash scripts/build-testplay.sh",
+    "deploy:prod": "bash scripts/deploy-prod.sh",
+    "dev": "pnpm --filter @hell-ict/web dev",
+    "dev:worker": "pnpm --filter @hell-ict/worker dev",
+    "format": "prettier --write .",
+    "format:check": "prettier --check .",
+    "lint": "eslint . --max-warnings 0",
+    "typecheck": "vue-tsc --build --pretty false && pnpm --filter @hell-ict/worker exec wrangler types --check --env-file /dev/null",
+    "test:domain": "vitest run --config vitest.domain.config.ts",
+    "test:content": "vitest run --config vitest.content.config.ts",
+    "test:worker": "pnpm --filter @hell-ict/worker test",
+    "test:web": "vitest run --config vitest.web.config.ts",
+    "test:scripts": "bash scripts/deploy-prod.test.sh && bash scripts/scenario-overlay.test.sh && bash scripts/public-snapshot.test.sh && bash scripts/check-public-scenario.test.sh",
+    "check:public-scenario": "bash scripts/check-public-scenario.sh",
+    "test:e2e": "playwright test --project=chromium",
+    "test:e2e:all": "playwright test",
+    "mutation": "stryker run",
+    "duplicates": "jscpd packages --min-lines 8 --min-tokens 60 --threshold 0 --reporters console",
+    "audit": "pnpm audit --prod --audit-level high",
+    "verify": "pnpm verify:checks && pnpm test:e2e",
+    "verify:checks": "pnpm format:check && pnpm lint && pnpm typecheck && pnpm build && pnpm test:domain && pnpm test:content && pnpm test:web && pnpm test:worker && pnpm test:scripts && pnpm check:public-scenario",
+    "verify:full": "pnpm verify && pnpm test:e2e:all && pnpm mutation && pnpm duplicates && pnpm audit"
+  },
+  "devDependencies": {
+    "@eslint/js": "9.39.5",
+    "@playwright/test": "1.57.0",
+    "@stryker-mutator/core": "10.0.0",
+    "@stryker-mutator/vitest-runner": "10.0.0",
+    "@types/node": "24.10.1",
+    "eslint": "9.39.5",
+    "eslint-plugin-vue": "10.11.1",
+    "globals": "16.5.0",
+    "jscpd": "5.0.16",
+    "prettier": "3.7.4",
+    "typescript": "5.9.3",
+    "typescript-eslint": "8.71.0",
+    "vitest": "4.1.11",
+    "vue-eslint-parser": "10.4.1",
+    "vue-tsc": "3.3.11"
+  }
+}

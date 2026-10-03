@@ -1,0 +1,30 @@
+diff --git a/wrangler-dist/cli.js b/wrangler-dist/cli.js
+index 1b503ac735a9d79156e60150c5d56e53f9182842..69d8a49ac06effccd80805f99dfc172ecd0cb5b6 100644
+--- a/wrangler-dist/cli.js
++++ b/wrangler-dist/cli.js
+@@ -184640,6 +184640,12 @@ var init_dist12 = __esm({
+             this.onPreviewTokenExpired();
+             break;
+           case "error":
++            // PATCH(hell-ict): ProxyWorkerの「Network connection lost.」を致命扱いしない。
++            // 応答を返している最中にクライアントが切れるとこれが出て wrangler dev がプロセスごと
++            // 終了する（cloudflare/workers-sdk#15451 ほか。4.131.0時点で未修正）。
++            // ページを閉じるだけで起きるので、E2Eはこれで毎回落ち得る。接続が消えただけの
++            // 事象なので握り潰し、devサーバは生かす。
++            if (message.error && message.error.message === "Network connection lost.") break;
+             this.emitErrorEvent("Error inside ProxyWorker", message.error);
+             break;
+         }
+@@ -325473,6 +325479,12 @@ var init_ProxyController = __esm({
+             this.emitPreviewTokenExpiredEvent(message.proxyData);
+             break;
+           case "error":
++            // PATCH(hell-ict): ProxyWorkerの「Network connection lost.」を致命扱いしない。
++            // 応答を返している最中にクライアントが切れるとこれが出て wrangler dev がプロセスごと
++            // 終了する（cloudflare/workers-sdk#15451 ほか。4.131.0時点で未修正）。
++            // ページを閉じるだけで起きるので、E2Eはこれで毎回落ち得る。接続が消えただけの
++            // 事象なので握り潰し、devサーバは生かす。
++            if (message.error && message.error.message === "Network connection lost.") break;
+             this.emitErrorEvent("Error inside ProxyWorker", message.error);
+             break;
+           case "debug-log":

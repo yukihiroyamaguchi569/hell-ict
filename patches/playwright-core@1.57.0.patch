@@ -1,0 +1,32 @@
+diff --git a/lib/server/utils/processLauncher.js b/lib/server/utils/processLauncher.js
+index 954d5e6fbc527e640ccec5709263374101c6340b..4f5c438be478a43d138e41c81ca384889361628f 100644
+--- a/lib/server/utils/processLauncher.js
++++ b/lib/server/utils/processLauncher.js
+@@ -159,6 +159,27 @@ async function launchProcess(options) {
+     options.onExit(exitCode, signal);
+     cleanup().then(fulfillCleanup);
+   });
++  // PATCH(hell-ict): "close" は子プロセスの終了に加えて stdio の EOF を待つ。macOSの製品版
++  // Chrome（PLAYWRIGHT_CHANNEL=chrome）は、別のプロセスグループで動く子に Chrome 自身の
++  // ログ用 stdio を引き継がせる——stdout（fd 1）は GoogleUpdater に、stderr（fd 2）は
++  // chrome_crashpad_handler に（どちらも lsof で相手側を確認）。Chrome が終了してもこれらが
++  // 数分〜無期限に居残ることがあり、その間 stdout/stderr が閉じないので "close" が来ず、
++  // browser.close() が返らない（30秒後の SIGKILL は Chrome のプロセスグループにしか届かない）。
++  // E2E では全件✓のあと集計行が出ずに止まって見える。プロセスの終了（"exit"）から1秒たっても
++  // "close" が来なければ、こちらから stdout と stderr を閉じて "close" を発生させる。
++  // 閉じるのはこの2本だけにする。fd 3/4（--remote-debugging-pipe のプロトコル通信）は誰にも
++  // 引き継がれず Chrome の終了で自然に EOF になるので触らない——そちらまで destroy すると、
++  // 終了直前に届いた読み残しのメッセージを捨ててしまう（Linux の CI の headless shell にも
++  // 同じ処理が及ぶ）。
++  spawnedProcess.once("exit", () => {
++    setTimeout(() => {
++      if (processClosed)
++        return;
++      options.log(`[pid=${spawnedProcess.pid}] <stdout/stderr still open after exit, destroying>`);
++      spawnedProcess.stdout.destroy();
++      spawnedProcess.stderr.destroy();
++    }, 1e3).unref();
++  });
+   addProcessHandlerIfNeeded("exit");
+   if (options.handleSIGINT)
+     addProcessHandlerIfNeeded("SIGINT");

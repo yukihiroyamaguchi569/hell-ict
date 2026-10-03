@@ -1,0 +1,79 @@
+name: journey E2E（shard）
+
+# journey E2E（e2e/journey/）を shard に分けて走らせる本体。単独では起動せず、
+# journey.yml（ラベルの無いPR）と verify.yml の監査レーン（ラベル付きPR・手動実行）から
+# 呼ぶ。どちらから呼んでも同じ journey を同じ分け方で走らせるため、ここに1つだけ置く。
+# 起動条件と concurrency は呼び出し側が持つ。
+on:
+  workflow_call:
+
+permissions:
+  contents: read
+
+jobs:
+  # journey のテストは1本3分前後かかるので、1本ずつ別ジョブで並列に走らせる。
+  # shard 数を固定で書くと、spec の増減で直列が残ったり空の shard が出たりするため、
+  # ここで journey project のテスト数を数え、shard 数をその数にそろえる
+  # （fullyParallel なので、テスト数と同じ数に分ければ1ジョブ1本になる）。
+  list:
+    name: journey のテスト数
+    runs-on: ubuntu-24.04
+    outputs:
+      shards: ${{ steps.count.outputs.shards }}
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          persist-credentials: false
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 11.22.0
+      - uses: actions/setup-node@v6
+        with:
+          node-version: 24
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      # --list はテストを数えるだけで、webServer もブラウザも起動しない。
+      # 0本や読み込みエラーは、journey が黙って走らなくなる形なので落とす。
+      - id: count
+        run: |
+          pnpm exec playwright test --project=journey --list --reporter=json >"$RUNNER_TEMP/journey-list.json"
+          JOURNEY_LIST="$RUNNER_TEMP/journey-list.json" node <<'JS' >>"$GITHUB_OUTPUT"
+          const fs = require("node:fs");
+          const report = JSON.parse(fs.readFileSync(process.env.JOURNEY_LIST, "utf8"));
+          const count = (suite) =>
+            (suite.specs ?? []).reduce((n, spec) => n + spec.tests.length, 0) +
+            (suite.suites ?? []).reduce((n, child) => n + count(child), 0);
+          const total = report.suites.reduce((n, suite) => n + count(suite), 0);
+          if (report.errors.length > 0 || total === 0) {
+            console.error(`journey のテストを数えられない（${total}本、エラー${report.errors.length}件）`);
+            process.exit(1);
+          }
+          console.log(`shards=${JSON.stringify(Array.from({ length: total }, (_, i) => i + 1))}`);
+          JS
+
+  journey:
+    name: playwright journey (${{ matrix.shard }}/${{ strategy.job-total }})
+    needs: list
+    runs-on: ubuntu-24.04
+    strategy:
+      # ほかの shard の失敗で打ち切らず、落ちたテストを全部出す。
+      fail-fast: false
+      matrix:
+        shard: ${{ fromJSON(needs.list.outputs.shards) }}
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          persist-credentials: false
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 11.22.0
+      - uses: actions/setup-node@v6
+        with:
+          node-version: 24
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm exec playwright install --with-deps chromium
+      - run: pnpm exec playwright test --project=journey --shard=${{ matrix.shard }}/${{ strategy.job-total }}
+      # verify.yml と同じ理由（wrangler dev が接続断で落ちると理由が wrangler のログにしか残らない）。
+      - if: failure()
+        run: for f in ~/.config/.wrangler/logs/*.log; do echo "===== $f"; cat "$f"; done

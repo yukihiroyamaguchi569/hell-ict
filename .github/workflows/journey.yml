@@ -1,0 +1,43 @@
+name: 通しE2E
+
+# 新アプリを通す journey E2E（e2e/journey/）は1本数分かかるため、
+# pnpm verify には入れず監査レーン（pnpm verify:full、CIでは verify.yml の監査レーン）に置いている。
+# ただ監査レーンは「監査レーン」ラベルか手動実行でしか走らず、演出だけを
+# 変えるPRではラベルが付かないので、journey がCIで一度も回らないまま書き換えられていた。
+# journey の結果を左右するファイルを変えたPRでは、ラベルが無くてもここで走らせる。
+on:
+  pull_request:
+    # labeled は含めない。ラベル付与で走るのは verify.yml の監査レーンで足りる。
+    types: [opened, synchronize, reopened]
+    paths:
+      - "assets/images/production/**"
+      - "apps/worker/**"
+      - "apps/web/**"
+      - "packages/domain/**"
+      - "packages/content/**"
+      - "e2e/**"
+      - "scripts/build-testplay.sh"
+      - "playwright.config.ts"
+      - "package.json"
+      - "pnpm-lock.yaml"
+      - "pnpm-workspace.yaml"
+      - "patches/**"
+      - "tsconfig.base.json"
+      - ".github/workflows/journey.yml"
+      - ".github/workflows/journey-shards.yml"
+
+permissions:
+  contents: read
+
+# verify.yml と同じ理由で、同じPRの実行は最新だけを残す（pull_request でしか走らない）。
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number }}
+  cancel-in-progress: true
+
+jobs:
+  # 本体は journey-shards.yml（テスト数を数えて1本1ジョブの shard に分ける）。
+  journey:
+    name: journey
+    # 「監査レーン」ラベル付きのPRは verify.yml の監査レーンが同じ journey を走らせるので二重にしない。
+    if: ${{ !contains(github.event.pull_request.labels.*.name, '監査レーン') }}
+    uses: ./.github/workflows/journey-shards.yml

@@ -1,0 +1,79 @@
+/*
+ * 共通シェルのデザイントークン。モック hell-ict-archive:docs/ui/mock/index.html の :root・[data-mode] の写しで、
+ * トークン名（--bg --surface --fg --accent --rule --ok --warn --ai-surface ほか）は
+ * hell-ict-scenario:docs/ui/00_共通シェルと通奏低音.md の実装メモのとおりモックから持ち越す。
+ */
+
+/* --- 書体の3役 -------------------------------------------------------- */
+/* アプリのシェル＝今日のもの／病院から届くもの＝2003年／数字＝計器 */
+:root {
+  --font-ui:
+    system-ui, -apple-system, "Hiragino Kaku Gothic ProN", "Yu Gothic Medium", "Noto Sans JP",
+    sans-serif;
+  --font-legacy:
+    "ＭＳ ゴシック", "MS Gothic", "Osaka－等幅", "Osaka-Mono", "Hiragino Kaku Gothic ProN",
+    monospace;
+  --font-num: ui-monospace, SFMono-Regular, Menlo, "Courier New", monospace;
+
+  /* 全モード共通 — AIチャットだけは、暗い病院の中で常に明るい */
+  --ai-surface: #f7f9fa;
+  --ai-surface-2: #eaeef1;
+  --ai-fg: #1a1d20;
+  --ai-muted: #656d74;
+  --ai-rule: #d4dbe0;
+  --phs: #1f6b3f;
+}
+
+/* --- テーマモード ------------------------------------------------------ */
+/* 転調は「赤い帯を足す」ではなく、器の色そのものを差し替えることで起こす。
+   --fg-muted は「目立たないこと自体が演出」の側、--fg-note は参加者が次の判断に使う小文字
+   （背景とのコントラスト比4.5:1以上。Issue #144）。 */
+[data-mode="peace"] {
+  --bg: #f5f1e8;
+  --surface: #fffdf8;
+  --surface-2: #efe9dc;
+  --fg: #2b2724;
+  --fg-muted: #6f6559;
+  --fg-note: #6f6559;
+  --accent: #3f7d78;
+  --rule: #ddd5c6;
+  --ok: #3f7d78;
+  --warn: #b8862b;
+}
+[data-mode="alert"] {
+  --bg: #14171a;
+  --surface: #1e2226;
+  --surface-2: #272c31;
+  --fg: #e8ecef;
+  --fg-muted: #8d979f;
+  --fg-note: #8d979f;
+  --accent: #c1121f;
+  --rule: #2c3238;
+  --ok: #3fa66b;
+  --warn: #d99a1f;
+}
+[data-mode="crisis"] {
+  --bg: #08090a;
+  --surface: #101112;
+  --surface-2: #17191b;
+  --fg: #d8dce0;
+  --fg-muted: #6b7176;
+  --fg-note: #7f868c;
+  --accent: #e01e2b;
+  --rule: #1e2022;
+  --ok: #3fa66b;
+  --warn: #d99a1f;
+}
+
+/* --- 文字サイズ3段階（issue #87） ----------------------------------------- */
+/* 読ませるものだけを --fs-scale の乗算にする。ヘッダー・ペイン幅・ボタンの寸法は倍率を
+   掛けない——ファシリテーターが「右のAI」と言える配置は段階が変わっても動かない。 */
+.screen {
+  --fs-scale: 1;
+}
+.screen[data-fs="2"] {
+  --fs-scale: 1.15;
+}
+.screen[data-fs="3"] {
+  --fs-scale: 1.3;
+}

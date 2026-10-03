@@ -1,0 +1,245 @@
+<!doctype html>
+<html lang="ja">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>結果発表 | 地獄のICT</title>
+    <!--
+      デブリーフィングで会場へ映す番付。scripts/ranking-board/server.mjs が配り、
+      GET /api/results を30秒間隔でポーリングして描画する。単一ファイル・依存ゼロ。
+      チーム名は参加者の入力なので、必ず textContent で差し込む。
+    -->
+    <style>
+      :root {
+        --bg: #0b0f14;
+        --panel: #121924;
+        --panel-edge: #1e2a3a;
+        --ink: #e8eef6;
+        --ink-dim: #8ea0b8;
+        --gold: #f5b942;
+        --accent: #4cc2ff;
+        --alert: #ff6b5e;
+      }
+      * {
+        box-sizing: border-box;
+      }
+      body {
+        margin: 0;
+        min-height: 100vh;
+        background: var(--bg);
+        color: var(--ink);
+        font-family: "Hiragino Kaku Gothic ProN", "Yu Gothic", "Meiryo", system-ui, sans-serif;
+        font-size: clamp(16px, 1.4vw, 26px);
+        display: flex;
+        flex-direction: column;
+        align-items: center;
+        padding: 2em 1em 3em;
+      }
+      h1 {
+        margin: 0 0 0.2em;
+        font-size: 2.6em;
+        letter-spacing: 0.1em;
+        color: var(--gold);
+      }
+      .sub {
+        margin: 0 0 1.6em;
+        color: var(--ink-dim);
+      }
+      main {
+        width: min(100%, 40em);
+        display: grid;
+        gap: 1.6em;
+      }
+      section {
+        background: var(--panel);
+        border: 2px solid var(--panel-edge);
+        border-radius: 0.6em;
+        padding: 1em 1.4em;
+      }
+      h2 {
+        margin: 0 0 0.6em;
+        font-size: 1.2em;
+        color: var(--accent);
+      }
+      ol {
+        list-style: none;
+        margin: 0;
+        padding: 0;
+      }
+      li {
+        display: grid;
+        grid-template-columns: 3em 1fr auto;
+        align-items: center;
+        gap: 0.6em;
+        padding: 0.5em 0;
+        border-bottom: 1px solid var(--panel-edge);
+      }
+      li:last-child {
+        border-bottom: none;
+      }
+      .rank {
+        text-align: center;
+        color: var(--ink-dim);
+      }
+      /* 上位3チームは文字だけ大きくし、列幅（em）の基準になる li の文字サイズは揃えたままにする。 */
+      li.top .name,
+      li.top .meta {
+        font-size: 1.25em;
+      }
+      li.top .rank {
+        font-size: 1.6em;
+      }
+      .name {
+        font-weight: bold;
+        overflow-wrap: anywhere;
+      }
+      .meta {
+        color: var(--ink-dim);
+        font-variant-numeric: tabular-nums;
+      }
+      .empty {
+        color: var(--ink-dim);
+        margin: 0.4em 0;
+      }
+      .audit .name {
+        font-size: 1.5em;
+        color: var(--gold);
+      }
+      footer {
+        margin-top: 1.6em;
+        color: var(--ink-dim);
+        font-size: 0.75em;
+      }
+      footer a {
+        color: var(--ink-dim);
+      }
+      .error {
+        color: var(--alert);
+      }
+    </style>
+  </head>
+  <body>
+    <h1>結果発表</h1>
+    <p class="sub">聖クロノス総合病院 感染制御チーム 対策本部</p>
+    <main>
+      <section>
+        <h2>🏆 着順（Stage 6 クリア）</h2>
+        <div id="goals"><p class="empty">読み込み中…</p></div>
+      </section>
+      <section class="audit">
+        <h2>🔍 監査賞（罠を踏まずに Stage 3 を最速で通過）</h2>
+        <div id="audit"><p class="empty">読み込み中…</p></div>
+      </section>
+    </main>
+    <footer>
+      <span id="status"></span> ・ 30秒ごとに自動更新 ・ <a href="/handover">申し送りへ</a>
+    </footer>
+
+    <script>
+      "use strict";
+      const POLL_MS = 30_000;
+      const FETCH_TIMEOUT_MS = 90_000;
+      const MEDALS = ["🥇", "🥈", "🥉"];
+
+      const displayName = (name) => (name === "" ? "（チーム名なし）" : name);
+
+      // 集計SQLの時刻は "YYYY-MM-DD HH:MM:SS.SSS"（UTC）。日本時間の時刻だけを出す。
+      const toJstTime = (utc) => {
+        const date = new Date(`${utc.replace(" ", "T")}Z`);
+        if (Number.isNaN(date.getTime())) return utc;
+        return date.toLocaleTimeString("ja-JP", { timeZone: "Asia/Tokyo", hour12: false });
+      };
+
+      const el = (tag, className, text) => {
+        const node = document.createElement(tag);
+        if (className) node.className = className;
+        if (text !== undefined) node.textContent = text;
+        return node;
+      };
+
+      const renderGoals = (goals) => {
+        const list = document.getElementById("goals");
+        if (goals.length === 0) {
+          list.replaceChildren(el("p", "empty", "まだゴールしたチームはありません"));
+          return;
+        }
+        const ol = el("ol");
+        ol.append(
+          ...goals.map((goal, i) => {
+            const item = el("li", i < 3 ? "top" : "");
+            item.append(
+              el("span", "rank", MEDALS[i] ?? `${String(i + 1)}位`),
+              el("span", "name", displayName(goal.teamName)),
+              el("span", "meta", `${toJstTime(goal.goalAtUtc)} ゴール`),
+            );
+            return item;
+          }),
+        );
+        list.replaceChildren(ol);
+      };
+
+      // audit は受賞チームだけ（同着なら複数）。0行なら「該当なし」（罠は確実に発動するので0行になりやすい）。
+      const renderAudit = (audit) => {
+        const box = document.getElementById("audit");
+        const [best] = audit;
+        if (best === undefined) {
+          box.replaceChildren(
+            el("p", "empty", "該当なし — 罠を踏まずに抜けたチームは、今回はいませんでした"),
+          );
+          return;
+        }
+        box.replaceChildren(
+          ...audit.map((winner) => el("p", "name", displayName(winner.teamName))),
+          el(
+            "p",
+            "meta",
+            `Stage 3 を ${String(best.s3Min)} 分で通過${audit.length > 1 ? "（同着）" : ""}`,
+          ),
+        );
+      };
+
+      const isResults = (data) =>
+        typeof data === "object" &&
+        data !== null &&
+        Array.isArray(data.goals) &&
+        Array.isArray(data.audit);
+
+      const setStatus = (text, isError) => {
+        const status = document.getElementById("status");
+        status.textContent = text;
+        status.className = isError ? "error" : "";
+      };
+
+      // 失敗しても直前の表示は残し、フッターにだけ知らせる（発表中に画面を空にしない）。
+      const refresh = async () => {
+        const controller = new AbortController();
+        const timer = setTimeout(() => controller.abort(), FETCH_TIMEOUT_MS);
+        try {
+          const response = await fetch("/api/results", {
+            signal: controller.signal,
+            cache: "no-store",
+          });
+          const data = await response.json();
+          if (!response.ok) throw new Error(data.error ?? `HTTP ${String(response.status)}`);
+          if (!isResults(data)) throw new Error("結果の形が想定と違う");
+          renderGoals(data.goals);
+          renderAudit(data.audit);
+          setStatus(
+            `開催回 ${data.eventNo} ・ ${new Date(data.fetchedAt).toLocaleTimeString("ja-JP")} 更新`,
+            false,
+          );
+        } catch (error) {
+          setStatus(
+            `更新に失敗しました（${error instanceof Error ? error.message : String(error)}）`,
+            true,
+          );
+        } finally {
+          clearTimeout(timer);
+        }
+      };
+
+      void refresh();
+      setInterval(() => void refresh(), POLL_MS);
+    </script>
+  </body>
+</html>
