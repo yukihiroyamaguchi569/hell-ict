@@ -1,5 +1,6 @@
 #!/usr/bin/env bash
 # Decide whether the audit lane (pnpm verify:full) can be skipped for a PR push.
+# (Throwaway PR to confirm the skip in CI; never merged.)
 #
 # Skip only when the push added nothing but a clean merge of the base branch:
 #   1. HEAD is a merge commit whose first parent is the previously pushed head (BEFORE_SHA),
