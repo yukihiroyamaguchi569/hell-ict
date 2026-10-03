@@ -12,13 +12,13 @@
 
 pnpm の monorepo です。
 
-| パス | 中身 |
-|---|---|
-| `apps/web` | 参加者が操作する画面（Vue 3 / Vite） |
-| `apps/worker` | API と配信（Cloudflare Workers）。チームの状態とリーダーボードは Durable Objects に置く |
-| `packages/domain` | ゲームの状態遷移・判定・時間処理（副作用のない関数） |
-| `packages/content` | シナリオのデータ（このリポジトリではダミー） |
-| `e2e/` | Playwright の E2E テスト |
+| パス               | 中身                                                                                    |
+| ------------------ | --------------------------------------------------------------------------------------- |
+| `apps/web`         | 参加者が操作する画面（Vue 3 / Vite）                                                    |
+| `apps/worker`      | API と配信（Cloudflare Workers）。チームの状態とリーダーボードは Durable Objects に置く |
+| `packages/domain`  | ゲームの状態遷移・判定・時間処理（副作用のない関数）                                    |
+| `packages/content` | シナリオのデータ（このリポジトリではダミー）                                            |
+| `e2e/`             | Playwright の E2E テスト                                                                |
 
 AI の応答は OpenAI API を Worker 経由で呼びます。ブラウザから直接は呼びません。
 
