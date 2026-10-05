@@ -60,6 +60,10 @@ test("手作業で直して提出するとクリアし、交代の案内まで�
   await expect(grid(page).locator("td.hot")).toHaveCount(0);
   await button(page, "提出する").click();
 
+  // 合格は4項目の ✓ とクリアの一行が判定枠に順に出て、出そろってからクリア演出に進む。
+  await expect(verdict(page)).toContainText("✓ 行数が20行");
+  await expect(verdict(page)).toContainText("Stage 2 をクリアしました");
+  await expect(page.getByTestId("clear-unlock")).toHaveCount(0);
   await expect(page.getByTestId("clear-unlock")).toContainText("Stage 2 をクリアしました");
   await expect(page.getByTestId("clear-field")).toBeVisible();
   await button(page, "次へ").click();

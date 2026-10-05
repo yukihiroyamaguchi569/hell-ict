@@ -84,11 +84,22 @@ describe("受信トレイと［表に追加］", () => {
 });
 
 describe("判定の表示", () => {
-  it("合格はクリアの一行", () => {
-    expect(stage2Verdict({ outcome: "pass" }, 20)).toEqual({
+  it("合格は4項目すべての ✓（差し戻しと同じ文言）の後にクリアの一行", () => {
+    expect(stage2Verdict({ outcome: "pass" }, 30)).toEqual({
       kind: "cleared",
       text: "Stage 2 をクリアしました",
+      checks: [
+        "✓ 必須列がすべて埋まっている",
+        "✓ 採取日が YYYY-MM-DD に統一",
+        "✓ MRSA結果が 陽性/陰性 の2値",
+        "✓ 行数が30行",
+      ],
     });
+  });
+
+  it("合格の行数の項目は、渡された期待行数を名乗る（締切前は20行）", () => {
+    const verdict = stage2Verdict({ outcome: "pass" }, 20);
+    expect(verdict.kind === "cleared" ? verdict.checks?.at(-1) : null).toBe("✓ 行数が20行");
   });
 
   it("採取日で落ちたら、前は✓・落ちた項目に件数・次は中断・最後にやり直しの案内", () => {

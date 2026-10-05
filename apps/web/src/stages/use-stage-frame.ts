@@ -22,7 +22,10 @@ export interface StageFrame {
   readonly chatSubmit: ComputedRef<ChatSubmit | undefined>;
   /** The stage's own conversation (`StageInstance.chat`; `undefined`: none). */
   readonly chat: ComputedRef<ScriptedChat | undefined>;
-  /** The stage holds back the clear effect (`StageInstance.holdClear`, only with an overlay). */
+  /**
+   * The stage holds back the clear effect (`StageInstance.holdClear`, only with an overlay, or
+   * `StageInstance.pauseClear`).
+   */
   readonly clearHeld: ComputedRef<boolean>;
 }
 
@@ -66,8 +69,12 @@ export const useStageFrame = (
 
   // A hold without a window to show would leave the team with neither the window nor the
   // effect: stuck. Only a stage that has an overlay may hold, and while it holds its window is up.
-  const clearHeld = computed(
+  const windowHeld = computed(
     () => instance.value?.overlay !== undefined && (instance.value.holdClear?.value ?? false),
+  );
+  // A pause keeps the centre on screen, and the stage releases it by time (`pauseClear`).
+  const clearHeld = computed(
+    () => windowHeld.value || (instance.value?.pauseClear?.value ?? false),
   );
 
   return {
@@ -75,7 +82,7 @@ export const useStageFrame = (
     instance,
     focus: computed(() => instance.value?.focus?.value ?? null),
     overlayWanted: computed(
-      () => (instance.value?.overlayWanted?.value ?? false) || clearHeld.value,
+      () => (instance.value?.overlayWanted?.value ?? false) || windowHeld.value,
     ),
     rightOverride: computed(() => instance.value?.rightPane?.value ?? null),
     viewerToolbar: (doc) => (doc === null ? null : (instance.value?.viewerToolbar?.(doc) ?? null)),
