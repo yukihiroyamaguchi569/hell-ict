@@ -21,7 +21,7 @@ import { fingerprintSchema, mismatchesFingerprint } from "./guard.js";
 
 type StoredCheckpointState = { snapshot: string };
 /**
- * チェックポイント台帳の行。台帳のfingerprintを信用しない理由は、team-room.tsの
+ * チェックポイント台帳の行。台帳のfingerprintを信用しない理由は、chat-ledger.tsの
  * 冪等台帳の行（storedLedgerRowSchema）の注記と同じ。
  */
 const storedCheckpointCommandSchema = z.object({
