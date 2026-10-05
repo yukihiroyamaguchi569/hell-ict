@@ -19,7 +19,7 @@ import type { Stage3 } from "./use-stage3.js";
  * the dermatologist says what happened) and call, and the bottle penalty (mock drawBottles).
  */
 const props = defineProps<{ stage: Stage3; penalty: BottlePenalty }>();
-const { overlay } = props.stage;
+const { overlay, penaltyDoneShown } = props.stage;
 const { shelf, note, freshWard, elapsedMs, failed, fill, retry } = props.penalty;
 const wards = computed(() => shelfWards(shelf.value));
 const bottleSrc = portraitSrc(stage3Penalty.bottleImg);
@@ -49,6 +49,7 @@ const tag = (state: string, ward: string): string => {
     v-else-if="overlay === 'penalty'"
     :heading="stage3Penalty.heading"
     :elapsed-ms="elapsedMs"
+    :done="penaltyDoneShown"
     wide
   >
     <div class="ptop">

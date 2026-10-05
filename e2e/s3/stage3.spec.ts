@@ -2,6 +2,7 @@ import { expect, test, type Page } from "@playwright/test";
 
 import {
   missionTitles,
+  penaltyDoneText,
   stage3KarubeAfterTrap,
   stage3KarubeFinalPush,
   stage3KarubeLines,
@@ -158,6 +159,8 @@ test("罠の初回は暗転→皮膚科医→罰。罰の途中で再読み込�
   expect(game.count("s3.submit")).toBe(1);
 
   await fillEveryBottle(page, game);
+  // Paid: the window says so for a moment before it closes.
+  await expect(lock(page).getByTestId("penalty-done")).toHaveText(penaltyDoneText);
   await expect(lock(page)).toHaveCount(0);
   await expect(field(page, "ppe")).toHaveValue(TRAP_PPE);
 
@@ -210,6 +213,9 @@ test("苅部さん: 差し戻しで2行、罰明けに「出ましたか」、�
   await submitButton(page).click();
   await call(page).getByRole("button", { name: "了解しました" }).click();
   await fillEveryBottle(page, game);
+  // The phone rings for the end of the penalty only once its window has closed.
+  await expect(lock(page).getByTestId("penalty-done")).toBeVisible();
+  await expect(badge(page)).toHaveCount(0);
   await expect(lock(page)).toHaveCount(0);
   await expect(badge(page)).toHaveText("2");
   await readPhone(page, stage3KarubeAfterTrap);

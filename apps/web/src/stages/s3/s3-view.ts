@@ -88,7 +88,8 @@ export const NOTICE_DELAY_MS = 2_600;
  * - notice: the nursing director's news, once (a reload after 了解しました does not bring it
  *   back). Never after the trap: that team has been here already.
  * - blackout, scold: the trap's first firing, played only in the tab that fired it.
- * - penalty: the bottles, as long as the server has the penalty running (a reload lands here).
+ * - penalty: the bottles, as long as the server has the penalty running (a reload lands here),
+ *   and a moment longer while 「罰ゲーム完了！」 shows in the tab that paid it (`penaltyHeld`).
  */
 export type Stage3Overlay = "notice" | "blackout" | "scold" | "penalty" | null;
 
@@ -100,6 +101,8 @@ export interface OverlayFacts {
   readonly trapScene: "blackout" | "scold" | null;
   /** A submission is on its way: its answer decides what comes next. */
   readonly submitting: boolean;
+  /** The penalty was just paid here: its window stays for PENALTY_DONE_MS. */
+  readonly penaltyHeld: boolean;
 }
 
 const noticeDue = ({ state, serverNow, noticeSeen }: OverlayFacts): boolean => {
@@ -115,5 +118,6 @@ const noticeDue = ({ state, serverNow, noticeSeen }: OverlayFacts): boolean => {
 export const stage3Overlay = (facts: OverlayFacts): Stage3Overlay => {
   if (facts.state.game.stage !== "s3" || facts.submitting) return null;
   if (facts.state.game.penalties.s3 === "in-progress") return facts.trapScene ?? "penalty";
+  if (facts.penaltyHeld) return "penalty";
   return noticeDue(facts) ? "notice" : null;
 };

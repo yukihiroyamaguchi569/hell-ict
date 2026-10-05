@@ -1,6 +1,7 @@
 import { expect, test, type Page } from "@playwright/test";
 
 import {
+  penaltyDoneText,
   stage5CallLines,
   stage5FeverRows,
   stage5IncidentReport,
@@ -133,6 +134,7 @@ test("AIへ個人情報を送ると警報 → 叱責 → 黒塗りの罰。塗�
   await press(page, () => true);
   await submitReport(page);
   await expect(lock(page).getByTestId("verdict")).toContainText(stage5ReportVerdicts.sent);
+  await expect(lock(page).getByTestId("penalty-done")).toHaveText(penaltyDoneText);
   await expect(lock(page)).toHaveCount(0);
 
   // Back at the chat: the system bubble says it was blocked, the text is still in the input, and

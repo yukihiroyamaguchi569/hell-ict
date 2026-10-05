@@ -18,8 +18,10 @@ export interface BottlePenaltyDeps {
   readonly serverNow: Readonly<Ref<number>>;
   readonly scheduler: Scheduler;
   readonly sfx: Sfx;
-  /** The server has the penalty paid. */
-  readonly onPaid: () => void;
+  /** Every bottle is full and `s3.finish-penalty` is about to be sent (again, on a retry). */
+  readonly onFinishing: () => void;
+  /** The answer to it: `true` when the server has the penalty paid, `false` when not delivered. */
+  readonly onFinished: (paid: boolean) => void;
 }
 
 export interface BottlePenalty {
@@ -91,9 +93,11 @@ export const useBottlePenalty = (deps: BottlePenaltyDeps): BottlePenalty => {
   const finish = async (): Promise<void> => {
     failed.value = false;
     commandId ??= deps.newCommandId();
+    deps.onFinishing();
     const outcome = await deps.send({ type: "s3.finish-penalty" }, commandId);
-    if (outcome.kind === "done") deps.onPaid();
-    else failed.value = true;
+    const paid = outcome.kind === "done";
+    failed.value = !paid;
+    deps.onFinished(paid);
   };
 
   const land = (ward: string): void => {
