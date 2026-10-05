@@ -526,7 +526,7 @@ export const stage5Penalty = {
 /** 報告書の判定の文（モック submitReport）。塗り残しと塗りすぎは両方並ぶことがある。 */
 export const stage5ReportVerdicts = {
   missing: "個人情報が残っています。",
-  over: "日時や部署名まで黒く塗られていて、何が起きたのか分かりません。",
+  over: "不必要な部分まで黒く塗られています。",
   sent: "報告書を医療安全管理室へ送信しました。",
 } as const;
 
