@@ -35,7 +35,7 @@ export const RESET_KEPT_TABLES = ["reset_generation", "migrations"] as const;
  * その1種類だけを握る（applyAddColumns）。ほかの失敗まで握ると、列の無いまま
  * コンストラクタが通り、以後の読み書きが欠けた列を相手に延々失敗し続ける。
  *
- * 既存行のprompt_profileはNULLになり、照合をスキップする（team-room.tsのmismatchesPending）。
+ * 既存行のprompt_profileはNULLになり、照合をスキップする（chat-ledger.tsのmismatchesPending）。
  *
  * テストが各文を直接当てて「移行後は全列が揃っている」ことを確かめるので公開する。
  */
