@@ -140,7 +140,7 @@ describe("useStage3", () => {
     expect(stage.overlay.value).toBeNull();
     expect(stage.verdict.value).toEqual({
       kind: "rejected",
-      lines: ["まだ基準が正しくありません。正典を確認してください。"],
+      lines: ["まだ基準が正しくありません。院内感染対策マニュアルを確認してください。"],
     });
     expect(sounds).toEqual([]);
   });

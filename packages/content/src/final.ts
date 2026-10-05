@@ -56,7 +56,7 @@ export const finalBoardTiles = [
   {
     id: "s3",
     n: "STAGE 3",
-    achieve: "AIの誤りを正典で見抜き、方針を立てた",
+    achieve: "AIの誤りをマニュアルで見抜き、方針を立てた",
     icon: '<path d="M12 3l7 3v6c0 5-3.2 8-7 9-3.8-1-7-4-7-9V6l7-3z"></path>',
   },
   {

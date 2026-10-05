@@ -80,7 +80,8 @@ export const stage3KarubeLines = [
 ] as const satisfies Lines;
 
 /** 罰ゲーム明けの苅部さん。 */
-export const stage3KarubeAfterTrap = "〔苅部〕……ああ、出ましたか。正典、読んでください。";
+export const stage3KarubeAfterTrap =
+  "〔苅部〕……ああ、やっぱり。院内感染対策マニュアル、共有フォルダにありますよ。";
 
 /*
  * 罠判定が続いたときの苅部さん（Issue #219）。どれを出すかは domain の stage3TrapHint が
@@ -139,7 +140,7 @@ export const stage3SubmitLabel = "提出する";
 /** 提出結果の文言。欄の不足は `${欄名}${shortSuffix}`。 */
 export const stage3Verdicts = {
   shortSuffix: "の欄が、まだ足りません。",
-  trapRepeated: "まだ基準が正しくありません。正典を確認してください。",
+  trapRepeated: "まだ基準が正しくありません。院内感染対策マニュアルを確認してください。",
   cleared: "Stage 3 をクリアしました",
 } as const;
 
