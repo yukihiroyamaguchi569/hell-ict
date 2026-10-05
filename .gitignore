@@ -23,3 +23,5 @@ docs/testplay/*.csv
 .deploy.env
 # 本物のシナリオを overlay した印（scripts/lib/scenario-overlay.sh）。
 .scenario-overlay
+# コードをチェックするツール scoria の手元の設定。
+scoria.config.json
