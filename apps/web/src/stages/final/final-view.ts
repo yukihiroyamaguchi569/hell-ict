@@ -141,6 +141,22 @@ export const handoverQuote = (line: string | null): string => `「${line ?? ""}�
 
 /** The stage behind the goal's title (the picture has no words; the title is laid over it). */
 export const GOAL_BACKDROP = portraitSrc("final-goal-ceremony.webp");
+/** The certificate's paper and gilded frame; its text is laid inside the plain middle. */
+export const CERTIFICATE_FRAME = portraitSrc("final-certificate-frame.webp");
+
+export type QuoteSize = "large" | "medium" | "small";
+
+const QUOTE_LARGE_MAX = 34;
+const QUOTE_MEDIUM_MAX = 74;
+
+/**
+ * How big the certificate sets the team's line (with its 「」): a short line large, and smaller as
+ * it grows, so even a line of FINAL_LINE_MAX stays inside the frame's plain middle.
+ */
+export const quoteSize = (quote: string): QuoteSize => {
+  if (quote.length <= QUOTE_LARGE_MAX) return "large";
+  return quote.length <= QUOTE_MEDIUM_MAX ? "medium" : "small";
+};
 
 /** The scenes drawn over the whole screen; the board and the rest are the centre pane's. */
 export const overlayScene = (phase: FinalPhase): boolean =>

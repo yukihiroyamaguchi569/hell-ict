@@ -129,6 +129,9 @@ test("ゴールから感謝状まで。一言は1回だけ記録し、コマン�
 
   await expect(page.getByTestId("final-address")).toHaveText(`${TEAM}${WIDE}御中`);
   await expect(page.getByTestId("final-quote")).toHaveText(`「${LINE}」`);
+  // The gilded frame picture is served and drawn under the text.
+  const frame = handover(page).locator("img.frame-art");
+  await expect.poll(() => frame.evaluate((img: HTMLImageElement) => img.naturalWidth)).toBe(1586);
   await expect(handover(page).locator("b", { hasText: "班" })).toHaveCount(0);
   await expect(handover(page).locator("b", { hasText: "名前を消す" })).toHaveCount(0);
 

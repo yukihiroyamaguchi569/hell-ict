@@ -9,7 +9,13 @@ import {
 import { computed } from "vue";
 
 import CallWindow from "../common/CallWindow.vue";
-import { GOAL_BACKDROP, relayButtonText, WIDE_SPACE } from "./final-view.js";
+import {
+  CERTIFICATE_FRAME,
+  GOAL_BACKDROP,
+  quoteSize,
+  relayButtonText,
+  WIDE_SPACE,
+} from "./final-view.js";
 import GoalConfetti from "./GoalConfetti.vue";
 import type { Final } from "./use-final.js";
 
@@ -21,6 +27,7 @@ import type { Final } from "./use-final.js";
  */
 const props = defineProps<{ final: Final }>();
 const { phase, confetti, goalName, address, quote } = props.final;
+const quoteClass = computed(() => quoteSize(quote.value));
 
 const epilogueCall = { ...execVoices.incho, tb: finalLabels.epilogueTitle };
 const relayStep = computed(() => (phase.value.kind === "relay" ? phase.value.step : 0));
@@ -71,17 +78,12 @@ const onRelayClick = (event: MouseEvent): void => {
   <div v-else-if="phase.kind === 'handover'" class="veil handover" data-testid="final-handover">
     <div class="hdoc-wrap">
       <div class="hdoc-frame">
-        <span class="hcorn tl" aria-hidden="true"></span>
-        <span class="hcorn tr" aria-hidden="true"></span>
-        <span class="hcorn bl" aria-hidden="true"></span>
-        <span class="hcorn br" aria-hidden="true"></span>
+        <img class="frame-art" :src="CERTIFICATE_FRAME" alt="" />
         <div class="hdoc">
           <div class="hdoc-title">{{ finalHandover.title }}</div>
-          <div class="hdoc-orn" aria-hidden="true"><span></span><b>◆</b><span></span></div>
           <div class="hdoc-to" data-testid="final-address">{{ address }}</div>
-          <div class="rule"></div>
           <p v-for="(text, i) in finalHandover.body" :key="i">{{ text }}</p>
-          <div class="hdoc-quote" data-testid="final-quote">{{ quote }}</div>
+          <div class="hdoc-quote" :class="quoteClass" data-testid="final-quote">{{ quote }}</div>
           <div class="hdoc-sign">
             <div class="sign-date">{{ finalHandover.signDate }}</div>
             <div class="sign-org">{{ finalHandover.signOrg }}</div>
@@ -193,14 +195,20 @@ const onRelayClick = (event: MouseEvent): void => {
 .goal .btn:hover {
   background: linear-gradient(180deg, #fffaf0 0%, #f8dc8a 55%, #e6b24c 100%);
 }
-/* The certificate (mock .handover / .hdoc): a framed hospital document in fixed colours. */
+/*
+ * The certificate (mock .handover / .hdoc): the hospital's document on a gilded frame picture,
+ * in fixed colours. The text stays inside the picture's plain middle, clear of the phoenixes in
+ * its corners. The veil behind is near black, so the game underneath does not show through the
+ * narration.
+ */
 .handover {
-  background: rgba(8, 9, 10, 0.78);
+  --font-cert: "Hiragino Mincho ProN", "Yu Mincho", "YuMincho", "Noto Serif JP", serif;
+  background: rgba(6, 6, 8, 0.97);
+  backdrop-filter: blur(8px);
   padding: 12px;
 }
 .hdoc-wrap {
   width: 100%;
-  max-width: 640px;
   max-height: 100%;
   overflow-y: auto;
   display: flex;
@@ -208,15 +216,14 @@ const onRelayClick = (event: MouseEvent): void => {
   align-items: center;
   gap: 14px;
 }
+/* The box keeps the picture's 1586:992, so the frame's corners land where the text expects. */
 .hdoc-frame {
   position: relative;
-  width: 100%;
-  padding: 16px;
-  border: 1px solid #b8a888;
-  background: linear-gradient(160deg, #fffdf7 0%, #f2e9d4 100%);
-  box-shadow:
-    0 14px 44px rgba(0, 0, 0, 0.4),
-    0 2px 0 rgba(255, 255, 255, 0.5) inset;
+  flex: none;
+  width: 880px;
+  max-width: 100%;
+  aspect-ratio: 1586 / 992;
+  box-shadow: 0 18px 56px rgba(0, 0, 0, 0.7);
   animation: hdocFrameIn 0.7s cubic-bezier(0.22, 1, 0.36, 1) both;
 }
 @keyframes hdocFrameIn {
@@ -229,105 +236,84 @@ const onRelayClick = (event: MouseEvent): void => {
     transform: none;
   }
 }
-.hcorn {
+.frame-art {
   position: absolute;
-  width: 22px;
-  height: 22px;
-  border: 0 solid #9c8552;
-}
-.hcorn.tl {
-  top: 8px;
-  left: 8px;
-  border-top-width: 2px;
-  border-left-width: 2px;
-}
-.hcorn.tr {
-  top: 8px;
-  right: 8px;
-  border-top-width: 2px;
-  border-right-width: 2px;
-}
-.hcorn.bl {
-  bottom: 8px;
-  left: 8px;
-  border-bottom-width: 2px;
-  border-left-width: 2px;
-}
-.hcorn.br {
-  bottom: 8px;
-  right: 8px;
-  border-bottom-width: 2px;
-  border-right-width: 2px;
-}
-.hdoc {
-  position: relative;
+  inset: 0;
   width: 100%;
+  height: 100%;
+  display: block;
+}
+/* The plain middle of the frame: inside the gold lines and clear of the corner ornaments. */
+.hdoc {
+  position: absolute;
+  top: 9.5%;
+  bottom: 10%;
+  left: 14.5%;
+  right: 14.5%;
+  display: flex;
+  flex-direction: column;
   color: #16181a;
-  border: 5px double #9c8552;
-  background:
-    repeating-linear-gradient(135deg, rgba(120, 100, 60, 0.035) 0 2px, transparent 2px 7px),
-    linear-gradient(165deg, #fffefb 0%, #f8f2e3 100%);
-  padding: 18px 36px 26px;
 }
 .hdoc-title {
-  font-size: 22px;
+  font-family: var(--font-cert);
+  font-size: 40px;
   font-weight: 700;
+  line-height: 1.2;
   text-align: center;
-  letter-spacing: 0.4em;
-  text-indent: 0.4em;
-  color: #2c2015;
-}
-.hdoc-orn {
-  display: flex;
-  align-items: center;
-  gap: 12px;
-  margin: 9px 0 15px;
-}
-.hdoc-orn span {
-  flex: 1;
-  height: 1px;
-  background: linear-gradient(90deg, transparent, #b39b6a 50%, transparent);
-}
-.hdoc-orn b {
-  color: #ab8f57;
-  font-size: 12px;
-  font-weight: 400;
+  letter-spacing: 0.6em;
+  text-indent: 0.6em;
+  color: #2a1c0c;
+  text-shadow:
+    0 1px 0 rgba(255, 255, 255, 0.7),
+    0 0 12px rgba(201, 158, 62, 0.45);
 }
 .hdoc-to {
-  font-family: var(--font-legacy);
-  font-size: 17px;
+  margin-top: 10px;
+  font-family: var(--font-cert);
+  font-size: 20px;
   font-weight: 700;
   letter-spacing: 0.08em;
-  color: #2c2015;
+  color: #2a1c0c;
+  padding-bottom: 4px;
+  border-bottom: 1px solid rgba(166, 128, 52, 0.55);
   overflow-wrap: anywhere;
-}
-.hdoc .rule {
-  border-top: 1px solid #c9b98f;
-  margin: 14px 0 0;
 }
 .hdoc p {
   font-family: var(--font-legacy);
   font-size: 14px;
-  line-height: 1.9;
-  color: #333;
-  margin: 14px 0 0;
+  line-height: 1.75;
+  color: #2f2a22;
+  margin: 8px 0 0;
+  text-indent: 1em;
 }
 .hdoc-quote {
   position: relative;
-  margin: 20px auto 0;
-  max-width: 44ch;
-  padding: 16px 34px;
+  margin: 12px auto 0;
+  max-width: 100%;
+  padding: 10px 36px;
   border: 1.5px solid #c2a765;
-  background: linear-gradient(180deg, #fffef8 0%, #faf1da 100%);
-  box-shadow: inset 0 0 0 4px #fffef8;
-  font-family: var(--font-legacy);
-  font-size: 21px;
+  background: rgba(255, 252, 240, 0.72);
+  box-shadow: inset 0 0 0 4px rgba(255, 252, 240, 0.9);
+  font-family: var(--font-cert);
   font-weight: 700;
-  line-height: 1.75;
   text-align: center;
   color: #241c10;
   overflow-wrap: anywhere;
   animation: hdocQuoteIn 0.55s cubic-bezier(0.22, 1, 0.36, 1) 0.35s both;
+}
+/* Sized by quoteSize(): the longest line still fits above the signature. */
+.hdoc-quote.large {
+  font-size: 22px;
+  line-height: 1.6;
+}
+.hdoc-quote.medium {
+  font-size: 18px;
+  line-height: 1.55;
+}
+.hdoc-quote.small {
+  font-size: 15px;
+  line-height: 1.5;
+  padding: 8px 30px;
 }
 @keyframes hdocQuoteIn {
   from {
@@ -343,27 +329,28 @@ const onRelayClick = (event: MouseEvent): void => {
 .hdoc-quote::after {
   position: absolute;
   font-family: Georgia, "Hiragino Mincho ProN", serif;
-  font-size: 44px;
+  font-size: 40px;
   line-height: 1;
   color: rgba(171, 143, 87, 0.5);
 }
 .hdoc-quote::before {
   content: "“";
-  top: 4px;
-  left: 12px;
+  top: 2px;
+  left: 10px;
 }
 .hdoc-quote::after {
   content: "”";
-  bottom: -10px;
-  right: 12px;
+  bottom: -12px;
+  right: 10px;
 }
 .hdoc-sign {
-  margin: 22px 152px 0 0;
+  margin: auto 124px 0 0;
+  padding-top: 8px;
   text-align: right;
   font-family: var(--font-legacy);
   font-size: 14px;
-  line-height: 2;
-  color: #2c2015;
+  line-height: 1.8;
+  color: #2a1c0c;
   animation: hdocFadeIn 0.6s ease-out 0.7s both;
 }
 .sign-date {
@@ -378,9 +365,9 @@ const onRelayClick = (event: MouseEvent): void => {
 .hdoc-seal {
   position: absolute;
   right: 30px;
-  bottom: 8px;
-  width: 84px;
-  height: 84px;
+  bottom: -6px;
+  width: 80px;
+  height: 80px;
   opacity: 0.85;
   mix-blend-mode: multiply;
   transform: rotate(-9deg);
