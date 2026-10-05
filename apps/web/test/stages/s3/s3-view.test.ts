@@ -41,7 +41,7 @@ describe("stage3Result / stage3Verdict", () => {
     expect(again).toEqual({ kind: "trap-repeated" });
     expect(stage3Verdict(again)).toEqual({
       kind: "rejected",
-      lines: ["まだ基準が正しくありません。正典を確認してください。"],
+      lines: ["まだ基準が正しくありません。院内感染対策マニュアルを確認してください。"],
     });
   });
 

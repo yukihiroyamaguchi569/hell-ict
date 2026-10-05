@@ -49,7 +49,9 @@ export const fieldEchoes = {
     fullscreen: { img: "stage6-patient-relations-kondo-clear.webp" },
     org: "患者相談窓口",
     role: "近藤",
-    lines: ["受付と病棟入口へ掲示しました。さっそく、絵を指さして面会時間を確かめる方がいます。"],
+    lines: [
+      "受付と病棟入口へ掲示しました。さっそく、掲示の前で足を止めて、面会時間を確かめるご家族がいます。",
+    ],
   },
 } as const satisfies Readonly<Record<"s1" | "s2" | "s3" | "s4" | "s5" | "s6", FieldEcho>>;
 
@@ -148,7 +150,7 @@ export const stageClears = {
       "来年もこの形式でお願いします。……ああ、来年は別の方にお願いすることになりますが。",
     ],
     title: "Stage 6 をクリアしました",
-    sub: "全ステージ完了 — このあとゴールです",
+    sub: "",
     sfx: "success1",
   },
 } as const satisfies Readonly<Record<"s1" | "s2" | "s3" | "s4" | "s5" | "s6", StageClear>>;

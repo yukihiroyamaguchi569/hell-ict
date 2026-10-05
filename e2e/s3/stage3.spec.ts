@@ -163,7 +163,7 @@ test("罠の初回は暗転→皮膚科医→罰。罰の途中で再読み込�
 
   await submitButton(page).click();
   await expect(page.getByTestId("verdict")).toContainText(
-    "まだ基準が正しくありません。正典を確認してください。",
+    "まだ基準が正しくありません。院内感染対策マニュアルを確認してください。",
   );
   await expect(page.getByTestId("s3-blackout")).toHaveCount(0);
   await expect(lock(page)).toHaveCount(0);
