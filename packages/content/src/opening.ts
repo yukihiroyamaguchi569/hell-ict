@@ -15,6 +15,8 @@ export const opening = {
  * 読み込み画面がまとめて先読みする。実ファイルとの食い違いはテストが突き合わせて止める。
  */
 export const productionImages = [
+  "final-certificate-frame.webp",
+  "final-goal-ceremony.webp",
   "opening-saint-chronos-hospital-exterior.webp",
   "stage1-administrative-director-clear.webp",
   "stage1-administrative-director.png",
