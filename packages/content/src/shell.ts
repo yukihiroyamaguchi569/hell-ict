@@ -191,6 +191,9 @@ export const phsBusyLine = "〔苅部〕今、別病棟の対応中です。手�
 /** 提出を判定している間の判定枠の一行（モック verdictChecking）。全ステージの提出で共通。 */
 export const verdictCheckingText = "提出を確認しています…";
 
+/** 罰ゲームを終えたとき、窓が閉じる前に少しだけ出す一行。Stage 3 と Stage 5 の罰ゲームで共通。 */
+export const penaltyDoneText = "罰ゲーム完了！ 遅れを取り戻しましょう。がんばって！";
+
 /*
  * 共通シェル（ヘッダーと器の色）の表。モック hell-ict-archive:docs/ui/mock/index.html の STEPS[].mode と、
  * go()・演出が #fever へ書く値の写し。値は演出を見終えた後のものに固定する（V1 決定F）

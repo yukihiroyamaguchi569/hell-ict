@@ -87,6 +87,7 @@ describe("stage3Overlay", () => {
     noticeSeen: false,
     trapScene: null,
     submitting: false,
+    penaltyHeld: false,
     ...over,
   });
 
@@ -109,6 +110,17 @@ describe("stage3Overlay", () => {
 
   it("罰を払い終えたら、暗転や叱責が残っていても窓を出さない", () => {
     expect(stage3Overlay(facts({ state: s3State("done"), trapScene: "scold" }))).toBeNull();
+  });
+
+  it("払い終えた直後の完了表示の間（penaltyHeld）だけ、罰の窓を保つ。一報は出さない", () => {
+    const done = s3State("done");
+    expect(stage3Overlay(facts({ state: done, penaltyHeld: true }))).toBe("penalty");
+    expect(stage3Overlay(facts({ state: done, penaltyHeld: true, noticeSeen: true }))).toBe(
+      "penalty",
+    );
+    expect(stage3Overlay(facts({ state: done, penaltyHeld: false }))).toBeNull();
+    const moved = { ...done, game: { ...done.game, stage: "s4" as const } };
+    expect(stage3Overlay(facts({ state: moved, penaltyHeld: true }))).toBeNull();
   });
 
   it("提出の返事待ちの間と、Stage 3 以外では何も出さない", () => {

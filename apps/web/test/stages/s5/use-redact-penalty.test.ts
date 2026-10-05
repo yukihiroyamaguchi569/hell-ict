@@ -3,7 +3,11 @@ import { describe, expect, it } from "vitest";
 import { effectScope, nextTick, ref } from "vue";
 
 import type { GameCommandInput, SendOutcome } from "../../../src/composables/use-game-session.js";
-import { useRedactPenalty } from "../../../src/stages/s5/use-redact-penalty.js";
+import { PENALTY_DONE_MS } from "../../../src/stages/penalty/penalty-done.js";
+import {
+  STAGE5_PENALTY_HOLD_MS,
+  useRedactPenalty,
+} from "../../../src/stages/s5/use-redact-penalty.js";
 import { FakeScheduler, flush } from "../../fakes.js";
 import { answer, s5State } from "./s5-fixtures.js";
 
@@ -118,7 +122,7 @@ describe("useRedactPenalty", () => {
     expect(penalty.masked.value.size).toBe(1);
   });
 
-  it("通れば「送信しました」を 1200ms 見せて閉じる。その間は塗りも提出も受け付けない", async () => {
+  it("通れば「送信しました」と罰ゲーム完了を、長い方の時間だけ見せて閉じる。その間は塗りも提出も受け付けない", async () => {
     const { penalty, active, sent, scheduler, outcomes, maskAll } = mount();
     maskAll();
     outcomes.push(answer({ judgement: { outcome: "pass" } }, s5State("done")));
@@ -130,7 +134,8 @@ describe("useRedactPenalty", () => {
     penalty.toggle(NOT_PII);
     penalty.submit();
     expect(sent).toHaveLength(1);
-    scheduler.advanceBy(stage5Penalty.sentMs - 1);
+    expect(STAGE5_PENALTY_HOLD_MS).toBe(Math.max(stage5Penalty.sentMs, PENALTY_DONE_MS));
+    scheduler.advanceBy(STAGE5_PENALTY_HOLD_MS - 1);
     expect(penalty.holding.value).toBe(true);
     scheduler.advanceBy(1);
     expect(penalty.holding.value).toBe(false);

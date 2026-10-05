@@ -40,7 +40,9 @@ export const stage5: StageModule | null = {
       storage: context.sessionStorage,
       scheduler: context.scheduler,
       sfx: context.sfx,
-      penaltyHeld: () => penalty.holding.value,
+      // Held from the send on: the answer's state (penalty done) is shown before the answer is
+      // read, and the window must not close and open again in between.
+      penaltyHeld: () => penalty.sending.value || penalty.holding.value,
     });
     return {
       center: markRaw(defineComponent(() => () => h(Stage5Center, { stage }))),

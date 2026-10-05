@@ -51,6 +51,15 @@ describe("stage3KarubeCalls", () => {
     expect(calls[1]?.lines).toEqual([stage3KarubeAfterTrap]);
   });
 
+  it("罰明けの完了表示の間（penaltyHeld）は、罰明けの電話をまだ鳴らさない", () => {
+    expect(stage3KarubeCalls(s3State("done"), null, true)).toEqual([]);
+    expect(names(stage3KarubeCalls(s3State("done"), ENTERED, true))).toEqual(["lines"]);
+    expect(names(stage3KarubeCalls(s3State("done"), ENTERED, false))).toEqual([
+      "lines",
+      "after-trap",
+    ]);
+  });
+
   it.each([
     [1, ["lines"]],
     [2, ["lines", "type-hint:2"]],

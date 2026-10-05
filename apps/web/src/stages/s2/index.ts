@@ -64,6 +64,7 @@ export const stage2: StageModule = {
         stage2RightPane(stage.state.value, serverNow.value, karubeRead.value),
       ),
       chatSubmit: scriptedAnswer(stage, serverNow),
+      pauseClear: stage.pauseClear,
     };
   },
 };

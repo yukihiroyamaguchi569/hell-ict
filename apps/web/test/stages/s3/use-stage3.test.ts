@@ -3,6 +3,7 @@ import { describe, expect, it } from "vitest";
 import { effectScope, nextTick, ref, shallowRef } from "vue";
 
 import type { GameCommandInput, SendOutcome } from "../../../src/composables/use-game-session.js";
+import { PENALTY_DONE_MS } from "../../../src/stages/penalty/penalty-done.js";
 import { NOTICE_DELAY_MS } from "../../../src/stages/s3/s3-view.js";
 import { BLACKOUT_MS, useStage3 } from "../../../src/stages/s3/use-stage3.js";
 import { FakeKeyValueStorage, FakeScheduler, flush } from "../../fakes.js";
@@ -161,6 +162,53 @@ describe("useStage3", () => {
     );
     await stage.submit();
     await flush();
+    scope.stop();
+    expect(scheduler.pending).toBe(0);
+  });
+});
+
+describe("useStage3: 罰ゲームの完了表示", () => {
+  it("送る時から窓を保ち、払い終えから PENALTY_DONE_MS ちょうどまで完了を見せて閉じ、苅部さんはその後", () => {
+    const { stage, state, scheduler } = mount();
+    state.value = s3State("in-progress");
+    stage.penaltyFinishing();
+    expect(stage.verdict.value).toBeNull();
+    // The answer's state arrives before the answer is read: the window stays, not yet "done".
+    state.value = s3State("done");
+    expect([stage.overlay.value, stage.penaltyDoneShown.value]).toEqual(["penalty", true]);
+    expect(stage.karubeCalls.value).toEqual([]);
+    stage.penaltyFinished(true);
+    expect([stage.penaltyHeld.value, stage.overlay.value]).toEqual([true, "penalty"]);
+    expect(stage.karubeCalls.value).toEqual([]);
+    scheduler.advanceBy(PENALTY_DONE_MS - 1);
+    expect(stage.overlay.value).toBe("penalty");
+    scheduler.advanceBy(1);
+    expect([stage.penaltyHeld.value, stage.overlay.value]).toEqual([false, null]);
+    expect(stage.karubeCalls.value).toHaveLength(1);
+  });
+
+  it("送る間はまだ完了と出さない。届かなければ保つのをやめ、罰の窓（再送）のまま", () => {
+    const { stage, state, scheduler } = mount();
+    state.value = s3State("in-progress");
+    stage.penaltyFinishing();
+    expect([stage.overlay.value, stage.penaltyDoneShown.value]).toEqual(["penalty", false]);
+    stage.penaltyFinished(false);
+    expect([stage.penaltyHeld.value, stage.overlay.value]).toEqual([false, "penalty"]);
+    expect(scheduler.pending).toBe(0);
+  });
+
+  it("再読み込み（別タブ）で払い終えた状態から開いたら、窓を保たない", () => {
+    const { stage, state } = mount();
+    state.value = s3State("done");
+    expect([stage.penaltyHeld.value, stage.overlay.value]).toEqual([false, null]);
+    expect(stage.karubeCalls.value).toHaveLength(1);
+  });
+
+  it("保っている間にステージを離れたら、タイマーは残らない", () => {
+    const { stage, scheduler, scope } = mount();
+    stage.penaltyFinishing();
+    stage.penaltyFinished(true);
+    expect(scheduler.pending).toBe(1);
     scope.stop();
     expect(scheduler.pending).toBe(0);
   });

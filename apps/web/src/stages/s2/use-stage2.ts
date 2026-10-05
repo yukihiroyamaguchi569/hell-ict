@@ -59,6 +59,12 @@ export interface Stage2 {
    * at once, anything else is refused with its reason and changes nothing.
    */
   sendTable(text: string): void;
+  /**
+   * Holds back the clear effect (`StageInstance.pauseClear`): while a submission is being judged
+   * (its answer may be the clear), and for STAGE2_PASS_HOLD_MS after a pass, while its checks
+   * tick in. Never on a reload into a cleared stage: no verdict is on screen then.
+   */
+  readonly pauseClear: ComputedRef<boolean>;
 }
 
 /** Waits before asking again to start the stage when the first `s2.start` got no answer. */
@@ -68,6 +74,11 @@ export const STAGE2_START_RETRY_MS = 2_000;
  * later (a reload) finds it landed already, and a one-off effect is not replayed (V1 decision F).
  */
 export const STAGE2_LANDING_SOUND_MS = 1_000;
+/**
+ * How long a pass keeps the clear effect back: VerdictBox brings in the four checks and the line
+ * of success by animation-delay (the last at 1.8 s, faded in by 2.1 s), and a beat to read it.
+ */
+export const STAGE2_PASS_HOLD_MS = 2_400;
 
 /** The grid kept for a reload: whose start of the stage it belongs to, and whether it has the addendum. */
 const gridRecordSchema = z
@@ -133,9 +144,19 @@ export const useStage2 = (context: StageContext): Stage2 => {
     });
   };
   watch(game, startIfNeeded, { immediate: true });
+  const passShowing = shallowRef(false);
+  let cancelPassHold: () => void = () => undefined;
   onScopeDispose(() => {
     cancelRetry();
+    cancelPassHold();
   });
+  const holdForPass = (): void => {
+    cancelPassHold();
+    passShowing.value = true;
+    cancelPassHold = scheduler.schedule(() => {
+      passShowing.value = false;
+    }, STAGE2_PASS_HOLD_MS);
+  };
 
   // The grid of this start of the stage: the one kept for a reload, or the sheet as delivered.
   watch(
@@ -223,6 +244,7 @@ export const useStage2 = (context: StageContext): Stage2 => {
         stage2ExpectedRowCount(submitted, serverNow.value),
       );
       verdict.value = result.verdict;
+      if (result.verdict.kind === "cleared") holdForPass();
       if (result.rejected) {
         hot.value = result.hot;
         context.sfx.play("cancel");
@@ -251,5 +273,6 @@ export const useStage2 = (context: StageContext): Stage2 => {
       hot.value = NO_CELLS;
       landed.value += 1;
     },
+    pauseClear: computed(() => verdict.value?.kind === "checking" || passShowing.value),
   };
 };

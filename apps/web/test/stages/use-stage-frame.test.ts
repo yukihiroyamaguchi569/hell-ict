@@ -203,6 +203,17 @@ describe("useStageFrame", () => {
     expect([frame.clearHeld.value, frame.overlayWanted.value]).toEqual([false, false]);
   });
 
+  it("窓を持たないステージの一時停止（pauseClear）は演出を止めるが、窓は出さない", () => {
+    const pauseClear = ref(true);
+    const pausing: StageModule = {
+      setup: () => ({ center: { render: () => null }, pauseClear }),
+    };
+    const { frame } = mount(ref<GameStageId | null>("s2"), registryWith({ s2: pausing }));
+    expect([frame.clearHeld.value, frame.overlayWanted.value]).toEqual([true, false]);
+    pauseClear.value = false;
+    expect([frame.clearHeld.value, frame.overlayWanted.value]).toEqual([false, false]);
+  });
+
   it("保留していたステージを離れたら、保留は残らない", async () => {
     const holding: StageModule = {
       setup: () => ({

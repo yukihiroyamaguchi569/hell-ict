@@ -55,6 +55,7 @@ watch(verdict, () => {
     v-else-if="overlay === 'penalty'"
     :heading="stage5Penalty.heading"
     :elapsed-ms="elapsedMs"
+    :done="holding"
     wide
   >
     <div class="note">{{ stage5Penalty.note }}</div>

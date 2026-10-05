@@ -149,6 +149,14 @@ export interface StageInstance {
    * Absent: the effect plays as soon as the stage is cleared.
    */
   readonly holdClear?: Readonly<Ref<boolean>>;
+  /**
+   * While true, the frame holds back the clear effect with the centre left on screen (Stage 2's
+   * verdict ticking its checks after a pass). No window of its own, so the stage must release
+   * it on a timer of its own: it is a pause of a moment, never something to answer. Derive it
+   * like `holdClear` so that the clear never flashes before it, and keep it false on a reload
+   * into a cleared stage (the effect then plays at once). Absent: never paused.
+   */
+  readonly pauseClear?: Readonly<Ref<boolean>>;
 }
 
 export interface StageModule {

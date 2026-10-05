@@ -39,8 +39,11 @@ export const stage3: StageModule = {
       serverNow: context.serverNow,
       scheduler: context.scheduler,
       sfx: context.sfx,
-      onPaid: () => {
-        stage.clearVerdict();
+      onFinishing: () => {
+        stage.penaltyFinishing();
+      },
+      onFinished: (paid) => {
+        stage.penaltyFinished(paid);
       },
     });
     return {

@@ -6,7 +6,11 @@ import { effectScope } from "vue";
 
 import type { GameView, SendOutcome } from "../../../src/composables/use-game-session.js";
 import { cellKey } from "../../../src/stages/s2/s2-view.js";
-import { STAGE2_START_RETRY_MS, useStage2 } from "../../../src/stages/s2/use-stage2.js";
+import {
+  STAGE2_PASS_HOLD_MS,
+  STAGE2_START_RETRY_MS,
+  useStage2,
+} from "../../../src/stages/s2/use-stage2.js";
 import { FakeKeyValueStorage } from "../../fakes.js";
 import { appliedWith, rejectedWith } from "../s1/fake-session.js";
 import { s2Context, s2View, settle, T0 } from "./s2-fixtures.js";
@@ -278,12 +282,18 @@ describe("useStage2: 提出", () => {
     expect(stage.hot.value.size).toBe(0);
   });
 
-  it("合格はクリアの一行で、［提出に戻る］では開かない。クリア後は送らない", async () => {
+  it("合格は ✓ の行とクリアの一行で、［提出に戻る］では開かない。クリア後は送らない", async () => {
     const { stage, sent } = mount(s2View(started), () =>
       judged({ outcome: "pass" }, s2View(started, { cleared: true })),
     );
     await stage.submit();
-    expect(stage.verdict.value).toEqual({ kind: "cleared", text: "Stage 2 をクリアしました" });
+    expect(stage.verdict.value).toMatchObject({
+      kind: "cleared",
+      text: "Stage 2 をクリアしました",
+    });
+    expect(stage.verdict.value?.kind === "cleared" ? stage.verdict.value.checks : []).toHaveLength(
+      4,
+    );
     stage.reopen();
     expect(stage.verdict.value?.kind).toBe("cleared");
     await stage.submit();
@@ -296,6 +306,58 @@ describe("useStage2: 提出", () => {
     );
     await stage.submit();
     expect(sounds).toEqual([]);
+  });
+});
+
+describe("useStage2: 合格の ✓ が出そろうまでクリア演出を止める（pauseClear）", () => {
+  const passed = () => judged({ outcome: "pass" }, s2View(started, { cleared: true }));
+
+  it("判定を待つ間から止め、合格から STAGE2_PASS_HOLD_MS ちょうどで必ず外す", async () => {
+    let release: (outcome: SendOutcome) => void = () => undefined;
+    const { stage, scheduler } = mount(
+      s2View(started),
+      () =>
+        new Promise<SendOutcome>((resolve) => {
+          release = resolve;
+        }),
+    );
+    expect(stage.pauseClear.value).toBe(false);
+    const submitting = stage.submit();
+    // The cleared state may arrive before the answer is read: the effect must not start then.
+    expect(stage.pauseClear.value).toBe(true);
+    release(passed());
+    await submitting;
+    expect(stage.pauseClear.value).toBe(true);
+    scheduler.advanceBy(STAGE2_PASS_HOLD_MS - 1);
+    expect(stage.pauseClear.value).toBe(true);
+    scheduler.advanceBy(1);
+    expect(stage.pauseClear.value).toBe(false);
+  });
+
+  it("差し戻し・届かなかった提出では止めない", async () => {
+    for (const answer of [
+      () => judged({ outcome: "reject", check: "required-cells", cells: [] }, s2View(started)),
+      (): SendOutcome => ({ kind: "unavailable" }),
+    ]) {
+      const { stage, scheduler } = mount(s2View(started), answer);
+      await stage.submit();
+      expect(stage.pauseClear.value).toBe(false);
+      expect(scheduler.delays).not.toContain(STAGE2_PASS_HOLD_MS);
+    }
+  });
+
+  it("クリア済みで開き直した画面（再読み込み）は止めない", async () => {
+    const { stage } = mount(s2View(started, { cleared: true }));
+    await settle();
+    expect(stage.pauseClear.value).toBe(false);
+  });
+
+  it("止めている間にステージを離れたら、タイマーは残らない", async () => {
+    const { stage, scheduler, scope } = mount(s2View(started), passed);
+    await stage.submit();
+    expect([stage.pauseClear.value, scheduler.pending]).toEqual([true, 1]);
+    scope.stop();
+    expect(scheduler.pending).toBe(0);
   });
 });
 

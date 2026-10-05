@@ -16,7 +16,8 @@ const mount = () => {
   const sent: { command: GameCommandInput; commandId: string | undefined }[] = [];
   const sounds: string[] = [];
   const outcomes: SendOutcome[] = [];
-  let paid = 0;
+  /** What the stage was told, in order: "finishing", then "paid" or "failed". */
+  const reports: string[] = [];
   let ids = 0;
   const scope = effectScope();
   const penalty = scope.run(() =>
@@ -30,8 +31,11 @@ const mount = () => {
       serverNow,
       scheduler,
       sfx: { play: (name, volume) => sounds.push(`${name}@${String(volume ?? "")}`) },
-      onPaid: () => {
-        paid += 1;
+      onFinishing: () => {
+        reports.push("finishing");
+      },
+      onFinished: (paid) => {
+        reports.push(paid ? "paid" : "failed");
       },
     }),
   );
@@ -53,7 +57,7 @@ const mount = () => {
     outcomes,
     scope,
     fillAll,
-    paid: () => paid,
+    reports,
   };
 };
 
@@ -81,31 +85,34 @@ describe("useBottlePenalty", () => {
     expect(penalty.freshWard.value).toBeNull();
   });
 
-  it("40本すべて詰めたら finish-penalty を1回だけ送り、払い終えを知らせる", async () => {
-    const { fillAll, sent, paid } = mount();
+  it("40本すべて詰めたら finish-penalty を1回だけ送り、送る前に知らせ、払い終えを知らせる", async () => {
+    const { fillAll, sent, reports } = mount();
     fillAll();
     fillAll();
     expect(sent).toHaveLength(0);
+    expect(reports).toEqual([]);
     fillAll();
+    // Told before the answer: the state may turn `done` before the answer is read.
+    expect(reports).toEqual(["finishing"]);
     await flush();
     expect(sent).toEqual([{ command: { type: "s3.finish-penalty" }, commandId: "id-1" }]);
-    expect(paid()).toBe(1);
+    expect(reports).toEqual(["finishing", "paid"]);
   });
 
   it("届かなければ再送のボタンを出し、同じ commandId で送り直す", async () => {
-    const { penalty, fillAll, sent, outcomes, paid } = mount();
+    const { penalty, fillAll, sent, outcomes, reports } = mount();
     outcomes.push({ kind: "unavailable" });
     fillAll();
     fillAll();
     fillAll();
     await flush();
     expect(penalty.failed.value).toBe(true);
-    expect(paid()).toBe(0);
+    expect(reports).toEqual(["finishing", "failed"]);
     penalty.retry();
     await flush();
     expect(sent.map((s) => s.commandId)).toEqual(["id-1", "id-1"]);
     expect(penalty.failed.value).toBe(false);
-    expect(paid()).toBe(1);
+    expect(reports).toEqual(["finishing", "failed", "finishing", "paid"]);
   });
 
   it("窓が出直すたびに棚は最初から（再読み込みで軽くならない）。時計も0から", async () => {

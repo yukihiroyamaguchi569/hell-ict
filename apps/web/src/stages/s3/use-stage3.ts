@@ -9,6 +9,7 @@ import type { Sfx } from "../../composables/use-sfx.js";
 import type { KeyValueStorage, Scheduler } from "../../ports.js";
 import { sessionRecord, sessionRecordKey } from "../../session-record.js";
 import type { Verdict } from "../../verdict/verdict.js";
+import { PENALTY_DONE_MS } from "../penalty/penalty-done.js";
 import type { KarubeCall } from "../stage-module.js";
 import { stage3KarubeCalls } from "./karube-calls.js";
 import { stage3Overlay, stage3Result, stage3Verdict, type Stage3Overlay } from "./s3-view.js";
@@ -39,8 +40,25 @@ export interface Stage3 {
   submit(): Promise<void>;
   dismissNotice(): void;
   dismissScold(): void;
-  /** The penalty has been paid: the answer to the submission before it is no longer news. */
-  clearVerdict(): void;
+  /**
+   * The penalty's window is kept by this screen: from the moment its bottles are all full and
+   * the end is on its way (the state may turn `done` before the answer is read), until
+   * PENALTY_DONE_MS after it was paid. A reload, or another tab, finds the penalty done and has
+   * no window to keep.
+   */
+  readonly penaltyHeld: Readonly<Ref<boolean>>;
+  /** The window shows 「罰ゲーム完了！」: kept by this screen, and the server has it paid. */
+  readonly penaltyDoneShown: ComputedRef<boolean>;
+  /**
+   * Every bottle is full and `s3.finish-penalty` is on its way: the answer to the submission
+   * before it is no longer news, and the window stays until the answer.
+   */
+  penaltyFinishing(): void;
+  /**
+   * The answer to `s3.finish-penalty`. Paid: the window stays a moment with 「罰ゲーム完了！」
+   * before it closes and 苅部さん rings. Not delivered: nothing is kept (the retry button).
+   */
+  penaltyFinished(paid: boolean): void;
 }
 
 const EMPTY: Stage3Submission = { ppe: "", release: "", clean: "" };
@@ -76,6 +94,7 @@ export const useStage3 = (deps: Stage3Deps): Stage3 => {
   const noticeSeen = ref(noticeRecord.read() === true);
   const trapScene = ref<"blackout" | "scold" | null>(null);
   const rejectedIn = ref<string | null>(rejectedRecord.read());
+  const penaltyHeld = ref(false);
 
   /** Only before the trap: after it, a rejection no longer brings him (mock s3KarubeAutoNudged). */
   const noteRejection = (): void => {
@@ -96,12 +115,15 @@ export const useStage3 = (deps: Stage3Deps): Stage3 => {
           noticeSeen: noticeSeen.value,
           trapScene: trapScene.value,
           submitting: submitting.value,
+          penaltyHeld: penaltyHeld.value,
         });
   });
 
   let cancelBlackout: () => void = () => undefined;
+  let cancelPenaltyHold: () => void = () => undefined;
   onScopeDispose(() => {
     cancelBlackout();
+    cancelPenaltyHold();
   });
   const fireTrap = (): void => {
     trapScene.value = "blackout";
@@ -135,7 +157,7 @@ export const useStage3 = (deps: Stage3Deps): Stage3 => {
     overlay,
     karubeCalls: computed(() => {
       const state = deps.state();
-      return state === null ? [] : stage3KarubeCalls(state, rejectedIn.value);
+      return state === null ? [] : stage3KarubeCalls(state, rejectedIn.value, penaltyHeld.value);
     }),
     submit,
     dismissNotice() {
@@ -145,9 +167,25 @@ export const useStage3 = (deps: Stage3Deps): Stage3 => {
     dismissScold() {
       trapScene.value = null;
     },
-    clearVerdict() {
+    penaltyHeld,
+    penaltyDoneShown: computed(
+      () => penaltyHeld.value && deps.state()?.game.penalties.s3 === "done",
+    ),
+    penaltyFinishing() {
       verdict.value = null;
       warnField.value = null;
+      cancelPenaltyHold();
+      penaltyHeld.value = true;
+    },
+    penaltyFinished(paid) {
+      cancelPenaltyHold();
+      if (!paid) {
+        penaltyHeld.value = false;
+        return;
+      }
+      cancelPenaltyHold = deps.scheduler.schedule(() => {
+        penaltyHeld.value = false;
+      }, PENALTY_DONE_MS);
     },
   };
 };

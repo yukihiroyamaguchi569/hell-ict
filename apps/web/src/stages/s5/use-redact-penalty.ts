@@ -6,6 +6,7 @@ import type { GameCommandInput, SendOutcome } from "../../composables/use-game-s
 import type { Sfx } from "../../composables/use-sfx.js";
 import type { Scheduler } from "../../ports.js";
 import type { Verdict } from "../../verdict/verdict.js";
+import { PENALTY_DONE_MS } from "../penalty/penalty-done.js";
 import { reportResult, submitVerdict } from "./s5-view.js";
 import { useSubmission } from "./use-submission.js";
 
@@ -31,13 +32,19 @@ export interface RedactPenalty {
    */
   readonly elapsedMs: ComputedRef<number>;
   /**
-   * The report went through: 「送信しました」 shows for `stage5Penalty.sentMs` before the window
-   * closes, although the server has the penalty done already.
+   * The report went through: 「送信しました」 and 「罰ゲーム完了！」 show together for
+   * `STAGE5_PENALTY_HOLD_MS` before the window closes, although the server has the penalty done already.
    */
   readonly holding: Readonly<Ref<boolean>>;
   toggle(index: number): void;
   submit(): void;
 }
+
+/**
+ * How long the window stays once the report went through. 「送信しました」 (`sentMs`) and
+ * 「罰ゲーム完了！」 (PENALTY_DONE_MS) show at the same time, so the wait is the longer of the two.
+ */
+export const STAGE5_PENALTY_HOLD_MS = Math.max(stage5Penalty.sentMs, PENALTY_DONE_MS);
 
 /** The segments that can be pressed: the plain text between them cannot. */
 const clickable = (index: number): boolean => stage5IncidentReport[index]?.pii !== undefined;
@@ -65,7 +72,7 @@ export const useRedactPenalty = (deps: RedactPenaltyDeps): RedactPenalty => {
       holding.value = true;
       cancelHold = deps.scheduler.schedule(() => {
         holding.value = false;
-      }, stage5Penalty.sentMs);
+      }, STAGE5_PENALTY_HOLD_MS);
     },
   });
 

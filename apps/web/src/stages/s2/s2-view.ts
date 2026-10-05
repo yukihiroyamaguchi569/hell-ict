@@ -185,11 +185,18 @@ const rejectReason = (judgement: Stage2Reject): string => {
 
 /**
  * The verdict's rows (mock runVerdict): the checks passed, the one that failed with why, the
- * next one halted, and the line that says to fix and resubmit. `expectedRows` names the row
- * check (20, or 30 once the addendum has landed).
+ * next one halted, and the line that says to fix and resubmit. A pass ticks every check, in the
+ * same words, before the line of success. `expectedRows` names the row check (20, or 30 once the
+ * addendum has landed).
  */
 export const stage2Verdict = (judgement: Stage2Judgement, expectedRows: number): Verdict => {
-  if (judgement.outcome === "pass") return { kind: "cleared", text: stage2ClearedText };
+  if (judgement.outcome === "pass") {
+    return {
+      kind: "cleared",
+      text: stage2ClearedText,
+      checks: STAGE2_CHECK_IDS.map((id) => stage2CheckLine.pass(checkLabel(id, expectedRows))),
+    };
+  }
   const expected = judgement.check === "row-count" ? judgement.expected : expectedRows;
   const labels = STAGE2_CHECK_IDS.map((id) => checkLabel(id, expected));
   const failAt = STAGE2_CHECK_IDS.indexOf(judgement.check);

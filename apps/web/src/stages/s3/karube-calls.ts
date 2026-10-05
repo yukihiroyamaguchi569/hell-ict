@@ -46,19 +46,25 @@ const hintCalls = (entered: string, trapJudgements: number): readonly KarubeCall
     (hint) => hint !== null,
   );
 
+/** The penalty is paid and its window has closed on this screen. */
+const penaltyOver = (state: TeamGameViewState, penaltyHeld: boolean): boolean =>
+  state.game.penalties.s3 === "done" && !penaltyHeld;
+
 /**
  * The calls that should have rung by now, oldest first. `rejectedIn` is the entry time of the
  * stay in which a short field was sent back before the trap fired (kept in sessionStorage: the
- * server does not keep rejections), or `null`.
+ * server does not keep rejections), or `null`. `penaltyHeld`: the paid penalty's window is still
+ * up with 「罰ゲーム完了！」, and the end of the penalty rings only once it has closed.
  */
 export const stage3KarubeCalls = (
   state: TeamGameViewState,
   rejectedIn: string | null,
+  penaltyHeld = false,
 ): readonly KarubeCall[] => {
   const entered = state.enteredAt.s3;
   if (state.game.stage !== "s3" || entered === undefined) return [];
   const rejected = rejectedIn === entered;
-  const penaltyDone = state.game.penalties.s3 === "done";
+  const penaltyDone = penaltyOver(state, penaltyHeld);
   const calls: KarubeCall[] = [];
   if (rejected || penaltyDone) calls.push(call(entered, "lines", stage3KarubeLines));
   if (rejected && penaltyDone) calls.push(call(entered, "after-trap", [stage3KarubeAfterTrap]));
