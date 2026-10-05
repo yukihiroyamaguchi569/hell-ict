@@ -97,7 +97,7 @@ const tag = (state: string, ward: string): string => {
   display: flex;
   align-items: center;
   gap: 12px;
-  font-size: 13px;
+  font-size: 20px;
 }
 .note img {
   height: 54px;
