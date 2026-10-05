@@ -3,29 +3,21 @@ import {
   chatMessageResultSchema,
   chatMessageSchema,
   chatSnapshotSchema,
-  chatThreadIdSchema,
   commandIdSchema,
   checkpointSnapshotSchema,
   commandResultSchema,
-  countThreadsOfKind,
-  createThread as domainCreateThread,
   createThreadCommandSchema,
-  createThreadResultSchema,
-  initialChatSnapshot,
   initialTeamSnapshot,
   normalizeAssistantText,
   redactPii,
-  redactSnapshotPii,
   resetGenerationSchema,
   saveCheckpointCommandSchema,
   detectPii,
   resolveStageChatTarget,
   sendMessageCommandSchema,
   stageAiPlan,
-  stageAiView,
   stageChatCommandSchema,
   stageChatText,
-  stageThreadTitle,
   teamCodeSchema,
   teamCommandSchema,
   teamGameCommandSchema,
@@ -34,19 +26,15 @@ import {
   transitionTeam,
 } from "@hell-ict/domain";
 import type {
-  AiMessage,
   ChatMessage,
   ChatMessageResult,
   ChatSnapshot,
-  ChatThreadKind,
   CheckpointSnapshot,
   CommandResult,
   CommandStatus,
   CreateThreadCommand,
-  GameStageId,
   SaveCheckpointCommand,
   SendMessageCommand,
-  StageAi,
   StageChatCommand,
   TeamCode,
   TeamSnapshot,
@@ -61,7 +49,6 @@ import {
   chatClaimTokenSchema,
   completeChatOutcomeSchema,
   fingerprintSchema,
-  mismatchesFingerprint,
   nowMsSchema,
   rateLimitCountSchema,
 } from "./guard.js";
@@ -80,11 +67,11 @@ import {
   promptProfileOf,
   readPending,
   readProcessedMessage,
-  readProcessedThread,
   replayProcessed,
 } from "./chat-ledger.js";
 import type { StoredPendingMessage } from "./chat-ledger.js";
-import { migrateLedgerPii } from "./ledger-pii-migration.js";
+import { ChatStore } from "./chat-store.js";
+import type { StoredChatState } from "./chat-store.js";
 import type { RateLimitVerdict } from "./rate-limit-store.js";
 import type { GameCommandRpcResult, GameViewRpcResult } from "./game-store.js";
 import type {
@@ -102,20 +89,6 @@ import type {
 
 type StoredCommand = { result: string };
 type StoredState = { snapshot: string };
-type StoredChatState = { snapshot: string };
-/**
- * 1チームが持てるスレッド数の上限。kindごとに独立して数える——上限を1本にすると、
- * 手動スレッドを作りすぎたチームがステージ進行そのものを止めてしまう。
- * どちらもDOのストレージが際限なく膨らむのを防ぐための粗い上限である。
- */
-export const MAX_MANUAL_THREADS_PER_TEAM = 25;
-/** ステージが自動で開く5本に、改名・再設計の余裕を足した値。 */
-export const MAX_STAGE_THREADS_PER_TEAM = 8;
-
-const THREAD_LIMITS: Readonly<Record<ChatThreadKind, number>> = {
-  manual: MAX_MANUAL_THREADS_PER_TEAM,
-  stage: MAX_STAGE_THREADS_PER_TEAM,
-};
 
 /**
  * chatSnapshotへ渡せる問い合わせ対象のID。RPCの境界なので、Worker側で検証済みでも
@@ -291,7 +264,7 @@ export class TeamRoom extends DurableObject<Env> {
     // 送信を待つ間に別のコマンドが適用されうるので、返す状態は待った後に読み直す
     // ——先に読んだ状態を返すと、再接続した画面を1手前へ巻き戻してしまう。
     const state = store.load(nowMs);
-    return { state, ai: this.stageAi(teamCode, state) };
+    return { state, ai: this.chatStore.stageAi(teamCode, state) };
   }
 
   /**
@@ -311,45 +284,8 @@ export class TeamRoom extends DurableObject<Env> {
     if (resetGenerationSchema.parse(generationInput) !== generation)
       return { staleGeneration: true };
     const state = new GameStore(this.ctx.storage, generation).load(nowMs);
-    this.ensureStageThread(teamCode, state.game.stage);
-    return { state, ai: this.stageAi(teamCode, state) };
-  }
-
-  /**
-   * ステージの会話をサーバで用意する（モックの`activateStageThread`。クライアントはもう
-   * スレッドを作らない、Issue #236）。同名のステージスレッドがあれば何もしない——
-   * 前進の再送、再試行、モックが先に作っていた場合のどれでも1本に保つ。
-   *
-   * 失敗は握る。前進そのものは成立させ、会話が無いことはGETの`ai.status: "failed"`で
-   * 画面へ伝える——前のステージの会話を黙って出し続けない（Issue #85）。
-   */
-  private ensureStageThread(teamCode: TeamCode, stage: GameStageId): void {
-    const title = stageThreadTitle(stage);
-    if (title === null) return;
-    try {
-      const snapshot = this.loadChatSnapshot(teamCode);
-      if (stageAiView(stage, snapshot).status === "ready") return;
-      if (countThreadsOfKind(snapshot, "stage") >= MAX_STAGE_THREADS_PER_TEAM) return;
-      const created = domainCreateThread(snapshot, {
-        threadId: chatThreadIdSchema.parse(crypto.randomUUID()),
-        title,
-        kind: "stage",
-      });
-      if (!created.ok) return;
-      this.saveChatSnapshot(created.snapshot);
-      this.broadcastChat(created.snapshot);
-    } catch {
-      // 会話のsnapshotが読めない・書けない。ai.status が "failed" のまま残る。
-    }
-  }
-
-  /** 今のステージのAI。会話のsnapshotが読めなければ、会話は用意できていないものとして示す。 */
-  private stageAi(teamCode: TeamCode, state: TeamGameState): StageAi {
-    try {
-      return stageAiView(state.game.stage, this.loadChatSnapshot(teamCode));
-    } catch {
-      return { status: "failed" };
-    }
+    this.chatStore.ensureStageThread(teamCode, state.game.stage);
+    return { state, ai: this.chatStore.stageAi(teamCode, state) };
   }
 
   /**
@@ -379,8 +315,8 @@ export class TeamRoom extends DurableObject<Env> {
     // ステージに入ったら、そのステージの会話をサーバで用意する（Issue #236）。前進の直後、
     // awaitを挟まずに作るので、入場と会話の用意の間に別のタブの送信が割り込まない。
     if (reply.kind === "applied" && reply.events.some((event) => event.type === "stage-entered"))
-      this.ensureStageThread(teamCode, reply.state.game.stage);
-    const ai = this.stageAi(teamCode, reply.state);
+      this.chatStore.ensureStageThread(teamCode, reply.state.game.stage);
+    const ai = this.chatStore.stageAi(teamCode, reply.state);
     await this.gamePublisher.publish(teamCode, store);
     const result: GameCommandRpcResult = { reply, generation, ai };
     return result;
@@ -394,38 +330,11 @@ export class TeamRoom extends DurableObject<Env> {
 
   // ---- チャット ----
 
-  /**
-   * チャットのsnapshotを読む。伏せ字化を入れる前に保存された平文のPIIが、GET・
-   * WebSocket配信・台帳の再生から出続けないよう、読み出した時点で伏せ字へ置き換える。
-   * 内容が変わったらその場で保存し直す（一度きりの移行。次回以降は参照が変わらないので
-   * 書き込みは走らない）。
-   */
-  private loadChatSnapshot(teamCode: TeamCode): ChatSnapshot {
-    migrateLedgerPii(this.ctx.storage);
-    const stored =
-      this.ctx.storage.sql
-        .exec<StoredChatState>("SELECT snapshot FROM chat_state WHERE id = 1")
-        .toArray()[0] ?? null;
-    if (stored !== null) {
-      const parsed = chatSnapshotSchema.parse(JSON.parse(stored.snapshot) as unknown);
-      const redacted = redactSnapshotPii(parsed);
-      if (redacted !== parsed) this.saveChatSnapshot(redacted);
-      return redacted;
-    }
-    const snapshot = initialChatSnapshot(teamCode, crypto.randomUUID());
-    this.ctx.storage.sql.exec(
-      "INSERT INTO chat_state (id, snapshot) VALUES (1, ?)",
-      JSON.stringify(snapshot),
-    );
-    return snapshot;
-  }
-
-  private saveChatSnapshot(snapshot: ChatSnapshot): void {
-    this.ctx.storage.sql.exec(
-      "UPDATE chat_state SET snapshot = ? WHERE id = 1",
-      JSON.stringify(snapshot),
-    );
-  }
+  /** The chat snapshot and thread creation. It holds no per-call state, so one per DO. */
+  private readonly chatStore = new ChatStore({
+    storage: this.ctx.storage,
+    broadcastChat: (snapshot) => this.broadcastChat(snapshot),
+  });
 
   /**
    * チャットのsnapshotを返す。`commandIdsInput`を渡した呼び出しでは、そのIDが
@@ -435,7 +344,7 @@ export class TeamRoom extends DurableObject<Env> {
    * 先に送った要求が後から完了したときに取り違える）。
    */
   async chatSnapshot(teamCodeInput: unknown, commandIdsInput?: unknown): Promise<ChatSnapshot> {
-    const snapshot = this.loadChatSnapshot(teamCodeSchema.parse(teamCodeInput));
+    const snapshot = this.chatStore.loadChatSnapshot(teamCodeSchema.parse(teamCodeInput));
     if (commandIdsInput === undefined) return snapshot;
     const commandIds = chatCommandIdsSchema.parse(commandIdsInput);
     const commands: Record<string, CommandStatus> = {};
@@ -454,51 +363,7 @@ export class TeamRoom extends DurableObject<Env> {
     const command: CreateThreadCommand = createThreadCommandSchema.parse(commandInput);
     // 世代の照合は冪等台帳より前（command()と同じ理由）。
     if (command.generation !== this.readGeneration()) return { staleGeneration: true };
-    const saved = readProcessedThread(this.ctx.storage.sql, command.commandId);
-    if (saved !== null) {
-      // 同じcommandIdで別のタイトル・別のkindを送る取り違えは冪等再送ではない。
-      if (mismatchesFingerprint(saved.fingerprint, fingerprint)) return { conflict: true };
-      return { snapshot: saved.result.snapshot, created: false };
-    }
-    const snapshot = this.loadChatSnapshot(teamCode);
-    // ステージ用スレッドはtitleがステージ名で一意、という契約にする。リロードや
-    // タブの競合で同じステージの作成要求が二重に来ても増やさない——commandIdは
-    // 要求ごとに新しいので、冪等台帳だけでは同名スレッドの増殖を止められない。
-    // manualは参加者が同じ名前を付けてよいので従来どおり増やす。
-    if (command.kind === "stage") {
-      const existing = snapshot.threads.find(
-        (thread) => (thread.kind ?? "manual") === "stage" && thread.title === command.title,
-      );
-      if (existing !== undefined) return this.replayExistingThread(snapshot, command, fingerprint);
-    }
-    // 冪等再送（processed済み）は上限に関係なく従来の結果を返す。上限を当てるのは
-    // 新しいスレッドを実際に増やすときだけである。kindごとに独立して数える。
-    const max = THREAD_LIMITS[command.kind];
-    if (countThreadsOfKind(snapshot, command.kind) >= max) {
-      return { threadLimit: true, max, kind: command.kind };
-    }
-    const threadId = chatThreadIdSchema.parse(crypto.randomUUID());
-    const created = domainCreateThread(snapshot, {
-      threadId,
-      title: command.title,
-      kind: command.kind,
-    });
-    if (!created.ok) throw new Error("スレッドの作成に失敗しました。");
-    const result = createThreadResultSchema.parse({ snapshot: created.snapshot });
-    // snapshotの更新と冪等台帳は必ず同時に成立させる。片方だけ書けると、スレッドは
-    // 増えたのに台帳に記録が無い状態になり、同じcommandIdの再送が新規作成として
-    // もう1本増やしてしまう（checkpointと同じ流儀）。
-    this.ctx.storage.transactionSync(() => {
-      this.saveChatSnapshot(created.snapshot);
-      this.ctx.storage.sql.exec(
-        "INSERT INTO processed_thread_commands (command_id, result, fingerprint) VALUES (?, ?, ?)",
-        command.commandId,
-        JSON.stringify(result),
-        fingerprint,
-      );
-    });
-    this.broadcastChat(created.snapshot);
-    return { snapshot: result.snapshot, created: true, threadId };
+    return this.chatStore.createThread(teamCode, command, fingerprint);
   }
 
   /**
@@ -564,25 +429,6 @@ export class TeamRoom extends DurableObject<Env> {
    * 超過したときはユーザーメッセージを保存せず（saveChatSnapshotより手前で返す）、
    * 呼び出し側もAiGatewayに触れない。
    */
-  /**
-   * 既に同じステージ用スレッドがある作成要求へ、現在のsnapshotをそのまま返す。
-   * 台帳へも記録して、同じcommandIdの再送が同じ結果を返すようにする。
-   */
-  private replayExistingThread(
-    snapshot: ChatSnapshot,
-    command: CreateThreadCommand,
-    fingerprint: string,
-  ): CreateThreadOutcome {
-    const result = createThreadResultSchema.parse({ snapshot });
-    this.ctx.storage.sql.exec(
-      "INSERT OR IGNORE INTO processed_thread_commands (command_id, result, fingerprint) VALUES (?, ?, ?)",
-      command.commandId,
-      JSON.stringify(result),
-      fingerprint,
-    );
-    return { snapshot: result.snapshot, created: false };
-  }
-
   async beginChatMessage(
     teamCodeInput: unknown,
     commandInput: unknown,
@@ -620,7 +466,7 @@ export class TeamRoom extends DurableObject<Env> {
     gate: BeginChatMessageGate,
   ): BeginChatMessageOutcome | UnknownThreadReply {
     const { nowMs, limit, fingerprint } = gate;
-    const snapshot = this.loadChatSnapshot(teamCode);
+    const snapshot = this.chatStore.loadChatSnapshot(teamCode);
     if (!snapshot.threads.some((thread) => thread.threadId === command.threadId)) {
       return { unknownThread: true };
     }
@@ -639,7 +485,7 @@ export class TeamRoom extends DurableObject<Env> {
     const retryAfterSeconds = this.ctx.storage.transactionSync(() => {
       const retry = consumeRateLimit(this.ctx.storage.sql, "chat", nowMs, limit);
       if (retry !== null) return retry;
-      this.saveChatSnapshot(appended.snapshot);
+      this.chatStore.saveChatSnapshot(appended.snapshot);
       const now = new Date().toISOString();
       this.ctx.storage.sql.exec(
         "INSERT INTO pending_message_commands (command_id, thread_id, created_at, claimed_at, prompt_profile, fingerprint, claim_generation) VALUES (?, ?, ?, ?, ?, ?, 1)",
@@ -656,7 +502,7 @@ export class TeamRoom extends DurableObject<Env> {
     this.broadcastChat(appended.snapshot);
     return {
       kind: "pending",
-      history: this.historyFor(appended.snapshot, command.threadId),
+      history: this.chatStore.historyFor(appended.snapshot, command.threadId),
       token: { claimGeneration: 1, resetGeneration: this.readGeneration() },
     };
   }
@@ -725,7 +571,11 @@ export class TeamRoom extends DurableObject<Env> {
     // 会話のsnapshotはこの後で読む——読めない（壊れている）ときでも罠は確定させる。
     if (detectPii(text.text) !== null)
       return this.blockStageChatPii(state, command, gate, text.text);
-    const target = resolveStageChatTarget(stage, this.loadChatSnapshot(teamCode), command.type);
+    const target = resolveStageChatTarget(
+      stage,
+      this.chatStore.loadChatSnapshot(teamCode),
+      command.type,
+    );
     if (!target.ok) return { refused: target.reason };
     return this.appendStageChatMessage(teamCode, command, gate, {
       threadId: target.threadId,
@@ -832,10 +682,10 @@ export class TeamRoom extends DurableObject<Env> {
       claimGeneration,
       commandId,
     );
-    const snapshot = this.loadChatSnapshot(teamCode);
+    const snapshot = this.chatStore.loadChatSnapshot(teamCode);
     return {
       kind: "pending",
-      history: this.historyFor(snapshot, pending.thread_id),
+      history: this.chatStore.historyFor(snapshot, pending.thread_id),
       token: { claimGeneration, resetGeneration: this.readGeneration() },
     };
   }
@@ -914,7 +764,7 @@ export class TeamRoom extends DurableObject<Env> {
       assistant: assistantMessage,
     });
     this.ctx.storage.transactionSync(() => {
-      this.saveChatSnapshot(appended.snapshot);
+      this.chatStore.saveChatSnapshot(appended.snapshot);
       this.ctx.storage.sql.exec(
         // pending行の指紋をそのまま引き継ぐ。processed側にも残しておかないと、
         // 完了後の再送で内容の取り違えを検出できない。
@@ -930,11 +780,6 @@ export class TeamRoom extends DurableObject<Env> {
     });
     this.broadcastChat(appended.snapshot);
     return result;
-  }
-
-  private historyFor(snapshot: ChatSnapshot, threadId: string): AiMessage[] {
-    const thread = snapshot.threads.find((candidate) => candidate.threadId === threadId);
-    return (thread?.messages ?? []).map((message) => ({ role: message.role, text: message.text }));
   }
 
   // ---- チェックポイント ----
@@ -978,7 +823,10 @@ export class TeamRoom extends DurableObject<Env> {
     server.serializeAttachment({ kind: "team", teamCode: parsed.data });
     this.ctx.acceptWebSocket(server);
     this.sendEnvelope(server, { kind: "team", snapshot: this.joinSnapshot(parsed.data) });
-    this.sendEnvelope(server, { kind: "chat", snapshot: this.loadChatSnapshot(parsed.data) });
+    this.sendEnvelope(server, {
+      kind: "chat",
+      snapshot: this.chatStore.loadChatSnapshot(parsed.data),
+    });
     return new Response(null, { status: 101, webSocket: client });
   }
 

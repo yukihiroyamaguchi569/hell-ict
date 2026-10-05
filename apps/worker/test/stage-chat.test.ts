@@ -18,7 +18,7 @@ import { handleGameState, handlePrepareStageThread } from "../src/game-api.js";
 import { handleStageChatMessage } from "../src/stage-chat.js";
 import { systemPromptFor } from "../src/stage-prompts.js";
 import { advance, applied, CLEAR, command, playTo } from "./game-command-support.js";
-import { MAX_STAGE_THREADS_PER_TEAM } from "../src/team-room.js";
+import { MAX_STAGE_THREADS_PER_TEAM } from "../src/chat-store.js";
 import { clock, countRows, gameOf, gmReset, viewSchema } from "./game-support.js";
 import { get, postJson, TEST_ORIGIN } from "./support.js";
 import { PII_NAME, PII_SURNAME } from "./pii-support.js";
