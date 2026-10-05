@@ -39,7 +39,7 @@ import {
   rateLimitRetryAfterSeconds,
 } from "../src/guard.js";
 import { handleChatMessage } from "../src/index.js";
-import { MAX_MANUAL_THREADS_PER_TEAM, MAX_STAGE_THREADS_PER_TEAM } from "../src/team-room.js";
+import { MAX_MANUAL_THREADS_PER_TEAM, MAX_STAGE_THREADS_PER_TEAM } from "../src/chat-store.js";
 import { firstMessage, get, postJson, session, TEST_ORIGIN, upgrade } from "./support.js";
 
 const OTHER_ORIGIN = "https://evil.test";

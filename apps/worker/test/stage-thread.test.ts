@@ -6,7 +6,7 @@ import { beforeEach, describe, expect, it } from "vitest";
 import { z } from "zod";
 
 import { handleGameState, handlePrepareStageThread } from "../src/game-api.js";
-import { MAX_STAGE_THREADS_PER_TEAM } from "../src/team-room.js";
+import { MAX_STAGE_THREADS_PER_TEAM } from "../src/chat-store.js";
 import {
   advance,
   applied,
