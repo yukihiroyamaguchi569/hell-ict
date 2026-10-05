@@ -464,6 +464,10 @@ const playFinal = async (page: Page): Promise<void> => {
   await receive.click();
   await expect(page.getByTestId("final-address")).toHaveText(`${TEAM}${WIDE}御中`);
   await expect(page.getByTestId("final-quote")).toHaveText(`「${FINAL_LINE}」`);
+  // The frame picture under the certificate has arrived: a reload while it is still on its way
+  // would abort the request (the next step reloads at once, which no team does).
+  const frame = page.getByTestId("final-handover").locator("img.frame-art");
+  await expect.poll(() => frame.evaluate((img: HTMLImageElement) => img.naturalWidth)).toBe(1586);
 };
 
 test("Vue 版を入室から感謝状まで1本で通す（実 Worker・OpenAI スタブ・境目ごとに再読み込み）", async ({
