@@ -1,4 +1,4 @@
-import { expect, test, type Locator, type Page } from "@playwright/test";
+import { expect, test, type Page } from "@playwright/test";
 
 import {
   epilogueLines,
@@ -174,15 +174,7 @@ test("ゴールとエピローグは［振り返りへ］を押すまで出し�
   expect(fake.commands).toEqual([]);
 });
 
-const rightEdge = async (target: Locator): Promise<number> => {
-  const box = await target.boundingBox();
-  if (box === null) throw new Error("not on screen");
-  return box.x + box.width;
-};
-
-test("ゴールには紙吹雪と停留所の帯。マーカーは Final の右端に内側へ寄せ、紙吹雪は消えてクリックを妨げない", async ({
-  page,
-}) => {
+test("ゴールは舞台の絵の上に見出しと紙吹雪。紙吹雪は消えてクリックを妨げない", async ({ page }) => {
   const fake = await serveFinal(page);
   await page.goto("/");
   await enterTeam(page, uniqueTeamCode(), TEAM);
@@ -195,18 +187,14 @@ test("ゴールには紙吹雪と停留所の帯。マーカーは Final の右�
     content: "[data-testid='final-confetti'] i { animation-play-state: paused !important; }",
   });
 
-  const stops = goal(page).locator(".goal-track .stops span");
-  await expect(stops).toHaveText(["Prologue", "S1", "S2", "S3", "S4", "S5", "S6", "Final"]);
-  const mark = goal(page).getByTestId("final-goal-mark");
-  await expect(mark).toHaveText(`◆${TEAM}`);
-  // Pulled inwards: its right edge is the track's right edge, so the name is not cut off.
-  const markRight = await rightEdge(mark);
-  expect(Math.abs(markRight - (await rightEdge(stops.last())))).toBeLessThan(2);
-  expect(markRight).toBeLessThanOrEqual(page.viewportSize()?.width ?? 0);
+  // The stage picture is served and drawn behind the title.
+  const art = goal(page).locator("img.art");
+  await expect(art).toHaveAttribute("src", "/assets/images/production/final-goal-ceremony.webp");
+  await expect.poll(() => art.evaluate((img: HTMLImageElement) => img.naturalWidth)).toBe(1672);
 
   // Taken away 3.4 s after the goal comes up, whether the animation ended or not.
   await expect(confetti).toHaveCount(0, { timeout: 6_000 });
-  await expect(mark).toBeVisible();
+  await expect(goal(page)).toContainText(`${TEAM}${WIDE}ゴール`);
 
   // The goal comes back on a reload, confetti and all; its button is on top of the confetti,
   // so the press lands while the pieces are still falling.

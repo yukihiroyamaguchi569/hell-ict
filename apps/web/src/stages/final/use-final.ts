@@ -17,11 +17,10 @@ export interface Final {
   /** Why the line was refused (「一言を入力してください。」), "" otherwise. */
   readonly note: Readonly<Ref<string>>;
   readonly pieceOpen: ComputedRef<boolean>;
-  readonly goalTitle: ComputedRef<string>;
   /** The goal's confetti is falling: each time the goal comes up, for CONFETTI_CLEAR_MS. */
   readonly confetti: Readonly<Ref<boolean>>;
-  /** The name by the team's marker on the goal's row of stops. */
-  readonly goalMark: ComputedRef<string>;
+  /** The team's name on the goal's title (the name, a wide space, 「ゴール」). */
+  readonly goalName: ComputedRef<string>;
   readonly address: ComputedRef<string>;
   readonly quote: ComputedRef<string>;
   pressGoalNext(): void;
@@ -209,8 +208,7 @@ export const useFinal = (context: StageContext, activity: ActivityApi): Final =>
     draft,
     note: readonly(note),
     pieceOpen: computed(() => view.pieceOpen(phase.value, line.value)),
-    goalTitle: computed(() => view.goalTitle(context.teamName.value)),
-    goalMark: computed(() => view.goalTeamName(context.teamName.value)),
+    goalName: computed(() => view.goalTeamName(context.teamName.value)),
     address: computed(() => view.handoverAddress(context.teamName.value)),
     quote: computed(() => view.handoverQuote(line.value)),
     pressGoalNext: move(view.afterGoal),

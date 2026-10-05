@@ -9,20 +9,18 @@ import {
 import { computed } from "vue";
 
 import CallWindow from "../common/CallWindow.vue";
-import { relayButtonText } from "./final-view.js";
+import { GOAL_BACKDROP, relayButtonText, WIDE_SPACE } from "./final-view.js";
 import GoalConfetti from "./GoalConfetti.vue";
-import { GOAL_STOP, GOAL_STOPS, stopMark } from "./goal-view.js";
 import type { Final } from "./use-final.js";
 
 /*
- * Final's windows over the whole screen: the goal (mock #ov-goal, its confetti and the row of
- * stops with the team's marker on Final), the director's epilogue (#ov-epilogue), the relay of
- * three voices (#ov-f-relay) and the certificate (#ov-f-handover). The team's name and line are
- * text, never markup.
+ * Final's windows over the whole screen: the goal (mock #ov-goal and its confetti, over a stage
+ * picture), the director's epilogue (#ov-epilogue), the relay of three voices (#ov-f-relay) and
+ * the certificate (#ov-f-handover, its text inside a framed picture). The team's name and line
+ * are text, never markup.
  */
 const props = defineProps<{ final: Final }>();
-const { phase, confetti, goalTitle, goalMark, address, quote } = props.final;
-const mark = stopMark(GOAL_STOP);
+const { phase, confetti, goalName, address, quote } = props.final;
 
 const epilogueCall = { ...execVoices.incho, tb: finalLabels.epilogueTitle };
 const relayStep = computed(() => (phase.value.kind === "relay" ? phase.value.step : 0));
@@ -42,25 +40,15 @@ const onRelayClick = (event: MouseEvent): void => {
 
 <template>
   <div v-if="phase.kind === 'goal'" class="veil goal" data-testid="final-goal">
-    <div class="t">{{ goalTitle }}</div>
+    <img class="art" :src="GOAL_BACKDROP" alt="" />
+    <div class="t">
+      <span class="nm">{{ goalName }}</span
+      ><span class="sp">{{ WIDE_SPACE }}</span
+      ><span class="word">{{ finalLabels.goal }}</span>
+    </div>
     <button type="button" class="btn" @click="final.pressGoalNext()">
       {{ finalLabels.goalNext }}
     </button>
-    <div class="goal-track">
-      <div class="stops">
-        <span v-for="stop in GOAL_STOPS" :key="stop">{{ stop }}</span>
-      </div>
-      <div class="marks">
-        <div
-          class="mark-t"
-          :class="mark.align"
-          :style="{ left: `${mark.leftPct}%` }"
-          data-testid="final-goal-mark"
-        >
-          ◆<span class="nm">{{ goalMark }}</span>
-        </div>
-      </div>
-    </div>
     <GoalConfetti v-if="confetti" />
   </div>
   <CallWindow
@@ -118,25 +106,59 @@ const onRelayClick = (event: MouseEvent): void => {
 </template>
 
 <style scoped>
-/* The race's end (mock .goal): a bright festive backing of its own, whatever the mode. */
+/*
+ * The race's end (mock .goal): a festive stage picture, whatever the mode, with the title over its
+ * bright middle. The light there is near white, so the letters are gold and white with a dark
+ * outline and a dark glow under them.
+ */
 .goal {
-  background: linear-gradient(160deg, #fffaf3 0%, #fdf0dc 55%, #fbe4c4 100%);
+  background: #2a0605;
   flex-direction: column;
-  gap: 22px;
+  gap: 34px;
+}
+.goal .art {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  object-position: center;
+  display: block;
 }
 .goal .t {
-  font-size: 92px;
-  font-weight: 800;
-  letter-spacing: 0.05em;
-  max-width: 92%;
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  max-width: 88%;
+  font-family: var(--font-ui);
+  font-weight: 900;
+  line-height: 1.1;
   text-align: center;
-  overflow-wrap: anywhere;
-  background: linear-gradient(135deg, #b8631f 0%, #d9a441 45%, #c97b84 100%);
-  background-clip: text;
-  color: transparent;
-  filter: drop-shadow(0 3px 0 rgba(255, 255, 255, 0.7))
-    drop-shadow(0 10px 22px rgba(184, 99, 31, 0.35));
+  filter: drop-shadow(0 4px 3px rgba(40, 4, 0, 0.55)) drop-shadow(0 0 26px rgba(60, 8, 0, 0.55));
   animation: goalTitlePop 0.7s cubic-bezier(0.34, 1.56, 0.64, 1) both;
+}
+/* The name may be up to 12 wide letters: it wraps rather than leave the screen. */
+.goal .nm {
+  max-width: 100%;
+  font-size: 58px;
+  letter-spacing: 0.06em;
+  color: #fffaf0;
+  -webkit-text-stroke: 7px #4a0f06;
+  paint-order: stroke fill;
+  overflow-wrap: anywhere;
+}
+/* The wide space stays in the title's text; on screen the two lines already part the words. */
+.goal .sp {
+  display: none;
+}
+.goal .word {
+  font-size: 150px;
+  letter-spacing: 0.08em;
+  text-indent: 0.08em;
+  color: #ffe6a0;
+  -webkit-text-stroke: 10px #4a0f06;
+  paint-order: stroke fill;
 }
 @keyframes goalTitlePop {
   0% {
@@ -155,51 +177,21 @@ const onRelayClick = (event: MouseEvent): void => {
   }
 }
 .goal .btn {
-  background: #b8631f;
-  border-color: #b8631f;
-  color: #fff;
-}
-/* The row of stops under the button (mock .goal-track), in fixed colours on the bright backing. */
-.goal-track {
-  width: min(84%, 900px);
-}
-.goal-track .stops {
-  display: flex;
-  justify-content: space-between;
-  font-family: var(--font-num);
-  font-size: 13px;
-  color: #a3906f;
-  letter-spacing: 0.04em;
-  margin-bottom: 22px;
-}
-.goal-track .marks {
   position: relative;
-  height: 22px;
-}
-.goal-track .mark-t {
-  position: absolute;
-  bottom: 0;
-  display: flex;
-  align-items: center;
-  gap: 5px;
-  white-space: nowrap;
-  font-size: 14px;
+  padding: 12px 40px;
+  font-size: 18px;
   font-weight: 700;
-  color: #b8631f;
+  letter-spacing: 0.08em;
+  color: #4a0f06;
+  background: linear-gradient(180deg, #fff6d6 0%, #f3cf6b 55%, #d9a23a 100%);
+  border: 2px solid #7a1c0c;
+  border-radius: 999px;
+  box-shadow:
+    0 0 0 3px rgba(255, 244, 205, 0.85),
+    0 8px 22px rgba(40, 4, 0, 0.55);
 }
-/* A marker on either end is pulled inwards so the team's name stays on screen (mock placeMark). */
-.goal-track .mark-t.start {
-  transform: translateX(0);
-}
-.goal-track .mark-t.center {
-  transform: translateX(-50%);
-}
-.goal-track .mark-t.end {
-  transform: translateX(-100%);
-}
-.goal-track .mark-t .nm {
-  font-family: var(--font-ui);
-  font-size: 12px;
+.goal .btn:hover {
+  background: linear-gradient(180deg, #fffaf0 0%, #f8dc8a 55%, #e6b24c 100%);
 }
 /* The certificate (mock .handover / .hdoc): a framed hospital document in fixed colours. */
 .handover {

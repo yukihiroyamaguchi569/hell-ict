@@ -1,11 +1,4 @@
-// The goal's pure part: the confetti's pieces (mock goalConfettiBurst) and the row of stops
-// with the team's marker (mock .goal-track, placeMark).
-
-/** The stops of the race, Prologue to Final (mock .goal-track .stops). */
-export const GOAL_STOPS = ["Prologue", "S1", "S2", "S3", "S4", "S5", "S6", "Final"] as const;
-
-/** The goal only comes up in Final, so the team's marker always stands on the last stop. */
-export const GOAL_STOP = GOAL_STOPS.length - 1;
+// The goal's pure part: the confetti's pieces (mock goalConfettiBurst).
 
 /** Five colours that stay visible on the goal's bright backing (mock GOAL_CONFETTI_COLORS). */
 export const CONFETTI_COLORS = ["#c1121f", "#b8631f", "#2f8f7f", "#e0673f", "#8a4a72"] as const;
@@ -52,16 +45,3 @@ const piece = (index: number): ConfettiPiece => ({
 /** The pieces of one burst: each falls once and is gone by DELAY_MAX_MS + the longest fall. */
 export const confettiPieces = (count: number = CONFETTI_COUNT): readonly ConfettiPiece[] =>
   Array.from({ length: count }, (_, index) => piece(index));
-
-export type MarkAlign = "start" | "center" | "end";
-
-/**
- * Where a marker stands on the row of stops: the stops are spread edge to edge, so stop `pos` is at
- * pos ÷ (stops − 1). A marker on either end is pulled inwards so the team's name is not cut off
- * at the edge of the screen (mock placeMark).
- */
-export const stopMark = (pos: number): { readonly leftPct: number; readonly align: MarkAlign } => {
-  const last = GOAL_STOPS.length - 1;
-  const align: MarkAlign = pos <= 0 ? "start" : pos >= last ? "end" : "center";
-  return { leftPct: (pos * 100) / last, align };
-};

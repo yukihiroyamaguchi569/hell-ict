@@ -7,6 +7,8 @@ import {
 } from "@hell-ict/content";
 import { z } from "zod";
 
+import { portraitSrc } from "../../overlays/clear-sheets.js";
+
 // Final's pure part: the order of its scenes, the line the team leaves (nothing is judged: the
 // mock's fSubmitLine refuses an empty line only), and the certificate.
 /** The tiles light one by one at this interval (mock F_BOARD_LIGHT_MS). */
@@ -126,19 +128,19 @@ export const resume = (phase: FinalPhase): FinalPhase =>
   phase.kind === "rest" ? { kind: "handover" } : phase;
 
 /** The full-width space between the name and 「ゴール」 or 「御中」 (mock goalSequence, fShowHandover). */
-const WIDE_SPACE = "　";
+export const WIDE_SPACE = "　";
 
-/** The team's name on the goal (its title and its marker on the row of stops). */
+/** The team's name on the goal's title, which reads name, WIDE_SPACE, 「ゴール」. */
 export const goalTeamName = (teamName: string): string =>
   teamName.trim() || finalLabels.goalTeamFallback;
-
-export const goalTitle = (teamName: string): string =>
-  `${goalTeamName(teamName)}${WIDE_SPACE}${finalLabels.goal}`;
 
 export const handoverAddress = (teamName: string): string =>
   `${teamName.trim() || finalHandover.teamFallback}${WIDE_SPACE}${finalHandover.honorific}`;
 
 export const handoverQuote = (line: string | null): string => `「${line ?? ""}」`;
+
+/** The stage behind the goal's title (the picture has no words; the title is laid over it). */
+export const GOAL_BACKDROP = portraitSrc("final-goal-ceremony.webp");
 
 /** The scenes drawn over the whole screen; the board and the rest are the centre pane's. */
 export const overlayScene = (phase: FinalPhase): boolean =>

@@ -81,7 +81,7 @@ describe("一言・宛名・保存の形", () => {
 
   it("宛名とゴールの見出しは、名前が無ければ既定の名で埋める", () => {
     expect(view.handoverAddress("  ")).toBe(finalHandover.teamFallback + "　御中");
-    expect(view.goalTitle("")).toBe("自チーム　ゴール");
+    expect(view.goalTeamName("")).toBe("自チーム");
   });
 
   it("空白だけの一言、121字の一言、一言の無い未送信は壊れた保存として拒否する", () => {

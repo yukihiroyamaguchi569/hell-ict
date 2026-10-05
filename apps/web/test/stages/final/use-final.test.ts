@@ -125,7 +125,7 @@ describe("ゴールとエピローグ", () => {
   it("初めての入場はゴールから。エピローグは開いて400ms未満の押下を捨て、押せば intro 済みを保存", async () => {
     const s = await setup();
     expect(s.final.phase.value).toEqual({ kind: "goal" });
-    expect(s.final.goalTitle.value).toBe("チームA　ゴール");
+    expect(s.final.goalName.value).toBe("チームA");
     s.final.pressEpilogueNext();
     s.final.pressGoalNext();
     await s.settle();
