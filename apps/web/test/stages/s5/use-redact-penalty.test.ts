@@ -43,7 +43,7 @@ const mount = () => {
       newCommandId: () => `id-${String((ids += 1))}`,
       serverNow,
       scheduler,
-      sfx: { play: (name) => sounds.push(name) },
+      sfx: { play: (name) => sounds.push(name), tone: () => undefined },
     }),
   );
   if (penalty === undefined) throw new Error("the scope did not run");

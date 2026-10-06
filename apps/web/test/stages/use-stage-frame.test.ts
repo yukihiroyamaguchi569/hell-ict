@@ -35,7 +35,7 @@ const context = (): StageContext => {
     sessionStorage: new FakeKeyValueStorage(),
     scheduler,
     mail: useMailSelection(),
-    sfx: { play: () => undefined },
+    sfx: { play: () => undefined, tone: () => undefined },
     karubeRead: ref(new Set<string>()),
     teamName: ref(""),
   };

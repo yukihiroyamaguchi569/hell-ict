@@ -90,7 +90,7 @@ const setup = async (options: Options = {}) => {
     sessionStorage: storage,
     scheduler,
     mail: useMailSelection(),
-    sfx: { play: () => undefined },
+    sfx: { play: () => undefined, tone: () => undefined },
     karubeRead: ref(new Set<string>()),
     teamName: ref("チームA"),
   };

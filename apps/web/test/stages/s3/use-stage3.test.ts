@@ -31,7 +31,7 @@ const mount = (storage = new FakeKeyValueStorage()) => {
       serverNow,
       storage,
       scheduler,
-      sfx: { play: (name) => sounds.push(name) },
+      sfx: { play: (name) => sounds.push(name), tone: () => undefined },
     }),
   );
   if (stage === undefined) throw new Error("the scope did not run");

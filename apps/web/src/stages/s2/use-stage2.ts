@@ -14,6 +14,7 @@ import { useAtServerTime } from "../../composables/use-at-server-time.js";
 import type { GameCommandInput, SendOutcome } from "../../composables/use-game-session.js";
 import { sessionRecord, sessionRecordKey } from "../../session-record.js";
 import type { Verdict } from "../../verdict/verdict.js";
+import { verdictTicks } from "../../verdict/verdict-ticks.js";
 import type { InboxRow, StageContext } from "../stage-module.js";
 import { stage2PasteErrorText } from "./s2-ai.js";
 import {
@@ -146,16 +147,29 @@ export const useStage2 = (context: StageContext): Stage2 => {
   watch(game, startIfNeeded, { immediate: true });
   const passShowing = shallowRef(false);
   let cancelPassHold: () => void = () => undefined;
+  let cancelTicks: (() => void)[] = [];
+  const stopTicks = (): void => {
+    for (const cancel of cancelTicks) cancel();
+    cancelTicks = [];
+  };
   onScopeDispose(() => {
     cancelRetry();
     cancelPassHold();
+    stopTicks();
   });
-  const holdForPass = (): void => {
+  /** Holds the clear effect back and beeps once as each row of the pass starts to show. */
+  const holdForPass = (pass: Extract<Verdict, { kind: "cleared" }>): void => {
     cancelPassHold();
+    stopTicks();
     passShowing.value = true;
     cancelPassHold = scheduler.schedule(() => {
       passShowing.value = false;
     }, STAGE2_PASS_HOLD_MS);
+    cancelTicks = verdictTicks(pass.checks?.length ?? 0).map(({ atMs, tone }) =>
+      scheduler.schedule(() => {
+        context.sfx.tone(tone);
+      }, atMs),
+    );
   };
 
   // The grid of this start of the stage: the one kept for a reload, or the sheet as delivered.
@@ -244,7 +258,7 @@ export const useStage2 = (context: StageContext): Stage2 => {
         stage2ExpectedRowCount(submitted, serverNow.value),
       );
       verdict.value = result.verdict;
-      if (result.verdict.kind === "cleared") holdForPass();
+      if (result.verdict.kind === "cleared") holdForPass(result.verdict);
       if (result.rejected) {
         hot.value = result.hot;
         context.sfx.play("cancel");

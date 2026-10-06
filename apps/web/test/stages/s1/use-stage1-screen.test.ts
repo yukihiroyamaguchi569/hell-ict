@@ -58,7 +58,7 @@ const mount = (
       sessionStorage: new FakeKeyValueStorage(),
       scheduler,
       mail,
-      sfx: { play: () => undefined },
+      sfx: { play: () => undefined, tone: () => undefined },
       karubeRead: ref(new Set<string>()),
       teamName: ref(""),
     };

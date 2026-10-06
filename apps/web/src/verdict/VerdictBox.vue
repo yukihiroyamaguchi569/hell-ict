@@ -2,15 +2,21 @@
 import { verdictCheckingText } from "@hell-ict/content";
 
 import type { Verdict } from "./verdict.js";
+import { verdictTickDelayMs } from "./verdict-ticks.js";
 
 /*
  * The verdict under a submission (mock `.verdict`, index.html 446-474). The checking line stays
  * on top, and its spinner stops once a result row is under it. A result row fades in each time,
  * so a rejection with the same words as the last one still shows that it was checked again
  * (issue #69). A pass that lists its checks shows them one by one before the success line (mock
- * runVerdict), by CSS animation-delay rather than timers.
+ * runVerdict), by CSS animation-delay rather than timers. The delays come from
+ * `verdictTickDelayMs`, the same numbers Stage 2 times its beeps by.
  */
 defineProps<{ verdict: Verdict }>();
+
+const tickDelay = (index: number): Record<string, string> => ({
+  "--tick-delay": `${String(verdictTickDelayMs(index))}ms`,
+});
 </script>
 
 <template>
@@ -24,14 +30,14 @@ defineProps<{ verdict: Verdict }>();
         v-for="(line, i) in verdict.checks ?? []"
         :key="`check-${String(i)}`"
         class="lead tick"
-        :style="{ '--tick': i }"
+        :style="tickDelay(i)"
       >
         {{ line }}
       </div>
       <div
         class="done"
         :class="{ tick: verdict.checks !== undefined }"
-        :style="{ '--tick': verdict.checks?.length ?? 0 }"
+        :style="tickDelay(verdict.checks?.length ?? 0)"
       >
         {{ verdict.text }}
       </div>
@@ -61,10 +67,11 @@ defineProps<{ verdict: Verdict }>();
 }
 /*
  * A pass's checks and its success line come in turn: the first at 200 ms, then one every 400 ms
- * (Stage 2's success line at 1.8 s). STAGE2_PASS_HOLD_MS holds the clear effect until all are in.
+ * (Stage 2's success line at 1.8 s; `--tick-delay` from verdictTickDelayMs). STAGE2_PASS_HOLD_MS
+ * holds the clear effect until all are in.
  */
 .verdict > .tick {
-  animation-delay: calc(200ms + var(--tick) * 400ms);
+  animation-delay: var(--tick-delay);
 }
 @media (prefers-reduced-motion: reduce) {
   .verdict > .tick {

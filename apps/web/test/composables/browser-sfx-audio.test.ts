@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 
 import { createBrowserSfxAudio, type SfxElement } from "../../src/composables/use-sfx.js";
+import type { Tone } from "../../src/ports.js";
 
 type Failure = "none" | "volume" | "seek" | "play-throws" | "play-rejects" | "pause";
 
@@ -121,6 +122,32 @@ describe("createBrowserSfxAudio", () => {
       failing.audio.stopAll();
     }).not.toThrow();
     expect(failing.created.map((element) => element.pauses)).toEqual([1, 1]);
+  });
+
+  it("解錠と合成音は音のファイルを作らず、合成器へそのまま渡す", () => {
+    const created: string[] = [];
+    const tones: Tone[] = [];
+    let unlocks = 0;
+    const audio = createBrowserSfxAudio(
+      (src) => {
+        created.push(src);
+        return new FakeElement(src, "none");
+      },
+      {
+        unlock: () => {
+          unlocks += 1;
+        },
+        play: (tone) => {
+          tones.push(tone);
+        },
+      },
+    );
+    const beep: Tone = { frequencyHz: 988, durationMs: 70, volume: 0.12 };
+    audio.unlock();
+    audio.tone(beep);
+    expect(unlocks).toBe(1);
+    expect(tones).toEqual([beep]);
+    expect(created).toEqual([]);
   });
 });
 

@@ -166,7 +166,7 @@ const setup = async (
     sessionStorage: storage,
     scheduler,
     mail: useMailSelection(),
-    sfx: { play: (name) => played.push(name) },
+    sfx: { play: (name) => played.push(name), tone: () => undefined },
     karubeRead: ref(new Set<string>()),
     teamName: ref(""),
   };
