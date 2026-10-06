@@ -1,6 +1,7 @@
 import { onScopeDispose, watch, type Ref } from "vue";
 
-import type { AudioPort, PreloadResult } from "../ports.js";
+import type { AudioPort, PreloadResult, Tone } from "../ports.js";
+import { createToneSynth } from "./tone-synth.js";
 
 /*
  * Sound effects (mock `sfx()` / `applySfxMute`, hell-ict-scenario:docs/ui/00_共通シェルと通奏低音.md §11).
@@ -37,6 +38,8 @@ export interface Sfx {
    * Stage 3 penalty). 0 means silent, not the default.
    */
   readonly play: (name: SfxName, volume?: number) => void;
+  /** A synthesized beep (the ticks of Stage 2's verdict). Same gesture and mute rules. */
+  readonly tone: (tone: Tone) => void;
 }
 
 /**
@@ -67,6 +70,10 @@ export const useSfx = (
       if (!unlocked || muted.value) return;
       audio.play(name, sfxVolume(name, volume));
     },
+    tone: (tone) => {
+      if (!unlocked || muted.value) return;
+      audio.tone(tone);
+    },
   };
 };
 
@@ -95,9 +102,11 @@ const HAVE_ENOUGH_DATA = 4;
  * and pausing. A sound must never stop the game. `preload` builds the same element the play
  * uses, so a sound loaded by the opening (Issue #379) is played from it without a second fetch.
  * An element that failed to load is dropped, so the next play or preload fetches it again.
+ * Tones are synthesized by `playTone` (Web Audio, `createToneSynth`).
  */
 export const createBrowserSfxAudio = (
   createElement: (src: string) => SfxElement = (src) => new Audio(src),
+  playTone: (tone: Tone) => void = createToneSynth(),
 ): AudioPort => {
   const cache = new Map<string, SfxElement>();
 
@@ -173,5 +182,6 @@ export const createBrowserSfxAudio = (
       }
     },
     preload,
+    tone: playTone,
   };
 };

@@ -30,7 +30,10 @@ const mount = () => {
       newCommandId: () => `id-${String((ids += 1))}`,
       serverNow,
       scheduler,
-      sfx: { play: (name, volume) => sounds.push(`${name}@${String(volume ?? "")}`) },
+      sfx: {
+        play: (name, volume) => sounds.push(`${name}@${String(volume ?? "")}`),
+        tone: () => undefined,
+      },
       onFinishing: () => {
         reports.push("finishing");
       },

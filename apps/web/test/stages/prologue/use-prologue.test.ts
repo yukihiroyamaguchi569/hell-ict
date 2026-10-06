@@ -128,7 +128,11 @@ const start = async (opened = true, storage = new FakeKeyValueStorage()) => {
   const mail = useMailSelection();
   const context = {
     ...{ session, serverNow, sessionStorage: storage, scheduler, mail },
-    ...{ sfx: { play: () => undefined }, karubeRead: ref(new Set<string>()), teamName: ref("") },
+    ...{
+      sfx: { play: () => undefined, tone: () => undefined },
+      karubeRead: ref(new Set<string>()),
+      teamName: ref(""),
+    },
   };
   const scope = effectScope();
   const prologue = scope.run(() => usePrologue(context));

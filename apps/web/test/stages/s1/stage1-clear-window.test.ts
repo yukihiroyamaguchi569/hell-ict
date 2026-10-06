@@ -90,6 +90,7 @@ const mount = (initial: GameView) => {
           play: (name) => {
             played.push(name);
           },
+          tone: () => undefined,
         },
         karubeRead: ref(new Set<string>()),
         teamName: ref(""),

@@ -36,7 +36,7 @@ const mount = (initial = s5State(), storage = new FakeKeyValueStorage(), now = E
       serverNow,
       storage,
       scheduler,
-      sfx: { play: (name) => sounds.push(name) },
+      sfx: { play: (name) => sounds.push(name), tone: () => undefined },
       penaltyHeld: () => penaltyHeld.value,
     }),
   );

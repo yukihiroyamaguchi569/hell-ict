@@ -55,13 +55,23 @@ export interface ClipboardPort {
   writeText(text: string): Promise<void>;
 }
 
+/** A short synthesized beep: one sine wave with a fade in and out (no sound file). */
+export interface Tone {
+  readonly frequencyHz: number;
+  readonly durationMs: number;
+  /** Peak gain, 0〜1. */
+  readonly volume: number;
+}
+
 /**
- * Plays named sound effects (`/sounds/<name>.mp3`). Must never throw: a sound must never stop
- * the game.
+ * Plays named sound effects (`/sounds/<name>.mp3`) and synthesized tones. Must never throw: a
+ * sound must never stop the game.
  */
 export interface AudioPort {
   /** `volume` is 0〜1. */
   play(name: string, volume: number): void;
+  /** Synthesizes `tone` on the spot. Silent where the browser cannot synthesize sound. */
+  tone(tone: Tone): void;
   /** Stops whatever is playing (muting silences the sound that is already on). */
   stopAll(): void;
   /**

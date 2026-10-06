@@ -5,6 +5,7 @@ import { nextTick, ref } from "vue";
 import type { GameView } from "../../../src/composables/use-game-session.js";
 import type { SfxName } from "../../../src/composables/use-sfx.js";
 import { useMailSelection } from "../../../src/inbox/use-stage-inbox.js";
+import type { Tone } from "../../../src/ports.js";
 import type { StageContext } from "../../../src/stages/stage-module.js";
 import { FakeKeyValueStorage, FakeScheduler, flush, viewBody } from "../../fakes.js";
 import { fakeSession, T0 } from "../s1/fake-session.js";
@@ -42,6 +43,7 @@ export const s2Context = (
   const scheduler = new FakeScheduler();
   const storage = options.storage ?? new FakeKeyValueStorage();
   const sounds: SfxName[] = [];
+  const tones: Tone[] = [];
   const context: StageContext = {
     session: fake.session,
     serverNow,
@@ -52,11 +54,14 @@ export const s2Context = (
       play: (name) => {
         sounds.push(name);
       },
+      tone: (tone) => {
+        tones.push(tone);
+      },
     },
     karubeRead: ref(new Set<string>()),
     teamName: ref(""),
   };
-  return { ...fake, context, serverNow, scheduler, storage, sounds };
+  return { ...fake, context, serverNow, scheduler, storage, sounds, tones };
 };
 
 export const settle = async (): Promise<void> => {

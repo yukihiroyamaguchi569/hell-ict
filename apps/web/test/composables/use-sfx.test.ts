@@ -2,14 +2,19 @@ import { describe, expect, it } from "vitest";
 import { effectScope, nextTick, ref } from "vue";
 
 import { sfxVolume, useSfx } from "../../src/composables/use-sfx.js";
-import type { AudioPort, PreloadResult } from "../../src/ports.js";
+import type { AudioPort, PreloadResult, Tone } from "../../src/ports.js";
 
 class FakeAudio implements AudioPort {
   readonly played: [string, number][] = [];
+  readonly tones: Tone[] = [];
   stops = 0;
 
   play(name: string, volume: number): void {
     this.played.push([name, volume]);
+  }
+
+  tone(tone: Tone): void {
+    this.tones.push(tone);
   }
 
   stopAll(): void {
@@ -115,6 +120,30 @@ describe("useSfx", () => {
     click();
     sfx.play("don-1");
     expect(audio.played).toHaveLength(1);
+  });
+});
+
+describe("useSfx の合成音（tone）", () => {
+  const beep: Tone = { frequencyHz: 880, durationMs: 70, volume: 0.12 };
+
+  it("最初のクリックまでは鳴らさず、クリック後はそのまま audio.tone へ渡す", () => {
+    const { audio, sfx, click } = setup();
+    sfx.tone(beep);
+    expect(audio.tones).toEqual([]);
+    click();
+    sfx.tone(beep);
+    expect(audio.tones).toEqual([beep]);
+  });
+
+  it("ミュート中は1回も鳴らさず、外せば次から鳴る", async () => {
+    const { audio, muted, sfx, click } = setup(true);
+    click();
+    sfx.tone(beep);
+    expect(audio.tones).toEqual([]);
+    muted.value = false;
+    await nextTick();
+    sfx.tone(beep);
+    expect(audio.tones).toEqual([beep]);
   });
 });
 
