@@ -50,6 +50,8 @@ import { messageCommandStatus } from "./chat-ledger.js";
 import { ChatStore } from "./chat-store.js";
 import { ChatMessages } from "./chat-messages.js";
 import { StageChatIntake } from "./stage-chat-intake.js";
+import { repairLeaderboard } from "./leaderboard-repair.js";
+import type { LeaderboardRepairDeps } from "./leaderboard-repair.js";
 import type { RateLimitVerdict } from "./rate-limit-store.js";
 import type { GameCommandRpcResult, GameViewRpcResult } from "./game-store.js";
 import type {
@@ -182,7 +184,8 @@ export class TeamRoom extends DurableObject<Env> {
         )
         .toArray()[0] ?? null;
     if (saved !== null)
-      return this.repairLeaderboard(
+      return repairLeaderboard(
+        this.leaderboardRepair,
         commandResultSchema.parse(JSON.parse(saved.result) as unknown),
         command.commandId,
       );
@@ -204,7 +207,7 @@ export class TeamRoom extends DurableObject<Env> {
       command.commandId,
       JSON.stringify(pending),
     );
-    return this.repairLeaderboard(pending, command.commandId);
+    return repairLeaderboard(this.leaderboardRepair, pending, command.commandId);
   }
 
   // ---- ゲーム状態（Issue #234） ----
@@ -287,6 +290,14 @@ export class TeamRoom extends DurableObject<Env> {
    * queues are what keep the sends one-at-a-time, so it must not be created per call.
    */
   private readonly gamePublisher = new GamePublisher(this.env);
+
+  /** What the leaderboard repair after a team command needs. It holds no per-call state. */
+  private readonly leaderboardRepair: LeaderboardRepairDeps = {
+    leaderboard: () => this.env.RACE_LEADERBOARD.getByName("global"),
+    storage: this.ctx.storage,
+    readGeneration: () => this.readGeneration(),
+    broadcast: (snapshot) => this.broadcast(snapshot),
+  };
 
   // ---- チャット ----
 
@@ -520,32 +531,6 @@ export class TeamRoom extends DurableObject<Env> {
   }
   override webSocketClose(socket: WebSocket): void {
     socket.close();
-  }
-
-  private async repairLeaderboard(
-    result: CommandResult,
-    commandId: string,
-  ): Promise<CommandResult> {
-    if (result.leaderboardPending) {
-      try {
-        await this.env.RACE_LEADERBOARD.getByName("global").upsert(
-          result.snapshot.teamCode,
-          result.snapshot,
-          this.readGeneration(),
-        );
-      } catch {
-        return result;
-      }
-      const completed = commandResultSchema.parse({ ...result, leaderboardPending: false });
-      this.ctx.storage.sql.exec(
-        "UPDATE processed_commands SET result = ? WHERE command_id = ?",
-        JSON.stringify(completed),
-        commandId,
-      );
-      this.broadcast(completed.snapshot);
-      return completed;
-    }
-    return result;
   }
 
   private broadcast(snapshot: TeamSnapshot): void {
