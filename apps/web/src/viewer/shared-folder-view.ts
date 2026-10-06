@@ -22,8 +22,9 @@ export interface SharedFolderItem {
  */
 
 /**
- * Stages 1 and 2: the handover memo. The inbox's copy vanishes after 60 seconds, but the
- * material itself was on the shelf from the start.
+ * The Prologue and Stages 1 and 2: the handover memo. The previous ICN's Prologue mail says it
+ * lies in the shared folder too, so it is there from the Prologue on. The inbox's copy vanishes
+ * after 60 seconds, but the material itself was on the shelf from the start.
  */
 const MEMO_ONLY: readonly ViewerId[] = ["s1memo"];
 
@@ -38,7 +39,7 @@ const STAGE3_DOCS: readonly ViewerId[] = ["s3contaminated", "s3manual"];
 const NONE: readonly ViewerId[] = [];
 
 const FOLDER_BY_STAGE: Readonly<Record<GameStageId, readonly ViewerId[]>> = {
-  prologue: NONE,
+  prologue: MEMO_ONLY,
   s1: MEMO_ONLY,
   s2: MEMO_ONLY,
   s3: STAGE3_DOCS,

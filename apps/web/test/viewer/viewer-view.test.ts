@@ -19,7 +19,7 @@ const VIEWER_IDS = Object.keys(viewerDocs).filter((id): id is ViewerId =>
 
 describe("sharedFolderItems（ステージ × 共有フォルダの中身）", () => {
   const EXPECTED = {
-    prologue: [],
+    prologue: ["s1memo"],
     s1: ["s1memo"],
     s2: ["s1memo"],
     s3: ["s3contaminated", "s3manual"],
@@ -47,6 +47,10 @@ describe("sharedFolderItems（ステージ × 共有フォルダの中身）", (
       expect(ids).not.toContain("s3contaminated");
       expect(ids).not.toContain("s3manual");
     }
+  });
+
+  it("Prologue から Stage 1 と同じ引き継ぎメモがある（前任 ICN のメールが「共有フォルダにも置いておきます」と書く）", () => {
+    expect(sharedFolderItems("prologue")).toEqual(sharedFolderItems("s1"));
   });
 
   it("Stage 4 以降は空（ほかのステージの資料を AI に貼らせない）", () => {
