@@ -1,5 +1,6 @@
 import { expect, test, type Page } from "@playwright/test";
 
+import { viewerDocs } from "../../packages/content/src/index.js";
 import {
   gameInstantSchema,
   gameViewResponseSchema,
@@ -42,6 +43,15 @@ test("入室 →［メールを開く］→ 3通に返信 → Stage 1 のブリ�
   // 残り時間はメールを開いているときだけ。
   await expect(page.getByTestId("mission-countdown")).toHaveCount(0);
   await expect(page.getByTestId("inbox-list").getByRole("button")).toHaveCount(3);
+
+  // 前任 ICN のメールのとおり、共有フォルダに引き継ぎメモがもうある。開いて閉じても進行は変わらない。
+  const memoLabel = `📄 ${viewerDocs.s1memo.name}`;
+  await expect(page.getByTestId("shared-folder").getByRole("button")).toHaveText([memoLabel]);
+  await page.getByTestId("shared-folder").getByRole("button", { name: memoLabel }).click();
+  await expect(page.getByTestId("viewer-name")).toHaveText(viewerDocs.s1memo.name);
+  await expect(page.getByTestId("viewer-text")).toHaveText(viewerDocs.s1memo.text);
+  await page.getByTestId("viewer").getByRole("button", { name: "閉じる" }).click();
+  await expect(page.getByTestId("viewer")).toHaveCount(0);
 
   await row(page, "p0").click();
   await expect(page.getByTestId("mail-reader")).toContainText("人事課");
