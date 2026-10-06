@@ -1,4 +1,4 @@
-import { expect, test, type Locator, type Page } from "@playwright/test";
+import { expect, test, type Page } from "@playwright/test";
 
 import {
   epilogueLines,
@@ -58,6 +58,15 @@ const TEAM = "F<b>班</b>";
 const LINE = "<b>AIに渡す前に、名前を消す。</b>";
 
 const goal = (page: Page) => page.getByTestId("final-goal");
+
+/** The goal's title: the team's name over 「ゴール」, one heading read as the name, WIDE, 「ゴール」. */
+const expectGoalTitle = async (page: Page, name: string): Promise<void> => {
+  await expect(goal(page).getByTestId("final-goal-name")).toHaveText(name);
+  await expect(goal(page).getByTestId("final-goal-word")).toHaveText("ゴール");
+  await expect(
+    goal(page).getByRole("heading", { name: `${name}${WIDE}ゴール`, exact: true }),
+  ).toBeVisible();
+};
 const epilogue = (page: Page) => page.getByTestId("final-epilogue");
 const relay = (page: Page) => page.getByTestId("final-relay");
 const handover = (page: Page) => page.getByTestId("final-handover");
@@ -79,7 +88,7 @@ test("ゴールから感謝状まで。一言は1回だけ記録し、コマン�
   await page.goto("/");
   await enterTeam(page, uniqueTeamCode(), TEAM);
 
-  await expect(goal(page)).toContainText(`${TEAM}${WIDE}ゴール`);
+  await expectGoalTitle(page, TEAM);
   await expect(page.getByTestId("mission-bar")).toContainText("Final");
   // The epilogue opens where the goal's button was: a second press at once does not skip it.
   await goal(page).getByRole("button", { name: "振り返りへ進む" }).click();
@@ -129,6 +138,9 @@ test("ゴールから感謝状まで。一言は1回だけ記録し、コマン�
 
   await expect(page.getByTestId("final-address")).toHaveText(`${TEAM}${WIDE}御中`);
   await expect(page.getByTestId("final-quote")).toHaveText(`「${LINE}」`);
+  // The gilded frame picture is served and drawn under the text.
+  const frame = handover(page).locator("img.frame-art");
+  await expect.poll(() => frame.evaluate((img: HTMLImageElement) => img.naturalWidth)).toBe(1586);
   await expect(handover(page).locator("b", { hasText: "班" })).toHaveCount(0);
   await expect(handover(page).locator("b", { hasText: "名前を消す" })).toHaveCount(0);
 
@@ -161,7 +173,7 @@ test("ゴールとエピローグは［振り返りへ］を押すまで出し�
   await goal(page).getByRole("button", { name: "振り返りへ進む" }).click();
   await expect(epilogue(page)).toBeVisible();
   await page.reload();
-  await expect(goal(page)).toContainText(`F班${WIDE}ゴール`);
+  await expectGoalTitle(page, "F班");
 
   await readIntro(page);
   await page.reload();
@@ -174,15 +186,7 @@ test("ゴールとエピローグは［振り返りへ］を押すまで出し�
   expect(fake.commands).toEqual([]);
 });
 
-const rightEdge = async (target: Locator): Promise<number> => {
-  const box = await target.boundingBox();
-  if (box === null) throw new Error("not on screen");
-  return box.x + box.width;
-};
-
-test("ゴールには紙吹雪と停留所の帯。マーカーは Final の右端に内側へ寄せ、紙吹雪は消えてクリックを妨げない", async ({
-  page,
-}) => {
+test("ゴールは舞台の絵の上に見出しと紙吹雪。紙吹雪は消えてクリックを妨げない", async ({ page }) => {
   const fake = await serveFinal(page);
   await page.goto("/");
   await enterTeam(page, uniqueTeamCode(), TEAM);
@@ -195,18 +199,14 @@ test("ゴールには紙吹雪と停留所の帯。マーカーは Final の右�
     content: "[data-testid='final-confetti'] i { animation-play-state: paused !important; }",
   });
 
-  const stops = goal(page).locator(".goal-track .stops span");
-  await expect(stops).toHaveText(["Prologue", "S1", "S2", "S3", "S4", "S5", "S6", "Final"]);
-  const mark = goal(page).getByTestId("final-goal-mark");
-  await expect(mark).toHaveText(`◆${TEAM}`);
-  // Pulled inwards: its right edge is the track's right edge, so the name is not cut off.
-  const markRight = await rightEdge(mark);
-  expect(Math.abs(markRight - (await rightEdge(stops.last())))).toBeLessThan(2);
-  expect(markRight).toBeLessThanOrEqual(page.viewportSize()?.width ?? 0);
+  // The stage picture is served and drawn behind the title.
+  const art = goal(page).locator("img.art");
+  await expect(art).toHaveAttribute("src", "/assets/images/production/final-goal-ceremony.webp");
+  await expect.poll(() => art.evaluate((img: HTMLImageElement) => img.naturalWidth)).toBe(1672);
 
   // Taken away 3.4 s after the goal comes up, whether the animation ended or not.
   await expect(confetti).toHaveCount(0, { timeout: 6_000 });
-  await expect(mark).toBeVisible();
+  await expectGoalTitle(page, TEAM);
 
   // The goal comes back on a reload, confetti and all; its button is on top of the confetti,
   // so the press lands while the pieces are still falling.

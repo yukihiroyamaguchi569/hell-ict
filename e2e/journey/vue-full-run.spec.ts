@@ -443,7 +443,10 @@ const playStage6 = async (page: Page): Promise<void> => {
 
 const playFinal = async (page: Page): Promise<void> => {
   const goal = page.getByTestId("final-goal");
-  await expect(goal).toContainText(`${TEAM}${WIDE}ゴール`);
+  await expect(goal.getByTestId("final-goal-name")).toHaveText(TEAM);
+  await expect(
+    goal.getByRole("heading", { name: `${TEAM}${WIDE}ゴール`, exact: true }),
+  ).toBeVisible();
   await goal.getByRole("button", { name: "振り返りへ進む" }).click();
   const epilogue = page.getByTestId("final-epilogue");
   await expect(epilogue).toContainText(epilogueLines[0]);
@@ -464,6 +467,12 @@ const playFinal = async (page: Page): Promise<void> => {
   await receive.click();
   await expect(page.getByTestId("final-address")).toHaveText(`${TEAM}${WIDE}御中`);
   await expect(page.getByTestId("final-quote")).toHaveText(`「${FINAL_LINE}」`);
+  // The frame picture under the certificate has arrived: a reload while it is still on its way
+  // would abort the request (the next step reloads at once, which no team does).
+  const frame = page.getByTestId("final-handover").locator("img.frame-art");
+  await expect
+    .poll(() => frame.evaluate((img: HTMLImageElement) => img.complete && img.naturalWidth > 0))
+    .toBe(true);
 };
 
 test("Vue 版を入室から感謝状まで1本で通す（実 Worker・OpenAI スタブ・境目ごとに再読み込み）", async ({

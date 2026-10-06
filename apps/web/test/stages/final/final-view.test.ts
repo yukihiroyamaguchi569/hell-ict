@@ -1,4 +1,4 @@
-import { finalHandover, finalLabels } from "@hell-ict/content";
+import { FINAL_LINE_MAX, finalHandover, finalLabels, productionImages } from "@hell-ict/content";
 import { describe, expect, it } from "vitest";
 
 import * as view from "../../../src/stages/final/final-view.js";
@@ -81,7 +81,9 @@ describe("一言・宛名・保存の形", () => {
 
   it("宛名とゴールの見出しは、名前が無ければ既定の名で埋める", () => {
     expect(view.handoverAddress("  ")).toBe(finalHandover.teamFallback + "　御中");
+    expect(view.goalTeamName("")).toBe("自チーム");
     expect(view.goalTitle("")).toBe("自チーム　ゴール");
+    expect(view.goalTitle(" F班 ")).toBe("F班　ゴール");
   });
 
   it("空白だけの一言、121字の一言、一言の無い未送信は壊れた保存として拒否する", () => {
@@ -131,5 +133,32 @@ describe("画面の出し分け", () => {
       all,
       all,
     ]);
+  });
+});
+
+describe("ゴールと感謝状の絵", () => {
+  it("どちらも production の画像で、読み込み画面が先読みする", () => {
+    const listed = productionImages.map((file) => `/assets/images/production/${file}`);
+    expect(view.GOAL_BACKDROP).toBe("/assets/images/production/final-goal-ceremony.webp");
+    expect(view.CERTIFICATE_FRAME).toBe("/assets/images/production/final-certificate-frame.webp");
+    expect(listed).toContain(view.GOAL_BACKDROP);
+    expect(listed).toContain(view.CERTIFICATE_FRAME);
+  });
+});
+
+describe("感謝状の一言の大きさ", () => {
+  const quoteOf = (length: number): string => view.handoverQuote("あ".repeat(length));
+
+  it("「」込みで34字までは大、74字までは中、それより長ければ小", () => {
+    expect(view.quoteSize(quoteOf(1))).toBe("large");
+    expect(view.quoteSize(quoteOf(32))).toBe("large");
+    expect(view.quoteSize(quoteOf(33))).toBe("medium");
+    expect(view.quoteSize(quoteOf(72))).toBe("medium");
+    expect(view.quoteSize(quoteOf(73))).toBe("small");
+  });
+
+  it("上限いっぱいの一言は小、一言が無くても大", () => {
+    expect(view.quoteSize(quoteOf(FINAL_LINE_MAX))).toBe("small");
+    expect(view.quoteSize(view.handoverQuote(null))).toBe("large");
   });
 });

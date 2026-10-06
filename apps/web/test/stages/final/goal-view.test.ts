@@ -43,20 +43,8 @@ describe("紙吹雪の片", () => {
   });
 });
 
-describe("停留所の帯", () => {
-  it("Prologue から Final までの8停留所で、ゴールのマーカーは Final に立つ", () => {
-    expect(goal.GOAL_STOPS).toEqual(["Prologue", "S1", "S2", "S3", "S4", "S5", "S6", "Final"]);
-    expect(goal.GOAL_STOPS[goal.GOAL_STOP]).toBe("Final");
-  });
-
-  it("両端のマーカーは内側へ寄せ、途中は停留所の真上に中心を合わせる", () => {
-    expect(goal.stopMark(0)).toEqual({ leftPct: 0, align: "start" });
-    expect(goal.stopMark(1)).toEqual({ leftPct: 100 / 7, align: "center" });
-    expect(goal.stopMark(6)).toEqual({ leftPct: 600 / 7, align: "center" });
-    expect(goal.stopMark(7)).toEqual({ leftPct: 100, align: "end" });
-  });
-
-  it("マーカーの名前はチーム名で、空白だけなら既定の名", () => {
+describe("ゴールの見出し", () => {
+  it("名前はチーム名の前後の空白を落とし、空白だけなら既定の名", () => {
     expect(view.goalTeamName(" F班 ")).toBe("F班");
     expect(view.goalTeamName("　")).toBe("自チーム");
   });

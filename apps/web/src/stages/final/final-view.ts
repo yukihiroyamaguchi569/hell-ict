@@ -7,6 +7,8 @@ import {
 } from "@hell-ict/content";
 import { z } from "zod";
 
+import { portraitSrc } from "../../overlays/clear-sheets.js";
+
 // Final's pure part: the order of its scenes, the line the team leaves (nothing is judged: the
 // mock's fSubmitLine refuses an empty line only), and the certificate.
 /** The tiles light one by one at this interval (mock F_BOARD_LIGHT_MS). */
@@ -128,10 +130,11 @@ export const resume = (phase: FinalPhase): FinalPhase =>
 /** The full-width space between the name and 「ゴール」 or 「御中」 (mock goalSequence, fShowHandover). */
 const WIDE_SPACE = "　";
 
-/** The team's name on the goal (its title and its marker on the row of stops). */
+/** The team's name, the first of the goal title's two lines (the second is 「ゴール」). */
 export const goalTeamName = (teamName: string): string =>
   teamName.trim() || finalLabels.goalTeamFallback;
 
+/** The goal's title read as one line (its heading's accessible name). */
 export const goalTitle = (teamName: string): string =>
   `${goalTeamName(teamName)}${WIDE_SPACE}${finalLabels.goal}`;
 
@@ -139,6 +142,25 @@ export const handoverAddress = (teamName: string): string =>
   `${teamName.trim() || finalHandover.teamFallback}${WIDE_SPACE}${finalHandover.honorific}`;
 
 export const handoverQuote = (line: string | null): string => `「${line ?? ""}」`;
+
+/** The stage behind the goal's title (the picture has no words; the title is laid over it). */
+export const GOAL_BACKDROP = portraitSrc("final-goal-ceremony.webp");
+/** The certificate's paper and gilded frame; its text is laid inside the plain middle. */
+export const CERTIFICATE_FRAME = portraitSrc("final-certificate-frame.webp");
+
+export type QuoteSize = "large" | "medium" | "small";
+
+const QUOTE_LARGE_MAX = 34;
+const QUOTE_MEDIUM_MAX = 74;
+
+/**
+ * How big the certificate sets the team's line (with its 「」): a short line large, and smaller as
+ * it grows, so even a line of FINAL_LINE_MAX stays inside the frame's plain middle.
+ */
+export const quoteSize = (quote: string): QuoteSize => {
+  if (quote.length <= QUOTE_LARGE_MAX) return "large";
+  return quote.length <= QUOTE_MEDIUM_MAX ? "medium" : "small";
+};
 
 /** The scenes drawn over the whole screen; the board and the rest are the centre pane's. */
 export const overlayScene = (phase: FinalPhase): boolean =>
