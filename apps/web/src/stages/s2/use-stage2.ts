@@ -157,7 +157,7 @@ export const useStage2 = (context: StageContext): Stage2 => {
     cancelPassHold();
     stopTicks();
   });
-  /** Holds the clear effect back and beeps once as each check row starts to show. */
+  /** Holds the clear effect back and beeps once as each row of the pass starts to show. */
   const holdForPass = (pass: Extract<Verdict, { kind: "cleared" }>): void => {
     cancelPassHold();
     stopTicks();
