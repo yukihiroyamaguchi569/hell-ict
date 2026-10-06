@@ -11,6 +11,11 @@ import {
   STAGE2_START_RETRY_MS,
   useStage2,
 } from "../../../src/stages/s2/use-stage2.js";
+import {
+  VERDICT_TICK_DURATION_MS,
+  VERDICT_TICK_FREQUENCIES_HZ,
+  VERDICT_TICK_VOLUME,
+} from "../../../src/verdict/verdict-ticks.js";
 import { FakeKeyValueStorage } from "../../fakes.js";
 import { appliedWith, rejectedWith } from "../s1/fake-session.js";
 import { s2Context, s2View, settle, T0 } from "./s2-fixtures.js";
@@ -355,9 +360,75 @@ describe("useStage2: 合格の ✓ が出そろうまでクリア演出を止め
   it("止めている間にステージを離れたら、タイマーは残らない", async () => {
     const { stage, scheduler, scope } = mount(s2View(started), passed);
     await stage.submit();
-    expect([stage.pauseClear.value, scheduler.pending]).toEqual([true, 1]);
+    // The hold and the four beeps of the checks.
+    expect([stage.pauseClear.value, scheduler.pending]).toEqual([true, 5]);
     scope.stop();
     expect(scheduler.pending).toBe(0);
+  });
+});
+
+describe("useStage2: 合格の ✓ が1行出るたびに短い電子音", () => {
+  const passed = () => judged({ outcome: "pass" }, s2View(started, { cleared: true }));
+
+  it("✓ の4行がそれぞれ見え始める時刻（200/600/1000/1400ms）に、音程を上げて1回ずつ鳴らす", async () => {
+    const { stage, scheduler, tones } = mount(s2View(started), passed);
+    await stage.submit();
+    expect(tones).toEqual([]);
+    const heard: [number, number][] = [];
+    let at = 0;
+    const advanceTo = (ms: number) => {
+      scheduler.advanceBy(ms - at);
+      at = ms;
+    };
+    for (const ms of [199, 200, 599, 600, 999, 1_000, 1_399, 1_400, STAGE2_PASS_HOLD_MS]) {
+      const before = tones.length;
+      advanceTo(ms);
+      for (const tone of tones.slice(before)) heard.push([ms, tone.frequencyHz]);
+    }
+    expect(heard).toEqual([
+      [200, VERDICT_TICK_FREQUENCIES_HZ[0]],
+      [600, VERDICT_TICK_FREQUENCIES_HZ[1]],
+      [1_000, VERDICT_TICK_FREQUENCIES_HZ[2]],
+      [1_400, VERDICT_TICK_FREQUENCIES_HZ[3]],
+    ]);
+    // The line of success (1.8 s) has no beep: four in all.
+    expect(tones).toHaveLength(4);
+    expect(scheduler.pending).toBe(0);
+    for (const tone of tones) {
+      expect(tone).toMatchObject({
+        durationMs: VERDICT_TICK_DURATION_MS,
+        volume: VERDICT_TICK_VOLUME,
+      });
+    }
+  });
+
+  it("差し戻し・届かなかった提出では鳴らさない（差し戻しは cancel だけ）", async () => {
+    for (const answer of [
+      () => judged({ outcome: "reject", check: "required-cells", cells: [] }, s2View(started)),
+      (): SendOutcome => ({ kind: "unavailable" }),
+    ]) {
+      const { stage, scheduler, tones } = mount(s2View(started), answer);
+      await stage.submit();
+      scheduler.advanceBy(STAGE2_PASS_HOLD_MS);
+      expect(tones).toEqual([]);
+    }
+  });
+
+  it("クリア済みで開き直した画面（再読み込み）では鳴らさない", async () => {
+    const { scheduler, tones } = mount(s2View(started, { cleared: true }));
+    await settle();
+    scheduler.advanceBy(STAGE2_PASS_HOLD_MS);
+    expect(tones).toEqual([]);
+  });
+
+  it("鳴り終わる前にステージを離れたら、残りは鳴らさない", async () => {
+    const { stage, scheduler, scope, tones } = mount(s2View(started), passed);
+    await stage.submit();
+    scheduler.advanceBy(600);
+    expect(tones).toHaveLength(2);
+    scope.stop();
+    scheduler.advanceBy(STAGE2_PASS_HOLD_MS);
+    expect(tones).toHaveLength(2);
   });
 });
 
