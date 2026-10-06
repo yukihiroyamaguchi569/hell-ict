@@ -19,8 +19,10 @@ export interface Final {
   readonly pieceOpen: ComputedRef<boolean>;
   /** The goal's confetti is falling: each time the goal comes up, for CONFETTI_CLEAR_MS. */
   readonly confetti: Readonly<Ref<boolean>>;
-  /** The team's name on the goal's title (the name, a wide space, 「ゴール」). */
+  /** The team's name, the first line of the goal's title (the second is 「ゴール」). */
   readonly goalName: ComputedRef<string>;
+  /** The goal's title read as one line: the name, a wide space, 「ゴール」. */
+  readonly goalTitle: ComputedRef<string>;
   readonly address: ComputedRef<string>;
   readonly quote: ComputedRef<string>;
   pressGoalNext(): void;
@@ -209,6 +211,7 @@ export const useFinal = (context: StageContext, activity: ActivityApi): Final =>
     note: readonly(note),
     pieceOpen: computed(() => view.pieceOpen(phase.value, line.value)),
     goalName: computed(() => view.goalTeamName(context.teamName.value)),
+    goalTitle: computed(() => view.goalTitle(context.teamName.value)),
     address: computed(() => view.handoverAddress(context.teamName.value)),
     quote: computed(() => view.handoverQuote(line.value)),
     pressGoalNext: move(view.afterGoal),

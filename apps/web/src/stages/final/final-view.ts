@@ -128,11 +128,15 @@ export const resume = (phase: FinalPhase): FinalPhase =>
   phase.kind === "rest" ? { kind: "handover" } : phase;
 
 /** The full-width space between the name and 「ゴール」 or 「御中」 (mock goalSequence, fShowHandover). */
-export const WIDE_SPACE = "　";
+const WIDE_SPACE = "　";
 
-/** The team's name on the goal's title, which reads name, WIDE_SPACE, 「ゴール」. */
+/** The team's name, the first of the goal title's two lines (the second is 「ゴール」). */
 export const goalTeamName = (teamName: string): string =>
   teamName.trim() || finalLabels.goalTeamFallback;
+
+/** The goal's title read as one line (its heading's accessible name). */
+export const goalTitle = (teamName: string): string =>
+  `${goalTeamName(teamName)}${WIDE_SPACE}${finalLabels.goal}`;
 
 export const handoverAddress = (teamName: string): string =>
   `${teamName.trim() || finalHandover.teamFallback}${WIDE_SPACE}${finalHandover.honorific}`;

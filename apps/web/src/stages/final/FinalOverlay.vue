@@ -9,13 +9,7 @@ import {
 import { computed } from "vue";
 
 import CallWindow from "../common/CallWindow.vue";
-import {
-  CERTIFICATE_FRAME,
-  GOAL_BACKDROP,
-  quoteSize,
-  relayButtonText,
-  WIDE_SPACE,
-} from "./final-view.js";
+import { CERTIFICATE_FRAME, GOAL_BACKDROP, quoteSize, relayButtonText } from "./final-view.js";
 import GoalConfetti from "./GoalConfetti.vue";
 import type { Final } from "./use-final.js";
 
@@ -26,7 +20,7 @@ import type { Final } from "./use-final.js";
  * are text, never markup.
  */
 const props = defineProps<{ final: Final }>();
-const { phase, confetti, goalName, address, quote } = props.final;
+const { phase, confetti, goalName, goalTitle, address, quote } = props.final;
 const quoteClass = computed(() => quoteSize(quote.value));
 
 const epilogueCall = { ...execVoices.incho, tb: finalLabels.epilogueTitle };
@@ -48,11 +42,10 @@ const onRelayClick = (event: MouseEvent): void => {
 <template>
   <div v-if="phase.kind === 'goal'" class="veil goal" data-testid="final-goal">
     <img class="art" :src="GOAL_BACKDROP" alt="" />
-    <div class="t">
-      <span class="nm">{{ goalName }}</span
-      ><span class="sp">{{ WIDE_SPACE }}</span
-      ><span class="word">{{ finalLabels.goal }}</span>
-    </div>
+    <h2 class="t" :aria-label="goalTitle">
+      <span class="nm" data-testid="final-goal-name">{{ goalName }}</span>
+      <span class="word" data-testid="final-goal-word">{{ finalLabels.goal }}</span>
+    </h2>
     <button type="button" class="btn" @click="final.pressGoalNext()">
       {{ finalLabels.goalNext }}
     </button>
@@ -129,6 +122,7 @@ const onRelayClick = (event: MouseEvent): void => {
 }
 .goal .t {
   position: relative;
+  margin: 0;
   display: flex;
   flex-direction: column;
   align-items: center;
@@ -149,10 +143,6 @@ const onRelayClick = (event: MouseEvent): void => {
   -webkit-text-stroke: 7px #4a0f06;
   paint-order: stroke fill;
   overflow-wrap: anywhere;
-}
-/* The wide space stays in the title's text; on screen the two lines already part the words. */
-.goal .sp {
-  display: none;
 }
 .goal .word {
   font-size: 150px;

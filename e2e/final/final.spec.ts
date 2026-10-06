@@ -58,6 +58,15 @@ const TEAM = "F<b>班</b>";
 const LINE = "<b>AIに渡す前に、名前を消す。</b>";
 
 const goal = (page: Page) => page.getByTestId("final-goal");
+
+/** The goal's title: the team's name over 「ゴール」, one heading read as the name, WIDE, 「ゴール」. */
+const expectGoalTitle = async (page: Page, name: string): Promise<void> => {
+  await expect(goal(page).getByTestId("final-goal-name")).toHaveText(name);
+  await expect(goal(page).getByTestId("final-goal-word")).toHaveText("ゴール");
+  await expect(
+    goal(page).getByRole("heading", { name: `${name}${WIDE}ゴール`, exact: true }),
+  ).toBeVisible();
+};
 const epilogue = (page: Page) => page.getByTestId("final-epilogue");
 const relay = (page: Page) => page.getByTestId("final-relay");
 const handover = (page: Page) => page.getByTestId("final-handover");
@@ -79,7 +88,7 @@ test("ゴールから感謝状まで。一言は1回だけ記録し、コマン�
   await page.goto("/");
   await enterTeam(page, uniqueTeamCode(), TEAM);
 
-  await expect(goal(page)).toContainText(`${TEAM}${WIDE}ゴール`);
+  await expectGoalTitle(page, TEAM);
   await expect(page.getByTestId("mission-bar")).toContainText("Final");
   // The epilogue opens where the goal's button was: a second press at once does not skip it.
   await goal(page).getByRole("button", { name: "振り返りへ進む" }).click();
@@ -164,7 +173,7 @@ test("ゴールとエピローグは［振り返りへ］を押すまで出し�
   await goal(page).getByRole("button", { name: "振り返りへ進む" }).click();
   await expect(epilogue(page)).toBeVisible();
   await page.reload();
-  await expect(goal(page)).toContainText(`F班${WIDE}ゴール`);
+  await expectGoalTitle(page, "F班");
 
   await readIntro(page);
   await page.reload();
@@ -197,7 +206,7 @@ test("ゴールは舞台の絵の上に見出しと紙吹雪。紙吹雪は消�
 
   // Taken away 3.4 s after the goal comes up, whether the animation ended or not.
   await expect(confetti).toHaveCount(0, { timeout: 6_000 });
-  await expect(goal(page)).toContainText(`${TEAM}${WIDE}ゴール`);
+  await expectGoalTitle(page, TEAM);
 
   // The goal comes back on a reload, confetti and all; its button is on top of the confetti,
   // so the press lands while the pieces are still falling.

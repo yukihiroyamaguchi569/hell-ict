@@ -126,6 +126,7 @@ describe("ゴールとエピローグ", () => {
     const s = await setup();
     expect(s.final.phase.value).toEqual({ kind: "goal" });
     expect(s.final.goalName.value).toBe("チームA");
+    expect(s.final.goalTitle.value).toBe("チームA　ゴール");
     s.final.pressEpilogueNext();
     s.final.pressGoalNext();
     await s.settle();
