@@ -8,6 +8,11 @@ class FakeAudio implements AudioPort {
   readonly played: [string, number][] = [];
   readonly tones: Tone[] = [];
   stops = 0;
+  unlocks = 0;
+
+  unlock(): void {
+    this.unlocks += 1;
+  }
 
   play(name: string, volume: number): void {
     this.played.push([name, volume]);
@@ -133,6 +138,16 @@ describe("useSfx の合成音（tone）", () => {
     click();
     sfx.tone(beep);
     expect(audio.tones).toEqual([beep]);
+  });
+
+  it("最初のクリックの中で1回だけ audio.unlock を呼ぶ（ジェスチャの外では解錠しない）", () => {
+    const { audio, sfx, click } = setup();
+    sfx.tone(beep);
+    expect(audio.unlocks).toBe(0);
+    click();
+    expect(audio.unlocks).toBe(1);
+    click();
+    expect(audio.unlocks).toBe(1);
   });
 
   it("ミュート中は1回も鳴らさず、外せば次から鳴る", async () => {

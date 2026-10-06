@@ -1,7 +1,7 @@
 import { onScopeDispose, watch, type Ref } from "vue";
 
 import type { AudioPort, PreloadResult, Tone } from "../ports.js";
-import { createToneSynth } from "./tone-synth.js";
+import { createToneSynth, type ToneSynth } from "./tone-synth.js";
 
 /*
  * Sound effects (mock `sfx()` / `applySfxMute`, hell-ict-scenario:docs/ui/00_共通シェルと通奏低音.md §11).
@@ -45,6 +45,7 @@ export interface Sfx {
 /**
  * Browsers block sound until the page has had a user gesture, so nothing plays before the first
  * click on `gestureTarget` (caught in the capture phase: the click that unlocks may itself play).
+ * That click also readies synthesized sound (`audio.unlock`), while it is still a user gesture.
  */
 export const useSfx = (
   audio: AudioPort,
@@ -54,6 +55,7 @@ export const useSfx = (
   let unlocked = false;
   const unlock = (): void => {
     unlocked = true;
+    audio.unlock();
   };
   gestureTarget.addEventListener("click", unlock, { once: true, capture: true });
   // Unmounted before the first click: do not leave the listener on the page.
@@ -102,11 +104,11 @@ const HAVE_ENOUGH_DATA = 4;
  * and pausing. A sound must never stop the game. `preload` builds the same element the play
  * uses, so a sound loaded by the opening (Issue #379) is played from it without a second fetch.
  * An element that failed to load is dropped, so the next play or preload fetches it again.
- * Tones are synthesized by `playTone` (Web Audio, `createToneSynth`).
+ * Tones are synthesized by `synth` (Web Audio, `createToneSynth`).
  */
 export const createBrowserSfxAudio = (
   createElement: (src: string) => SfxElement = (src) => new Audio(src),
-  playTone: (tone: Tone) => void = createToneSynth(),
+  synth: ToneSynth = createToneSynth(),
 ): AudioPort => {
   const cache = new Map<string, SfxElement>();
 
@@ -182,6 +184,7 @@ export const createBrowserSfxAudio = (
       }
     },
     preload,
-    tone: playTone,
+    unlock: synth.unlock,
+    tone: synth.play,
   };
 };

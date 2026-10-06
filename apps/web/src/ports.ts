@@ -70,7 +70,15 @@ export interface Tone {
 export interface AudioPort {
   /** `volume` is 0〜1. */
   play(name: string, volume: number): void;
-  /** Synthesizes `tone` on the spot. Silent where the browser cannot synthesize sound. */
+  /**
+   * Readies synthesized sound. Called inside the user's first click (browsers start Web Audio
+   * only from a user gesture).
+   */
+  unlock(): void;
+  /**
+   * Synthesizes `tone` on the spot. Silent where the browser cannot synthesize sound, or before
+   * `unlock` has got it running.
+   */
   tone(tone: Tone): void;
   /** Stops whatever is playing (muting silences the sound that is already on). */
   stopAll(): void;

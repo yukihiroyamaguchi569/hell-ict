@@ -64,15 +64,25 @@ const scheduleTone = (context: ToneContext, tone: Tone): void => {
   oscillator.stop(end + 0.01);
 };
 
+export interface ToneSynth {
+  /**
+   * Makes the AudioContext and resumes it. Called inside the user's first click: some browsers
+   * (Safari) let a context start only there, not from a timer later.
+   */
+  readonly unlock: () => void;
+  /** Plays `tone` now if the context is running; otherwise drops it (never queued for later). */
+  readonly play: (tone: Tone) => void;
+}
+
 /**
- * Plays tones on one AudioContext, made at the first tone (after the user's first click, when
- * the browser allows sound). Every failure is swallowed: no AudioContext, one that cannot be
- * made, or one that refuses to resume only means silence. A context that could not be made is
- * not asked for again.
+ * Plays tones on one AudioContext, made by `unlock`. Every failure is swallowed: no
+ * AudioContext, one that cannot be made, or one that refuses to resume only means silence. A
+ * context that could not be made is not asked for again. A tone while the context is not
+ * running is dropped, so a context that resumes later does not play a pile of old beeps.
  */
 export const createToneSynth = (
   createContext: () => ToneContext | null = browserContext,
-): ((tone: Tone) => void) => {
+): ToneSynth => {
   let context: ToneContext | null | undefined;
   const ensureContext = (): ToneContext | null => {
     if (context === undefined) {
@@ -84,14 +94,22 @@ export const createToneSynth = (
     }
     return context;
   };
-  return (tone) => {
-    try {
-      const current = ensureContext();
-      if (current === null) return;
-      if (current.state === "suspended") current.resume().catch(() => undefined);
-      scheduleTone(current, tone);
-    } catch {
-      // No beep this time; the game goes on.
-    }
+  return {
+    unlock: () => {
+      try {
+        const current = ensureContext();
+        if (current?.state === "suspended") current.resume().catch(() => undefined);
+      } catch {
+        // No tones then; the game goes on.
+      }
+    },
+    play: (tone) => {
+      try {
+        if (context?.state !== "running") return;
+        scheduleTone(context, tone);
+      } catch {
+        // No beep this time; the game goes on.
+      }
+    },
   };
 };

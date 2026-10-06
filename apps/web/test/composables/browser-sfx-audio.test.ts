@@ -124,18 +124,28 @@ describe("createBrowserSfxAudio", () => {
     expect(failing.created.map((element) => element.pauses)).toEqual([1, 1]);
   });
 
-  it("合成音は音のファイルを作らず、合成器へそのまま渡す", () => {
+  it("解錠と合成音は音のファイルを作らず、合成器へそのまま渡す", () => {
     const created: string[] = [];
     const tones: Tone[] = [];
+    let unlocks = 0;
     const audio = createBrowserSfxAudio(
       (src) => {
         created.push(src);
         return new FakeElement(src, "none");
       },
-      (tone) => tones.push(tone),
+      {
+        unlock: () => {
+          unlocks += 1;
+        },
+        play: (tone) => {
+          tones.push(tone);
+        },
+      },
     );
     const beep: Tone = { frequencyHz: 988, durationMs: 70, volume: 0.12 };
+    audio.unlock();
     audio.tone(beep);
+    expect(unlocks).toBe(1);
     expect(tones).toEqual([beep]);
     expect(created).toEqual([]);
   });
