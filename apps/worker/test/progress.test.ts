@@ -4,7 +4,7 @@ import { PII_REDACTION, publicTeamId, stage5Patient } from "@hell-ict/domain";
 import { z } from "zod";
 
 import { parseTeamCodeRule } from "../src/guard.js";
-import { progressSchemaSql, summaryStatements } from "../src/progress.js";
+import { progressSchemaSql, summaryQueries, summaryStatements } from "../src/progress.js";
 import { get, postJson, TEST_ORIGIN } from "./support.js";
 import { PII_NAME } from "./pii-support.js";
 
@@ -872,5 +872,150 @@ describe("進捗記録: リセット世代の絞り込み", () => {
     // 1行あたり4行未満（実測3.2行/行）。二乗なら桁が変わり（旧版は46倍/行）、
     // 部分インデックスが無ければ5.2倍/行なので、どちらの後退もここで落ちる。
     expect(rowsRead).toBeLessThan(rows * 4);
+  });
+});
+
+/**
+ * 今の回（EVENT_NO）の行だけをインデックスで読むこと（Issue #22）。式（substr / CAST）での
+ * 絞り込みは`idx_progress_team`を使えず、過去の回やテストの行まで毎回全件読んでいた。
+ * 範囲条件へ書き換えても選ぶ行が変わらないことと、インデックスを使うことを固定する。
+ */
+describe("進捗記録: 今の回だけをインデックスで読む", () => {
+  beforeEach(async () => {
+    await env.PROGRESS_DB.exec(DROP_TABLE);
+    await env.PROGRESS_DB.exec(progressSchemaSql);
+  });
+
+  const insertCode = (teamCode: string, kind = "clear"): D1PreparedStatement =>
+    env.PROGRESS_DB.prepare(
+      `INSERT INTO progress_events (team_code, team_name, pos, view, kind, client_at)
+       VALUES (?, '班', 1, 's1', ?, '')`,
+    ).bind(teamCode, kind);
+
+  /**
+   * 書き換え前の条件（Issue #22 以前の teamFilter）。範囲条件が選ぶ行の正解として使う。
+   * 長さ6・上2桁が開催回・下4桁が数字・下4桁の値が1〜TEAM_MAX。
+   */
+  const legacyTeamCodes = async (eventNo: string, teamMax: number): Promise<string[]> => {
+    const rows = await env.PROGRESS_DB.prepare(
+      `SELECT DISTINCT team_code FROM progress_events
+       WHERE length(team_code) = 6 AND substr(team_code, 1, 2) = ?
+         AND substr(team_code, 3) GLOB '[0-9][0-9][0-9][0-9]'
+         AND CAST(substr(team_code, 3) AS INTEGER) BETWEEN 1 AND ?
+       ORDER BY team_code`,
+    )
+      .bind(eventNo, teamMax)
+      .all();
+    return z
+      .array(z.object({ team_code: z.string() }))
+      .parse(rows.results)
+      .map((row) => row.team_code);
+  };
+
+  /** サマリーのteams（生のチームコードを持つ）が選んだコード。 */
+  const summaryTeamCodes = async (eventNo: string, teamMax: number): Promise<string[]> => {
+    const [teams] = summaryStatements(env.PROGRESS_DB, { kind: "rule", eventNo, teamMax });
+    const rows = await teams.all();
+    return z
+      .array(z.object({ teamCode: z.string() }))
+      .parse(rows.results)
+      .map((row) => row.teamCode)
+      .sort();
+  };
+
+  // 境界（0000・0001・上限・上限＋1・9999）、別の回、桁違い、字種違い、前後の空白、
+  // 文字列の比較だけでは範囲の内側に入ってしまう値（`4200:1`・`42/001`）を混ぜる。
+  const CODES = [
+    "420000",
+    "420001",
+    "420002",
+    "420009",
+    "420010",
+    "420099",
+    "420100",
+    "420101",
+    "421000",
+    "429998",
+    "429999",
+    "410001",
+    "419999",
+    "430000",
+    "430001",
+    "400001",
+    "100001",
+    "000000",
+    "000001",
+    "990001",
+    "999999",
+    "42000",
+    "4200001",
+    "4200010",
+    "42001x",
+    "4200:1",
+    "42/001",
+    "42 001",
+    " 42001",
+    "420001 ",
+    "42-001",
+    "４２０００１",
+    "",
+  ];
+
+  const RULES: [string, number][] = [
+    ["42", 100],
+    ["42", 1],
+    ["42", 9],
+    ["42", 10],
+    ["42", 9998],
+    ["42", 9999],
+    ["00", 100],
+    ["99", 9999],
+    ["41", 9999],
+  ];
+
+  it("範囲条件は、書き換え前の条件と同じチームを選ぶ（境界・別の回・壊れたコード）", async () => {
+    await env.PROGRESS_DB.batch(CODES.map((code) => insertCode(code)));
+
+    for (const [eventNo, teamMax] of RULES) {
+      const expected = await legacyTeamCodes(eventNo, teamMax);
+      expect({ eventNo, teamMax, codes: await summaryTeamCodes(eventNo, teamMax) }).toEqual({
+        eventNo,
+        teamMax,
+        codes: expected,
+      });
+    }
+    // 正解側が空集合ばかりでは比べた意味が無い。代表の規則で中身を確かめておく。
+    await expect(legacyTeamCodes("42", 100)).resolves.toEqual([
+      "420001",
+      "420002",
+      "420009",
+      "420010",
+      "420099",
+      "420100",
+    ]);
+  });
+
+  it("teamsとeventsは、どちらもidx_progress_teamの範囲検索で読む", async () => {
+    const rule = { kind: "rule", eventNo: "42", teamMax: 100 } as const;
+    const plans = await Promise.all(
+      summaryQueries(rule).map(async (query) => {
+        const plan = await env.PROGRESS_DB.prepare(`EXPLAIN QUERY PLAN ${query.sql}`)
+          .bind(...query.params)
+          .all();
+        return z
+          .array(z.object({ detail: z.string() }))
+          .parse(plan.results)
+          .map((row) => row.detail);
+      }),
+    );
+    const [teamsPlan, eventsPlan] = plans;
+    expect(teamsPlan).toContain(
+      "SEARCH e USING INDEX idx_progress_team (team_code>? AND team_code<?)",
+    );
+    expect(eventsPlan).toContain(
+      "SEARCH p USING INDEX idx_progress_team (team_code>? AND team_code<?)",
+    );
+    // 本表を頭から読む走査（`SCAN e` / `SCAN p`）が残っていないこと。
+    for (const detail of plans.flat()) expect(detail).not.toMatch(/^SCAN [ep]\b/);
   });
 });

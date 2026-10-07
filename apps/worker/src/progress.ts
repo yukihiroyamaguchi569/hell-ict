@@ -244,32 +244,52 @@ const RESET_GENERATION_CTE = `WITH gen AS (
  */
 const currentGeneration = (alias: string): string => `${alias}.generation >= COALESCE(gen.g, 0)`;
 
+/**
+ * 絞り込みの部品。`indexedBy`はFROMの表名の直後へ置くインデックスの指定で、
+ * 範囲で絞るときだけ`idx_progress_team`を名指しする。eventsの`ORDER BY p.id DESC LIMIT 20`は、
+ * 指定しないとプランナが主キーの逆順走査を選び、今の回の行が20件に満たない間
+ * （開催前・開催直後）は表を全件読む。
+ */
+type RowsFilter = { clause: string; params: (string | number)[]; indexedBy: string };
+
 /** 規則の絞り込みへ世代の述語をANDで足す。規則が無ければ世代だけのWHEREになる。 */
-const currentRowsFilter = (
-  rule: TeamCodeRule,
-  alias: string,
-): { clause: string; params: (string | number)[] } => {
+const currentRowsFilter = (rule: TeamCodeRule, alias: string): RowsFilter => {
   const filter = teamFilter(rule, `${alias}.team_code`);
   return {
+    ...filter,
     clause:
       filter.clause === ""
         ? `WHERE ${currentGeneration(alias)}`
         : `${filter.clause} AND ${currentGeneration(alias)}`,
-    params: filter.params,
   };
 };
 
-const teamFilter = (
-  rule: TeamCodeRule,
-  column: string,
-): { clause: string; params: (string | number)[] } => {
-  if (rule.kind === "open") return { clause: "", params: [] };
-  if (rule.kind === "invalid") return { clause: `WHERE 0`, params: [] };
-  // 長さと下4桁の字種も見る。INの列挙と違い、規則だけでは`4200015`のような桁違いや
-  // `42001x`のような壊れた行が、substrとCASTの結果（`1x`→1）で紛れ込みうる。
+/**
+ * 規則に合うコードの最小と最大（`NN0001`〜`NN`＋TEAM_MAXの4桁0埋め）。文字列の範囲として
+ * 比べると、長さ6・下4桁が数字の行に限れば「上2桁が開催回、下4桁が1〜TEAM_MAX」と同じ
+ * 行集合になる——上2桁は両端が同じなので範囲の内側では必ず一致し、0埋めした4桁の数字は
+ * 文字列の順と数値の順が一致する。
+ */
+const teamCodeRange = (rule: {
+  eventNo: string;
+  teamMax: number;
+}): { first: string; last: string } => ({
+  first: `${rule.eventNo}0001`,
+  last: `${rule.eventNo}${String(rule.teamMax).padStart(4, "0")}`,
+});
+
+const teamFilter = (rule: TeamCodeRule, column: string): RowsFilter => {
+  if (rule.kind === "open") return { clause: "", params: [], indexedBy: "" };
+  if (rule.kind === "invalid") return { clause: `WHERE 0`, params: [], indexedBy: "" };
+  // 範囲条件（BETWEEN）にして`idx_progress_team`で今の回の行だけを読む。substrやCASTの
+  // 式で絞るとインデックスが使えず、過去の回やテストの行まで毎回全件読む（Issue #22）。
+  // 長さと下4桁の字種は範囲の内側に残る行だけへ当てる。範囲だけでは`4200015`のような
+  // 桁違いや`42001x`・`4200:1`のような壊れた行が、文字列の比較で紛れ込みうる。
+  const range = teamCodeRange(rule);
   return {
-    clause: `WHERE length(${column}) = 6 AND substr(${column}, 1, 2) = ? AND substr(${column}, 3) GLOB '[0-9][0-9][0-9][0-9]' AND CAST(substr(${column}, 3) AS INTEGER) BETWEEN 1 AND ?`,
-    params: [rule.eventNo, rule.teamMax],
+    clause: `WHERE ${column} BETWEEN ? AND ? AND length(${column}) = 6 AND substr(${column}, 3) GLOB '[0-9][0-9][0-9][0-9]'`,
+    params: [range.first, range.last],
+    indexedBy: "INDEXED BY idx_progress_team",
   };
 };
 
@@ -295,7 +315,7 @@ const teamFilter = (
  */
 const ARRIVAL_TIME = `COALESCE(strftime('%Y-%m-%d %H:%M:%f', NULLIF(e.client_at, '')), strftime('%Y-%m-%d %H:%M:%f', e.created_at))`;
 
-const teamsSql = (filter: string): string => `${RESET_GENERATION_CTE}
+const teamsSql = (filter: RowsFilter): string => `${RESET_GENERATION_CTE}
 SELECT
   e.team_code AS teamCode,
   COALESCE((
@@ -307,13 +327,13 @@ SELECT
   MAX(e.created_at) AS updatedAt,
   MIN(CASE WHEN e.kind IN ('entry', 'clear')
     THEN printf('%02d', 99 - e.pos) || ${ARRIVAL_TIME} END) AS arrivalKey
-FROM progress_events e
+FROM progress_events e ${filter.indexedBy}
 LEFT JOIN gen ON gen.team_code = e.team_code
-${filter}
+${filter.clause}
 GROUP BY e.team_code
 ORDER BY pos DESC, arrivalKey IS NULL, arrivalKey ASC, teamCode ASC`;
 
-const eventsSql = (filter: string): string => `${RESET_GENERATION_CTE}
+const eventsSql = (filter: RowsFilter): string => `${RESET_GENERATION_CTE}
 SELECT
   p.team_code AS teamCode,
   p.team_name AS teamName,
@@ -321,9 +341,9 @@ SELECT
   p.view,
   p.kind,
   p.created_at AS createdAt
-FROM progress_events p
+FROM progress_events p ${filter.indexedBy}
 LEFT JOIN gen ON gen.team_code = p.team_code
-${filter}
+${filter.clause}
 ORDER BY p.id DESC
 LIMIT 20`;
 
@@ -465,19 +485,30 @@ const selfTeamCode = (url: URL, rule: TeamCodeRule): string | null => {
   return isTeamCodeAllowed(parsed.data, rule) ? parsed.data : null;
 };
 
+type SummaryQuery = { sql: string; params: (string | number)[] };
+
 /**
  * サマリー1回が投げる2本（teams / events）。当日のD1 rows readはここが支配的なので、
- * 同じ文をテストからも測れるよう公開する（test/progress.test.ts の rows read 回帰）。
+ * 同じ文をテストからも測れるよう公開する（test/progress.test.ts の rows read 回帰と、
+ * EXPLAIN QUERY PLANでのインデックスの確認）。
  */
+export const summaryQueries = (rule: TeamCodeRule): [SummaryQuery, SummaryQuery] => {
+  const teamsFilter = currentRowsFilter(rule, "e");
+  const eventsFilter = currentRowsFilter(rule, "p");
+  return [
+    { sql: teamsSql(teamsFilter), params: teamsFilter.params },
+    { sql: eventsSql(eventsFilter), params: eventsFilter.params },
+  ];
+};
+
 export const summaryStatements = (
   db: D1Database,
   rule: TeamCodeRule,
 ): [D1PreparedStatement, D1PreparedStatement] => {
-  const teamsFilter = currentRowsFilter(rule, "e");
-  const eventsFilter = currentRowsFilter(rule, "p");
+  const [teams, events] = summaryQueries(rule);
   return [
-    db.prepare(teamsSql(teamsFilter.clause)).bind(...teamsFilter.params),
-    db.prepare(eventsSql(eventsFilter.clause)).bind(...eventsFilter.params),
+    db.prepare(teams.sql).bind(...teams.params),
+    db.prepare(events.sql).bind(...events.params),
   ];
 };
 
