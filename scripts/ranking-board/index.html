@@ -238,8 +238,21 @@
         }
       };
 
-      void refresh();
-      setInterval(() => void refresh(), POLL_MS);
+      // 取り直しはタブが見えている間だけ。1回ごとに本番のD1へ集計SQLを流すので、裏に回った
+      // タブで回し続けない（hell-ict#22）。見えたら1回すぐ取り直し、タイマーは1本だけ持つ。
+      let pollTimer = null;
+      const applyVisibility = () => {
+        if (document.visibilityState !== "visible") {
+          clearInterval(pollTimer);
+          pollTimer = null;
+          return;
+        }
+        if (pollTimer !== null) return;
+        void refresh();
+        pollTimer = setInterval(() => void refresh(), POLL_MS);
+      };
+      document.addEventListener("visibilitychange", applyVisibility);
+      applyVisibility();
     </script>
   </body>
 </html>

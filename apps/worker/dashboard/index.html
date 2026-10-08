@@ -964,10 +964,31 @@
           tickClock();
           renderTimer();
         }, 1000);
-        void poll();
-        setInterval(() => {
+        /**
+         * ポーリングはタブが見えている間だけ回す（hell-ict#22）。裏に回ったタブや最小化した
+         * ウィンドウでも10秒ごとにD1を読み続け、開きっぱなしのボードだけで無料プランの
+         * rows read（500万/日）を使い切った。見えたら1回すぐ取り直してから間隔へ戻す。
+         * タイマーは1本だけ持ち、二重に張らない（visibilitychangeが続けて来ても同じ）。
+         */
+        let pollTimer = null;
+        const startPolling = () => {
+          if (pollTimer !== null) return;
           void poll();
-        }, POLL_MS);
+          pollTimer = setInterval(() => {
+            void poll();
+          }, POLL_MS);
+        };
+        const stopPolling = () => {
+          if (pollTimer === null) return;
+          clearInterval(pollTimer);
+          pollTimer = null;
+        };
+        const applyVisibility = () => {
+          if (document.visibilityState === "visible") startPolling();
+          else stopPolling();
+        };
+        document.addEventListener("visibilitychange", applyVisibility);
+        applyVisibility();
       })();
     </script>
   </body>
