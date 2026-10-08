@@ -35,10 +35,10 @@ import { isDuplicateColumn } from "./sqlite.js";
 export const progressSchemaSql = [
   "CREATE TABLE IF NOT EXISTS progress_events (id INTEGER PRIMARY KEY AUTOINCREMENT, team_code TEXT NOT NULL, team_name TEXT NOT NULL DEFAULT '', pos INTEGER NOT NULL, view TEXT NOT NULL DEFAULT '', kind TEXT NOT NULL, generation INTEGER NOT NULL DEFAULT 0, client_at TEXT NOT NULL DEFAULT '', created_at TEXT NOT NULL DEFAULT (datetime('now')));",
   "CREATE INDEX IF NOT EXISTS idx_progress_team ON progress_events(team_code, id);",
-  // リセット世代の集計（RESET_GENERATION_CTE）専用の部分インデックス。reset行は
-  // 全体のごく一部なので、これが無いとサマリーの2本が毎回テーブル全体を1回ずつ
-  // 余計に走査する（Issue #125）。列を(team_code, generation)の順に持たせて
-  // GROUP BY team_code / MAX(generation) をインデックスだけで賄う。
+  // リセット世代の集計（currentGenerationと、aggregation/*.sqlのgen）専用の部分インデックス。
+  // reset行は全体のごく一部なので、これが無いとサマリーが毎回テーブル全体を余計に
+  // 走査する（Issue #125）。列を(team_code, generation)の順に持たせて、チームごとの
+  // MAX(generation) をインデックスだけで賄う。
   "CREATE INDEX IF NOT EXISTS idx_progress_reset ON progress_events(team_code, generation) WHERE kind = 'reset';",
   "CREATE TABLE IF NOT EXISTS migrations (name TEXT PRIMARY KEY);",
 ].join("\n");
@@ -220,56 +220,87 @@ const eventRowSchema = z.object({
  * 常に偽の条件を置く。
  */
 /**
- * チームごとの最後のリセット世代を、1回のGROUP BYで畳むCTE。各クエリはこれを
- * `LEFT JOIN gen ON gen.team_code = <alias>.team_code` で連結して使う。
- * resetを一度もしていないチームはこのCTEに行が無く、COALESCE(gen.g, 0)で0になる
- * ——「reset行が無ければ全件が今の世代」という従来の意味と同じ。
+ * その行が「今の世代」に属するかの述語。チームごとに、最後のreset行の世代以上の行だけを
+ * 数える（resetを一度もしていないチームはサブクエリがNULLになり、0以上＝全件）。
+ * 照合を通った後にリセットが入って積まれた古い行は、世代が小さいのでここで落ちる。
  *
- * 行ごとの相関サブクエリ（`SELECT MAX(generation) ... WHERE team_code = e.team_code`）を
- * やめた理由はrows read。あの形は O(チーム数 × 1チームの行数²) で読むため、当日の
- * ポーリングだけで無料プランの上限（D1 rows read 500万/日）を大きく超える
- * （Issue #125。実測で1回あたり約18,000行→約1,570行）。返す結果は変えない。
+ * そのチームの最後の世代は、行ごとの相関サブクエリで部分インデックス`idx_progress_reset`を
+ * 1回引いて求める（MAXはインデックスの末尾を1行見るだけで、resetが無いチームなら何も
+ * 読まない）。以前はreset行を全チーム分GROUP BYで畳むCTEをLEFT JOINしていたが、
+ * resetの有無にかかわらず結合の照会が1行あたり1行ずつrows readへ上乗せされ、他の回の
+ * reset行まで毎回読んでいた（hell-ict#22）。さらに前の相関サブクエリが
+ * O(チーム数 × 1チームの行数²) だったのは部分インデックスが無かったためで（Issue #125）、
+ * 今の形はそれとは別物である。
  */
-const RESET_GENERATION_CTE = `WITH gen AS (
-  SELECT team_code, MAX(generation) AS g FROM progress_events WHERE kind = 'reset' GROUP BY team_code
-)`;
+const currentGeneration = (alias: string): string =>
+  `${alias}.generation >= COALESCE((SELECT MAX(r.generation) FROM progress_events r WHERE r.kind = 'reset' AND r.team_code = ${alias}.team_code), 0)`;
 
 /**
- * その行が「今の世代」に属するかの述語。チームごとに、最後のreset行の世代以上の行だけを
- * 数える（resetを一度もしていないチームは0以上＝全件）。照合を通った後にリセットが
- * 入って積まれた古い行は、世代が小さいのでここで落ちる。
- *
- * 世代はRESET_GENERATION_CTEの`gen`から引く。この述語を使うクエリは必ず`gen`を
- * LEFT JOINしていること（サブクエリの中から使う場合は、外側の結合行を参照する）。
+ * 絞り込みの部品。`indexedBy`はFROMの表名の直後へ置く読み方の指定で、範囲で絞るときだけ
+ * 付ける（teamsは`idx_progress_team`の範囲検索、eventsは主キー。newestEventsFilter）。
+ * プランナ任せにすると、同じ文でもデータ次第で表の全件走査へ切り替わりうる。
  */
-const currentGeneration = (alias: string): string => `${alias}.generation >= COALESCE(gen.g, 0)`;
+type RowsFilter = { clause: string; params: (string | number)[]; indexedBy: string };
 
 /** 規則の絞り込みへ世代の述語をANDで足す。規則が無ければ世代だけのWHEREになる。 */
-const currentRowsFilter = (
-  rule: TeamCodeRule,
-  alias: string,
-): { clause: string; params: (string | number)[] } => {
+const currentRowsFilter = (rule: TeamCodeRule, alias: string): RowsFilter => {
   const filter = teamFilter(rule, `${alias}.team_code`);
   return {
+    ...filter,
     clause:
       filter.clause === ""
         ? `WHERE ${currentGeneration(alias)}`
         : `${filter.clause} AND ${currentGeneration(alias)}`,
-    params: filter.params,
   };
 };
 
-const teamFilter = (
-  rule: TeamCodeRule,
-  column: string,
-): { clause: string; params: (string | number)[] } => {
-  if (rule.kind === "open") return { clause: "", params: [] };
-  if (rule.kind === "invalid") return { clause: `WHERE 0`, params: [] };
-  // 長さと下4桁の字種も見る。INの列挙と違い、規則だけでは`4200015`のような桁違いや
-  // `42001x`のような壊れた行が、substrとCASTの結果（`1x`→1）で紛れ込みうる。
+/**
+ * 規則に合うコードの最小と最大（`NN0001`〜`NN`＋TEAM_MAXの4桁0埋め）。文字列の範囲として
+ * 比べると、長さ6・下4桁が数字の行に限れば「上2桁が開催回、下4桁が1〜TEAM_MAX」と同じ
+ * 行集合になる——上2桁は両端が同じなので範囲の内側では必ず一致し、0埋めした4桁の数字は
+ * 文字列の順と数値の順が一致する。
+ */
+const teamCodeRange = (rule: {
+  eventNo: string;
+  teamMax: number;
+}): { first: string; last: string } => ({
+  first: `${rule.eventNo}0001`,
+  last: `${rule.eventNo}${String(rule.teamMax).padStart(4, "0")}`,
+});
+
+const teamFilter = (rule: TeamCodeRule, column: string): RowsFilter => {
+  if (rule.kind === "open") return { clause: "", params: [], indexedBy: "" };
+  if (rule.kind === "invalid") return { clause: `WHERE 0`, params: [], indexedBy: "" };
+  // 範囲条件（BETWEEN）にして`idx_progress_team`で今の回の行だけを読む。substrやCASTの
+  // 式で絞るとインデックスが使えず、過去の回やテストの行まで毎回全件読む（hell-ict#22）。
+  // 長さと下4桁の字種は範囲の内側に残る行だけへ当てる。範囲だけでは`4200015`のような
+  // 桁違いや`42001x`・`4200:1`のような壊れた行が、文字列の比較で紛れ込みうる。
+  const range = teamCodeRange(rule);
   return {
-    clause: `WHERE length(${column}) = 6 AND substr(${column}, 1, 2) = ? AND substr(${column}, 3) GLOB '[0-9][0-9][0-9][0-9]' AND CAST(substr(${column}, 3) AS INTEGER) BETWEEN 1 AND ?`,
-    params: [rule.eventNo, rule.teamMax],
+    clause: `WHERE ${column} BETWEEN ? AND ? AND length(${column}) = 6 AND substr(${column}, 3) GLOB '[0-9][0-9][0-9][0-9]'`,
+    params: [range.first, range.last],
+    indexedBy: "INDEXED BY idx_progress_team",
+  };
+};
+
+/**
+ * eventsの絞り込み。規則があるときは、今の回の最初の行（範囲に入るidの最小）より前を
+ * 主キーで切り捨て、主キーの逆順に読んで20件そろったところで止める。範囲に入る行は
+ * 必ずその最小以上なので、選ぶ行は変わらない。
+ *
+ * `idx_progress_team`の範囲検索で読むと、今の回の行を全部読んだうえ、世代の照会と
+ * id順の並べ替えで1行あたり2〜3行になる。主キーの逆順だけだと、今の回の行が20件に
+ * 満たない間（開催前・未使用の開催回へ切り替えた直後）に表を全件読む。最小のidは
+ * `idx_progress_team`（team_code, id）だけで求まり、1行あたり1行で済む。
+ */
+const newestEventsFilter = (rule: TeamCodeRule): RowsFilter => {
+  const filter = currentRowsFilter(rule, "p");
+  if (rule.kind !== "rule") return filter;
+  const range = teamCodeRange(rule);
+  return {
+    clause: `${filter.clause} AND p.id >= (SELECT MIN(m.id) FROM progress_events m WHERE m.team_code BETWEEN ? AND ?)`,
+    params: [...filter.params, range.first, range.last],
+    indexedBy: "NOT INDEXED",
   };
 };
 
@@ -287,43 +318,40 @@ const teamFilter = (
  * posと到達時刻を1回の走査で出すため、「99 - pos」と正規化した時刻を連結した文字列の
  * MINを採る（最大のposの中で最も早い時刻の行が選ばれる）。先頭が同じ2桁なので、同じpos
  * 同士は時刻の順で比べられる。(チーム, pos)で畳んでから引き直す形は、同じデータで
- * rows readが約1.5倍になった（Issue #125の上限を超える）。条件をposと同じ
- * `NOT IN ('jump', 'resume', 'reset')`で書かないのも同じ理由——3値のNOT INは
- * 行ごとに一時表を引き、rows readへ1行ずつ上乗せされる（2値のINは比較で済む）。
+ * rows readが約1.5倍になった（Issue #125の上限を超える）。posの条件を
+ * `NOT IN ('jump', 'resume', 'reset')`ではなく`<>`の連結で書くのも同じ理由——3値の
+ * NOT INは行ごとに一時表を引き、rows readへ1行ずつ上乗せされる（2値のINは比較で済む）。
+ * kindはNOT NULLなので、`<>`の連結とNOT INは同じ行を選ぶ（hell-ict#22）。到達時刻の
  * 対象のkindは同じ（POSTが受けるのはentry/clear/jump/resume、サーバが書くのはそれとreset）。
  * 同着は起きにくいが、チームコードで順を固定し、ポーリングのたびに入れ替わらないようにする。
  */
 const ARRIVAL_TIME = `COALESCE(strftime('%Y-%m-%d %H:%M:%f', NULLIF(e.client_at, '')), strftime('%Y-%m-%d %H:%M:%f', e.created_at))`;
 
-const teamsSql = (filter: string): string => `${RESET_GENERATION_CTE}
-SELECT
+const teamsSql = (filter: RowsFilter): string => `SELECT
   e.team_code AS teamCode,
   COALESCE((
     SELECT i.team_name FROM progress_events i
     WHERE i.team_code = e.team_code AND i.team_name <> '' AND ${currentGeneration("i")}
     ORDER BY i.id DESC LIMIT 1
   ), '') AS teamName,
-  COALESCE(MAX(CASE WHEN e.kind NOT IN ('jump', 'resume', 'reset') THEN e.pos END), 0) AS pos,
+  COALESCE(MAX(CASE WHEN e.kind <> 'jump' AND e.kind <> 'resume' AND e.kind <> 'reset' THEN e.pos END), 0) AS pos,
   MAX(e.created_at) AS updatedAt,
   MIN(CASE WHEN e.kind IN ('entry', 'clear')
     THEN printf('%02d', 99 - e.pos) || ${ARRIVAL_TIME} END) AS arrivalKey
-FROM progress_events e
-LEFT JOIN gen ON gen.team_code = e.team_code
-${filter}
+FROM progress_events e ${filter.indexedBy}
+${filter.clause}
 GROUP BY e.team_code
 ORDER BY pos DESC, arrivalKey IS NULL, arrivalKey ASC, teamCode ASC`;
 
-const eventsSql = (filter: string): string => `${RESET_GENERATION_CTE}
-SELECT
+const eventsSql = (filter: RowsFilter): string => `SELECT
   p.team_code AS teamCode,
   p.team_name AS teamName,
   p.pos,
   p.view,
   p.kind,
   p.created_at AS createdAt
-FROM progress_events p
-LEFT JOIN gen ON gen.team_code = p.team_code
-${filter}
+FROM progress_events p ${filter.indexedBy}
+${filter.clause}
 ORDER BY p.id DESC
 LIMIT 20`;
 
@@ -465,19 +493,30 @@ const selfTeamCode = (url: URL, rule: TeamCodeRule): string | null => {
   return isTeamCodeAllowed(parsed.data, rule) ? parsed.data : null;
 };
 
+type SummaryQuery = { sql: string; params: (string | number)[] };
+
 /**
  * サマリー1回が投げる2本（teams / events）。当日のD1 rows readはここが支配的なので、
- * 同じ文をテストからも測れるよう公開する（test/progress.test.ts の rows read 回帰）。
+ * 同じ文をテストからも測れるよう公開する（test/progress.test.ts の rows read 回帰と、
+ * EXPLAIN QUERY PLANでのインデックスの確認）。
  */
+export const summaryQueries = (rule: TeamCodeRule): [SummaryQuery, SummaryQuery] => {
+  const teamsFilter = currentRowsFilter(rule, "e");
+  const eventsFilter = newestEventsFilter(rule);
+  return [
+    { sql: teamsSql(teamsFilter), params: teamsFilter.params },
+    { sql: eventsSql(eventsFilter), params: eventsFilter.params },
+  ];
+};
+
 export const summaryStatements = (
   db: D1Database,
   rule: TeamCodeRule,
 ): [D1PreparedStatement, D1PreparedStatement] => {
-  const teamsFilter = currentRowsFilter(rule, "e");
-  const eventsFilter = currentRowsFilter(rule, "p");
+  const [teams, events] = summaryQueries(rule);
   return [
-    db.prepare(teamsSql(teamsFilter.clause)).bind(...teamsFilter.params),
-    db.prepare(eventsSql(eventsFilter.clause)).bind(...eventsFilter.params),
+    db.prepare(teams.sql).bind(...teams.params),
+    db.prepare(events.sql).bind(...events.params),
   ];
 };
 
