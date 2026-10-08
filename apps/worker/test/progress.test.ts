@@ -844,6 +844,8 @@ describe("進捗記録: リセット世代の絞り込み", () => {
     // 約18,400行、CTE版が約2,060行、CTE＋部分インデックス（idx_progress_reset）版が
     // 約1,260行。行数に対して線形であること、かつ部分インデックスが効いていることを
     // 固定する（インデックスを落とすと約5.2倍/行へ戻り、この上限を超える）。
+    // hell-ict#22 で世代を部分インデックスへの相関サブクエリに戻し、posの3値のNOT INを
+    // やめて、約440行（1.1行/行）になった。部分インデックスがあるので二乗にはならない。
     const rows = 400;
     const teams = 10;
     await env.PROGRESS_DB.batch(
@@ -869,14 +871,14 @@ describe("進捗記録: リセット世代の絞り込み", () => {
       0,
     );
 
-    // 1行あたり4行未満（実測3.2行/行）。二乗なら桁が変わり（旧版は46倍/行）、
-    // 部分インデックスが無ければ5.2倍/行なので、どちらの後退もここで落ちる。
-    expect(rowsRead).toBeLessThan(rows * 4);
+    // 1行あたり2行未満（実測1.1行/行）。二乗なら桁が変わり（旧版は46倍/行）、
+    // 3値のNOT INへ戻すと2.1行/行、CTE＋LEFT JOINへ戻すと3.2行/行なので、どの後退もここで落ちる。
+    expect(rowsRead).toBeLessThan(rows * 2);
   });
 });
 
 /**
- * 今の回（EVENT_NO）の行だけをインデックスで読むこと（Issue #22）。式（substr / CAST）での
+ * 今の回（EVENT_NO）の行だけをインデックスで読むこと（hell-ict#22）。式（substr / CAST）での
  * 絞り込みは`idx_progress_team`を使えず、過去の回やテストの行まで毎回全件読んでいた。
  * 範囲条件へ書き換えても選ぶ行が変わらないことと、インデックスを使うことを固定する。
  */
@@ -893,7 +895,7 @@ describe("進捗記録: 今の回だけをインデックスで読む", () => {
     ).bind(teamCode, kind);
 
   /**
-   * 書き換え前の条件（Issue #22 以前の teamFilter）。範囲条件が選ぶ行の正解として使う。
+   * 書き換え前の条件（hell-ict#22 以前の teamFilter）。範囲条件が選ぶ行の正解として使う。
    * 長さ6・上2桁が開催回・下4桁が数字・下4桁の値が1〜TEAM_MAX。
    */
   const legacyTeamCodes = async (eventNo: string, teamMax: number): Promise<string[]> => {
@@ -995,7 +997,7 @@ describe("進捗記録: 今の回だけをインデックスで読む", () => {
     ]);
   });
 
-  it("teamsとeventsは、どちらもidx_progress_teamの範囲検索で読む", async () => {
+  it("teamsはidx_progress_teamの範囲検索、eventsは今の回の最初のid以降だけを読む", async () => {
     const rule = { kind: "rule", eventNo: "42", teamMax: 100 } as const;
     const plans = await Promise.all(
       summaryQueries(rule).map(async (query) => {
@@ -1012,10 +1014,73 @@ describe("進捗記録: 今の回だけをインデックスで読む", () => {
     expect(teamsPlan).toContain(
       "SEARCH e USING INDEX idx_progress_team (team_code>? AND team_code<?)",
     );
+    // eventsは主キーの下限から逆順に読み、下限（範囲に入るidの最小）はインデックスだけで求める。
+    expect(eventsPlan).toContain("SEARCH p USING INTEGER PRIMARY KEY (rowid>?)");
     expect(eventsPlan).toContain(
-      "SEARCH p USING INDEX idx_progress_team (team_code>? AND team_code<?)",
+      "SEARCH m USING COVERING INDEX idx_progress_team (team_code>? AND team_code<?)",
     );
     // 本表を頭から読む走査（`SCAN e` / `SCAN p`）が残っていないこと。
     for (const detail of plans.flat()) expect(detail).not.toMatch(/^SCAN [ep]\b/);
+  });
+
+  /** サマリー1回（teams＋events）のrows read。 */
+  const summaryRowsRead = async (): Promise<number> => {
+    const measured = await Promise.all(
+      summaryStatements(env.PROGRESS_DB, { kind: "rule", eventNo: "42", teamMax: 100 }).map(
+        (statement) => statement.all(),
+      ),
+    );
+    const metaSchema = z.object({ rows_read: z.number() });
+    return measured.reduce((total, result) => total + metaSchema.parse(result.meta).rows_read, 0);
+  };
+
+  /** 今の回（42）の10チーム×30行。チームごとに1回ずつGMリセットを挟む。 */
+  const CURRENT_ROWS = 300;
+  const currentRows = (): D1PreparedStatement[] =>
+    Array.from({ length: CURRENT_ROWS }, (_unused, index) =>
+      insertCode(`42${String(1 + (index % 10)).padStart(4, "0")}`, index < 10 ? "reset" : "clear"),
+    );
+
+  /**
+   * 過去の回・テスト用・範囲の外の壊れたコードの行（GMリセットの行も含む）。`42001x`のように
+   * 範囲の内側に入る壊れたコードは、インデックスで読んでから字種で落とすので読まれる
+   * （POSTのschemaが弾く値なので、本番の表には無い）。
+   */
+  const otherRows = (): D1PreparedStatement[] =>
+    Array.from({ length: 3000 }, (_unused, index) =>
+      insertCode(
+        ["410001", "419999", "430001", "100001", "4200001", "420000"][index % 6] ?? "",
+        index % 10 === 0 ? "reset" : "clear",
+      ),
+    );
+
+  const insertAll = async (statements: D1PreparedStatement[]): Promise<void> => {
+    for (let start = 0; start < statements.length; start += 500) {
+      await env.PROGRESS_DB.batch(statements.slice(start, start + 500));
+    }
+  };
+
+  it("rows readは今の回の行数だけで決まり、他の回の行が何行あっても増えない", async () => {
+    await insertAll(currentRows());
+    const onlyCurrent = await summaryRowsRead();
+
+    await env.PROGRESS_DB.exec(DROP_TABLE);
+    await env.PROGRESS_DB.exec(progressSchemaSql);
+    await insertAll([...otherRows(), ...currentRows()]);
+    const withOthers = await summaryRowsRead();
+
+    // 書き換え前は表全体（3,300行）を毎回読んでいた。今の回だけなら、teamsが約2行/行
+    // （範囲の読み出しと、resetのあるチームの世代の照会）、eventsが約1行/行（最初のidを
+    // 求めるぶん）。他の回の行で増えるのは、範囲の端で隣の1行を見るぶん（1本につき1行。
+    // 他の回を3倍にしても変わらないことを確かめてある）。
+    expect(withOthers - onlyCurrent).toBeLessThanOrEqual(2);
+    expect(onlyCurrent).toBeLessThan(CURRENT_ROWS * 3.5);
+  });
+
+  it("今の回の行が無いときは、他の回の行をほとんど読まない", async () => {
+    // 開催前や、未使用の開催回へ切り替えた直後。主キーの逆順走査だと、LIMIT 20を
+    // 満たせないまま表を全件読む。
+    await insertAll(otherRows());
+    await expect(summaryRowsRead()).resolves.toBeLessThan(10);
   });
 });
