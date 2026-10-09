@@ -20,7 +20,11 @@ const REPO_ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..
 
 const progressLine = (result: JobResult, done: number, total: number): string => {
   const status = result.error === null ? `HTTP ${String(result.status)}` : result.error.kind;
-  const late = result.overProductionTimeout ? " (20s+)" : "";
+  const late = result.overProductionTimeout
+    ? " (20s+)"
+    : result.cutOffBeforeProductionTimeout
+      ? " (cut off before 20s)"
+      : "";
   return `[${String(done)}/${String(total)}] ${result.model} ${result.caseId} #${String(result.round)}: ${String(result.elapsedMs)} ms, ${status}${late}`;
 };
 

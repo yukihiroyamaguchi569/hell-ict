@@ -41,6 +41,11 @@ export type JobResult = CallResult & {
   readonly round: number;
   /** Slower than the Worker waits: the participant would have seen a failure. */
   readonly overProductionTimeout: boolean;
+  /**
+   * Given up on (`--timeout-ms`) before the Worker's limit: whether production would have timed
+   * out cannot be told, so it is counted apart from both the fast and the late calls.
+   */
+  readonly cutOffBeforeProductionTimeout: boolean;
   /** USD; null when the model has no price or no usage came back. */
   readonly costUsd: number | null;
   /** Order in which the calls finished, for "the last rate limit seen". */
@@ -52,8 +57,13 @@ export const costOf = (usage: Usage | null, price: ModelPrice | null): number | 
   return (usage.promptTokens * price.input + usage.completionTokens * price.output) / 1_000_000;
 };
 
+/** Took longer than the Worker waits. A call cut off at the very limit counts as late too. */
 export const isOverProductionTimeout = (result: CallResult): boolean =>
-  result.error?.kind === "timeout" || result.elapsedMs > PRODUCTION_TIMEOUT_MS;
+  result.elapsedMs > PRODUCTION_TIMEOUT_MS ||
+  (result.error?.kind === "timeout" && result.elapsedMs >= PRODUCTION_TIMEOUT_MS);
+
+export const isCutOffBeforeProductionTimeout = (result: CallResult): boolean =>
+  result.error?.kind === "timeout" && result.elapsedMs < PRODUCTION_TIMEOUT_MS;
 
 export type RunOptions = {
   readonly baseUrl: string;
@@ -92,6 +102,7 @@ export const runJobs = async (
       model: job.model.name,
       round: job.round,
       overProductionTimeout: isOverProductionTimeout(call),
+      cutOffBeforeProductionTimeout: isCutOffBeforeProductionTimeout(call),
       costUsd: costOf(call.usage, job.model.price),
       finishedOrder: finished,
     };
@@ -118,6 +129,7 @@ export type ModelSummary = {
   readonly maxMs: number | null;
   readonly totalCostUsd: number | null;
   readonly overProductionTimeout: number;
+  readonly cutOffBeforeProductionTimeout: number;
   readonly errors: number;
   readonly promptTokens: number;
   readonly completionTokens: number;
@@ -167,6 +179,8 @@ export const summarizeModel = (model: string, all: readonly JobResult[]): ModelS
     maxMs: durations.length === 0 ? null : Math.max(...durations),
     totalCostUsd: totalCost(results),
     overProductionTimeout: results.filter((result) => result.overProductionTimeout).length,
+    cutOffBeforeProductionTimeout: results.filter((result) => result.cutOffBeforeProductionTimeout)
+      .length,
     errors: results.length - succeeded.length,
     promptTokens: sum(usages.map((usage) => usage.promptTokens)),
     completionTokens: sum(usages.map((usage) => usage.completionTokens)),

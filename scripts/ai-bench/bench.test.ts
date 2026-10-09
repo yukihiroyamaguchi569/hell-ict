@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 
 import {
   costOf,
+  isCutOffBeforeProductionTimeout,
   isOverProductionTimeout,
   median,
   planJobs,
@@ -39,6 +40,7 @@ const jobResult = (overrides: Partial<JobResult> = {}): JobResult => ({
   model: "gpt-4o",
   round: 1,
   overProductionTimeout: false,
+  cutOffBeforeProductionTimeout: false,
   costUsd: 0.001,
   finishedOrder: 1,
   ...overrides,
@@ -99,13 +101,22 @@ describe("isOverProductionTimeout", () => {
     expect(isOverProductionTimeout(call({ elapsedMs: 20_001 }))).toBe(true);
   });
 
-  it("marks a call we gave up on, whatever its duration", () => {
-    expect(
-      isOverProductionTimeout(call({ elapsedMs: 5, error: { kind: "timeout", message: "t" } })),
-    ).toBe(true);
-    expect(
-      isOverProductionTimeout(call({ elapsedMs: 5, error: { kind: "network", message: "n" } })),
-    ).toBe(false);
+  it("marks a call cut off at or after 20 seconds as late", () => {
+    const timeout = { kind: "timeout" as const, message: "t" };
+    expect(isOverProductionTimeout(call({ elapsedMs: 20_000, error: timeout }))).toBe(true);
+    expect(isCutOffBeforeProductionTimeout(call({ elapsedMs: 20_000, error: timeout }))).toBe(
+      false,
+    );
+  });
+
+  it("does not count a call cut off before 20 seconds as late: it cannot be told", () => {
+    const cutOff = call({ elapsedMs: 5_000, error: { kind: "timeout", message: "t" } });
+    expect(isOverProductionTimeout(cutOff)).toBe(false);
+    expect(isCutOffBeforeProductionTimeout(cutOff)).toBe(true);
+    const lost = call({ elapsedMs: 5, error: { kind: "network", message: "n" } });
+    expect(isOverProductionTimeout(lost)).toBe(false);
+    expect(isCutOffBeforeProductionTimeout(lost)).toBe(false);
+    expect(isCutOffBeforeProductionTimeout(call({ elapsedMs: 5 }))).toBe(false);
   });
 });
 
@@ -232,6 +243,32 @@ describe("runJobs", () => {
     await runJobs(planJobs(cases, MODELS, 1), cases, options, deps);
     expect(inFlight.max).toBe(1);
     expect(await runJobs([], [], options, deps)).toEqual([]);
+  });
+
+  it("counts a call cut off by a --timeout-ms under 20 seconds apart from the late ones", async () => {
+    const cases = [benchCase("a")];
+    const hang: FetchFn = (_url, init) =>
+      new Promise((_resolve, reject) => {
+        init.signal?.addEventListener("abort", () => {
+          reject(new DOMException("aborted", "AbortError"));
+        });
+      });
+    let now = 0;
+    const results = await runJobs(
+      planJobs(cases, [modelSpecFor("gpt-4o")], 1),
+      cases,
+      { baseUrl: "u", apiKey: "k", timeoutMs: 20, concurrency: 1 },
+      { fetch: hang, clock: { now: () => (now += 10) } },
+    );
+    expect(results[0]).toMatchObject({
+      error: { kind: "timeout" },
+      overProductionTimeout: false,
+      cutOffBeforeProductionTimeout: true,
+    });
+    expect(summarize([modelSpecFor("gpt-4o")], results)[0]).toMatchObject({
+      overProductionTimeout: 0,
+      cutOffBeforeProductionTimeout: 1,
+    });
   });
 
   it("keeps going after a failure and records it", async () => {

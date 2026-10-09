@@ -1,6 +1,11 @@
 import { describe, expect, it } from "vitest";
 
-import { costOf, isOverProductionTimeout, summarize } from "./bench.ts";
+import {
+  costOf,
+  isCutOffBeforeProductionTimeout,
+  isOverProductionTimeout,
+  summarize,
+} from "./bench.ts";
 import type { JobResult } from "./bench.ts";
 import { modelSpecFor } from "./config.ts";
 import { callModel } from "./openai.ts";
@@ -64,6 +69,7 @@ const resultsFrom = async (): Promise<JobResult[]> => {
         model: model.name,
         round: 1,
         overProductionTimeout: isOverProductionTimeout(slow),
+        cutOffBeforeProductionTimeout: isCutOffBeforeProductionTimeout(slow),
         costUsd: costOf(slow.usage, model.price),
         finishedOrder: index + 1,
       };
@@ -127,6 +133,26 @@ describe("renderReport", () => {
     expect(html).toMatch(/<tr><th>gpt-6-sol<\/th><td>1<\/td><td>—<\/td><td>—<\/td>/);
     expect(html).toContain("<td>5000</td>");
     expect(html).toContain("<td>799</td>");
+  });
+
+  it("shows a call cut off before 20 seconds as undetermined, not as a production timeout", async () => {
+    const [fast, failed] = await resultsFrom();
+    if (fast === undefined || failed === undefined) throw new Error("fixture");
+    const cutOff: JobResult = {
+      ...failed,
+      elapsedMs: 5_000,
+      error: { kind: "timeout", message: "no reply within 5000 ms" },
+      overProductionTimeout: false,
+      cutOffBeforeProductionTimeout: true,
+    };
+    const html = renderReport(
+      runOf([{ ...fast, elapsedMs: 1_000, overProductionTimeout: false }, cutOff]),
+    );
+    expect(html).toContain("打ち切り（本番での判定不能）");
+    expect(html).not.toContain("本番ならタイムアウト（");
+    expect(html).toMatch(
+      /<tr><th>gpt-6-sol<\/th>(<td>[^<]*<\/td>){7}<td>0<\/td><td>1<\/td><td>1<\/td><\/tr>/,
+    );
   });
 
   it("is a single file without external resources", async () => {

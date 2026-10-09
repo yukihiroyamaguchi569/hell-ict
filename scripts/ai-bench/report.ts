@@ -51,7 +51,9 @@ const renderCallMeta = (result: JobResult): string => {
         (result.usage.reasoningTokens > 0 ? ` / 推論 ${String(result.usage.reasoningTokens)}` : "");
   const badge = result.overProductionTimeout
     ? `<span class="badge late">本番ならタイムアウト（${String(PRODUCTION_TIMEOUT_MS / 1000)} 秒超）</span>`
-    : "";
+    : result.cutOffBeforeProductionTimeout
+      ? `<span class="badge late">打ち切り（本番での判定不能）</span>`
+      : "";
   return `<div class="meta">${formatMs(result.elapsedMs)} · ${usage} · ${formatUsd(result.costUsd)} · HTTP ${result.status === null ? "—" : String(result.status)}${badge}</div>`;
 };
 
@@ -88,12 +90,12 @@ const renderSummary = (summaries: readonly ModelSummary[]): string => {
   const rows = summaries
     .map(
       (summary) =>
-        `<tr><th>${escapeHtml(summary.model)}</th><td>${String(summary.calls)}</td><td>${formatMs(summary.medianMs)}</td><td>${formatMs(summary.maxMs)}</td><td>${String(summary.promptTokens)}</td><td>${String(summary.completionTokens)}</td><td>${String(summary.reasoningTokens)}</td><td>${formatUsd(summary.totalCostUsd)}</td><td>${String(summary.overProductionTimeout)}</td><td>${String(summary.errors)}</td></tr>`,
+        `<tr><th>${escapeHtml(summary.model)}</th><td>${String(summary.calls)}</td><td>${formatMs(summary.medianMs)}</td><td>${formatMs(summary.maxMs)}</td><td>${String(summary.promptTokens)}</td><td>${String(summary.completionTokens)}</td><td>${String(summary.reasoningTokens)}</td><td>${formatUsd(summary.totalCostUsd)}</td><td>${String(summary.overProductionTimeout)}</td><td>${String(summary.cutOffBeforeProductionTimeout)}</td><td>${String(summary.errors)}</td></tr>`,
     )
     .join("");
   return `<h2>モデルごとの集計</h2>
-<p class="note">所要時間の中央値・最大は、成功した呼び出しだけで数える。「${String(PRODUCTION_TIMEOUT_MS / 1000)} 秒超」は Worker の待ち時間を超えたもの（本番なら参加者には失敗に見える）。</p>
-<table><thead><tr><th>モデル</th><th>呼び出し</th><th>中央値</th><th>最大</th><th>入力トークン</th><th>出力トークン</th><th>推論トークン</th><th>費用（推定）</th><th>${String(PRODUCTION_TIMEOUT_MS / 1000)} 秒超</th><th>エラー</th></tr></thead><tbody>${rows}</tbody></table>`;
+<p class="note">所要時間の中央値・最大は、成功した呼び出しだけで数える。「${String(PRODUCTION_TIMEOUT_MS / 1000)} 秒超」は Worker の待ち時間を超えたもの（本番なら参加者には失敗に見える）。「打ち切り（判定不能）」は ${String(PRODUCTION_TIMEOUT_MS / 1000)} 秒より短い --timeout-ms で打ち切ったもの。</p>
+<table><thead><tr><th>モデル</th><th>呼び出し</th><th>中央値</th><th>最大</th><th>入力トークン</th><th>出力トークン</th><th>推論トークン</th><th>費用（推定）</th><th>${String(PRODUCTION_TIMEOUT_MS / 1000)} 秒超</th><th>打ち切り（判定不能）</th><th>エラー</th></tr></thead><tbody>${rows}</tbody></table>`;
 };
 
 const renderRateLimits = (summaries: readonly ModelSummary[]): string => {
