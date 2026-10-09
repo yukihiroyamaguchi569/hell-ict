@@ -150,7 +150,7 @@ bash scripts/public-snapshot.sh <ref> --verify --out <dir>   # すべて通っ�
 ```sh
 cd apps/worker
 pnpm exec wrangler secret put OPENAI_API_KEY_BACKUP
-pnpm exec wrangler secret put OPENAI_MODEL_BACKUP   # 任意
+pnpm exec wrangler secret put OPENAI_MODEL_BACKUP   # 本番では gpt-4o を登録する
 ```
 
 - **切り替えは自動。** 主系が上の失敗を返したときだけ、同じ送信を予備へ1回だけ送り直す。予備で通ったら5分間は主系を呼ばずに予備へ送り、過ぎたら主系を1回試す——クレジットを補充すれば、運営が何もしなくても5分以内に主系へ戻る。
