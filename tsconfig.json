@@ -6,6 +6,7 @@
     { "path": "./apps/web" },
     { "path": "./apps/worker" },
     { "path": "./apps/worker/tsconfig.test.json" },
-    { "path": "./tsconfig.tests.json" }
+    { "path": "./tsconfig.tests.json" },
+    { "path": "./scripts/ai-bench" }
   ]
 }

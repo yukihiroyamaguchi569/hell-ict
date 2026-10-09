@@ -131,6 +131,14 @@ export default tseslint.config(
     },
   },
   {
+    // The model bench runs on Node (type stripping) and has its own tsconfig for `.ts` imports.
+    files: ["scripts/ai-bench/**/*.ts"],
+    languageOptions: {
+      globals: globals.node,
+      parserOptions: { project: "./scripts/ai-bench/tsconfig.json" },
+    },
+  },
+  {
     files: [
       "apps/worker/**/*.ts",
       "**/*.test.ts",
