@@ -1,5 +1,15 @@
 import { spawnSync } from "node:child_process";
-import { chmodSync, mkdtempSync, statSync, writeFileSync } from "node:fs";
+import {
+  chmodSync,
+  closeSync,
+  mkdirSync,
+  mkdtempSync,
+  openSync,
+  readdirSync,
+  readFileSync,
+  statSync,
+  writeFileSync,
+} from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
@@ -26,6 +36,33 @@ describe("writePrivateFile", () => {
     await writePrivateFile(file, "new");
     expect(modeOf(file)).toBe(0o600);
     expect(statSync(file).size).toBe(3);
+  });
+});
+
+describe("writePrivateFile replaces instead of rewriting in place", () => {
+  it("never puts the new content into the old, readable file", async () => {
+    const file = path.join(fresh(), "report.html");
+    writeFileSync(file, "old");
+    chmodSync(file, 0o644);
+    // Whoever had the old file open (with its old permissions) must not see the new content.
+    const oldFile = openSync(file, "r");
+    try {
+      await writePrivateFile(file, "secret");
+      expect(readFileSync(oldFile, "utf8")).toBe("old");
+    } finally {
+      closeSync(oldFile);
+    }
+    expect(readFileSync(file, "utf8")).toBe("secret");
+    expect(modeOf(file)).toBe(0o600);
+  });
+
+  it("leaves no temporary file behind, on success or on failure", async () => {
+    const dir = fresh();
+    await writePrivateFile(path.join(dir, "ok.json"), "x");
+    mkdirSync(path.join(dir, "taken"));
+    writeFileSync(path.join(dir, "taken", "keep"), "");
+    await expect(writePrivateFile(path.join(dir, "taken"), "x")).rejects.toThrow();
+    expect(readdirSync(dir).sort()).toEqual(["ok.json", "taken"]);
   });
 });
 

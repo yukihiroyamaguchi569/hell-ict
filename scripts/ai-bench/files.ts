@@ -1,11 +1,13 @@
-import { chmod, mkdir, writeFile } from "node:fs/promises";
+import { randomUUID } from "node:crypto";
+import { chmod, mkdir, rename, rm, writeFile } from "node:fs/promises";
 import path from "node:path";
 
 /**
  * The output holds the real scenario and the participants' text, so only the owner may read it.
- * `mode` of writeFile/mkdir applies only to what they create, so the permissions are set
- * explicitly afterwards: an existing file is tightened too. A folder that already existed (say,
- * ~/Desktop) is left alone; only the folders made here are set to 700.
+ * A file is written to a new temporary file (created 600, next to the target) and renamed over
+ * the target, so an existing file is never rewritten in place under its old, wider permissions.
+ * `mode` of mkdir applies only to what it creates, so the folders made here are set to 700
+ * explicitly; a folder that already existed (say, ~/Desktop) is left alone.
  */
 
 export const makePrivateDir = async (dir: string): Promise<void> => {
@@ -20,6 +22,18 @@ export const makePrivateDir = async (dir: string): Promise<void> => {
 };
 
 export const writePrivateFile = async (file: string, content: string): Promise<void> => {
-  await writeFile(file, content, { mode: 0o600 });
-  await chmod(file, 0o600);
+  const target = path.resolve(file);
+  const temporary = path.join(
+    path.dirname(target),
+    `.${path.basename(target)}.${randomUUID()}.tmp`,
+  );
+  try {
+    // "wx": never reuse an existing file; the umask can only narrow 600, chmod makes it exact.
+    await writeFile(temporary, content, { mode: 0o600, flag: "wx" });
+    await chmod(temporary, 0o600);
+    await rename(temporary, target);
+  } catch (caught) {
+    await rm(temporary, { force: true });
+    throw caught;
+  }
 };
