@@ -31,7 +31,7 @@ describe("P1B Worker", () => {
         chatRateLimitPerMinute: 20,
       },
       // AIの経路。テスト環境では予備が未設定で、主系のまま。
-      ai: { route: "primary", backupKey: false, backupModel: false },
+      ai: { route: "primary", backupKey: false, backupModel: false, fallbackConfigured: false },
     });
     await expect(listDurableObjectIds(env.TEAM_ROOM)).resolves.toEqual([]);
     await expect(listDurableObjectIds(env.RACE_LEADERBOARD)).resolves.toEqual([]);
