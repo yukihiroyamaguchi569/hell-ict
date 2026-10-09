@@ -93,9 +93,39 @@ type Env = Readonly<Record<string, string | undefined>>;
 
 export type Endpoint = { readonly baseUrl: string; readonly apiKey: string };
 
+const LOCAL_HOSTS: readonly string[] = ["127.0.0.1", "localhost", "[::1]"];
+
+const parseUrl = (raw: string): URL | null => {
+  try {
+    return new URL(raw);
+  } catch {
+    return null;
+  }
+};
+
+/**
+ * Whether an override may receive the key and the real scenario: the provider's own host over
+ * https, or a stub on this machine over http. Anything else could send both anywhere.
+ */
+const isAllowedOverride = (raw: string, officialBaseUrl: string): boolean => {
+  const url = parseUrl(raw);
+  if (url === null || url.username !== "" || url.password !== "") return false;
+  if (url.protocol === "https:") return url.host === new URL(officialBaseUrl).host;
+  return url.protocol === "http:" && LOCAL_HOSTS.includes(url.hostname);
+};
+
+/** The provider's endpoint, or its override; a foreign override stops the run before any call. */
 export const baseUrlOf = (env: Env, provider: ProviderName): string => {
   const { baseUrl, baseUrlEnv } = PROVIDERS[provider];
-  return (env[baseUrlEnv]?.trim() || baseUrl).replace(/\/+$/, "");
+  const override = env[baseUrlEnv]?.trim() ?? "";
+  if (override === "") return baseUrl;
+  if (!isAllowedOverride(override, baseUrl)) {
+    throw new Error(
+      `${baseUrlEnv} must point to https://${new URL(baseUrl).host} or to a local stub ` +
+        `(http://127.0.0.1, http://localhost or http://[::1])`,
+    );
+  }
+  return override.replace(/\/+$/, "");
 };
 
 /**

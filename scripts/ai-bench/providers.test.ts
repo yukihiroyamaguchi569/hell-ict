@@ -45,6 +45,49 @@ describe("baseUrlOf", () => {
     );
   });
 
+  it("accepts the provider's own host over https and a local stub over http", () => {
+    expect(
+      baseUrlOf(
+        { GEMINI_BASE_URL: "https://generativelanguage.googleapis.com/v1beta/openai/" },
+        "gemini",
+      ),
+    ).toBe("https://generativelanguage.googleapis.com/v1beta/openai");
+    expect(baseUrlOf({ ANTHROPIC_BASE_URL: "http://127.0.0.1:8787/v1" }, "anthropic")).toBe(
+      "http://127.0.0.1:8787/v1",
+    );
+    expect(baseUrlOf({ OPENAI_BASE_URL: "http://[::1]:9/v1" }, "openai")).toBe("http://[::1]:9/v1");
+  });
+
+  it.each([
+    ["OPENAI_BASE_URL", "openai", "https://evil.example/v1"],
+    ["OPENAI_BASE_URL", "openai", "http://api.openai.com/v1"],
+    ["OPENAI_BASE_URL", "openai", "https://api.anthropic.com/v1"],
+    ["GEMINI_BASE_URL", "gemini", "https://generativelanguage.googleapis.com.evil.example/v1"],
+    ["GEMINI_BASE_URL", "gemini", "https://user@evil.example/v1"],
+    ["ANTHROPIC_BASE_URL", "anthropic", "https://localhost/v1"],
+    ["ANTHROPIC_BASE_URL", "anthropic", "http://localhost.evil.example/v1"],
+    ["ANTHROPIC_BASE_URL", "anthropic", "http://10.0.0.1/v1"],
+    ["ANTHROPIC_BASE_URL", "anthropic", "not a url"],
+  ] as const)("refuses %s=%s %s before any call", (name, provider, url) => {
+    expect(() => baseUrlOf({ [name]: url }, provider)).toThrow(
+      new RegExp(`${name} must point to `),
+    );
+  });
+
+  it("stops in readEndpoints on a foreign override, without the key in the message", () => {
+    let message = "";
+    try {
+      readEndpoints(
+        { GEMINI_API_KEY: "AIza-secret-key", GEMINI_BASE_URL: "https://evil.example/v1" },
+        ["gemini"],
+      );
+    } catch (caught) {
+      message = caught instanceof Error ? caught.message : "";
+    }
+    expect(message).toContain("GEMINI_BASE_URL must point to");
+    expect(message).not.toContain("AIza-secret-key");
+  });
+
   it("does not take one provider's override for another", () => {
     expect(baseUrlOf({ OPENAI_BASE_URL: "http://localhost:9/v1" }, "anthropic")).toBe(
       "https://api.anthropic.com/v1",
