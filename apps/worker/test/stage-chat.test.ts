@@ -15,6 +15,7 @@ import { FakeAiGateway } from "@hell-ict/domain/fakes";
 import { beforeEach, describe, expect, it } from "vitest";
 
 import { handleGameState, handlePrepareStageThread } from "../src/game-api.js";
+import { AiRouteState, createAiGateway } from "../src/ai-failover.js";
 import { handleStageChatMessage } from "../src/stage-chat.js";
 import { systemPromptFor } from "../src/stage-prompts.js";
 import { advance, applied, CLEAR, command, playTo } from "./game-command-support.js";
@@ -238,6 +239,49 @@ describe("会話が用意できていないとき（Issue #85）", () => {
 });
 
 describe("PIIの罠（Stage 5）", () => {
+  it("他社の予備へ手で切り替えていても、氏名入りの送信は送信前に止まりAIの呼び出しは0回", async () => {
+    const teamCode = "630091";
+    await playTo(teamCode, "s5");
+    const urls: string[] = [];
+    const originalFetch = globalThis.fetch;
+    globalThis.fetch = ((url: string) => {
+      urls.push(String(url));
+      return Promise.resolve(
+        new Response(JSON.stringify({ choices: [{ message: { content: "届いてはいけない" } }] })),
+      );
+    }) as typeof fetch;
+    try {
+      const aiGateway = createAiGateway(
+        {
+          OPENAI_MODEL: "gpt-4.1-mini",
+          OPENAI_BASE_URL: "https://example.test/v1",
+          OPENAI_API_KEY: "sk-primary-secret",
+          AI_ROUTE: "fallback",
+          AI_FALLBACK_BASE_URL: "https://api.anthropic.test/v1",
+          AI_FALLBACK_API_KEY: "sk-ant-fallback-secret",
+          AI_FALLBACK_MODEL: "claude-haiku-5-5",
+        },
+        new AiRouteState(),
+      );
+      const ctx = createExecutionContext();
+      const response = await handleStageChatMessage(
+        new Request(`${TEST_ORIGIN}/api/teams/${teamCode}/game/chat/messages`, {
+          method: "POST",
+          body: JSON.stringify(message(`${PATIENT}さんの発熱を整理して`)),
+        }),
+        { env, ctx },
+        teamCode,
+        { aiGateway, nowMs: clock.now().getTime() },
+      );
+      await waitOnExecutionContext(ctx);
+      expect(response.status).toBe(422);
+      expect((await errorOf(response)).code).toBe("pii_blocked");
+      expect(urls).toEqual([]);
+    } finally {
+      globalThis.fetch = originalFetch;
+    }
+  });
+
   it("氏名入りの送信はOpenAIを呼ばずに止め、同じ操作で罠（罰の開始）を確定する", async () => {
     const teamCode = "630001";
     await playTo(teamCode, "s5");

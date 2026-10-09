@@ -544,6 +544,102 @@ describe("活動ログ", () => {
       });
     });
 
+    describe("手で切り替えた他社の予備（AI_ROUTE=fallback）", () => {
+      /** 予備（他社）へ切り替えた設定で1回送る。fetchへ届いた宛先を記録する。 */
+      const chatOnFallback = async (
+        teamCode: string,
+        command: { commandId: string; threadId: string; text: string },
+        respond: () => Response,
+      ): Promise<{ response: Response; urls: string[] }> => {
+        const urls: string[] = [];
+        const originalFetch = globalThis.fetch;
+        globalThis.fetch = ((url: string) => {
+          urls.push(String(url));
+          return Promise.resolve(respond());
+        }) as typeof fetch;
+        try {
+          const gateway = createAiGateway(
+            {
+              OPENAI_MODEL: "gpt-4.1-mini",
+              OPENAI_BASE_URL: "https://example.test/v1",
+              OPENAI_API_KEY: "sk-primary-secret",
+              AI_ROUTE: "fallback",
+              AI_FALLBACK_BASE_URL: "https://api.anthropic.test/v1",
+              AI_FALLBACK_API_KEY: "sk-ant-fallback-secret",
+              AI_FALLBACK_MODEL: "claude-haiku-5-5",
+            },
+            new AiRouteState(),
+          );
+          return { response: await chat(teamCode, command, gateway), urls };
+        } finally {
+          globalThis.fetch = originalFetch;
+        }
+      };
+
+      it("予備で応答し、経路fallbackを活動ログに残す（キーは残さない）", async () => {
+        const teamCode = "500076";
+        const threadId = await mainThreadId(teamCode, "00000000-0000-4000-8000-000000007601");
+        const { response, urls } = await chatOnFallback(
+          teamCode,
+          { commandId: "00000000-0000-4000-8000-000000007602", threadId, text: "発注の文面" },
+          () =>
+            new Response(JSON.stringify({ choices: [{ message: { content: "他社の応答" } }] }), {
+              status: 200,
+            }),
+        );
+        expect(urls).toEqual(["https://api.anthropic.test/v1/chat/completions"]);
+        expect(response.status).toBe(200);
+        const body = z.object({ assistant: chatMessageSchema }).parse(await response.json());
+        expect(body.assistant.text).toBe("他社の応答");
+
+        const chatRows = (await rows(teamCode)).filter((row) => row.kind.startsWith("chat."));
+        expect(chatRows.map((row) => row.kind)).toEqual(["chat.user", "chat.assistant"]);
+        expect(metaOf(chatRows[1])).toEqual({ promptProfile: "default", aiRoute: "fallback" });
+        expect(JSON.stringify(chatRows)).not.toContain("sk-ant-fallback-secret");
+      });
+
+      it("予備の失敗は従来どおり503で、経路fallbackをchat.failureに残す", async () => {
+        const teamCode = "500077";
+        const threadId = await mainThreadId(teamCode, "00000000-0000-4000-8000-000000007701");
+        const { response, urls } = await chatOnFallback(
+          teamCode,
+          { commandId: "00000000-0000-4000-8000-000000007702", threadId, text: "発注の文面" },
+          () => new Response(null, { status: 529 }),
+        );
+        expect(urls).toHaveLength(1);
+        expect(response.status).toBe(503);
+        const chatRows = (await rows(teamCode)).filter((row) => row.kind.startsWith("chat."));
+        expect(chatRows.map((row) => row.kind)).toEqual(["chat.user", "chat.failure"]);
+        expect(metaOf(chatRows[1])).toEqual({
+          promptProfile: "default",
+          failureReason: "http_error",
+          httpStatus: 529,
+          aiRoute: "fallback",
+        });
+      });
+
+      it("PIIを含む送信は、予備へ切り替えていても送信前に止まりAIの呼び出しは0回", async () => {
+        const teamCode = "500078";
+        const threadId = await mainThreadId(teamCode, "00000000-0000-4000-8000-000000007801");
+        const { response, urls } = await chatOnFallback(
+          teamCode,
+          {
+            commandId: "00000000-0000-4000-8000-000000007802",
+            threadId,
+            text: `${PII_NAME}さんの件で返信文を書いてください`,
+          },
+          () =>
+            new Response(
+              JSON.stringify({ choices: [{ message: { content: "届いてはいけない" } }] }),
+            ),
+        );
+        expect(response.status).toBe(422);
+        expect(urls).toEqual([]);
+        const chatRows = (await rows(teamCode)).filter((row) => row.kind.startsWith("chat."));
+        expect(chatRows.map((row) => row.kind)).toEqual(["chat.pii_blocked"]);
+      });
+    });
+
     it("PIIブロックはchat.pii_blockedを1行だけ残し、本文を保存せずAIも呼ばない", async () => {
       const threadId = await mainThreadId("500004", "00000000-0000-4000-8000-000000000401");
       const gateway = new FakeAiGateway([]);

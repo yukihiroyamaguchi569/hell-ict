@@ -31,11 +31,22 @@ export {};
  * `wrangler secret put`で与える。予備モデルは秘密ではないが、会ごとの運用値として
  * 同じく`wrangler secret put`で与える。どちらも未設定（空文字を含む）なら予備なしで動く。
  */
+/**
+ * AI_ROUTEとAI_FALLBACK_*は、OpenAIそのものが落ちたときに手で切り替える他社の予備
+ * （src/ai-failover.ts）。予備の接続先・キー・モデルを本番前に`wrangler secret put`で
+ * 登録しておき、障害時は`AI_ROUTE`に`fallback`を入れるだけで切り替える（デプロイ不要）。
+ * 切り替えのたびにデプロイで消えないよう、どれも`vars`ではなくsecretで与える。
+ * 未設定・空・`primary`・書き損じ、予備の3つの不足、httpsでない接続先では主系のまま動く。
+ */
 declare global {
   interface HellIctVars {
     OPENAI_API_KEY: string;
     OPENAI_API_KEY_BACKUP?: string;
     OPENAI_MODEL_BACKUP?: string;
+    AI_ROUTE?: string;
+    AI_FALLBACK_BASE_URL?: string;
+    AI_FALLBACK_API_KEY?: string;
+    AI_FALLBACK_MODEL?: string;
     ADMIN_TOKEN?: string;
     EVENT_NO?: string;
     ALLOWED_ORIGINS?: string;

@@ -1,7 +1,7 @@
 import type { AiGateway, AiRequest, AiResponse } from "@hell-ict/domain";
 
 import { OpenAiGateway, OpenAiRequestError } from "./openai-gateway.js";
-import type { OpenAiFailure } from "./openai-gateway.js";
+import type { ExtraRequestBody, OpenAiFailure } from "./openai-gateway.js";
 
 /**
  * 予備キー・予備モデルへの切り替え（Issue #217）。
@@ -20,8 +20,14 @@ import type { OpenAiFailure } from "./openai-gateway.js";
  * 後も切り替えの判断が揺れる。
  */
 
-/** どの経路でOpenAIを呼んだか。活動ログとhealthに出す。 */
-export type AiRoute = "primary" | "backup-key" | "backup-model";
+/**
+ * どの経路でAIを呼んだか。活動ログとhealthに出す。`fallback`は運営が`AI_ROUTE`で手で
+ * 切り替えた他社の予備（OpenAIそのものの障害への備え。下の`createAiGateway`）。
+ */
+export type AiRoute = "primary" | "backup-key" | "backup-model" | "fallback";
+
+/** 自動で切り替える経路。手で切り替える`fallback`は保持の対象にしない。 */
+type AutoRoute = Exclude<AiRoute, "fallback">;
 
 /** 切り替えの原因。キーが使えないか、モデルが使えないか。 */
 export type AiSwitchCause = "key" | "model";
@@ -41,7 +47,7 @@ export const switchCauseOf = (failure: OpenAiFailure): AiSwitchCause | null => {
 const ROUTE_FOR_CAUSE = {
   key: "backup-key",
   model: "backup-model",
-} as const satisfies Record<AiSwitchCause, AiRoute>;
+} as const satisfies Record<AiSwitchCause, AutoRoute>;
 
 /**
  * 切り替えた状態を保つ時間。この間は主系を呼ばずに予備へ直接送り、主系への無駄な
@@ -56,16 +62,16 @@ export const AI_ROUTE_HOLD_MS = 5 * 60 * 1000;
  * 正しさは変わらない。DO・KVへ置くと、チャットのたびに読み書きが1往復増える。
  */
 export class AiRouteState {
-  private route: AiRoute = "primary";
+  private route: AutoRoute = "primary";
   private untilMs = 0;
 
   constructor(private readonly holdMs: number = AI_ROUTE_HOLD_MS) {}
 
-  current(nowMs: number): AiRoute {
+  current(nowMs: number): AutoRoute {
     return nowMs < this.untilMs ? this.route : "primary";
   }
 
-  hold(route: AiRoute, nowMs: number): void {
+  hold(route: AutoRoute, nowMs: number): void {
     this.route = route;
     this.untilMs = nowMs + this.holdMs;
   }
@@ -146,6 +152,25 @@ export class FailoverAiGateway implements AiGateway {
 }
 
 /**
+ * 手で切り替えた他社の予備（`AI_ROUTE=fallback`）。経路は常に`fallback`で、自動の
+ * 切り替え（`FailoverAiGateway`）も保持も使わない。OpenAIそのものが落ちたときの備えで、
+ * OpenAIの予備キー・予備モデルへは連鎖しない。
+ */
+export class FallbackAiGateway extends OpenAiGateway {
+  readonly routeMeta: AiRouteMeta = { aiRoute: "fallback" };
+}
+
+/**
+ * 予備（Anthropicの互換の接続先、claude-haiku-5-5）の呼び出しにだけ足す指定。思考を
+ * 切る——ゲームは思考を求めず、思考の分だけ遅く高くなる。互換の接続先は
+ * `reasoning_effort`を無視し`thinking`を通す。ai-bench（scripts/ai-bench/config.ts）で
+ * 比較と負荷テスト（60同時・900件すべて成功）に使ったのと同じ本文にそろえる。
+ */
+export const FALLBACK_EXTRA_BODY = {
+  thinking: { type: "disabled" },
+} as const satisfies ExtraRequestBody;
+
+/**
  * AI経路に要る設定だけを抜き出した型。`Env`の`vars`はwrangler typesがリテラル型にするので、
  * テストから別の宛先を渡せるよう`string`で受ける（`Env`はそのまま代入できる）。
  */
@@ -155,6 +180,10 @@ export type AiEnv = {
   readonly OPENAI_MODEL: string;
   readonly OPENAI_API_KEY_BACKUP?: string | undefined;
   readonly OPENAI_MODEL_BACKUP?: string | undefined;
+  readonly AI_ROUTE?: string | undefined;
+  readonly AI_FALLBACK_BASE_URL?: string | undefined;
+  readonly AI_FALLBACK_API_KEY?: string | undefined;
+  readonly AI_FALLBACK_MODEL?: string | undefined;
 };
 
 /** 空文字は未設定として扱う（`wrangler secret put`で空を入れて無効にできるように）。 */
@@ -173,6 +202,37 @@ const backupSettings = (
   };
 };
 
+/**
+ * 他社の予備の接続先。https以外（http・URLでない値・資格情報入りのURL）は、キーと
+ * 参加者の入力を平文や想定外の宛先へ送らないよう未設定とみなす。末尾の`/`は落とす
+ * （`/chat/completions`をつなぐため）。
+ */
+const httpsBaseUrl = (value: string | undefined): string | null => {
+  const raw = configured(value);
+  if (raw === null || !URL.canParse(raw)) return null;
+  const url = new URL(raw);
+  if (url.protocol !== "https:" || url.username !== "" || url.password !== "") return null;
+  return raw.replace(/\/+$/, "");
+};
+
+type FallbackSettings = { readonly baseUrl: string; readonly key: string; readonly model: string };
+
+/** 他社の予備の設定。3つのどれかが欠けて（または使えない値で）いればnull。 */
+const fallbackSettings = (env: AiEnv): FallbackSettings | null => {
+  const baseUrl = httpsBaseUrl(env.AI_FALLBACK_BASE_URL);
+  const key = configured(env.AI_FALLBACK_API_KEY);
+  const model = configured(env.AI_FALLBACK_MODEL);
+  return baseUrl === null || key === null || model === null ? null : { baseUrl, key, model };
+};
+
+/**
+ * 今使う他社の予備。`AI_ROUTE`が`fallback`で、予備の3つがそろっているときだけ返す。
+ * それ以外（未設定・空・`primary`・書き損じ・予備の不足）は主系のまま動かす——
+ * 切り替えの書き損じでAIを止めない。どちらで動いているかはhealthの`ai.route`で分かる。
+ */
+const activeFallback = (env: AiEnv): FallbackSettings | null =>
+  env.AI_ROUTE === "fallback" ? fallbackSettings(env) : null;
+
 /** isolateで共有する切り替え状態。チャットとhealthが同じものを見る。 */
 export const sharedAiRouteState = new AiRouteState();
 
@@ -180,6 +240,14 @@ export const createAiGateway = (
   env: AiEnv,
   state: AiRouteState = sharedAiRouteState,
 ): AiGateway => {
+  const fallback = activeFallback(env);
+  if (fallback !== null)
+    return new FallbackAiGateway(
+      fallback.baseUrl,
+      fallback.key,
+      fallback.model,
+      FALLBACK_EXTRA_BODY,
+    );
   const backup = backupSettings(env);
   const gateway = (apiKey: string, model: string): OpenAiGateway =>
     new OpenAiGateway(env.OPENAI_BASE_URL, apiKey, model);
@@ -194,24 +262,33 @@ export const createAiGateway = (
   );
 };
 
-/** 活動ログへ足す経路のmeta。FailoverAiGateway以外（テスト用のFake）は何も足さない。 */
+/** 活動ログへ足す経路のmeta。経路を持たないAiGateway（テスト用のFake）は何も足さない。 */
 export const aiRouteMeta = (gateway: AiGateway): Partial<AiRouteMeta> =>
-  gateway instanceof FailoverAiGateway ? gateway.routeMeta : {};
+  gateway instanceof FailoverAiGateway || gateway instanceof FallbackAiGateway
+    ? gateway.routeMeta
+    : {};
 
 /**
  * healthへ載せるAI経路の状態。キーの値・一部・長さは出さない（healthはOrigin不問で
- * 誰でも読める）。予備モデル名は秘密ではないが、設定の有無だけで確認には足りる。
- * `route`はhealthに応答したisolateの状態で、他のisolateとずれることがある。
+ * 誰でも読める）。予備モデル名・接続先は秘密ではないが、設定の有無だけで確認には足りる。
+ * `route`は手で切り替えた`fallback`を先に見る。それ以外はhealthに応答したisolateの
+ * 自動の切り替えの状態で、他のisolateとずれることがある。
  */
 export const aiRouteStatus = (
   env: AiEnv,
   state: AiRouteState,
   nowMs: number,
-): { route: AiRoute; backupKey: boolean; backupModel: boolean } => {
+): {
+  route: AiRoute;
+  backupKey: boolean;
+  backupModel: boolean;
+  fallbackConfigured: boolean;
+} => {
   const backup = backupSettings(env);
   return {
-    route: state.current(nowMs),
+    route: activeFallback(env) === null ? state.current(nowMs) : "fallback",
     backupKey: backup.key !== null,
     backupModel: backup.model !== null,
+    fallbackConfigured: fallbackSettings(env) !== null,
   };
 };
