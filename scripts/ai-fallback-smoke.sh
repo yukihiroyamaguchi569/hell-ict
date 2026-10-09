@@ -27,6 +27,10 @@ if [ -z "${ANTHROPIC_API_KEY:-}" ]; then
   echo "ERROR: ANTHROPIC_API_KEY が無い。read -s ANTHROPIC_API_KEY; export ANTHROPIC_API_KEY してから実行する。" >&2
   exit 1
 fi
+# Move the key into a non-exported shell variable before starting any child process
+# (curl, mktemp, wrangler ...), so none of them inherits it in its environment.
+fallback_key="$ANTHROPIC_API_KEY"
+unset ANTHROPIC_API_KEY
 for tool in curl jq uuidgen; do
   command -v "$tool" >/dev/null || { echo "ERROR: $tool が無い。" >&2; exit 1; }
 done
@@ -64,9 +68,8 @@ fi
 event_no=99
 team_code="${event_no}$(printf '%04d' $((RANDOM % 9999 + 1)))"
 
-(umask 077 && printf 'AI_FALLBACK_API_KEY=%s\n' "$ANTHROPIC_API_KEY" >"$key_file")
-# From here on, no child process (wrangler dev, d1 execute, curl) inherits the key: it is read only from $key_file.
-unset ANTHROPIC_API_KEY
+(umask 077 && printf 'AI_FALLBACK_API_KEY=%s\n' "$fallback_key" >"$key_file")
+unset fallback_key
 
 echo "wrangler dev を予備の設定で起動する（ポート ${port}、モデル ${model}）..."
 (
