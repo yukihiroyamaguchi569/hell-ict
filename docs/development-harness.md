@@ -155,13 +155,81 @@ pnpm exec wrangler secret put OPENAI_MODEL_BACKUP   # 本番では gpt-4o を登
 
 - **切り替えは自動。** 主系が上の失敗を返したときだけ、同じ送信を予備へ1回だけ送り直す。予備で通ったら5分間は主系を呼ばずに予備へ送り、過ぎたら主系を1回試す——クレジットを補充すれば、運営が何もしなくても5分以内に主系へ戻る。
 - **一時的な失敗では切り替えない。** レート制限（429 `rate_limit_exceeded`）・5xx・タイムアウト・通信断は、参加者の再試行に任せる。タイムアウトと通信断はOpenAI側で課金済みのことがあり、予備へ送ると二重に払うためである。
-- **確かめ方**: `GET /api/health`の`ai`を見る。`{"route":"primary","backupKey":true,"backupModel":false}`のように、予備が設定済みかどうか（キーの値は出さない）と、応答したWorkerの今の経路（`primary` / `backup-key` / `backup-model`）が出る。経路はWorkerのインスタンスごとに持つので、切り替わっていても`primary`と出ることがある。**実際に切り替わったかは活動ログで確かめる**——`chat.assistant`・`chat.failure`・`chat.refusal`のmetaに`aiRoute`が、切り替えたその送信には`aiSwitchCause`（`key` / `model`）が残る。
+- **確かめ方**: `GET /api/health`の`ai`を見る。`{"route":"primary","backupKey":true,"backupModel":false,"fallbackConfigured":true}`のように、予備が設定済みかどうか（キーの値は出さない）と、応答したWorkerの今の経路（`primary` / `backup-key` / `backup-model`。手で切り替えた他社の予備は`fallback`。次節）が出る。経路はWorkerのインスタンスごとに持つので、切り替わっていても`primary`と出ることがある。**実際に切り替わったかは活動ログで確かめる**——`chat.assistant`・`chat.failure`・`chat.refusal`のmetaに`aiRoute`が、切り替えたその送信には`aiSwitchCause`（`key` / `model`）が残る。
 
   ```sh
   pnpm exec wrangler d1 execute hell-ict-testplay --remote --command "SELECT created_at, kind, json_extract(meta, '$.aiRoute') AS route, json_extract(meta, '$.errorCode') AS code FROM activity_events WHERE json_extract(meta, '$.aiRoute') != 'primary' ORDER BY id DESC LIMIT 20"
   ```
 
 - 予備に切り替わったら、手順7のBillingで主キーの残高を補充する（予備のクレジットも有限である）。
+
+#### OpenAIが落ちたとき: 他社の予備（Claude Haiku 5.5）へ手で切り替える
+
+上の予備はOpenAIの中での備えで、OpenAIそのものの障害（5xx・タイムアウトが続く）には効かない。そのときは運営が手で、Anthropicの OpenAI 互換の接続先（`claude-haiku-5-5`）へ切り替える。切り替えのスイッチも secret 1つ（`AI_ROUTE`）にしてあり、デプロイせずに数秒で反映される。
+
+| secret | 中身 | 例 |
+|---|---|---|
+| `AI_ROUTE` | `fallback`で予備へ。未設定・空・`primary`は主系（今のまま） | `fallback` |
+| `AI_FALLBACK_BASE_URL` | 予備の接続先。httpsのみ受け付ける | `https://api.anthropic.com/v1` |
+| `AI_FALLBACK_API_KEY` | 予備のキー（Anthropicの本番用キー。期限は11/30など本番後） | — |
+| `AI_FALLBACK_MODEL` | 予備のモデル | `claude-haiku-5-5` |
+
+どれも`wrangler.jsonc`の`vars`には書かない（`vars`はデプロイのたびに上書きされ、切り替えが消える）。
+
+- **予備だけを呼ぶ。** `AI_ROUTE=fallback`で予備の3つがそろっていれば、OpenAI（主系・予備キー・予備モデル）へは送らない。予備の呼び出しにだけ、思考を切る指定（`thinking: {"type": "disabled"}`）を足す——ai-bench で比較・負荷テストに使ったのと同じ本文である。主系の本文は変わらない。
+- **書き損じではAIを止めない。** `AI_ROUTE`が`fallback`以外の値（`Fallback`・末尾の改行など）、予備の3つのどれかが無い、接続先がhttpsでない、のいずれでも主系のまま動く。どちらで動いているかは`/api/health`の`ai.route`で確かめる。
+- PIIゲートは経路によらずAIの呼び出しより先に止める。予備へ切り替えても、PIIを含む送信は他社へも届かない。
+
+**事前の登録（本番前に1回）**
+
+```sh
+cd apps/worker
+printf https://api.anthropic.com/v1 | pnpm exec wrangler secret put AI_FALLBACK_BASE_URL
+pnpm exec wrangler secret put AI_FALLBACK_API_KEY      # 対話で貼る
+printf claude-haiku-5-5 | pnpm exec wrangler secret put AI_FALLBACK_MODEL
+curl -s "$HELL_ICT_PROD_URL/api/health" | jq .ai       # fallbackConfigured: true、route: primary
+```
+
+- `HELL_ICT_PROD_URL`はリポジトリ直下の`.deploy.env`のもの（`set -a; . ../../.deploy.env; set +a`で読む）。
+- Anthropicの組織（Console の Billing）にクレジットが十分あることも確かめる。
+- `AI_ROUTE`はまだ入れない。
+- 手元で本物の Anthropic へ通して確かめるには `scripts/ai-fallback-smoke.sh` を使う（下の「手元での確認」）。
+
+**いつ切り替えるか（目安）**
+
+- OpenAIのステータスページ（https://status.openai.com/）に障害が出ている。または
+- 活動ログの`chat.failure`が、5xx・タイムアウト（`failureReason`が`timeout`・`network`、`httpStatus`が5xx）で続いている。
+
+  ```sh
+  pnpm exec wrangler d1 execute hell-ict-testplay --remote --command "SELECT created_at, json_extract(meta, '$.failureReason') AS reason, json_extract(meta, '$.httpStatus') AS status, json_extract(meta, '$.aiRoute') AS route FROM activity_events WHERE kind = 'chat.failure' ORDER BY id DESC LIMIT 20"
+  ```
+
+**切り替え**（`apps/worker`で）
+
+```sh
+printf fallback | pnpm exec wrangler secret put AI_ROUTE
+curl -s "$HELL_ICT_PROD_URL/api/health" | jq .ai       # route: fallback になったことを確かめる
+```
+
+参加者には再送してもらえば通る。活動ログの`aiRoute`が`fallback`になる。
+
+**戻し**
+
+```sh
+printf primary | pnpm exec wrangler secret put AI_ROUTE
+curl -s "$HELL_ICT_PROD_URL/api/health" | jq .ai       # route: primary を確かめる
+```
+
+`printf`を使う（`echo`だと末尾に改行が入り、`fallback`と一致せず主系のままになる）。
+
+**手元での確認**（本物の Anthropic へ Worker を通す）
+
+```sh
+read -s ANTHROPIC_API_KEY; export ANTHROPIC_API_KEY
+bash scripts/ai-fallback-smoke.sh
+```
+
+`wrangler dev --local`を予備の設定（`AI_ROUTE=fallback`ほか）で起動し、テスト用のチームで入室してチャットを数回送り、応答の有無・所要時間・活動ログの`aiRoute`を表示して、終わったらdevを止める。キーはファイル（`.dev.vars`など）に書かず`--var`で渡す（devが動いている間だけプロセスの引数に載る）。D1とDOは手元のローカルのもの（一時ディレクトリ）だけを使い、本番には触れない。
 
 ### デプロイの流れ
 
