@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 
 import {
-  costOf,
+  callCost,
   isCutOffBeforeProductionTimeout,
   isOverProductionTimeout,
   summarize,
@@ -70,7 +70,7 @@ const resultsFrom = async (): Promise<JobResult[]> => {
         round: 1,
         overProductionTimeout: isOverProductionTimeout(slow),
         cutOffBeforeProductionTimeout: isCutOffBeforeProductionTimeout(slow),
-        costUsd: costOf(slow.usage, model.price),
+        costUsd: callCost(slow, model.price),
         finishedOrder: index + 1,
       };
     }),
@@ -179,7 +179,7 @@ describe("renderReport", () => {
       round: 1,
       overProductionTimeout: false,
       cutOffBeforeProductionTimeout: false,
-      costUsd: costOf(call.usage, model.price),
+      costUsd: callCost(call, model.price),
       finishedOrder: 1,
     };
     const html = renderReport({
@@ -189,8 +189,8 @@ describe("renderReport", () => {
     });
     expect(html).toContain('<pre class="reply">応答</pre>');
     expect(html).toContain("トークン 不明 · 不明");
-    expect(html).not.toContain("$0.0");
-    expect(html).toMatch(/<tr><th>gpt-4o<\/th>(<td>[^<]*<\/td>){6}<td>1<\/td><td>不明<\/td>/);
+    expect(html).toContain("不明（下限 $0.00000）");
+    expect(html).toMatch(/<tr><th>gpt-4o<\/th>(<td>[^<]*<\/td>){6}<td>1<\/td><td>不明（下限 /);
   });
 
   it("is a single file without external resources", async () => {

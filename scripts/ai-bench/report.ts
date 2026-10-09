@@ -33,6 +33,12 @@ const formatMs = (ms: number | null): string =>
 export const formatUsd = (usd: number | null): string =>
   usd === null ? "不明" : `$${usd.toFixed(usd < 0.01 ? 5 : 3)}`;
 
+/** The total, or "unknown" with the known part as a lower bound. */
+export const formatTotalCost = (summary: ModelSummary): string =>
+  summary.totalCostUsd === null
+    ? `不明（下限 ${formatUsd(summary.costLowerBoundUsd)}）`
+    : formatUsd(summary.totalCostUsd);
+
 const ROLE_LABELS = { system: "system", user: "参加者", assistant: "AI（9/26）" } as const;
 
 const renderMessages = (benchCase: BenchCase): string =>
@@ -90,11 +96,11 @@ const renderSummary = (summaries: readonly ModelSummary[]): string => {
   const rows = summaries
     .map(
       (summary) =>
-        `<tr><th>${escapeHtml(summary.model)}</th><td>${String(summary.calls)}</td><td>${formatMs(summary.medianMs)}</td><td>${formatMs(summary.maxMs)}</td><td>${String(summary.promptTokens)}</td><td>${String(summary.completionTokens)}</td><td>${String(summary.reasoningTokens)}</td><td>${String(summary.usageUnknown)}</td><td>${formatUsd(summary.totalCostUsd)}</td><td>${String(summary.overProductionTimeout)}</td><td>${String(summary.cutOffBeforeProductionTimeout)}</td><td>${String(summary.errors)}</td></tr>`,
+        `<tr><th>${escapeHtml(summary.model)}</th><td>${String(summary.calls)}</td><td>${formatMs(summary.medianMs)}</td><td>${formatMs(summary.maxMs)}</td><td>${String(summary.promptTokens)}</td><td>${String(summary.completionTokens)}</td><td>${String(summary.reasoningTokens)}</td><td>${String(summary.usageUnknown)}</td><td>${formatTotalCost(summary)}</td><td>${String(summary.overProductionTimeout)}</td><td>${String(summary.cutOffBeforeProductionTimeout)}</td><td>${String(summary.errors)}</td></tr>`,
     )
     .join("");
   return `<h2>モデルごとの集計</h2>
-<p class="note">所要時間の中央値・最大は、成功した呼び出しだけで数える。トークン数は usage が読めた応答だけの合計で、1件でも費用が分からない応答があれば合計費用は「不明」にする。「${String(PRODUCTION_TIMEOUT_MS / 1000)} 秒超」は Worker の待ち時間を超えたもの（本番なら参加者には失敗に見える）。「打ち切り（判定不能）」は ${String(PRODUCTION_TIMEOUT_MS / 1000)} 秒より短い --timeout-ms で打ち切ったもの。</p>
+<p class="note">所要時間の中央値・最大は、成功した呼び出しだけで数える。トークン数は usage が読めた応答だけの合計で、HTTP エラーで返った呼び出しは費用 0、usage の無い応答やタイムアウト・通信断は課金されたか分からないので、1件でもあれば合計費用は「不明」とし、分かっている分を下限として出す。「${String(PRODUCTION_TIMEOUT_MS / 1000)} 秒超」は Worker の待ち時間を超えたもの（本番なら参加者には失敗に見える）。「打ち切り（判定不能）」は ${String(PRODUCTION_TIMEOUT_MS / 1000)} 秒より短い --timeout-ms で打ち切ったもの。</p>
 <table><thead><tr><th>モデル</th><th>呼び出し</th><th>中央値</th><th>最大</th><th>入力トークン</th><th>出力トークン</th><th>推論トークン</th><th>usage 不明</th><th>費用（推定）</th><th>${String(PRODUCTION_TIMEOUT_MS / 1000)} 秒超</th><th>打ち切り（判定不能）</th><th>エラー</th></tr></thead><tbody>${rows}</tbody></table>`;
 };
 

@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 
 import {
   costOf,
+  callCost,
   isCutOffBeforeProductionTimeout,
   isOverProductionTimeout,
   median,
@@ -155,14 +156,15 @@ describe("summarizeModel", () => {
       promptTokens: 300,
       completionTokens: 150,
     });
-    expect(summary.totalCostUsd).toBeCloseTo(0.06);
+    expect(summary.totalCostUsd).toBeNull();
+    expect(summary.costLowerBoundUsd).toBeCloseTo(0.06);
   });
 
   it("leaves the total cost unknown when a reply came without usage, instead of undercounting", () => {
     const results = [
       jobResult({ costUsd: 0.01 }),
       jobResult({ usage: null, costUsd: null }),
-      jobResult({ error: { kind: "http_error", message: "x" }, usage: null, costUsd: null }),
+      jobResult({ error: { kind: "http_error", message: "x" }, usage: null, costUsd: 0 }),
     ];
     const summary = summarizeModel("gpt-4o", results);
     expect(summary.totalCostUsd).toBeNull();
@@ -173,7 +175,7 @@ describe("summarizeModel", () => {
   it("does not let failed calls without usage make the total unknown", () => {
     const results = [
       jobResult({ costUsd: 0.01 }),
-      jobResult({ error: { kind: "http_error", message: "x" }, usage: null, costUsd: null }),
+      jobResult({ error: { kind: "http_error", message: "x" }, usage: null, costUsd: 0 }),
     ];
     expect(summarizeModel("gpt-4o", results)).toMatchObject({
       totalCostUsd: 0.01,
@@ -181,16 +183,44 @@ describe("summarizeModel", () => {
     });
   });
 
+  it("prices a rejected request at 0 but a cut-off or lost call as unknown", () => {
+    const price = { input: 2.5, output: 10 };
+    const rejected = call({
+      status: 429,
+      usage: null,
+      error: { kind: "http_error", message: "x" },
+    });
+    expect(callCost(rejected, price)).toBe(0);
+    expect(callCost(rejected, null)).toBe(0);
+    for (const kind of ["timeout", "network", "invalid_response"] as const) {
+      expect(callCost(call({ usage: null, error: { kind, message: "x" } }), price)).toBeNull();
+    }
+    expect(callCost(call({ usage: null }), price)).toBeNull();
+    expect(callCost(call(), price)).toBeCloseTo((100 * 2.5 + 50 * 10) / 1_000_000);
+  });
+
+  it("leaves the total unknown, with the known part as a lower bound, after a timeout", () => {
+    const results = [
+      jobResult({ costUsd: 0.01 }),
+      jobResult({ costUsd: 0, usage: null, error: { kind: "http_error", message: "x" } }),
+      jobResult({ costUsd: null, usage: null, error: { kind: "timeout", message: "t" } }),
+    ];
+    expect(summarizeModel("gpt-4o", results)).toMatchObject({
+      totalCostUsd: null,
+      costLowerBoundUsd: 0.01,
+    });
+  });
+
   it("reports nothing measured for a model whose every call failed", () => {
     const failed = jobResult({
       error: { kind: "http_error", message: "x" },
       usage: null,
-      costUsd: null,
+      costUsd: 0,
     });
     expect(summarizeModel("gpt-4o", [failed])).toMatchObject({
       medianMs: null,
       maxMs: null,
-      totalCostUsd: null,
+      totalCostUsd: 0,
       errors: 1,
     });
   });
@@ -291,6 +321,8 @@ describe("runJobs", () => {
     expect(summarize([modelSpecFor("gpt-4o")], results)[0]).toMatchObject({
       overProductionTimeout: 0,
       cutOffBeforeProductionTimeout: 1,
+      totalCostUsd: null,
+      costLowerBoundUsd: 0,
     });
   });
 

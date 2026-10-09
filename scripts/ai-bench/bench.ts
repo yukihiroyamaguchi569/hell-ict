@@ -46,7 +46,7 @@ export type JobResult = CallResult & {
    * out cannot be told, so it is counted apart from both the fast and the late calls.
    */
   readonly cutOffBeforeProductionTimeout: boolean;
-  /** USD; null when the model has no price or no usage came back. */
+  /** USD; null when it cannot be known (see `callCost`). */
   readonly costUsd: number | null;
   /** Order in which the calls finished, for "the last rate limit seen". */
   readonly finishedOrder: number;
@@ -55,6 +55,16 @@ export type JobResult = CallResult & {
 export const costOf = (usage: Usage | null, price: ModelPrice | null): number | null => {
   if (usage === null || price === null) return null;
   return (usage.promptTokens * price.input + usage.completionTokens * price.output) / 1_000_000;
+};
+
+/**
+ * What a call cost. A rejected request (an HTTP error came back) is not billed: 0. A reply
+ * without usage, or a call that timed out or lost its connection after the request went out,
+ * may have been billed: unknown (null), never guessed as 0.
+ */
+export const callCost = (call: CallResult, price: ModelPrice | null): number | null => {
+  if (call.usage === null && call.error?.kind === "http_error") return 0;
+  return costOf(call.usage, price);
 };
 
 /** Took longer than the Worker waits. A call cut off at the very limit counts as late too. */
@@ -103,7 +113,7 @@ export const runJobs = async (
       round: job.round,
       overProductionTimeout: isOverProductionTimeout(call),
       cutOffBeforeProductionTimeout: isCutOffBeforeProductionTimeout(call),
-      costUsd: costOf(call.usage, job.model.price),
+      costUsd: callCost(call, job.model.price),
       finishedOrder: finished,
     };
     results[index] = result;
@@ -127,7 +137,9 @@ export type ModelSummary = {
   readonly calls: number;
   readonly medianMs: number | null;
   readonly maxMs: number | null;
+  /** null when any call's cost is unknown; `costLowerBoundUsd` then holds what is known. */
   readonly totalCostUsd: number | null;
+  readonly costLowerBoundUsd: number;
   readonly overProductionTimeout: number;
   readonly cutOffBeforeProductionTimeout: number;
   readonly errors: number;
@@ -153,15 +165,18 @@ const sum = (values: readonly number[]): number =>
   values.reduce((total, value) => total + value, 0);
 
 /**
- * Unknown as soon as one reply has no cost (no usage, or no price): a sum that silently skipped
- * it would read as the full cost. Failed calls without a usage are taken as free.
+ * Unknown as soon as one call's cost is unknown: a sum that silently skipped it would read as the
+ * full cost. The known part is kept as a lower bound.
  */
-const totalCost = (results: readonly JobResult[]): number | null => {
-  const charged = results.filter((result) => result.error === null || result.usage !== null);
-  if (charged.length === 0) return null;
-  const costs = charged.map((result) => result.costUsd);
-  if (costs.some((cost) => cost === null)) return null;
-  return sum(costs.map((cost) => cost ?? 0));
+const totalCost = (
+  results: readonly JobResult[],
+): { totalCostUsd: number | null; costLowerBoundUsd: number } => {
+  const known = results.flatMap((result) => (result.costUsd === null ? [] : [result.costUsd]));
+  const costLowerBoundUsd = sum(known);
+  return {
+    totalCostUsd: known.length === results.length ? costLowerBoundUsd : null,
+    costLowerBoundUsd,
+  };
 };
 
 const lastRateLimit = (results: readonly JobResult[]): RateLimitHeaders => {
@@ -185,7 +200,7 @@ export const summarizeModel = (model: string, all: readonly JobResult[]): ModelS
     calls: results.length,
     medianMs: median(durations),
     maxMs: durations.length === 0 ? null : Math.max(...durations),
-    totalCostUsd: totalCost(results),
+    ...totalCost(results),
     overProductionTimeout: results.filter((result) => result.overProductionTimeout).length,
     cutOffBeforeProductionTimeout: results.filter((result) => result.cutOffBeforeProductionTimeout)
       .length,
