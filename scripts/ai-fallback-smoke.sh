@@ -29,6 +29,7 @@ if [ -z "${ANTHROPIC_API_KEY:-}" ]; then
 fi
 # Move the key into a non-exported shell variable before starting any child process
 # (curl, mktemp, wrangler ...), so none of them inherits it in its environment.
+unset fallback_key  # drop any inherited export attribute before holding the key
 fallback_key="$ANTHROPIC_API_KEY"
 unset ANTHROPIC_API_KEY
 for tool in curl jq uuidgen; do
