@@ -5,31 +5,53 @@ import { parseArgs } from "node:util";
 import { estimateCaseTokens } from "./cases.ts";
 import type { BenchCase } from "./cases.ts";
 import {
-  DEFAULT_BASE_URL,
   DEFAULT_CONCURRENCY,
   DEFAULT_MODEL_NAMES,
   DEFAULT_REPEAT,
   DEFAULT_TIMEOUT_MS,
+  KNOWN_MODEL_NAMES,
   modelSpecFor,
 } from "./config.ts";
 import type { ModelSpec } from "./config.ts";
+import { parseProviderName, PROVIDER_NAMES, PROVIDERS } from "./providers.ts";
+import type { ProviderName } from "./providers.ts";
 import { formatUsd } from "./report.ts";
 
-/** The command line, the key and the output place: everything decided before the first call. */
+/** The command line and the output place: everything decided before the first call. */
+
+const providerLines = PROVIDER_NAMES.map((name) => {
+  const provider = PROVIDERS[name];
+  return `  ${name.padEnd(10)}${provider.keyEnv.padEnd(19)}(${provider.baseUrlEnv} overrides ${provider.baseUrl})`;
+}).join("\n");
+
+/** The keys and the providers, shared by the help of the comparison and of the load test. */
+export const KEYS_HELP = `Models in config.ts (each is sent to its own provider):
+  ${KNOWN_MODEL_NAMES.join(", ")}
+
+API keys are read from the environment only, one per provider in use (never from an argument):
+${providerLines}
+
+Enter a key without echoing it or leaving it in the shell history, e.g.:
+  read -s OPENAI_API_KEY && export OPENAI_API_KEY
+  read -s GEMINI_API_KEY && export GEMINI_API_KEY
+  read -s ANTHROPIC_API_KEY && export ANTHROPIC_API_KEY`;
 
 export const USAGE = `Usage: pnpm ai-bench --cases <cases.json> [options]
 
   --cases <file>        case file (JSON array of {id, stage, label, messages})
-  --models <a,b,...>    models to compare (default: ${DEFAULT_MODEL_NAMES.join(",")})
+  --models <a,b,...>    models to compare, from any providers (default: ${DEFAULT_MODEL_NAMES.join(",")})
+  --provider <name>     provider of the models not in config.ts (${PROVIDER_NAMES.join(", ")})
   --repeat <n>          calls per case and model (default: ${String(DEFAULT_REPEAT)})
   --concurrency <n>     calls in flight at once (default: ${String(DEFAULT_CONCURRENCY)})
   --timeout-ms <n>      give up on a call after this long (default: ${String(DEFAULT_TIMEOUT_MS)})
   --out <dir>           where to write bench.json and report.html (default: under $TMPDIR).
                         Must be outside this repository: the output holds the real scenario.
-  --dry-run             show what would be sent, without the API key and without calling
+  --dry-run             show what would be sent, without the API keys and without calling
 
-The API key is read from the environment variable OPENAI_API_KEY only.
-OPENAI_BASE_URL overrides the endpoint (default: ${DEFAULT_BASE_URL}).`;
+${KEYS_HELP}
+
+Example (three providers side by side):
+  pnpm ai-bench --cases cases.json --models gpt-4.1-mini,gemini-3.8-flash,claude-haiku-5-5`;
 
 export type CliOptions = {
   readonly casesPath: string;
@@ -51,14 +73,25 @@ const positiveInteger = (raw: string | undefined, name: string, fallback: number
   return value;
 };
 
-const modelList = (raw: string | undefined): readonly ModelSpec[] => {
+export const providerOption = (raw: string | undefined): ProviderName | null =>
+  raw === undefined ? null : parseProviderName(raw);
+
+const modelList = (
+  raw: string | undefined,
+  provider: ProviderName | null,
+): readonly ModelSpec[] => {
   const names = (raw ?? DEFAULT_MODEL_NAMES.join(","))
     .split(",")
     .map((name) => name.trim())
     .filter((name) => name !== "");
   if (names.length === 0) throw new Error("--models must name at least one model");
-  return [...new Set(names)].map(modelSpecFor);
+  return [...new Set(names)].map((name) => modelSpecFor(name, provider));
 };
+
+/** The providers the models need, each once, in the order the models name them. */
+export const providersOf = (models: readonly ModelSpec[]): readonly ProviderName[] => [
+  ...new Set(models.map((model) => model.provider)),
+];
 
 export const parseCliArgs = (argv: readonly string[]): CliOptions => {
   const { values } = parseArgs({
@@ -68,6 +101,7 @@ export const parseCliArgs = (argv: readonly string[]): CliOptions => {
     options: {
       cases: { type: "string" },
       models: { type: "string" },
+      provider: { type: "string" },
       repeat: { type: "string" },
       concurrency: { type: "string" },
       "timeout-ms": { type: "string" },
@@ -79,7 +113,7 @@ export const parseCliArgs = (argv: readonly string[]): CliOptions => {
   if (!values.help && values.cases === undefined) throw new Error("--cases is required");
   return {
     casesPath: values.cases ?? "",
-    models: modelList(values.models),
+    models: modelList(values.models, providerOption(values.provider)),
     repeat: positiveInteger(values.repeat, "repeat", DEFAULT_REPEAT),
     concurrency: positiveInteger(values.concurrency, "concurrency", DEFAULT_CONCURRENCY),
     timeoutMs: positiveInteger(values["timeout-ms"], "timeout-ms", DEFAULT_TIMEOUT_MS),
@@ -88,21 +122,6 @@ export const parseCliArgs = (argv: readonly string[]): CliOptions => {
     help: values.help,
   };
 };
-
-/** The key comes from the environment only, so it never lands in shell history or a file. */
-export const readApiKey = (env: Readonly<Record<string, string | undefined>>): string => {
-  const key = env.OPENAI_API_KEY?.trim() ?? "";
-  if (key === "") {
-    throw new Error(
-      "OPENAI_API_KEY is not set. Run `read -s OPENAI_API_KEY; export OPENAI_API_KEY` first " +
-        "(or use --dry-run to check the cases without a key).",
-    );
-  }
-  return key;
-};
-
-export const baseUrlOf = (env: Readonly<Record<string, string | undefined>>): string =>
-  (env.OPENAI_BASE_URL?.trim() || DEFAULT_BASE_URL).replace(/\/+$/, "");
 
 const isInside = (dir: string, root: string): boolean => {
   const relative = path.relative(root, dir);
@@ -165,7 +184,8 @@ export const resolveOutDir = (
 /** What a dry run prints: per case, the size of what each model would get. */
 export const dryRunLines = (cases: readonly BenchCase[], options: CliOptions): string[] => {
   const lines = options.models.map(
-    (model) => `model ${model.name} params ${JSON.stringify(model.params)}`,
+    (model) =>
+      `model ${model.name} (${model.provider}, key ${PROVIDERS[model.provider].keyEnv}) params ${JSON.stringify(model.params)}`,
   );
   let totalTokens = 0;
   for (const benchCase of cases) {

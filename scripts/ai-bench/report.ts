@@ -1,7 +1,8 @@
 import type { JobResult, ModelSummary } from "./bench.ts";
 import type { BenchCase } from "./cases.ts";
 import { PRODUCTION_TIMEOUT_MS } from "./config.ts";
-import { RATE_LIMIT_HEADERS } from "./openai.ts";
+import { PROVIDERS } from "./providers.ts";
+import type { ProviderName } from "./providers.ts";
 
 /**
  * The HTML report: one self-contained file (no CDN, no script) that puts each case's replies
@@ -10,7 +11,7 @@ import { RATE_LIMIT_HEADERS } from "./openai.ts";
 
 export type BenchRun = {
   readonly startedAt: string;
-  readonly models: readonly string[];
+  readonly models: readonly { readonly name: string; readonly provider: ProviderName }[];
   readonly repeat: number;
   readonly concurrency: number;
   readonly timeoutMs: number;
@@ -76,11 +77,16 @@ const renderCase = (benchCase: BenchCase, run: BenchRun): string => {
   const columns = run.models
     .map((model) => {
       const calls = run.results
-        .filter((result) => result.caseId === benchCase.id && result.model === model)
+        .filter(
+          (result) =>
+            result.caseId === benchCase.id &&
+            result.model === model.name &&
+            result.provider === model.provider,
+        )
         .sort((a, b) => a.round - b.round)
         .map(renderCall)
         .join("");
-      return `<div class="col"><h3>${escapeHtml(model)}</h3>${calls}</div>`;
+      return `<div class="col"><h3>${escapeHtml(model.name)} <span class="provider">${escapeHtml(model.provider)}</span></h3>${calls}</div>`;
     })
     .join("");
   const last = benchCase.messages.at(-1)?.content ?? "";
@@ -96,28 +102,36 @@ const renderSummary = (summaries: readonly ModelSummary[]): string => {
   const rows = summaries
     .map(
       (summary) =>
-        `<tr><th>${escapeHtml(summary.model)}</th><td>${String(summary.calls)}</td><td>${formatMs(summary.medianMs)}</td><td>${formatMs(summary.maxMs)}</td><td>${String(summary.promptTokens)}</td><td>${String(summary.completionTokens)}</td><td>${String(summary.reasoningTokens)}</td><td>${String(summary.usageUnknown)}</td><td>${formatTotalCost(summary)}</td><td>${String(summary.overProductionTimeout)}</td><td>${String(summary.cutOffBeforeProductionTimeout)}</td><td>${String(summary.errors)}</td></tr>`,
+        `<tr><th>${escapeHtml(summary.model)}</th><td>${escapeHtml(summary.provider)}</td><td>${String(summary.calls)}</td><td>${formatMs(summary.medianMs)}</td><td>${formatMs(summary.maxMs)}</td><td>${String(summary.promptTokens)}</td><td>${String(summary.completionTokens)}</td><td>${String(summary.reasoningTokens)}</td><td>${String(summary.usageUnknown)}</td><td>${formatTotalCost(summary)}</td><td>${String(summary.overProductionTimeout)}</td><td>${String(summary.cutOffBeforeProductionTimeout)}</td><td>${String(summary.errors)}</td></tr>`,
     )
     .join("");
   return `<h2>モデルごとの集計</h2>
 <p class="note">所要時間の中央値・最大は、成功した呼び出しだけで数える。トークン数は usage が読めた応答だけの合計で、HTTP エラーで返った呼び出しは費用 0、usage の無い応答やタイムアウト・通信断は課金されたか分からないので、1件でもあれば合計費用は「不明」とし、分かっている分を下限として出す。「${String(PRODUCTION_TIMEOUT_MS / 1000)} 秒超」は Worker の待ち時間を超えたもの（本番なら参加者には失敗に見える）。「打ち切り（判定不能）」は ${String(PRODUCTION_TIMEOUT_MS / 1000)} 秒より短い --timeout-ms で打ち切ったもの。</p>
-<table><thead><tr><th>モデル</th><th>呼び出し</th><th>中央値</th><th>最大</th><th>入力トークン</th><th>出力トークン</th><th>推論トークン</th><th>usage 不明</th><th>費用（推定）</th><th>${String(PRODUCTION_TIMEOUT_MS / 1000)} 秒超</th><th>打ち切り（判定不能）</th><th>エラー</th></tr></thead><tbody>${rows}</tbody></table>`;
+<table><thead><tr><th>モデル</th><th>プロバイダ</th><th>呼び出し</th><th>中央値</th><th>最大</th><th>入力トークン</th><th>出力トークン</th><th>推論トークン</th><th>usage 不明</th><th>費用（推定）</th><th>${String(PRODUCTION_TIMEOUT_MS / 1000)} 秒超</th><th>打ち切り（判定不能）</th><th>エラー</th></tr></thead><tbody>${rows}</tbody></table>`;
+};
+
+/** The headers that came back, or why there are none. */
+const renderRateLimitValues = (summary: ModelSummary): string => {
+  const entries = Object.entries(summary.rateLimit);
+  if (entries.length > 0) {
+    return entries
+      .map(([name, value]) => `<code>${escapeHtml(name)}</code> ${escapeHtml(value)}`)
+      .join("<br>");
+  }
+  return PROVIDERS[summary.provider].rateLimitHeaders.length === 0
+    ? "取れない（このプロバイダは rate limit のヘッダを返さない）"
+    : "取れない（ヘッダが返らなかった）";
 };
 
 const renderRateLimits = (summaries: readonly ModelSummary[]): string => {
-  const head = RATE_LIMIT_HEADERS.map(
-    (name) => `<th>${name.replace("x-ratelimit-", "")}</th>`,
-  ).join("");
   const rows = summaries
-    .map((summary) => {
-      const cells = RATE_LIMIT_HEADERS.map(
-        (name) => `<td>${escapeHtml(summary.rateLimit[name] ?? "—")}</td>`,
-      ).join("");
-      return `<tr><th>${escapeHtml(summary.model)}</th>${cells}</tr>`;
-    })
+    .map(
+      (summary) =>
+        `<tr><th>${escapeHtml(summary.model)}</th><td>${escapeHtml(summary.provider)}</td><td class="headers">${renderRateLimitValues(summary)}</td></tr>`,
+    )
     .join("");
   return `<h2>rate limit（モデルごとに最後に受け取った値）</h2>
-<table><thead><tr><th>モデル</th>${head}</tr></thead><tbody>${rows}</tbody></table>`;
+<table><thead><tr><th>モデル</th><th>プロバイダ</th><th>ヘッダ</th></tr></thead><tbody>${rows}</tbody></table>`;
 };
 
 const STYLE = `
@@ -128,6 +142,8 @@ h1{font-size:20px}h2{font-size:17px;margin-top:32px}h3{font-size:14px;margin:0 0
 pre{white-space:pre-wrap;word-break:break-word;margin:0;font:inherit}
 .note,.meta,.round,.role{color:var(--muted);font-size:12px}
 .case{border-top:1px solid var(--line);padding-top:8px}
+.provider{color:var(--muted);font-size:12px;font-weight:normal}
+td.headers{text-align:left}
 .stage{font-size:12px;border:1px solid var(--line);border-radius:4px;padding:0 6px}
 .ask,.msg{background:var(--card);border-radius:6px;padding:8px;margin:6px 0;max-height:16em;overflow:auto}
 .cols{display:grid;grid-template-columns:repeat(var(--cols),minmax(260px,1fr));gap:12px;overflow-x:auto}
@@ -143,7 +159,7 @@ export const renderReport = (run: BenchRun): string => `<!doctype html>
 <html lang="ja"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
 <title>AIモデル比較</title><style>${STYLE}</style></head><body>
 <h1>AIモデル比較（地獄のICT）</h1>
-<p class="note">${escapeHtml(run.startedAt)} 開始 · モデル ${escapeHtml(run.models.join(", "))} · ケース ${String(run.cases.length)} 件 × ${String(run.repeat)} 回 · 並列 ${String(run.concurrency)} · 打ち切り ${String(run.timeoutMs / 1000)} 秒</p>
+<p class="note">${escapeHtml(run.startedAt)} 開始 · モデル ${escapeHtml(run.models.map((model) => `${model.name}（${model.provider}）`).join(", "))} · ケース ${String(run.cases.length)} 件 × ${String(run.repeat)} 回 · 並列 ${String(run.concurrency)} · 打ち切り ${String(run.timeoutMs / 1000)} 秒</p>
 ${run.cases.map((benchCase) => renderCase(benchCase, run)).join("\n")}
 ${renderSummary(run.summaries)}
 ${renderRateLimits(run.summaries)}

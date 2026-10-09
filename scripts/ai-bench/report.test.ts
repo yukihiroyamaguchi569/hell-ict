@@ -14,7 +14,7 @@ import { escapeHtml, formatUsd, renderReport } from "./report.ts";
 import type { BenchRun } from "./report.ts";
 
 const KEY = "sk-report-SECRET-987";
-const MODELS = ["gpt-4o", "gpt-6-sol"].map(modelSpecFor);
+const MODELS = ["gpt-4o", "gpt-6-sol"].map((name) => modelSpecFor(name));
 const benchCase = {
   id: "s5-table",
   stage: "s5",
@@ -67,6 +67,7 @@ const resultsFrom = async (): Promise<JobResult[]> => {
         ...slow,
         caseId: benchCase.id,
         model: model.name,
+        provider: model.provider,
         round: 1,
         overProductionTimeout: isOverProductionTimeout(slow),
         cutOffBeforeProductionTimeout: isCutOffBeforeProductionTimeout(slow),
@@ -79,7 +80,7 @@ const resultsFrom = async (): Promise<JobResult[]> => {
 
 const runOf = (results: JobResult[]): BenchRun => ({
   startedAt: "2026-10-10T00:00:00.000Z",
-  models: MODELS.map((model) => model.name),
+  models: MODELS.map(({ name, provider }) => ({ name, provider })),
   repeat: 1,
   concurrency: 2,
   timeoutMs: 60_000,
@@ -113,8 +114,8 @@ describe("renderReport", () => {
   it("puts each model's reply side by side, escaped", async () => {
     const html = renderReport(runOf(await resultsFrom()));
     expect(html).toContain('<div class="cols" style="--cols:2">');
-    expect(html).toContain("<h3>gpt-4o</h3>");
-    expect(html).toContain("<h3>gpt-6-sol</h3>");
+    expect(html).toContain('<h3>gpt-4o <span class="provider">openai</span></h3>');
+    expect(html).toContain('<h3>gpt-6-sol <span class="provider">openai</span></h3>');
     expect(html).toContain("&lt;i&gt;ok&lt;/i&gt;");
     expect(html).toContain("&lt;script&gt;alert(1)&lt;/script&gt;");
     expect(html).not.toContain("<script>");
@@ -130,9 +131,13 @@ describe("renderReport", () => {
   it("has the summary and the rate-limit tables", async () => {
     const html = renderReport(runOf(await resultsFrom()));
     expect(html).toContain("モデルごとの集計");
-    expect(html).toMatch(/<tr><th>gpt-6-sol<\/th><td>1<\/td><td>—<\/td><td>—<\/td>/);
-    expect(html).toContain("<td>5000</td>");
-    expect(html).toContain("<td>799</td>");
+    expect(html).toMatch(
+      /<tr><th>gpt-6-sol<\/th><td>openai<\/td><td>1<\/td><td>—<\/td><td>—<\/td>/,
+    );
+    expect(html).toContain(
+      "<code>x-ratelimit-limit-requests</code> 5000<br><code>x-ratelimit-remaining-tokens</code> 799",
+    );
+    expect(html).toContain("取れない（ヘッダが返らなかった）");
   });
 
   it("shows a call cut off before 20 seconds as undetermined, not as a production timeout", async () => {
@@ -151,7 +156,7 @@ describe("renderReport", () => {
     expect(html).toContain("打ち切り（本番での判定不能）");
     expect(html).not.toContain("本番ならタイムアウト（");
     expect(html).toMatch(
-      /<tr><th>gpt-6-sol<\/th>(<td>[^<]*<\/td>){8}<td>0<\/td><td>1<\/td><td>1<\/td><\/tr>/,
+      /<tr><th>gpt-6-sol<\/th>(<td>[^<]*<\/td>){9}<td>0<\/td><td>1<\/td><td>1<\/td><\/tr>/,
     );
   });
 
@@ -176,6 +181,7 @@ describe("renderReport", () => {
       ...call,
       caseId: benchCase.id,
       model: model.name,
+      provider: model.provider,
       round: 1,
       overProductionTimeout: false,
       cutOffBeforeProductionTimeout: false,
@@ -184,13 +190,78 @@ describe("renderReport", () => {
     };
     const html = renderReport({
       ...runOf([result]),
-      models: [model.name],
+      models: [{ name: model.name, provider: model.provider }],
       summaries: summarize([model], [result]),
     });
     expect(html).toContain('<pre class="reply">応答</pre>');
     expect(html).toContain("トークン 不明 · 不明");
     expect(html).toContain("不明（下限 $0.00000）");
-    expect(html).toMatch(/<tr><th>gpt-4o<\/th>(<td>[^<]*<\/td>){6}<td>1<\/td><td>不明（下限 /);
+    expect(html).toMatch(/<tr><th>gpt-4o<\/th>(<td>[^<]*<\/td>){7}<td>1<\/td><td>不明（下限 /);
+  });
+
+  it("shows each provider and the rate-limit headers each one gave, or that none can be had", async () => {
+    const keys = { gemini: "AIzaReportGeminiKey123", anthropic: "sk-ant-report-SECRET" } as const;
+    const models = ["gemini-3.8-flash", "claude-haiku-5-5"].map((name) => modelSpecFor(name));
+    const results: JobResult[] = await Promise.all(
+      models.map(async (model, index) => {
+        const call = await callModel(
+          {
+            baseUrl: "u",
+            apiKey: model.provider === "gemini" ? keys.gemini : keys.anthropic,
+            model,
+            messages: benchCase.messages,
+            timeoutMs: 1000,
+          },
+          {
+            fetch: () =>
+              Promise.resolve(
+                new Response(
+                  JSON.stringify({
+                    choices: [{ message: { content: `from ${model.name}` } }],
+                    usage: { prompt_tokens: 10, completion_tokens: 5 },
+                  }),
+                  {
+                    headers: {
+                      "x-ratelimit-remaining-requests": "41",
+                      "anthropic-ratelimit-output-tokens-remaining": "2000000",
+                      "x-goog-something": "ignored",
+                    },
+                  },
+                ),
+              ),
+            clock: { now: () => 0 },
+          },
+        );
+        return {
+          ...call,
+          caseId: benchCase.id,
+          model: model.name,
+          provider: model.provider,
+          round: 1,
+          overProductionTimeout: false,
+          cutOffBeforeProductionTimeout: false,
+          costUsd: callCost(call, model.price),
+          finishedOrder: index + 1,
+        };
+      }),
+    );
+    const html = renderReport({
+      ...runOf(results),
+      models: models.map(({ name, provider }) => ({ name, provider })),
+      summaries: summarize(models, results),
+    });
+    expect(html).toContain("gemini-3.8-flash（gemini）, claude-haiku-5-5（anthropic）");
+    expect(html).toContain('<h3>claude-haiku-5-5 <span class="provider">anthropic</span></h3>');
+    expect(html).toMatch(/<tr><th>gemini-3.8-flash<\/th><td>gemini<\/td><td>1<\/td>/);
+    // Gemini documents no rate-limit header: whatever came is not read.
+    expect(html).toContain(
+      '<tr><th>gemini-3.8-flash</th><td>gemini</td><td class="headers">取れない（このプロバイダは rate limit のヘッダを返さない）</td></tr>',
+    );
+    expect(html).toContain(
+      "<code>x-ratelimit-remaining-requests</code> 41<br><code>anthropic-ratelimit-output-tokens-remaining</code> 2000000",
+    );
+    expect(html).not.toContain("x-goog-something");
+    for (const key of Object.values(keys)) expect(html).not.toContain(key);
   });
 
   it("is a single file without external resources", async () => {

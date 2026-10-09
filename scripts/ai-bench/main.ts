@@ -6,8 +6,10 @@ import { fileURLToPath } from "node:url";
 import { planJobs, runJobs, summarize } from "./bench.ts";
 import type { JobResult } from "./bench.ts";
 import { parseCases } from "./cases.ts";
-import { baseUrlOf, dryRunLines, parseCliArgs, readApiKey, resolveOutDir, USAGE } from "./cli.ts";
+import { dryRunLines, parseCliArgs, providersOf, resolveOutDir, USAGE } from "./cli.ts";
 import { makePrivateDir, writePrivateFile } from "./files.ts";
+import { readEndpoints } from "./providers.ts";
+import type { Endpoint, ProviderName } from "./providers.ts";
 import { renderReport } from "./report.ts";
 import type { BenchRun } from "./report.ts";
 
@@ -25,7 +27,7 @@ const progressLine = (result: JobResult, done: number, total: number): string =>
     : result.cutOffBeforeProductionTimeout
       ? " (cut off before 20s)"
       : "";
-  return `[${String(done)}/${String(total)}] ${result.model} ${result.caseId} #${String(result.round)}: ${String(result.elapsedMs)} ms, ${status}${late}`;
+  return `[${String(done)}/${String(total)}] ${result.model} (${result.provider}) ${result.caseId} #${String(result.round)}: ${String(result.elapsedMs)} ms, ${status}${late}`;
 };
 
 const main = async (): Promise<void> => {
@@ -40,7 +42,13 @@ const main = async (): Promise<void> => {
     for (const line of dryRunLines(cases, options)) console.log(line);
     return;
   }
-  const apiKey = readApiKey(process.env);
+  const endpoints = readEndpoints(process.env, providersOf(options.models));
+  const endpointFor = (provider: ProviderName): Endpoint => {
+    const endpoint = endpoints.get(provider);
+    // readEndpoints covered every provider of options.models, the only models the jobs use.
+    if (endpoint === undefined) throw new Error(`no endpoint for ${provider}`);
+    return endpoint;
+  };
   const startedAt = new Date();
   const outDir = resolveOutDir(options.out, {
     repoRoot: REPO_ROOT,
@@ -52,8 +60,7 @@ const main = async (): Promise<void> => {
     jobs,
     cases,
     {
-      baseUrl: baseUrlOf(process.env),
-      apiKey,
+      endpointFor,
       timeoutMs: options.timeoutMs,
       concurrency: options.concurrency,
       onResult: (result, done, total) => {
@@ -64,7 +71,7 @@ const main = async (): Promise<void> => {
   );
   const run: BenchRun = {
     startedAt: startedAt.toISOString(),
-    models: options.models.map((model) => model.name),
+    models: options.models.map(({ name, provider }) => ({ name, provider })),
     repeat: options.repeat,
     concurrency: options.concurrency,
     timeoutMs: options.timeoutMs,

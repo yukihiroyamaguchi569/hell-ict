@@ -16,7 +16,9 @@ import type { BenchCase } from "./cases.ts";
 import { modelSpecFor } from "./config.ts";
 import type { CallResult, FetchFn } from "./openai.ts";
 
-const MODELS = ["gpt-4o", "gpt-4.1", "gpt-4.1-mini", "gpt-6-sol"].map(modelSpecFor);
+const MODELS = ["gpt-4o", "gpt-4.1", "gpt-4.1-mini", "gpt-6-sol"].map((name) => modelSpecFor(name));
+const GPT_4O = modelSpecFor("gpt-4o");
+const endpoint = (baseUrl: string, apiKey: string) => () => ({ baseUrl, apiKey });
 
 const benchCase = (id: string): BenchCase => ({
   id,
@@ -39,6 +41,7 @@ const jobResult = (overrides: Partial<JobResult> = {}): JobResult => ({
   ...call(),
   caseId: "c1",
   model: "gpt-4o",
+  provider: "openai",
   round: 1,
   overProductionTimeout: false,
   cutOffBeforeProductionTimeout: false,
@@ -145,7 +148,7 @@ describe("summarizeModel", () => {
       }),
       jobResult({ model: "gpt-4.1", elapsedMs: 99_999 }),
     ];
-    const summary = summarizeModel("gpt-4o", results);
+    const summary = summarizeModel(GPT_4O, results);
     expect(summary).toMatchObject({
       model: "gpt-4o",
       calls: 4,
@@ -166,7 +169,7 @@ describe("summarizeModel", () => {
       jobResult({ usage: null, costUsd: null }),
       jobResult({ error: { kind: "http_error", message: "x" }, usage: null, costUsd: 0 }),
     ];
-    const summary = summarizeModel("gpt-4o", results);
+    const summary = summarizeModel(GPT_4O, results);
     expect(summary.totalCostUsd).toBeNull();
     expect(summary.usageUnknown).toBe(1);
     expect(summary.promptTokens).toBe(100);
@@ -177,7 +180,7 @@ describe("summarizeModel", () => {
       jobResult({ costUsd: 0.01 }),
       jobResult({ error: { kind: "http_error", message: "x" }, usage: null, costUsd: 0 }),
     ];
-    expect(summarizeModel("gpt-4o", results)).toMatchObject({
+    expect(summarizeModel(GPT_4O, results)).toMatchObject({
       totalCostUsd: 0.01,
       usageUnknown: 0,
     });
@@ -205,7 +208,7 @@ describe("summarizeModel", () => {
       jobResult({ costUsd: 0, usage: null, error: { kind: "http_error", message: "x" } }),
       jobResult({ costUsd: null, usage: null, error: { kind: "timeout", message: "t" } }),
     ];
-    expect(summarizeModel("gpt-4o", results)).toMatchObject({
+    expect(summarizeModel(GPT_4O, results)).toMatchObject({
       totalCostUsd: null,
       costLowerBoundUsd: 0.01,
     });
@@ -217,7 +220,7 @@ describe("summarizeModel", () => {
       usage: null,
       costUsd: 0,
     });
-    expect(summarizeModel("gpt-4o", [failed])).toMatchObject({
+    expect(summarizeModel(GPT_4O, [failed])).toMatchObject({
       medianMs: null,
       maxMs: null,
       totalCostUsd: 0,
@@ -232,7 +235,7 @@ describe("summarizeModel", () => {
       jobResult({ finishedOrder: 6, rateLimit: {} }),
       jobResult({ finishedOrder: 4, rateLimit: { "x-ratelimit-remaining-requests": "6" } }),
     ];
-    expect(summarizeModel("gpt-4o", results).rateLimit).toEqual({
+    expect(summarizeModel(GPT_4O, results).rateLimit).toEqual({
       "x-ratelimit-remaining-requests": "5",
     });
   });
@@ -265,8 +268,7 @@ describe("runJobs", () => {
       jobs,
       cases,
       {
-        baseUrl: "https://api.example.test/v1",
-        apiKey: "sk-x",
+        endpointFor: endpoint("https://api.example.test/v1", "sk-x"),
         timeoutMs: 1000,
         concurrency: 2,
         onResult: (_result, done) => progress.push(done),
@@ -291,7 +293,7 @@ describe("runJobs", () => {
   it("runs one at a time with concurrency 1 and copes with no jobs", async () => {
     const inFlight = { now: 0, max: 0 };
     const deps = { fetch: okFetch(new Map(), inFlight), clock: { now: () => 0 } };
-    const options = { baseUrl: "u", apiKey: "k", timeoutMs: 1000, concurrency: 1 };
+    const options = { endpointFor: endpoint("u", "k"), timeoutMs: 1000, concurrency: 1 };
     const cases = [benchCase("a")];
     await runJobs(planJobs(cases, MODELS, 1), cases, options, deps);
     expect(inFlight.max).toBe(1);
@@ -310,7 +312,7 @@ describe("runJobs", () => {
     const results = await runJobs(
       planJobs(cases, [modelSpecFor("gpt-4o")], 1),
       cases,
-      { baseUrl: "u", apiKey: "k", timeoutMs: 20, concurrency: 1 },
+      { endpointFor: endpoint("u", "k"), timeoutMs: 20, concurrency: 1 },
       { fetch: hang, clock: { now: () => (now += 10) } },
     );
     expect(results[0]).toMatchObject({
@@ -326,6 +328,79 @@ describe("runJobs", () => {
     });
   });
 
+  it("sends each model to its own provider with that provider's key, and sums per provider", async () => {
+    const cases = [benchCase("a")];
+    const mixed = ["gpt-4.1-mini", "gemini-3.8-flash", "claude-haiku-5-5"].map((name) =>
+      modelSpecFor(name),
+    );
+    const endpoints = {
+      openai: { baseUrl: "https://openai.test/v1", apiKey: "sk-openai" },
+      gemini: { baseUrl: "https://gemini.test/v1beta/openai", apiKey: "AIza-gemini" },
+      anthropic: { baseUrl: "https://anthropic.test/v1", apiKey: "sk-ant-anthropic" },
+    } as const;
+    const seen: [string, string | null, string][] = [];
+    const fetch: FetchFn = (url, init) => {
+      const body = typeof init.body === "string" ? init.body : "";
+      seen.push([url, new Headers(init.headers).get("authorization"), body]);
+      const headers: Record<string, string> = url.startsWith("https://gemini.test")
+        ? {}
+        : { "x-ratelimit-remaining-requests": url.startsWith("https://openai") ? "9" : "8" };
+      return Promise.resolve(
+        new Response(
+          JSON.stringify({
+            choices: [{ message: { content: "ok" } }],
+            usage: { prompt_tokens: 1_000_000, completion_tokens: 0 },
+          }),
+          { headers },
+        ),
+      );
+    };
+    const results = await runJobs(
+      planJobs(cases, mixed, 1),
+      cases,
+      { endpointFor: (provider) => endpoints[provider], timeoutMs: 1000, concurrency: 1 },
+      { fetch, clock: { now: () => 0 } },
+    );
+    expect([...seen].sort((a, b) => a[0].localeCompare(b[0]))).toEqual([
+      [
+        "https://anthropic.test/v1/chat/completions",
+        "Bearer sk-ant-anthropic",
+        expect.stringContaining('"thinking":{"type":"disabled"}'),
+      ],
+      [
+        "https://gemini.test/v1beta/openai/chat/completions",
+        "Bearer AIza-gemini",
+        expect.stringContaining('"reasoning_effort":"minimal"'),
+      ],
+      ["https://openai.test/v1/chat/completions", "Bearer sk-openai", expect.any(String)],
+    ]);
+    const summaries = summarize(mixed, results);
+    expect(summaries.map((summary) => [summary.model, summary.provider])).toEqual([
+      ["gpt-4.1-mini", "openai"],
+      ["gemini-3.8-flash", "gemini"],
+      ["claude-haiku-5-5", "anthropic"],
+    ]);
+    // One million input tokens each: the cost is each provider's input price.
+    expect(summaries.map((summary) => summary.totalCostUsd)).toEqual([0.4, 0.75, 0.1]);
+    expect(summaries.map((summary) => summary.rateLimit)).toEqual([
+      { "x-ratelimit-remaining-requests": "9" },
+      {},
+      { "x-ratelimit-remaining-requests": "8" },
+    ]);
+  });
+
+  it("keeps two models of the same name from different providers apart", () => {
+    const openai = modelSpecFor("shared-name", "openai");
+    const gemini = modelSpecFor("shared-name", "gemini");
+    const results = [
+      jobResult({ model: "shared-name", provider: "openai", elapsedMs: 1000 }),
+      jobResult({ model: "shared-name", provider: "gemini", elapsedMs: 3000 }),
+      jobResult({ model: "shared-name", provider: "gemini", elapsedMs: 5000 }),
+    ];
+    expect(summarizeModel(openai, results)).toMatchObject({ calls: 1, medianMs: 1000 });
+    expect(summarizeModel(gemini, results)).toMatchObject({ calls: 2, medianMs: 4000 });
+  });
+
   it("keeps going after a failure and records it", async () => {
     const cases = [benchCase("a")];
     const fetch: FetchFn = (_url, init) =>
@@ -337,7 +412,7 @@ describe("runJobs", () => {
     const results = await runJobs(
       planJobs(cases, MODELS, 1),
       cases,
-      { baseUrl: "u", apiKey: "k", timeoutMs: 1000, concurrency: 2 },
+      { endpointFor: endpoint("u", "k"), timeoutMs: 1000, concurrency: 2 },
       { fetch, clock: { now: () => 0 } },
     );
     expect(results).toHaveLength(4);

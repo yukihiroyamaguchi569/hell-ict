@@ -11,6 +11,9 @@ import type { LoadCall } from "./load.ts";
 import { estimateLoad, parseLoadArgs } from "./load-cli.ts";
 import { renderLoadReport } from "./load-report.ts";
 import { outcomeKey, percentile, perSecond, summarizeCalls } from "./load-stats.ts";
+import { PROVIDERS } from "./providers.ts";
+
+const OPENAI = PROVIDERS.openai;
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
 
@@ -92,7 +95,7 @@ describe("summarizeCalls", () => {
       error: { kind: "network", message: "n" },
     }),
   ];
-  const summary = summarizeCalls(calls, 30_000);
+  const summary = summarizeCalls(calls, 30_000, OPENAI);
 
   it("counts completions, successes, 429s, late calls and lost connections", () => {
     expect(summary).toMatchObject({
@@ -136,11 +139,11 @@ describe("summarizeCalls", () => {
   it("leaves the cost unknown with a lower bound when a call may have been billed", () => {
     expect(summary.totalCostUsd).toBeNull();
     expect(summary.costLowerBoundUsd).toBeCloseTo(0.002);
-    expect(summarizeCalls(calls.slice(0, 4), 1_000).totalCostUsd).toBeCloseTo(0.002);
+    expect(summarizeCalls(calls.slice(0, 4), 1_000, OPENAI).totalCostUsd).toBeCloseTo(0.002);
   });
 
   it("copes with no calls and a zero window", () => {
-    expect(summarizeCalls([], 0)).toMatchObject({
+    expect(summarizeCalls([], 0, OPENAI)).toMatchObject({
       completed: 0,
       p50Ms: null,
       maxMs: null,
@@ -151,10 +154,29 @@ describe("summarizeCalls", () => {
     });
   });
 
+  it("reads the lowest remaining from the provider's own headers", () => {
+    const calls = [
+      loadCall({
+        rateLimit: { "x-ratelimit-remaining-requests": "70", "x-ratelimit-remaining-tokens": "9" },
+      }),
+      loadCall({ rateLimit: { "x-ratelimit-remaining-requests": "60" } }),
+    ];
+    expect(summarizeCalls(calls, 1_000, PROVIDERS.anthropic)).toMatchObject({
+      minRemainingRequests: 60,
+      minRemainingTokens: 9,
+    });
+    // Gemini has no such header: nothing is read, whatever came back.
+    expect(summarizeCalls(calls, 1_000, PROVIDERS.gemini)).toMatchObject({
+      minRemainingRequests: null,
+      minRemainingTokens: null,
+    });
+  });
+
   it("ignores a rate-limit header that is not a number", () => {
     const odd = summarizeCalls(
       [loadCall({ rateLimit: { "x-ratelimit-remaining-requests": "n/a" } })],
       1_000,
+      OPENAI,
     );
     expect(odd.minRemainingRequests).toBeNull();
   });
@@ -168,7 +190,7 @@ describe("perSecond", () => {
       loadCall({ startMs: 1_200, endMs: 2_000 }),
       rateLimited({ startMs: 1_900, endMs: 1_950 }),
     ];
-    const rows = perSecond(calls, 2_000);
+    const rows = perSecond(calls, 2_000, OPENAI);
     expect(rows.map((row) => [row.second, row.started, row.completed, row.rateLimited])).toEqual([
       [0, 2, 1, 0],
       [1, 2, 2, 1],
@@ -179,7 +201,7 @@ describe("perSecond", () => {
   });
 
   it("has one row for a run shorter than a second", () => {
-    expect(perSecond([], 0)).toHaveLength(1);
+    expect(perSecond([], 0, OPENAI)).toHaveLength(1);
   });
 });
 
@@ -225,9 +247,19 @@ describe("parseLoadArgs / estimateLoad", () => {
     [["--duration-s", "abc"], /--duration-s/],
     [["--max-429-ratio", "1.5"], /at most 1/],
     [["--model", "gpt-unknown"], /no price/],
+    [["--provider", "gemini"], /provider/],
     [["--api-key", "sk-x"], /api-key/],
   ])("rejects %j", (args, message) => {
     expect(() => parseLoadArgs(["--cases", "c", ...args])).toThrow(message);
+  });
+
+  it("takes another provider's model with its own price", () => {
+    expect(parseLoadArgs(["--cases", "c", "--model", "claude-haiku-5-5"]).model).toEqual({
+      name: "claude-haiku-5-5",
+      provider: "anthropic",
+      params: { thinking: { type: "disabled" } },
+      price: { input: 0.1, output: 0.5 },
+    });
   });
 
   it("requires --cases", () => {
@@ -254,13 +286,14 @@ describe("renderLoadReport", () => {
   const html = renderLoadReport({
     startedAt: "2026-10-10T00:00:00.000Z",
     model: "gpt-4.1-mini",
+    provider: "openai",
     concurrency: 60,
     durationMs: 60_000,
     timeoutMs: 60_000,
     casesCount: 12,
     outcome: { calls, stopReason: "429-in-a-row", wallMs: 1_500 },
-    summary: summarizeCalls(calls, 1_500),
-    seconds: perSecond(calls, 1_500),
+    summary: summarizeCalls(calls, 1_500, OPENAI),
+    seconds: perSecond(calls, 1_500, OPENAI),
   });
 
   it("shows the settings, the stop reason, the summary and one row per second", () => {
@@ -269,6 +302,31 @@ describe("renderLoadReport", () => {
     expect(html).toContain("<th>429 rate_limit_exceeded / requests</th><td>1</td>");
     expect(html).toContain("<th>RPM（実測、1 分あたり）</th><td>80</td>");
     expect(html.match(/<tr><th>[01]<\/th>/g)).toHaveLength(2);
+  });
+
+  it("names the provider and the header the remaining counts came from", () => {
+    expect(html).toContain("gpt-4.1-mini（openai）");
+    expect(html).toContain("残り requests の最小（x-ratelimit-remaining-requests）");
+    expect(html).toContain("取れない（返らなかった）");
+  });
+
+  it("says the remaining counts cannot be had for Gemini", () => {
+    const gemini = renderLoadReport({
+      startedAt: "2026-10-10T00:00:00.000Z",
+      model: "gemini-3.8-flash",
+      provider: "gemini",
+      concurrency: 5,
+      durationMs: null,
+      timeoutMs: 60_000,
+      casesCount: 1,
+      outcome: { calls, stopReason: "burst-done", wallMs: 1_500 },
+      summary: summarizeCalls(calls, 1_500, PROVIDERS.gemini),
+      seconds: perSecond(calls, 1_500, PROVIDERS.gemini),
+    });
+    expect(gemini).toContain("gemini-3.8-flash（gemini）");
+    expect(gemini).toContain(
+      "<th>残り requests の最小（ヘッダなし）</th><td>取れない（このプロバイダは返さない）</td>",
+    );
   });
 
   it("is self-contained and leaves the reply texts out", () => {
@@ -304,6 +362,16 @@ describe("load-main (as a process)", () => {
     const result = run(["--cases", casesPath, "--out", path.join(dir, "out")]);
     expect(result.status).toBe(1);
     expect(result.stderr).toContain("OPENAI_API_KEY is not set");
+  });
+
+  it("asks for the key of the model's provider only", () => {
+    const result = run(
+      ["--cases", casesPath, "--model", "claude-haiku-5-5", "--out", path.join(dir, "out")],
+      { OPENAI_API_KEY: "sk-test-not-used" },
+    );
+    expect(result.status).toBe(1);
+    expect(result.stderr).toContain("ANTHROPIC_API_KEY is not set");
+    expect(result.stderr).not.toContain("sk-test-not-used");
   });
 
   it("asks before starting, and refuses without a terminal unless --yes is given", () => {
