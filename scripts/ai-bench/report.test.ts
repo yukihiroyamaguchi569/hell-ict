@@ -151,8 +151,46 @@ describe("renderReport", () => {
     expect(html).toContain("打ち切り（本番での判定不能）");
     expect(html).not.toContain("本番ならタイムアウト（");
     expect(html).toMatch(
-      /<tr><th>gpt-6-sol<\/th>(<td>[^<]*<\/td>){7}<td>0<\/td><td>1<\/td><td>1<\/td><\/tr>/,
+      /<tr><th>gpt-6-sol<\/th>(<td>[^<]*<\/td>){8}<td>0<\/td><td>1<\/td><td>1<\/td><\/tr>/,
     );
+  });
+
+  it("shows the cost as unknown, not $0, when the usage came back malformed", async () => {
+    const model = modelSpecFor("gpt-4o");
+    const call = await callModel(
+      { baseUrl: "u", apiKey: KEY, model, messages: benchCase.messages, timeoutMs: 1000 },
+      {
+        fetch: () =>
+          Promise.resolve(
+            new Response(
+              JSON.stringify({
+                choices: [{ message: { content: "応答" } }],
+                usage: { prompt_tokens: "1200", completion_tokens: 300 },
+              }),
+            ),
+          ),
+        clock: { now: () => 0 },
+      },
+    );
+    const result: JobResult = {
+      ...call,
+      caseId: benchCase.id,
+      model: model.name,
+      round: 1,
+      overProductionTimeout: false,
+      cutOffBeforeProductionTimeout: false,
+      costUsd: costOf(call.usage, model.price),
+      finishedOrder: 1,
+    };
+    const html = renderReport({
+      ...runOf([result]),
+      models: [model.name],
+      summaries: summarize([model], [result]),
+    });
+    expect(html).toContain('<pre class="reply">応答</pre>');
+    expect(html).toContain("トークン 不明 · 不明");
+    expect(html).not.toContain("$0.0");
+    expect(html).toMatch(/<tr><th>gpt-4o<\/th>(<td>[^<]*<\/td>){6}<td>1<\/td><td>不明<\/td>/);
   });
 
   it("is a single file without external resources", async () => {

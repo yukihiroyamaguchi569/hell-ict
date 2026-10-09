@@ -73,19 +73,30 @@ export const redactSecrets = (text: string, apiKey: string): string => {
 const isRecord = (value: unknown): value is Record<string, unknown> =>
   typeof value === "object" && value !== null && !Array.isArray(value);
 
-const numberAt = (record: unknown, key: string): number => {
-  if (!isRecord(record)) return 0;
-  const value = record[key];
-  return typeof value === "number" && Number.isFinite(value) ? value : 0;
+const isTokenCount = (value: unknown): value is number =>
+  typeof value === "number" && Number.isSafeInteger(value) && value >= 0;
+
+/** `completion_tokens_details.reasoning_tokens`: absent is 0 (older models omit it), malformed is null. */
+const reasoningTokensOf = (details: unknown): number | null => {
+  if (details === undefined || details === null) return 0;
+  if (!isRecord(details)) return null;
+  const { reasoning_tokens: reasoning } = details;
+  if (reasoning === undefined || reasoning === null) return 0;
+  return isTokenCount(reasoning) ? reasoning : null;
 };
 
+/**
+ * The token counts, or null when they are missing or malformed. Never guessed as 0: a missing
+ * count would make the tokens and the cost look smaller than they were.
+ */
 export const parseUsage = (value: unknown): Usage | null => {
   if (!isRecord(value)) return null;
-  return {
-    promptTokens: numberAt(value, "prompt_tokens"),
-    completionTokens: numberAt(value, "completion_tokens"),
-    reasoningTokens: numberAt(value.completion_tokens_details, "reasoning_tokens"),
-  };
+  const { prompt_tokens: promptTokens, completion_tokens: completionTokens } = value;
+  const reasoningTokens = reasoningTokensOf(value.completion_tokens_details);
+  if (!isTokenCount(promptTokens) || !isTokenCount(completionTokens) || reasoningTokens === null) {
+    return null;
+  }
+  return { promptTokens, completionTokens, reasoningTokens };
 };
 
 /** The reply text of a 200 body, or why it is unusable (a refusal is reported as such). */

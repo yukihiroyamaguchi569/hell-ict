@@ -134,6 +134,8 @@ export type ModelSummary = {
   readonly promptTokens: number;
   readonly completionTokens: number;
   readonly reasoningTokens: number;
+  /** Replies that came without usable token counts: the token sums leave them out. */
+  readonly usageUnknown: number;
   /** The rate-limit headers of the call that finished last among those that returned any. */
   readonly rateLimit: RateLimitHeaders;
 };
@@ -150,9 +152,15 @@ export const median = (values: readonly number[]): number | null => {
 const sum = (values: readonly number[]): number =>
   values.reduce((total, value) => total + value, 0);
 
+/**
+ * Unknown as soon as one reply has no cost (no usage, or no price): a sum that silently skipped
+ * it would read as the full cost. Failed calls without a usage are taken as free.
+ */
 const totalCost = (results: readonly JobResult[]): number | null => {
-  const costs = results.map((result) => result.costUsd);
-  if (costs.every((cost) => cost === null)) return null;
+  const charged = results.filter((result) => result.error === null || result.usage !== null);
+  if (charged.length === 0) return null;
+  const costs = charged.map((result) => result.costUsd);
+  if (costs.some((cost) => cost === null)) return null;
   return sum(costs.map((cost) => cost ?? 0));
 };
 
@@ -185,6 +193,7 @@ export const summarizeModel = (model: string, all: readonly JobResult[]): ModelS
     promptTokens: sum(usages.map((usage) => usage.promptTokens)),
     completionTokens: sum(usages.map((usage) => usage.completionTokens)),
     reasoningTokens: sum(usages.map((usage) => usage.reasoningTokens)),
+    usageUnknown: succeeded.filter((result) => result.usage === null).length,
     rateLimit: lastRateLimit(results),
   };
 };

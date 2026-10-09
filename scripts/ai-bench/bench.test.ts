@@ -158,6 +158,29 @@ describe("summarizeModel", () => {
     expect(summary.totalCostUsd).toBeCloseTo(0.06);
   });
 
+  it("leaves the total cost unknown when a reply came without usage, instead of undercounting", () => {
+    const results = [
+      jobResult({ costUsd: 0.01 }),
+      jobResult({ usage: null, costUsd: null }),
+      jobResult({ error: { kind: "http_error", message: "x" }, usage: null, costUsd: null }),
+    ];
+    const summary = summarizeModel("gpt-4o", results);
+    expect(summary.totalCostUsd).toBeNull();
+    expect(summary.usageUnknown).toBe(1);
+    expect(summary.promptTokens).toBe(100);
+  });
+
+  it("does not let failed calls without usage make the total unknown", () => {
+    const results = [
+      jobResult({ costUsd: 0.01 }),
+      jobResult({ error: { kind: "http_error", message: "x" }, usage: null, costUsd: null }),
+    ];
+    expect(summarizeModel("gpt-4o", results)).toMatchObject({
+      totalCostUsd: 0.01,
+      usageUnknown: 0,
+    });
+  });
+
   it("reports nothing measured for a model whose every call failed", () => {
     const failed = jobResult({
       error: { kind: "http_error", message: "x" },

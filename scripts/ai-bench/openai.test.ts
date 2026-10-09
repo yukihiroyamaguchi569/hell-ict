@@ -92,13 +92,45 @@ describe("parseCompletion", () => {
     });
   });
 
-  it("counts missing or non-numeric token fields as 0 and a missing usage as null", () => {
-    expect(parseCompletion(completion("a", { prompt_tokens: "x" }))).toEqual({
-      ok: true,
-      text: "a",
-      usage: { promptTokens: 0, completionTokens: 0, reasoningTokens: 0 },
-    });
+  it("keeps the reply but leaves the usage unknown when it is missing", () => {
     expect(parseCompletion(completion("a"))).toEqual({ ok: true, text: "a", usage: null });
+  });
+
+  it.each([
+    ["a count given as a string", { prompt_tokens: "10", completion_tokens: 5 }],
+    ["a missing count", { prompt_tokens: 10 }],
+    ["a negative count", { prompt_tokens: -1, completion_tokens: 5 }],
+    ["a fractional count", { prompt_tokens: 1.5, completion_tokens: 5 }],
+    [
+      "a malformed reasoning count",
+      {
+        prompt_tokens: 1,
+        completion_tokens: 5,
+        completion_tokens_details: { reasoning_tokens: "2" },
+      },
+    ],
+    ["malformed details", { prompt_tokens: 1, completion_tokens: 5, completion_tokens_details: 3 }],
+    ["usage that is not an object", "100"],
+  ])("leaves the usage unknown, not 0, for %s", (_name, usage) => {
+    expect(parseCompletion(completion("a", usage))).toEqual({ ok: true, text: "a", usage: null });
+  });
+
+  it("takes reasoning tokens as 0 when the details or the field are absent", () => {
+    for (const details of [undefined, null, {}, { reasoning_tokens: null }]) {
+      expect(
+        parseCompletion(
+          completion("a", {
+            prompt_tokens: 0,
+            completion_tokens: 2,
+            completion_tokens_details: details,
+          }),
+        ),
+      ).toEqual({
+        ok: true,
+        text: "a",
+        usage: { promptTokens: 0, completionTokens: 2, reasoningTokens: 0 },
+      });
+    }
   });
 
   it("accepts an empty reply", () => {
