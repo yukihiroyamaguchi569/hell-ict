@@ -1,10 +1,11 @@
-import { readFile, writeFile } from "node:fs/promises";
+import { readFile } from "node:fs/promises";
 import path from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import { parseArgs } from "node:util";
 
 import { buildCases, parseSystemPrompts } from "./build-cases.ts";
 import { assertOutsideRepo } from "./cli.ts";
+import { writePrivateFile } from "./files.ts";
 
 /**
  * `node scripts/ai-bench/build-cases-main.ts --prompts <prompts.ts> --picks <picks.json> --out <cases.json>`
@@ -41,7 +42,7 @@ const main = async (): Promise<void> => {
   const moduleExports: unknown = await import(pathToFileURL(path.resolve(values.prompts)).href);
   const picks: unknown = JSON.parse(await readFile(values.picks, "utf8"));
   const cases = buildCases(picks, parseSystemPrompts(moduleExports));
-  await writeFile(outFile, JSON.stringify(cases, null, 2), { mode: 0o600 });
+  await writePrivateFile(outFile, JSON.stringify(cases, null, 2));
   console.log(`${String(cases.length)} cases written to ${outFile}`);
 };
 

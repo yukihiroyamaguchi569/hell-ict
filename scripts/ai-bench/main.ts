@@ -1,4 +1,4 @@
-import { mkdir, readFile, writeFile } from "node:fs/promises";
+import { readFile } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
@@ -7,6 +7,7 @@ import { planJobs, runJobs, summarize } from "./bench.ts";
 import type { JobResult } from "./bench.ts";
 import { parseCases } from "./cases.ts";
 import { baseUrlOf, dryRunLines, parseCliArgs, readApiKey, resolveOutDir, USAGE } from "./cli.ts";
+import { makePrivateDir, writePrivateFile } from "./files.ts";
 import { renderReport } from "./report.ts";
 import type { BenchRun } from "./report.ts";
 
@@ -67,9 +68,9 @@ const main = async (): Promise<void> => {
     results,
     summaries: summarize(options.models, results),
   };
-  await mkdir(outDir, { recursive: true, mode: 0o700 });
-  await writeFile(path.join(outDir, "bench.json"), JSON.stringify(run, null, 2), { mode: 0o600 });
-  await writeFile(path.join(outDir, "report.html"), renderReport(run), { mode: 0o600 });
+  await makePrivateDir(outDir);
+  await writePrivateFile(path.join(outDir, "bench.json"), JSON.stringify(run, null, 2));
+  await writePrivateFile(path.join(outDir, "report.html"), renderReport(run));
   console.log(`report: ${path.join(outDir, "report.html")}`);
   console.log(`raw data: ${path.join(outDir, "bench.json")}`);
 };
