@@ -739,6 +739,11 @@ describe("手で切り替える他社の予備（AI_ROUTE=fallback）", () => {
     ["接続先がURLでない", { AI_FALLBACK_BASE_URL: "api.anthropic.test/v1" }],
     ["接続先が資格情報入り", { AI_FALLBACK_BASE_URL: "https://u:p@api.anthropic.test/v1" }],
     ["接続先がhttps以外のスキーム", { AI_FALLBACK_BASE_URL: "ftp://api.anthropic.test/v1" }],
+    // `/chat/completions`をつなぐと、クエリやフラグメントの中に入って意図したパスへ届かない。
+    ["接続先がクエリ付き", { AI_FALLBACK_BASE_URL: "https://api.anthropic.test/v1?x=1" }],
+    ["接続先が空のクエリ付き", { AI_FALLBACK_BASE_URL: "https://api.anthropic.test/v1?" }],
+    ["接続先がフラグメント付き", { AI_FALLBACK_BASE_URL: "https://api.anthropic.test/v1#top" }],
+    ["接続先が空のフラグメント付き", { AI_FALLBACK_BASE_URL: "https://api.anthropic.test/v1#" }],
   ] as const)("fallbackでも%sなら主系のまま動く", async (_label, broken) => {
     stubSent(() => ok("主系の応答"));
     const overrides = { ...FALLBACK, ...broken };

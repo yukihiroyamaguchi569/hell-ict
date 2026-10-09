@@ -177,7 +177,7 @@ pnpm exec wrangler secret put OPENAI_MODEL_BACKUP   # 本番では gpt-4o を登
 どれも`wrangler.jsonc`の`vars`には書かない（`vars`はデプロイのたびに上書きされ、切り替えが消える）。
 
 - **予備だけを呼ぶ。** `AI_ROUTE=fallback`で予備の3つがそろっていれば、OpenAI（主系・予備キー・予備モデル）へは送らない。予備の呼び出しにだけ、思考を切る指定（`thinking: {"type": "disabled"}`）を足す——ai-bench で比較・負荷テストに使ったのと同じ本文である。主系の本文は変わらない。
-- **書き損じではAIを止めない。** `AI_ROUTE`が`fallback`以外の値（`Fallback`・末尾の改行など）、予備の3つのどれかが無い、接続先がhttpsでない、のいずれでも主系のまま動く。どちらで動いているかは`/api/health`の`ai.route`で確かめる。
+- **書き損じではAIを止めない。** `AI_ROUTE`が`fallback`以外の値（`Fallback`・末尾の改行など）、予備の3つのどれかが無い、接続先がhttpsでない（またはクエリ`?`・フラグメント`#`付き）、のいずれでも主系のまま動く。どちらで動いているかは`/api/health`の`ai.route`で確かめる。
 - PIIゲートは経路によらずAIの呼び出しより先に止める。予備へ切り替えても、PIIを含む送信は他社へも届かない。
 
 **事前の登録（本番前に1回）**

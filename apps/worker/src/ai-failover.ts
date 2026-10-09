@@ -205,11 +205,13 @@ const backupSettings = (
 /**
  * 他社の予備の接続先。https以外（http・URLでない値・資格情報入りのURL）は、キーと
  * 参加者の入力を平文や想定外の宛先へ送らないよう未設定とみなす。末尾の`/`は落とす
- * （`/chat/completions`をつなぐため）。
+ * （`/chat/completions`をつなぐため）。クエリ・フラグメント付き（空の`?`・`#`を含む）も
+ * 未設定とみなす——つないだパスがその中に入り、意図した宛先へ届かないのにhealthは
+ * `fallback`と出てしまう。空の`?`・`#`は`URL`の`search`・`hash`に現れないので、元の文字列で見る。
  */
 const httpsBaseUrl = (value: string | undefined): string | null => {
   const raw = configured(value);
-  if (raw === null || !URL.canParse(raw)) return null;
+  if (raw === null || /[?#]/.test(raw) || !URL.canParse(raw)) return null;
   const url = new URL(raw);
   if (url.protocol !== "https:" || url.username !== "" || url.password !== "") return null;
   return raw.replace(/\/+$/, "");
