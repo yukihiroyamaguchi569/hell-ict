@@ -9,6 +9,9 @@ import { fileURLToPath } from "node:url";
 
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 
+import { modelSpecFor } from "./config.ts";
+import { callModel } from "./openai.ts";
+
 /**
  * The comparison run as a process against a local stub of the three providers' endpoints: each
  * model must reach its own provider with its own key, and no key may reach the output.
@@ -140,6 +143,58 @@ describe("main against a stub of the three providers", () => {
         { provider: "gemini", completionTokens: 50, reasoningTokens: 40, errors: 0 },
         { provider: "anthropic", completionTokens: 10, errors: 0 },
       ],
+    });
+  });
+});
+
+describe("callModel with the real fetch against a stub that redirects", () => {
+  const reachedOutside: string[] = [];
+  const outside = createServer((request: IncomingMessage, response: ServerResponse) => {
+    reachedOutside.push(request.url ?? "");
+    response.writeHead(200, { "content-type": "application/json" });
+    response.end(JSON.stringify({ choices: [{ message: { content: "leaked" } }] }));
+  });
+  let outsideBase = "";
+  const redirecting = createServer((request: IncomingMessage, response: ServerResponse) => {
+    request.resume();
+    response.writeHead(307, { location: `${outsideBase}/v1/chat/completions` });
+    response.end();
+  });
+  let stubBase = "";
+
+  const listen = async (server: typeof outside): Promise<string> => {
+    await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
+    const address: AddressInfo | string | null = server.address();
+    if (address === null || typeof address === "string") throw new Error("no port");
+    return `http://127.0.0.1:${String(address.port)}`;
+  };
+
+  beforeAll(async () => {
+    outsideBase = await listen(outside);
+    stubBase = await listen(redirecting);
+  });
+
+  afterAll(async () => {
+    await new Promise<void>((resolve) => outside.close(() => resolve()));
+    await new Promise<void>((resolve) => redirecting.close(() => resolve()));
+  });
+
+  it("does not follow a 307: nothing reaches the target and the call is an error", async () => {
+    const result = await callModel(
+      {
+        baseUrl: `${stubBase}/v1`,
+        apiKey: KEYS.ANTHROPIC_API_KEY,
+        model: modelSpecFor("claude-haiku-5-5"),
+        messages: [{ role: "user", content: "the real scenario" }],
+        timeoutMs: 5_000,
+      },
+      { fetch: (url, init) => fetch(url, init), clock: { now: () => 0 } },
+    );
+    expect(reachedOutside).toEqual([]);
+    expect(result).toMatchObject({
+      status: 307,
+      text: null,
+      error: { kind: "http_error", message: "redirect not followed" },
     });
   });
 });

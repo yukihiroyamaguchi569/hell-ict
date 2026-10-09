@@ -356,6 +356,20 @@ describe("callModel", () => {
     expect(result.error).toEqual({ kind: "http_error", message: "[REDACTED]" });
   });
 
+  it("asks fetch not to follow redirects and records a 3xx as an error", async () => {
+    const fetch = vi.fn<FetchFn>(() =>
+      Promise.resolve(new Response(null, { status: 308, headers: { location: "https://x.test" } })),
+    );
+    const result = await callModel(request(), deps(fetch));
+    expect(fetch.mock.calls[0]?.[1].redirect).toBe("manual");
+    expect(result).toMatchObject({
+      status: 308,
+      text: null,
+      usage: null,
+      error: { kind: "http_error", message: "redirect not followed" },
+    });
+  });
+
   it("records a non-JSON error body as having no error body", async () => {
     const fetch: FetchFn = () =>
       Promise.resolve(new Response("<html>bad gateway</html>", { status: 502 }));

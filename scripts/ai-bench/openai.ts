@@ -180,7 +180,12 @@ const failure = (status: number | null, kind: CallErrorKind, message: string): O
   error: { kind, message },
 });
 
+const isRedirect = (status: number): boolean => status >= 300 && status < 400;
+
 const outcomeOfBody = (response: Response, text: string): Outcome => {
+  if (isRedirect(response.status)) {
+    return failure(response.status, "http_error", "redirect not followed");
+  }
   const body = parseJson(text);
   if (!response.ok) return failure(response.status, "http_error", describeErrorBody(body));
   if (body === undefined) return failure(response.status, "invalid_response", "body is not JSON");
@@ -206,6 +211,9 @@ export const callModel = async (request: CallRequest, deps: CallDeps): Promise<C
         authorization: `Bearer ${request.apiKey}`,
       },
       body: requestBody(request.model, request.messages),
+      // Never follow a redirect: it would carry the key and the real scenario to a host that
+      // the endpoint check never saw. The 3xx itself is recorded as an error.
+      redirect: "manual",
       signal: controller.signal,
     });
     status = response.status;
