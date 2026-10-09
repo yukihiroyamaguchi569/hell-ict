@@ -8,9 +8,12 @@
 # wrangler dev --local を予備の設定で起動し、テスト用のチームで入室してチャットを送り、
 # 応答の有無・所要時間・活動ログの aiRoute を表示して、終わったら dev を止める。
 #
-# キーの扱い: ファイル（.dev.vars など）には書かない。wrangler dev へ --var で渡すので、
-# dev が動いている間（数十秒）はプロセスの引数に載り、同じ機械の ps から見える。
-# 自分の端末で実行し、終わったら dev を止める（このスクリプトが止める）。
+# キーの扱い: プロセスの引数には載せない（ps から見えない）。リポジトリのファイル（.dev.vars
+# など）にも書かない。mktemp で作った一時ディレクトリ（700）の中の一時ファイル（600）へ
+# printf（シェルの組み込み）で書き、wrangler dev の --env-file で読ませる。一時ディレクトリは
+# 終了時（Ctrl-C・エラーを含む。trap）に dev を止めてから丸ごと消す。kill -9 などで trap が
+# 走らなかったときは、$TMPDIR の ai-fallback-smoke.* を手で消す。
+# （--env-file へのプロセス置換 <(...) は、wrangler が node の子プロセスで読むため使えない。）
 # D1・DO は一時ディレクトリ（--persist-to）のローカルだけを使い、終わったら消す。
 # --remote は使わない。主系（OpenAI）の宛先は届かないアドレスへ向けるので、予備へ
 # 切り替わっていなければ OpenAI へは送らずに失敗する。
@@ -38,6 +41,7 @@ origin="http://127.0.0.1:${port}"
 model="${AI_FALLBACK_MODEL:-claude-haiku-5-5}"
 state_dir="$(mktemp -d "${TMPDIR:-/tmp}/ai-fallback-smoke.XXXXXX")"
 dev_log="$state_dir/wrangler-dev.log"
+key_file="$state_dir/fallback.env"
 dev_pid=
 
 cleanup() {
@@ -47,7 +51,9 @@ cleanup() {
   fi
   rm -rf "$state_dir"
 }
-trap cleanup EXIT INT TERM
+# 中断（Ctrl-C・TERM）は exit に変えて、EXIT の cleanup を1回だけ通す。
+trap cleanup EXIT
+trap 'exit 130' INT TERM
 
 if curl -fsS -o /dev/null "$origin/api/health" 2>/dev/null; then
   echo "ERROR: ポート $port で別のサーバが動いている。SMOKE_PORT=<空いているポート> で実行する。" >&2
@@ -58,18 +64,20 @@ fi
 event_no=99
 team_code="${event_no}$(printf '%04d' $((RANDOM % 9999 + 1)))"
 
+(umask 077 && printf 'AI_FALLBACK_API_KEY=%s\n' "$ANTHROPIC_API_KEY" >"$key_file")
+
 echo "wrangler dev を予備の設定で起動する（ポート ${port}、モデル ${model}）..."
 (
   cd "$worker_dir"
   exec "$wrangler" dev --local --ip 127.0.0.1 --port "$port" --persist-to "$state_dir/state" \
     --var "AI_ROUTE:fallback" \
     --var "AI_FALLBACK_BASE_URL:https://api.anthropic.com/v1" \
-    --var "AI_FALLBACK_API_KEY:${ANTHROPIC_API_KEY}" \
     --var "AI_FALLBACK_MODEL:${model}" \
     --var "OPENAI_BASE_URL:http://127.0.0.1:9/v1" \
     --var "OPENAI_API_KEY:unused-on-fallback" \
     --var "EVENT_NO:${event_no}" \
-    --var "TEAM_MAX:9999"
+    --var "TEAM_MAX:9999" \
+    --env-file "$key_file"
 ) >"$dev_log" 2>&1 &
 dev_pid=$!
 

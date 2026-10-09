@@ -229,7 +229,7 @@ read -s ANTHROPIC_API_KEY; export ANTHROPIC_API_KEY
 bash scripts/ai-fallback-smoke.sh
 ```
 
-`wrangler dev --local`を予備の設定（`AI_ROUTE=fallback`ほか）で起動し、テスト用のチームで入室してチャットを数回送り、応答の有無・所要時間・活動ログの`aiRoute`を表示して、終わったらdevを止める。キーはファイル（`.dev.vars`など）に書かず`--var`で渡す（devが動いている間だけプロセスの引数に載る）。D1とDOは手元のローカルのもの（一時ディレクトリ）だけを使い、本番には触れない。
+`wrangler dev --local`を予備の設定（`AI_ROUTE=fallback`ほか）で起動し、テスト用のチームで入室してチャットを数回送り、応答の有無・所要時間・活動ログの`aiRoute`を表示して、終わったらdevを止める。キーはプロセスの引数（`ps`で見える）にもリポジトリのファイル（`.dev.vars`など）にも載せず、権限600の一時ファイル（権限700の一時ディレクトリの中）から`--env-file`で読ませ、終了時（Ctrl-Cを含む）に消す。D1とDOは手元のローカルのもの（一時ディレクトリ）だけを使い、本番には触れない。
 
 ### デプロイの流れ
 
