@@ -1,6 +1,8 @@
 import { PRODUCTION_TIMEOUT_MS } from "./config.ts";
 import type { LoadOutcome } from "./load.ts";
 import type { LoadSummary, SecondRow } from "./load-stats.ts";
+import { PROVIDERS } from "./providers.ts";
+import type { ProviderName } from "./providers.ts";
 import { escapeHtml, formatUsd } from "./report.ts";
 
 /** The load-test report: one self-contained HTML file of tables (no charts, no CDN, no script). */
@@ -8,6 +10,7 @@ import { escapeHtml, formatUsd } from "./report.ts";
 export type LoadRun = {
   readonly startedAt: string;
   readonly model: string;
+  readonly provider: ProviderName;
   readonly concurrency: number;
   readonly durationMs: number | null;
   readonly timeoutMs: number;
@@ -39,8 +42,15 @@ const totalCost = (summary: LoadSummary): string =>
 const row = (cells: readonly string[]): string =>
   `<tr>${cells.map((cell, index) => (index === 0 ? `<th>${cell}</th>` : `<td>${cell}</td>`)).join("")}</tr>`;
 
-const renderSummary = (summary: LoadSummary): string => {
+/** A remaining count, or why there is none: the provider has no such header, or none came. */
+const remaining = (value: number | null, header: string | null): string => {
+  if (header === null) return "取れない（このプロバイダは返さない）";
+  return value === null ? "取れない（返らなかった）" : int(value);
+};
+
+const renderSummary = (summary: LoadSummary, provider: ProviderName): string => {
   const late = String(PRODUCTION_TIMEOUT_MS / 1000);
+  const { remainingRequestsHeader, remainingTokensHeader } = PROVIDERS[provider];
   const rows: [string, string][] = [
     ["完了", int(summary.completed)],
     ["成功", int(summary.succeeded)],
@@ -54,8 +64,14 @@ const renderSummary = (summary: LoadSummary): string => {
     ],
     ["RPM（実測、1 分あたり）", int(summary.rpm)],
     ["TPM（実測、usage から）", int(summary.tpm)],
-    ["remaining-requests の最小", int(summary.minRemainingRequests)],
-    ["remaining-tokens の最小", int(summary.minRemainingTokens)],
+    [
+      `残り requests の最小（${remainingRequestsHeader ?? "ヘッダなし"}）`,
+      remaining(summary.minRemainingRequests, remainingRequestsHeader),
+    ],
+    [
+      `残り tokens の最小（${remainingTokensHeader ?? "ヘッダなし"}）`,
+      remaining(summary.minRemainingTokens, remainingTokensHeader),
+    ],
     ["費用", totalCost(summary)],
   ];
   return `<table><tbody>${rows.map(([label, value]) => row([escapeHtml(label), value])).join("")}</tbody></table>`;
@@ -128,10 +144,10 @@ export const renderLoadReport = (run: LoadRun): string => {
 <html lang="ja"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
 <title>AI負荷テスト</title><style>${STYLE}</style></head><body>
 <h1>AI負荷テスト（地獄のICT）</h1>
-<p class="note">${escapeHtml(run.startedAt)} 開始 · ${escapeHtml(run.model)} · ${mode} · ケース ${String(run.casesCount)} 件を順に · 打ち切り ${String(run.timeoutMs / 1000)} 秒 · 実時間 ${ms(run.outcome.wallMs)}</p>
+<p class="note">${escapeHtml(run.startedAt)} 開始 · ${escapeHtml(run.model)}（${escapeHtml(run.provider)}） · ${mode} · ケース ${String(run.casesCount)} 件を順に · 打ち切り ${String(run.timeoutMs / 1000)} 秒 · 実時間 ${ms(run.outcome.wallMs)}</p>
 <p>止まった理由: <strong>${STOP_LABELS[run.outcome.stopReason]}</strong></p>
 <h2>全体</h2>
-${renderSummary(run.summary)}
+${renderSummary(run.summary, run.provider)}
 ${renderOutcomes(run.summary)}
 ${renderSeconds(run.seconds)}
 </body></html>

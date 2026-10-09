@@ -1,8 +1,10 @@
 import type { BenchMessage } from "./cases.ts";
 import type { ModelSpec } from "./config.ts";
+import { PROVIDERS } from "./providers.ts";
 
 /**
- * One Chat Completions call, measured. Never throws: every failure (HTTP error, timeout, lost
+ * One call to an OpenAI-compatible Chat Completions endpoint (OpenAI, Gemini or Anthropic),
+ * measured. Never throws: every failure (HTTP error, timeout, lost
  * connection, a body of the wrong shape) is recorded in the result so the bench keeps going.
  * The API key goes into the request header only and never into the result.
  */
@@ -21,16 +23,8 @@ export type CallRequest = {
 
 export type CallDeps = { readonly fetch: FetchFn; readonly clock: Clock };
 
-export const RATE_LIMIT_HEADERS = [
-  "x-ratelimit-limit-requests",
-  "x-ratelimit-limit-tokens",
-  "x-ratelimit-remaining-requests",
-  "x-ratelimit-remaining-tokens",
-  "x-ratelimit-reset-requests",
-  "x-ratelimit-reset-tokens",
-] as const;
-
-export type RateLimitHeaders = Partial<Record<(typeof RATE_LIMIT_HEADERS)[number], string>>;
+/** Header name (lower case) to value, for the provider's rate-limit headers that came back. */
+export type RateLimitHeaders = Readonly<Record<string, string>>;
 
 export type Usage = {
   readonly promptTokens: number;
@@ -55,19 +49,27 @@ export type CallResult = {
   readonly rateLimit: RateLimitHeaders;
 };
 
-export const readRateLimitHeaders = (headers: Headers): RateLimitHeaders => {
-  const found: RateLimitHeaders = {};
-  for (const name of RATE_LIMIT_HEADERS) {
+export const readRateLimitHeaders = (
+  headers: Headers,
+  names: readonly string[],
+): RateLimitHeaders => {
+  const found: Record<string, string> = {};
+  for (const name of names) {
     const value = headers.get(name);
     if (value !== null) found[name] = value;
   }
   return found;
 };
 
-/** Masks the key itself and anything shaped like an OpenAI key (error bodies quote a masked key). */
+/**
+ * Masks the key itself and anything shaped like a key: OpenAI's and Anthropic's start with `sk-`
+ * (error bodies quote a masked one), Google's with `AIza`.
+ */
 export const redactSecrets = (text: string, apiKey: string): string => {
   const withoutKey = apiKey === "" ? text : text.split(apiKey).join("[REDACTED]");
-  return withoutKey.replace(/sk-[A-Za-z0-9_\-*]+/g, "[REDACTED]");
+  return withoutKey
+    .replace(/sk-[A-Za-z0-9_\-*]+/g, "[REDACTED]")
+    .replace(/AIza[\w-]+/g, "[REDACTED]");
 };
 
 const isRecord = (value: unknown): value is Record<string, unknown> =>
@@ -86,8 +88,21 @@ const reasoningTokensOf = (details: unknown): number | null => {
 };
 
 /**
+ * Output tokens that `total_tokens` counts but `completion_tokens` leaves out (an endpoint that
+ * reports its thinking apart from the reply): 0 when the total is absent or adds up, null when it
+ * is malformed or smaller than its parts.
+ */
+const unreportedOutputOf = (total: unknown, counted: number): number | null => {
+  if (total === undefined || total === null) return 0;
+  if (!isTokenCount(total) || total < counted) return null;
+  return total - counted;
+};
+
+/**
  * The token counts, or null when they are missing or malformed. Never guessed as 0: a missing
- * count would make the tokens and the cost look smaller than they were.
+ * count would make the tokens and the cost look smaller than they were. Tokens in
+ * `total_tokens` beyond prompt + completion are output that was billed but not reported as such
+ * (thinking): they are added to the completion and counted as reasoning.
  */
 export const parseUsage = (value: unknown): Usage | null => {
   if (!isRecord(value)) return null;
@@ -96,7 +111,13 @@ export const parseUsage = (value: unknown): Usage | null => {
   if (!isTokenCount(promptTokens) || !isTokenCount(completionTokens) || reasoningTokens === null) {
     return null;
   }
-  return { promptTokens, completionTokens, reasoningTokens };
+  const unreported = unreportedOutputOf(value.total_tokens, promptTokens + completionTokens);
+  if (unreported === null) return null;
+  return {
+    promptTokens,
+    completionTokens: completionTokens + unreported,
+    reasoningTokens: reasoningTokens + unreported,
+  };
 };
 
 /** The reply text of a 200 body, or why it is unusable (a refusal is reported as such). */
@@ -116,13 +137,21 @@ export const parseCompletion = (
   return { ok: false, message: "no content in the message" };
 };
 
-/** OpenAI's error code and type, never its free-text message (it can quote the request). */
+const errorPart = (part: unknown): string[] => {
+  if (typeof part === "string" && part !== "") return [part];
+  return typeof part === "number" && Number.isFinite(part) ? [String(part)] : [];
+};
+
+/**
+ * The error's code, type and status, never its free-text message (it can quote the request).
+ * OpenAI and Anthropic send `{ error: { code, type } }`; Gemini's native errors are
+ * `{ error: { code: 429, status: "RESOURCE_EXHAUSTED" } }`, and may come wrapped in an array.
+ */
 export const describeErrorBody = (body: unknown): string => {
-  const error = isRecord(body) ? body.error : undefined;
+  const outer: unknown = Array.isArray(body) ? body[0] : body;
+  const error = isRecord(outer) ? outer.error : undefined;
   if (!isRecord(error)) return "no error body";
-  const parts = [error.code, error.type].filter(
-    (part): part is string => typeof part === "string" && part !== "",
-  );
+  const parts = [error.code, error.type, error.status].flatMap(errorPart);
   return parts.length === 0 ? "no error code" : parts.join(" / ");
 };
 
@@ -180,7 +209,10 @@ export const callModel = async (request: CallRequest, deps: CallDeps): Promise<C
       signal: controller.signal,
     });
     status = response.status;
-    rateLimit = readRateLimitHeaders(response.headers);
+    rateLimit = readRateLimitHeaders(
+      response.headers,
+      PROVIDERS[request.model.provider].rateLimitHeaders,
+    );
     outcome = outcomeOfBody(response, await response.text());
   } catch {
     outcome = controller.signal.aborted

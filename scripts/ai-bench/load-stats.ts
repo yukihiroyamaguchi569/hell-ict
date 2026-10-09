@@ -1,5 +1,9 @@
 import { isCutOffBeforeProductionTimeout, isOverProductionTimeout } from "./bench.ts";
 import type { LoadCall } from "./load.ts";
+import type { Provider } from "./providers.ts";
+
+/** Which headers say how many requests and tokens remain (the provider's own names). */
+export type RemainingHeaders = Pick<Provider, "remainingRequestsHeader" | "remainingTokensHeader">;
 
 /** Counts, latencies, throughput and the lowest remaining rate limit, overall and per second. */
 
@@ -30,11 +34,9 @@ const countBy = (calls: readonly LoadCall[], key: (call: LoadCall) => string) =>
   return counts;
 };
 
-/** The lowest value of a numeric rate-limit header seen; null when it never came. */
-const minHeader = (
-  calls: readonly LoadCall[],
-  name: "x-ratelimit-remaining-requests" | "x-ratelimit-remaining-tokens",
-): number | null => {
+/** The lowest value of a numeric rate-limit header seen; null when it never came (or none exists). */
+const minHeader = (calls: readonly LoadCall[], name: string | null): number | null => {
+  if (name === null) return null;
   const values = calls.flatMap((call) => {
     const value = Number(call.rateLimit[name]);
     return call.rateLimit[name] === undefined || !Number.isFinite(value) ? [] : [value];
@@ -48,7 +50,11 @@ const perMinute = (count: number, ms: number): number => (ms <= 0 ? 0 : (count *
 export type LoadSummary = ReturnType<typeof summarizeCalls>;
 
 /** Latencies count successful calls only, as in the comparison: an error says nothing of speed. */
-export const summarizeCalls = (calls: readonly LoadCall[], windowMs: number) => {
+export const summarizeCalls = (
+  calls: readonly LoadCall[],
+  windowMs: number,
+  remaining: RemainingHeaders,
+) => {
   const succeeded = calls.filter((call) => call.error === null);
   const latencies = succeeded.map((call) => call.elapsedMs);
   const known = calls.flatMap((call) => (call.costUsd === null ? [] : [call.costUsd]));
@@ -68,8 +74,8 @@ export const summarizeCalls = (calls: readonly LoadCall[], windowMs: number) => 
     rpm: perMinute(calls.length, windowMs),
     tpm: perMinute(sum(calls.map(tokensOf)), windowMs),
     tokens: sum(calls.map(tokensOf)),
-    minRemainingRequests: minHeader(calls, "x-ratelimit-remaining-requests"),
-    minRemainingTokens: minHeader(calls, "x-ratelimit-remaining-tokens"),
+    minRemainingRequests: minHeader(calls, remaining.remainingRequestsHeader),
+    minRemainingTokens: minHeader(calls, remaining.remainingTokensHeader),
     totalCostUsd: known.length === calls.length ? costLowerBoundUsd : null,
     costLowerBoundUsd,
   };
@@ -81,11 +87,15 @@ export type SecondRow = LoadSummary & { readonly second: number; readonly starte
  * One row per second of the run, by when the calls finished (`started` counts the calls that
  * began in that second). RPM and TPM are that second's numbers times 60.
  */
-export const perSecond = (calls: readonly LoadCall[], wallMs: number): SecondRow[] => {
+export const perSecond = (
+  calls: readonly LoadCall[],
+  wallMs: number,
+  remaining: RemainingHeaders,
+): SecondRow[] => {
   const seconds = Math.floor(Math.max(0, wallMs) / 1000) + 1;
   return Array.from({ length: seconds }, (_, second) => {
     const inSecond = calls.filter((call) => Math.floor(call.endMs / 1000) === second);
     const started = calls.filter((call) => Math.floor(call.startMs / 1000) === second).length;
-    return { ...summarizeCalls(inSecond, 1000), second, started };
+    return { ...summarizeCalls(inSecond, 1000, remaining), second, started };
   });
 };

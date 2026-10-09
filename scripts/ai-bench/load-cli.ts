@@ -1,7 +1,8 @@
 import { parseArgs } from "node:util";
 
 import type { BenchCase } from "./cases.ts";
-import { modelSpecFor } from "./config.ts";
+import { KEYS_HELP } from "./cli.ts";
+import { KNOWN_MODEL_NAMES, modelSpecFor } from "./config.ts";
 import type { ModelPrice, ModelSpec } from "./config.ts";
 import { ASSUMED_OUTPUT_TOKENS, estimateCallCost } from "./load.ts";
 import type { LoadLimits } from "./load.ts";
@@ -26,7 +27,8 @@ export const LOAD_DEFAULTS = {
 export const LOAD_USAGE = `Usage: pnpm ai-bench:load --cases <cases.json> [options]
 
   --cases <file>            case file (the same as for the comparison); used in turn
-  --model <name>            model (default: ${LOAD_DEFAULTS.model}); must have a price in config.ts
+  --model <name>            model (default: ${LOAD_DEFAULTS.model}); must be in config.ts (for its
+                            price and its provider)
   --concurrency <n>         calls kept in flight (default: ${String(LOAD_DEFAULTS.concurrency)})
   --duration-s <n>          how long to keep them in flight (default: ${String(LOAD_DEFAULTS.durationS)})
   --burst                   instead: start <concurrency> calls at once, once, and wait for them
@@ -40,7 +42,10 @@ export const LOAD_USAGE = `Usage: pnpm ai-bench:load --cases <cases.json> [optio
   --dry-run                 show the estimate only, without the API key and without calling
   --yes                     start without asking
 
-The API key is read from the environment variable OPENAI_API_KEY only.`;
+${KEYS_HELP}
+
+Example (Claude Haiku 5.5, a 30-call burst):
+  pnpm ai-bench:load --cases cases.json --model claude-haiku-5-5 --concurrency 30 --burst`;
 
 export type LoadCliOptions = {
   readonly casesPath: string;
@@ -77,9 +82,10 @@ const positiveNumber = (
   return value;
 };
 
+/** Only a model in config.ts has a price, and with it its provider. */
 const pricedModel = (name: string): ModelSpec & { readonly price: ModelPrice } => {
-  const model = modelSpecFor(name);
-  if (model.price === null) {
+  const model = KNOWN_MODEL_NAMES.includes(name) ? modelSpecFor(name) : null;
+  if (model === null || model.price === null) {
     throw new Error(`no price for "${name}" in config.ts: the cost cap cannot work without one`);
   }
   return { ...model, price: model.price };
@@ -205,7 +211,7 @@ export const estimateLines = (cases: readonly BenchCase[], options: LoadCliOptio
       ? `burst: ${String(options.concurrency)} calls at once`
       : `${String(options.concurrency)} in flight for ${String(options.durationMs / 1000)} s`;
   return [
-    `model ${options.model.name}, ${mode}, ${String(cases.length)} cases in turn`,
+    `model ${options.model.name} (${options.model.provider}), ${mode}, ${String(cases.length)} cases in turn`,
     `expected: about ${String(requests)} calls, about ${formatUsd(costUsd)} ` +
       `(latency ${String(options.expectedLatencyS)} s, ${String(ASSUMED_OUTPUT_TOKENS)} output tokens per call assumed)`,
     `caps: ${String(options.limits.maxRequests)} calls, ${formatUsd(options.limits.maxCostUsd)}; ` +

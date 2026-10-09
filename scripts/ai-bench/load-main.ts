@@ -5,13 +5,14 @@ import { createInterface } from "node:readline/promises";
 import { fileURLToPath } from "node:url";
 
 import { parseCases } from "./cases.ts";
-import { baseUrlOf, readApiKey, resolveOutDir } from "./cli.ts";
+import { resolveOutDir } from "./cli.ts";
 import { makePrivateDir, writePrivateFile } from "./files.ts";
 import { runLoad } from "./load.ts";
 import { estimateLines, LOAD_USAGE, parseLoadArgs } from "./load-cli.ts";
 import { renderLoadReport } from "./load-report.ts";
 import type { LoadRun } from "./load-report.ts";
 import { perSecond, summarizeCalls } from "./load-stats.ts";
+import { PROVIDERS, readEndpoints } from "./providers.ts";
 
 /**
  * Entry point of the load test: `node scripts/ai-bench/load-main.ts --cases <file>` (or
@@ -41,7 +42,10 @@ const main = async (): Promise<void> => {
   const cases = parseCases(raw);
   for (const line of estimateLines(cases, options)) console.log(line);
   if (options.dryRun) return;
-  const apiKey = readApiKey(process.env);
+  const provider = options.model.provider;
+  const endpoint = readEndpoints(process.env, [provider]).get(provider);
+  // readEndpoints throws unless it has the endpoint of every provider it was given.
+  if (endpoint === undefined) throw new Error(`no endpoint for ${provider}`);
   const startedAt = new Date();
   const outDir = resolveOutDir(options.out, {
     repoRoot: REPO_ROOT,
@@ -60,8 +64,7 @@ const main = async (): Promise<void> => {
       concurrency: options.concurrency,
       durationMs: options.durationMs,
       timeoutMs: options.timeoutMs,
-      baseUrl: baseUrlOf(process.env),
-      apiKey,
+      ...endpoint,
       limits: options.limits,
     },
     { fetch: (url, init) => fetch(url, init), clock: { now: () => performance.now() } },
@@ -77,13 +80,14 @@ const main = async (): Promise<void> => {
   const run: LoadRun = {
     startedAt: startedAt.toISOString(),
     model: options.model.name,
+    provider,
     concurrency: options.concurrency,
     durationMs: options.durationMs,
     timeoutMs: options.timeoutMs,
     casesCount: cases.length,
     outcome,
-    summary: summarizeCalls(outcome.calls, outcome.wallMs),
-    seconds: perSecond(outcome.calls, outcome.wallMs),
+    summary: summarizeCalls(outcome.calls, outcome.wallMs, PROVIDERS[provider]),
+    seconds: perSecond(outcome.calls, outcome.wallMs, PROVIDERS[provider]),
   };
   await makePrivateDir(outDir);
   // The JSON keeps every call but not the reply texts: the load test is about counts and time.

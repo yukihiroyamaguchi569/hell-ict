@@ -9,11 +9,11 @@ import { describe, expect, it } from "vitest";
 import type { BenchCase } from "./cases.ts";
 import {
   assertOutsideRepo,
-  baseUrlOf,
   dryRunLines,
   parseCliArgs,
-  readApiKey,
+  providersOf,
   resolveOutDir,
+  USAGE,
 } from "./cli.ts";
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
@@ -39,11 +39,75 @@ describe("parseCliArgs", () => {
   });
 
   it("takes the model list, trimming and de-duplicating it; an unknown model has no price", () => {
-    const options = parseCliArgs(["--cases", "c", "--models", " gpt-4.1 ,gpt-x,,gpt-4.1"]);
-    expect(options.models).toEqual([
-      { name: "gpt-4.1", params: {}, price: { input: 2, output: 8 } },
-      { name: "gpt-x", params: {}, price: null },
+    const options = parseCliArgs([
+      "--cases",
+      "c",
+      "--models",
+      " gpt-4.1 ,gpt-x,,gpt-4.1",
+      "--provider",
+      "openai",
     ]);
+    expect(options.models).toEqual([
+      { name: "gpt-4.1", provider: "openai", params: {}, price: { input: 2, output: 8 } },
+      { name: "gpt-x", provider: "openai", params: {}, price: null },
+    ]);
+  });
+
+  it("mixes providers, each model bringing its own", () => {
+    const options = parseCliArgs([
+      "--cases",
+      "c",
+      "--models",
+      "gpt-4.1-mini,gemini-3.8-flash,claude-haiku-4-5-20251001,claude-sonnet-5-5",
+    ]);
+    expect(options.models.map((model) => [model.name, model.provider])).toEqual([
+      ["gpt-4.1-mini", "openai"],
+      ["gemini-3.8-flash", "gemini"],
+      ["claude-haiku-4-5-20251001", "anthropic"],
+      ["claude-sonnet-5-5", "anthropic"],
+    ]);
+    expect(providersOf(options.models)).toEqual(["openai", "gemini", "anthropic"]);
+  });
+
+  it("sends a model not in config.ts to --provider, leaving the known ones where they are", () => {
+    const options = parseCliArgs([
+      "--cases",
+      "c",
+      "--models",
+      "gemini-9-flash,gpt-4o",
+      "--provider",
+      " gemini ",
+    ]);
+    expect(options.models.map((model) => [model.name, model.provider, model.price])).toEqual([
+      ["gemini-9-flash", "gemini", null],
+      ["gpt-4o", "openai", { input: 2.5, output: 10 }],
+    ]);
+  });
+
+  it("refuses a model not in config.ts without --provider, rather than guessing from its name", () => {
+    expect(() => parseCliArgs(["--cases", "c", "--models", "gemini-9-flash"])).toThrow(
+      /"gemini-9-flash" is not in config.ts: pass --provider/,
+    );
+  });
+
+  it.each([["azure"], [""], ["OpenAI"]])("rejects --provider %j", (value) => {
+    expect(() => parseCliArgs(["--cases", "c", "--provider", value])).toThrow(
+      /--provider must be one of openai, gemini, anthropic/,
+    );
+  });
+
+  it("explains in --help where each provider's key comes from and how to enter it", () => {
+    for (const text of [
+      "OPENAI_API_KEY",
+      "GEMINI_API_KEY",
+      "ANTHROPIC_API_KEY",
+      "read -s GEMINI_API_KEY && export GEMINI_API_KEY",
+      "https://generativelanguage.googleapis.com/v1beta/openai",
+      "https://api.anthropic.com/v1",
+      "--models gpt-4.1-mini,gemini-3.8-flash,claude-haiku-5-5",
+    ]) {
+      expect(USAGE).toContain(text);
+    }
   });
 
   it("takes repeat, concurrency, timeout, out and dry-run", () => {
@@ -82,27 +146,6 @@ describe("parseCliArgs", () => {
 
   it("refuses an API key on the command line", () => {
     expect(() => parseCliArgs(["--cases", "c", "--api-key", "sk-x"])).toThrow();
-  });
-});
-
-describe("readApiKey", () => {
-  it("reads OPENAI_API_KEY, trimmed", () => {
-    expect(readApiKey({ OPENAI_API_KEY: " sk-abc \n" })).toBe("sk-abc");
-  });
-
-  it.each([[{}], [{ OPENAI_API_KEY: "" }], [{ OPENAI_API_KEY: "  " }]])(
-    "stops with a clear error when the key is missing (%j)",
-    (env) => {
-      expect(() => readApiKey(env)).toThrow(/OPENAI_API_KEY is not set/);
-    },
-  );
-});
-
-describe("baseUrlOf", () => {
-  it("defaults to OpenAI and drops trailing slashes from an override", () => {
-    expect(baseUrlOf({})).toBe("https://api.openai.com/v1");
-    expect(baseUrlOf({ OPENAI_BASE_URL: " " })).toBe("https://api.openai.com/v1");
-    expect(baseUrlOf({ OPENAI_BASE_URL: "http://localhost:9/v1//" })).toBe("http://localhost:9/v1");
   });
 });
 
@@ -187,15 +230,33 @@ describe("dryRunLines", () => {
 
   it("lists the models with their parameters and the size of each case", () => {
     const lines = dryRunLines(cases, parseCliArgs(["--cases", "c", "--repeat", "2"]));
-    expect(lines).toContain('model gpt-6-sol params {"reasoning_effort":"none"}');
+    expect(lines).toContain(
+      'model gpt-6-sol (openai, key OPENAI_API_KEY) params {"reasoning_effort":"none"}',
+    );
     expect(lines).toContain("s3-short [s3] short question: 2 messages, 11 chars, ~13 tokens");
     expect(lines).toContain("2 calls per model, 8 in all, ~26 input tokens per model");
     expect(lines.some((line) => line.startsWith("gpt-4o: input ~$"))).toBe(true);
   });
 
   it("shows an unknown price as unknown", () => {
-    const lines = dryRunLines(cases, parseCliArgs(["--cases", "c", "--models", "gpt-x"]));
+    const lines = dryRunLines(
+      cases,
+      parseCliArgs(["--cases", "c", "--models", "gpt-x", "--provider", "openai"]),
+    );
     expect(lines.at(-1)).toBe("gpt-x: input ~不明 (output not included)");
+  });
+
+  it("names each model's provider, key variable and parameters", () => {
+    const lines = dryRunLines(
+      cases,
+      parseCliArgs(["--cases", "c", "--models", "gemini-3.8-flash,claude-sonnet-5-5"]),
+    );
+    expect(lines).toContain(
+      'model gemini-3.8-flash (gemini, key GEMINI_API_KEY) params {"reasoning_effort":"minimal"}',
+    );
+    expect(lines).toContain(
+      'model claude-sonnet-5-5 (anthropic, key ANTHROPIC_API_KEY) params {"thinking":{"type":"between_tools"}}',
+    );
   });
 });
 
@@ -227,6 +288,36 @@ describe("main (as a process)", () => {
     expect(result.status).toBe(1);
     expect(result.stderr).toContain("OPENAI_API_KEY is not set");
     expect(result.stderr).not.toContain("[1/");
+  });
+
+  it("asks only for the keys of the providers in use, all missing ones at once", () => {
+    const result = run(
+      [
+        "--cases",
+        casesPath,
+        "--models",
+        "gpt-4.1-mini,gemini-3.8-flash,claude-haiku-5-5",
+        "--out",
+        path.join(dir, "out-mixed"),
+      ],
+      { OPENAI_API_KEY: "sk-test-openai-set" },
+    );
+    expect(result.status).toBe(1);
+    expect(result.stderr).toContain("GEMINI_API_KEY, ANTHROPIC_API_KEY are not set");
+    expect(result.stderr).not.toContain("OPENAI_API_KEY");
+    expect(result.stderr).not.toContain("sk-test-openai-set");
+    expect(result.stderr).not.toContain("[1/");
+  });
+
+  it("does not ask for the keys of providers not in use", () => {
+    const result = run(
+      ["--cases", casesPath, "--models", "gemini-3.8-flash", "--out", path.join(dir, "out-g")],
+      { GEMINI_API_KEY: "AIza-test-not-used", GEMINI_BASE_URL: "http://127.0.0.1:9/v1" },
+    );
+    // Port 9 refuses the connection: the call is recorded as a network error and the run ends.
+    expect(result.stderr).toContain("gemini-3.8-flash (gemini) a #1");
+    expect(result.stderr).not.toContain("is not set");
+    expect(result.stderr).not.toContain("AIza-test-not-used");
   });
 
   it("refuses an output folder inside the repository before calling anything", () => {

@@ -3,6 +3,7 @@ import { PRODUCTION_TIMEOUT_MS } from "./config.ts";
 import type { ModelPrice, ModelSpec } from "./config.ts";
 import { callModel } from "./openai.ts";
 import type { CallDeps, CallResult, RateLimitHeaders, Usage } from "./openai.ts";
+import type { Endpoint, ProviderName } from "./providers.ts";
 
 /**
  * Which calls to make, in which order, and what they add up to. The order rotates the models
@@ -38,6 +39,7 @@ export const planJobs = (
 export type JobResult = CallResult & {
   readonly caseId: string;
   readonly model: string;
+  readonly provider: ProviderName;
   readonly round: number;
   /** Slower than the Worker waits: the participant would have seen a failure. */
   readonly overProductionTimeout: boolean;
@@ -76,8 +78,8 @@ export const isCutOffBeforeProductionTimeout = (result: CallResult): boolean =>
   result.error?.kind === "timeout" && result.elapsedMs < PRODUCTION_TIMEOUT_MS;
 
 export type RunOptions = {
-  readonly baseUrl: string;
-  readonly apiKey: string;
+  /** Where each provider's calls go and with which key (read before the run starts). */
+  readonly endpointFor: (provider: ProviderName) => Endpoint;
   readonly timeoutMs: number;
   readonly concurrency: number;
   readonly onResult?: (result: JobResult, done: number, total: number) => void;
@@ -97,8 +99,7 @@ export const runJobs = async (
   const runOne = async (job: Job, index: number): Promise<void> => {
     const call = await callModel(
       {
-        baseUrl: options.baseUrl,
-        apiKey: options.apiKey,
+        ...options.endpointFor(job.model.provider),
         model: job.model,
         messages: messagesOf.get(job.caseId) ?? [],
         timeoutMs: options.timeoutMs,
@@ -110,6 +111,7 @@ export const runJobs = async (
       ...call,
       caseId: job.caseId,
       model: job.model.name,
+      provider: job.model.provider,
       round: job.round,
       overProductionTimeout: isOverProductionTimeout(call),
       cutOffBeforeProductionTimeout: isCutOffBeforeProductionTimeout(call),
@@ -134,6 +136,7 @@ export const runJobs = async (
 
 export type ModelSummary = {
   readonly model: string;
+  readonly provider: ProviderName;
   readonly calls: number;
   readonly medianMs: number | null;
   readonly maxMs: number | null;
@@ -190,13 +193,16 @@ const lastRateLimit = (results: readonly JobResult[]): RateLimitHeaders => {
  * Durations count successful calls only: a timeout or an instant 4xx would say nothing about
  * how fast the model answers. Errors and timeouts have their own columns.
  */
-export const summarizeModel = (model: string, all: readonly JobResult[]): ModelSummary => {
-  const results = all.filter((result) => result.model === model);
+export const summarizeModel = (model: ModelSpec, all: readonly JobResult[]): ModelSummary => {
+  const results = all.filter(
+    (result) => result.model === model.name && result.provider === model.provider,
+  );
   const succeeded = results.filter((result) => result.error === null);
   const durations = succeeded.map((result) => result.elapsedMs);
   const usages = results.flatMap((result) => (result.usage === null ? [] : [result.usage]));
   return {
-    model,
+    model: model.name,
+    provider: model.provider,
     calls: results.length,
     medianMs: median(durations),
     maxMs: durations.length === 0 ? null : Math.max(...durations),
@@ -216,4 +222,4 @@ export const summarizeModel = (model: string, all: readonly JobResult[]): ModelS
 export const summarize = (
   models: readonly ModelSpec[],
   results: readonly JobResult[],
-): readonly ModelSummary[] => models.map((model) => summarizeModel(model.name, results));
+): readonly ModelSummary[] => models.map((model) => summarizeModel(model, results));

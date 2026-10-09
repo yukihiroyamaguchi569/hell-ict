@@ -1,6 +1,7 @@
 import { describe, expect, it, vi } from "vitest";
 
 import { modelSpecFor } from "./config.ts";
+import { PROVIDERS } from "./providers.ts";
 import {
   callModel,
   describeErrorBody,
@@ -54,7 +55,7 @@ describe("readRateLimitHeaders", () => {
       "x-ratelimit-reset-requests": "120ms",
       "x-request-id": "abc",
     });
-    expect(readRateLimitHeaders(headers)).toEqual({
+    expect(readRateLimitHeaders(headers, PROVIDERS.openai.rateLimitHeaders)).toEqual({
       "x-ratelimit-limit-requests": "500",
       "x-ratelimit-remaining-tokens": "29000",
       "x-ratelimit-reset-requests": "120ms",
@@ -62,7 +63,13 @@ describe("readRateLimitHeaders", () => {
   });
 
   it("returns an empty object when none are present", () => {
-    expect(readRateLimitHeaders(new Headers())).toEqual({});
+    expect(readRateLimitHeaders(new Headers(), PROVIDERS.openai.rateLimitHeaders)).toEqual({});
+    expect(
+      readRateLimitHeaders(
+        new Headers({ "x-ratelimit-remaining-requests": "1" }),
+        PROVIDERS.gemini.rateLimitHeaders,
+      ),
+    ).toEqual({});
   });
 });
 
@@ -70,6 +77,12 @@ describe("redactSecrets", () => {
   it("masks the key and anything shaped like an OpenAI key", () => {
     expect(redactSecrets(`key ${KEY} and sk-proj-ab**cd`, KEY)).toBe(
       "key [REDACTED] and [REDACTED]",
+    );
+  });
+
+  it("masks Anthropic's and Google's key shapes too", () => {
+    expect(redactSecrets("a sk-ant-api03-xyz_1 b AIzaSyAbc-123_x c", "")).toBe(
+      "a [REDACTED] b [REDACTED] c",
     );
   });
 
@@ -133,6 +146,39 @@ describe("parseCompletion", () => {
     }
   });
 
+  it("takes a total that adds up as it is", () => {
+    expect(
+      parseCompletion(
+        completion("a", { prompt_tokens: 10, completion_tokens: 5, total_tokens: 15 }),
+      ),
+    ).toMatchObject({ usage: { promptTokens: 10, completionTokens: 5, reasoningTokens: 0 } });
+    expect(
+      parseCompletion(
+        completion("a", { prompt_tokens: 1, completion_tokens: 2, total_tokens: null }),
+      ),
+    ).toMatchObject({ usage: { promptTokens: 1, completionTokens: 2, reasoningTokens: 0 } });
+  });
+
+  it("counts tokens the total has beyond prompt + completion as billed output (thinking)", () => {
+    expect(
+      parseCompletion(
+        completion("a", { prompt_tokens: 10, completion_tokens: 5, total_tokens: 40 }),
+      ),
+    ).toMatchObject({ usage: { promptTokens: 10, completionTokens: 30, reasoningTokens: 25 } });
+  });
+
+  it.each([
+    [
+      "a total smaller than its parts",
+      { prompt_tokens: 10, completion_tokens: 5, total_tokens: 14 },
+    ],
+    ["a total given as a string", { prompt_tokens: 10, completion_tokens: 5, total_tokens: "15" }],
+    ["Gemini's native field names", { promptTokenCount: 10, candidatesTokenCount: 5 }],
+    ["Anthropic's native field names", { input_tokens: 10, output_tokens: 5 }],
+  ])("leaves the usage unknown, not 0, for %s", (_name, usage) => {
+    expect(parseCompletion(completion("a", usage))).toEqual({ ok: true, text: "a", usage: null });
+  });
+
   it("accepts an empty reply", () => {
     expect(parseCompletion(completion(""))).toMatchObject({ ok: true, text: "" });
   });
@@ -158,7 +204,20 @@ describe("describeErrorBody", () => {
 
   it("says so when there is no usable error body", () => {
     expect(describeErrorBody(undefined)).toBe("no error body");
+    expect(describeErrorBody([])).toBe("no error body");
     expect(describeErrorBody({ error: { message: "m" } })).toBe("no error code");
+    expect(describeErrorBody({ error: { code: Number.NaN, type: "" } })).toBe("no error code");
+  });
+
+  it("reads Gemini's numeric code and status, also wrapped in an array", () => {
+    const gemini = { error: { code: 429, message: "quota", status: "RESOURCE_EXHAUSTED" } };
+    expect(describeErrorBody(gemini)).toBe("429 / RESOURCE_EXHAUSTED");
+    expect(describeErrorBody([gemini])).toBe("429 / RESOURCE_EXHAUSTED");
+  });
+
+  it("reads Anthropic's error type", () => {
+    const body = { type: "error", error: { type: "rate_limit_error", message: "slow" } };
+    expect(describeErrorBody(body)).toBe("rate_limit_error");
   });
 });
 
@@ -176,6 +235,25 @@ describe("requestBody", () => {
   it("adds reasoning_effort none for gpt-6-sol", () => {
     const body: unknown = JSON.parse(requestBody(modelSpecFor("gpt-6-sol"), []));
     expect(body).toEqual({ model: "gpt-6-sol", messages: [], reasoning_effort: "none" });
+  });
+
+  it("adds each other provider's way of keeping the reasoning down", () => {
+    const bodyOf = (name: string): unknown => JSON.parse(requestBody(modelSpecFor(name), []));
+    expect(bodyOf("gemini-3.8-flash")).toEqual({
+      model: "gemini-3.8-flash",
+      messages: [],
+      reasoning_effort: "minimal",
+    });
+    expect(bodyOf("claude-haiku-5-5")).toEqual({
+      model: "claude-haiku-5-5",
+      messages: [],
+      thinking: { type: "disabled" },
+    });
+    expect(bodyOf("claude-sonnet-5-5")).toMatchObject({ thinking: { type: "between_tools" } });
+    expect(bodyOf("claude-haiku-4-5-20251001")).toEqual({
+      model: "claude-haiku-4-5-20251001",
+      messages: [],
+    });
   });
 });
 
@@ -219,6 +297,53 @@ describe("callModel", () => {
       error: { kind: "http_error", message: "rate_limit_exceeded / requests" },
       rateLimit: { "x-ratelimit-remaining-requests": "0" },
     });
+  });
+
+  it("keeps the headers of the model's provider: Anthropic's own and the OpenAI-style ones", async () => {
+    const fetch: FetchFn = () =>
+      Promise.resolve(
+        jsonResponse(completion("x", { prompt_tokens: 1, completion_tokens: 1 }), {
+          headers: {
+            "x-ratelimit-remaining-tokens": "9000",
+            "anthropic-ratelimit-requests-remaining": "9999",
+            "retry-after": "3",
+            "request-id": "req_1",
+          },
+        }),
+      );
+    const result = await callModel(request("claude-haiku-4-5-20251001"), deps(fetch));
+    expect(result.rateLimit).toEqual({
+      "x-ratelimit-remaining-tokens": "9000",
+      "anthropic-ratelimit-requests-remaining": "9999",
+      "retry-after": "3",
+    });
+  });
+
+  it("keeps no header for Gemini, which documents none, and still reads the reply", async () => {
+    const fetch: FetchFn = () =>
+      Promise.resolve(
+        jsonResponse(completion("x", { prompt_tokens: 1, completion_tokens: 1 }), {
+          headers: { "x-ratelimit-remaining-requests": "5" },
+        }),
+      );
+    const result = await callModel(request("gemini-3.8-flash"), deps(fetch));
+    expect(result).toMatchObject({ text: "x", rateLimit: {}, error: null });
+  });
+
+  it("records a Gemini 429 without the key the error quoted", async () => {
+    const geminiKey = "AIzaSyTESTgeminiKEY";
+    const fetch: FetchFn = () =>
+      Promise.resolve(
+        jsonResponse([{ error: { code: 429, message: `key ${geminiKey}`, status: geminiKey } }], {
+          status: 429,
+        }),
+      );
+    const result = await callModel(
+      { ...request("gemini-3.8-flash"), apiKey: geminiKey },
+      deps(fetch),
+    );
+    expect(result.error).toEqual({ kind: "http_error", message: "429 / [REDACTED]" });
+    expect(JSON.stringify(result)).not.toContain(geminiKey);
   });
 
   it("records a 401 without the key, even when the body quotes it", async () => {
