@@ -1,5 +1,5 @@
 import { spawnSync } from "node:child_process";
-import { mkdtempSync, writeFileSync } from "node:fs";
+import { mkdirSync, mkdtempSync, symlinkSync, writeFileSync } from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
@@ -127,6 +127,47 @@ describe("resolveOutDir", () => {
   it("refuses a file inside the repository", () => {
     expect(() => {
       assertOutsideRepo("/work/repo/cases.json", "/work/repo");
+    }).toThrow(/outside the repository/);
+  });
+});
+
+describe("assertOutsideRepo with symbolic links", () => {
+  const base = mkdtempSync(path.join(os.tmpdir(), "ai-bench-link-"));
+  const repo = path.join(base, "repo");
+  mkdirSync(path.join(repo, "sub"), { recursive: true });
+  const outside = path.join(base, "outside");
+  mkdirSync(outside);
+  symlinkSync(repo, path.join(base, "link-to-repo"));
+  symlinkSync(path.join(repo, "sub"), path.join(outside, "link-to-sub"));
+  symlinkSync(path.join(repo, "gone"), path.join(base, "dangling"));
+  symlinkSync(outside, path.join(repo, "link-out"));
+
+  it.each([
+    ["a link to the repository", "link-to-repo"],
+    ["a folder not made yet under a link to the repository", "link-to-repo/new/deeper"],
+    ["a file under a link to a folder of the repository", "outside/link-to-sub/cases.json"],
+  ])("refuses %s", (_name, target) => {
+    expect(() => {
+      assertOutsideRepo(path.join(base, target), repo);
+    }).toThrow(/outside the repository/);
+  });
+
+  it("refuses a dangling link, which could point anywhere", () => {
+    expect(() => {
+      assertOutsideRepo(path.join(base, "dangling"), repo);
+    }).toThrow(/cannot resolve/);
+  });
+
+  it("accepts a real folder outside, also when reached through a link inside the repository", () => {
+    expect(() => {
+      assertOutsideRepo(path.join(outside, "new"), repo);
+      assertOutsideRepo(path.join(repo, "link-out", "x"), repo);
+    }).not.toThrow();
+  });
+
+  it("refuses a repository given through a link, too", () => {
+    expect(() => {
+      assertOutsideRepo(path.join(repo, "out"), path.join(base, "link-to-repo"));
     }).toThrow(/outside the repository/);
   });
 });

@@ -1,3 +1,4 @@
+import { lstatSync, realpathSync } from "node:fs";
 import path from "node:path";
 import { parseArgs } from "node:util";
 
@@ -108,9 +109,42 @@ const isInside = (dir: string, root: string): boolean => {
   return relative === "" || (!relative.startsWith("..") && !path.isAbsolute(relative));
 };
 
-/** Refuses a path inside the repository, where the real scenario could get committed. */
+const exists = (target: string): boolean => {
+  try {
+    lstatSync(target);
+    return true;
+  } catch {
+    return false;
+  }
+};
+
+/**
+ * The path with every symbolic link resolved. A path that does not exist yet is resolved through
+ * its nearest existing ancestor. A dangling link throws (realpath fails), so it is refused too:
+ * writing through it could land anywhere.
+ */
+export const realPathOf = (target: string): string => {
+  let existing = path.resolve(target);
+  const rest: string[] = [];
+  while (!exists(existing) && path.dirname(existing) !== existing) {
+    rest.unshift(path.basename(existing));
+    existing = path.dirname(existing);
+  }
+  return path.join(realpathSync(existing), ...rest);
+};
+
+/**
+ * Refuses a path inside the repository, where the real scenario could get committed. Both sides
+ * are compared after resolving symbolic links, so a link to the repository does not slip through.
+ */
 export const assertOutsideRepo = (target: string, repoRoot: string): void => {
-  if (isInside(path.resolve(target), path.resolve(repoRoot))) {
+  let real: string;
+  try {
+    real = realPathOf(target);
+  } catch {
+    throw new Error(`cannot resolve the output path (${path.resolve(target)})`);
+  }
+  if (isInside(real, realPathOf(repoRoot))) {
     throw new Error(`the output must be outside the repository (${path.resolve(target)})`);
   }
 };
