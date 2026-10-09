@@ -1,0 +1,207 @@
+import { spawnSync } from "node:child_process";
+import { mkdtempSync, writeFileSync } from "node:fs";
+import os from "node:os";
+import path from "node:path";
+import { fileURLToPath } from "node:url";
+
+import { describe, expect, it } from "vitest";
+
+import type { BenchCase } from "./cases.ts";
+import {
+  assertOutsideRepo,
+  baseUrlOf,
+  dryRunLines,
+  parseCliArgs,
+  readApiKey,
+  resolveOutDir,
+} from "./cli.ts";
+
+const HERE = path.dirname(fileURLToPath(import.meta.url));
+const REPO_ROOT = path.resolve(HERE, "../..");
+
+describe("parseCliArgs", () => {
+  it("uses the four models and the defaults", () => {
+    const options = parseCliArgs(["--cases", "c.json"]);
+    expect(options.models.map((model) => model.name)).toEqual([
+      "gpt-4o",
+      "gpt-4.1",
+      "gpt-4.1-mini",
+      "gpt-6-sol",
+    ]);
+    expect(options).toMatchObject({
+      casesPath: "c.json",
+      repeat: 1,
+      concurrency: 2,
+      timeoutMs: 60_000,
+      out: null,
+      dryRun: false,
+    });
+  });
+
+  it("takes the model list, trimming and de-duplicating it; an unknown model has no price", () => {
+    const options = parseCliArgs(["--cases", "c", "--models", " gpt-4.1 ,gpt-x,,gpt-4.1"]);
+    expect(options.models).toEqual([
+      { name: "gpt-4.1", params: {}, price: { input: 2, output: 8 } },
+      { name: "gpt-x", params: {}, price: null },
+    ]);
+  });
+
+  it("takes repeat, concurrency, timeout, out and dry-run", () => {
+    const options = parseCliArgs([
+      "--cases=c",
+      "--repeat=3",
+      "--concurrency",
+      "1",
+      "--timeout-ms",
+      "30000",
+      "--out",
+      "/tmp/x",
+      "--dry-run",
+    ]);
+    expect(options).toMatchObject({
+      repeat: 3,
+      concurrency: 1,
+      timeoutMs: 30_000,
+      out: "/tmp/x",
+      dryRun: true,
+    });
+  });
+
+  it.each([["0"], ["-1"], ["1.5"], ["abc"], [""]])("rejects --repeat %j", (value) => {
+    expect(() => parseCliArgs(["--cases", "c", "--repeat", value])).toThrow(/--repeat/);
+  });
+
+  it("requires --cases unless asking for help", () => {
+    expect(() => parseCliArgs([])).toThrow(/--cases is required/);
+    expect(parseCliArgs(["--help"]).help).toBe(true);
+  });
+
+  it("rejects an empty model list", () => {
+    expect(() => parseCliArgs(["--cases", "c", "--models", " , "])).toThrow(/at least one/);
+  });
+
+  it("refuses an API key on the command line", () => {
+    expect(() => parseCliArgs(["--cases", "c", "--api-key", "sk-x"])).toThrow();
+  });
+});
+
+describe("readApiKey", () => {
+  it("reads OPENAI_API_KEY, trimmed", () => {
+    expect(readApiKey({ OPENAI_API_KEY: " sk-abc \n" })).toBe("sk-abc");
+  });
+
+  it.each([[{}], [{ OPENAI_API_KEY: "" }], [{ OPENAI_API_KEY: "  " }]])(
+    "stops with a clear error when the key is missing (%j)",
+    (env) => {
+      expect(() => readApiKey(env)).toThrow(/OPENAI_API_KEY is not set/);
+    },
+  );
+});
+
+describe("baseUrlOf", () => {
+  it("defaults to OpenAI and drops trailing slashes from an override", () => {
+    expect(baseUrlOf({})).toBe("https://api.openai.com/v1");
+    expect(baseUrlOf({ OPENAI_BASE_URL: " " })).toBe("https://api.openai.com/v1");
+    expect(baseUrlOf({ OPENAI_BASE_URL: "http://localhost:9/v1//" })).toBe("http://localhost:9/v1");
+  });
+});
+
+describe("resolveOutDir", () => {
+  const context = { repoRoot: "/work/repo", tmpDir: "/tmp/t", stamp: "S" };
+
+  it("defaults to a fresh folder under the temp dir", () => {
+    expect(resolveOutDir(null, context)).toBe("/tmp/t/hell-ict-ai-bench/S");
+  });
+
+  it("accepts a folder outside the repository, including a sibling with a similar name", () => {
+    expect(resolveOutDir("/work/repo-out", context)).toBe("/work/repo-out");
+  });
+
+  it.each([["/work/repo"], ["/work/repo/out"], ["/work/repo/a/../b"]])(
+    "refuses %s inside the repository",
+    (out) => {
+      expect(() => resolveOutDir(out, context)).toThrow(/outside the repository/);
+    },
+  );
+
+  it("refuses a file inside the repository", () => {
+    expect(() => {
+      assertOutsideRepo("/work/repo/cases.json", "/work/repo");
+    }).toThrow(/outside the repository/);
+  });
+});
+
+describe("dryRunLines", () => {
+  const cases: BenchCase[] = [
+    {
+      id: "s3-short",
+      stage: "s3",
+      label: "short question",
+      messages: [
+        { role: "system", content: "あいう" },
+        { role: "user", content: "abcdefgh" },
+      ],
+    },
+  ];
+
+  it("lists the models with their parameters and the size of each case", () => {
+    const lines = dryRunLines(cases, parseCliArgs(["--cases", "c", "--repeat", "2"]));
+    expect(lines).toContain('model gpt-6-sol params {"reasoning_effort":"none"}');
+    expect(lines).toContain("s3-short [s3] short question: 2 messages, 11 chars, ~13 tokens");
+    expect(lines).toContain("2 calls per model, 8 in all, ~26 input tokens per model");
+    expect(lines.some((line) => line.startsWith("gpt-4o: input ~$"))).toBe(true);
+  });
+
+  it("shows an unknown price as unknown", () => {
+    const lines = dryRunLines(cases, parseCliArgs(["--cases", "c", "--models", "gpt-x"]));
+    expect(lines.at(-1)).toBe("gpt-x: input ~不明 (output not included)");
+  });
+});
+
+describe("main (as a process)", () => {
+  const dir = mkdtempSync(path.join(os.tmpdir(), "ai-bench-test-"));
+  const casesPath = path.join(dir, "cases.json");
+  writeFileSync(
+    casesPath,
+    JSON.stringify([
+      { id: "a", stage: "s4", label: "l", messages: [{ role: "user", content: "q" }] },
+    ]),
+  );
+  const run = (args: string[], env: Record<string, string> = {}) =>
+    spawnSync(process.execPath, [path.join(HERE, "main.ts"), ...args], {
+      cwd: REPO_ROOT,
+      encoding: "utf8",
+      // No OPENAI_API_KEY from the developer's shell, and nowhere real to send to.
+      env: { PATH: process.env.PATH ?? "", OPENAI_BASE_URL: "http://127.0.0.1:9/v1", ...env },
+    });
+
+  it("reads the case file in a dry run, without a key", () => {
+    const result = run(["--cases", casesPath, "--dry-run"]);
+    expect(result.status).toBe(0);
+    expect(result.stdout).toContain("a [s4] l: 1 messages");
+  });
+
+  it("stops before calling anything when the key is missing", () => {
+    const result = run(["--cases", casesPath, "--out", path.join(dir, "out")]);
+    expect(result.status).toBe(1);
+    expect(result.stderr).toContain("OPENAI_API_KEY is not set");
+    expect(result.stderr).not.toContain("[1/");
+  });
+
+  it("refuses an output folder inside the repository before calling anything", () => {
+    const result = run(["--cases", casesPath, "--out", path.join(REPO_ROOT, "tmp-out")], {
+      OPENAI_API_KEY: "sk-test-not-used",
+    });
+    expect(result.status).toBe(1);
+    expect(result.stderr).toContain("outside the repository");
+    expect(result.stderr).not.toContain("sk-test-not-used");
+  });
+
+  it("stops on a malformed case file", () => {
+    const bad = path.join(dir, "bad.json");
+    writeFileSync(bad, JSON.stringify([{ id: "a" }]));
+    const result = run(["--cases", bad, "--dry-run"]);
+    expect(result.status).toBe(1);
+    expect(result.stderr).toContain('"stage" must be a non-empty string');
+  });
+});
