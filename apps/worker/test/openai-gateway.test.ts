@@ -333,3 +333,108 @@ describe("OpenAiGatewayの失敗原因", () => {
     expect(aiFailureMeta("文字列")).toEqual({ failureReason: "unknown" });
   });
 });
+
+describe("OpenAiGatewayの本文と互換の接続先", () => {
+  /** fetchを差し替えて1回送り、送った本文と結果（成功のtextか投げた例外）を返す。 */
+  const sendOnce = async (
+    gateway: OpenAiGateway,
+    response: () => Response,
+  ): Promise<{ bodies: string[]; result: unknown }> => {
+    const bodies: string[] = [];
+    const originalFetch = globalThis.fetch;
+    globalThis.fetch = ((_url: string, init: RequestInit) => {
+      bodies.push(String(init.body));
+      return Promise.resolve(response());
+    }) as typeof fetch;
+    try {
+      const result = await gateway
+        .complete({ messages: [{ role: "user", text: "こんにちは" }], timeoutMs: 1_000 })
+        .then((value) => value.text)
+        .catch((caught: unknown) => caught);
+      return { bodies, result };
+    } finally {
+      globalThis.fetch = originalFetch;
+    }
+  };
+
+  const okResponse = (): Response =>
+    new Response(JSON.stringify({ choices: [{ message: { content: "了解" } }] }), { status: 200 });
+
+  const parsedBodies = (bodies: readonly string[]): unknown[] =>
+    bodies.map((body): unknown => JSON.parse(body));
+
+  it("追加の指定が無ければ、本文はmodelとmessagesだけ（主系の本文を変えない）", async () => {
+    const { bodies } = await sendOnce(
+      new OpenAiGateway("https://example.test/v1", "k", "gpt-4.1-mini"),
+      okResponse,
+    );
+    expect(bodies).toEqual([
+      JSON.stringify({
+        model: "gpt-4.1-mini",
+        messages: [{ role: "user", content: "こんにちは" }],
+      }),
+    ]);
+  });
+
+  it("追加の指定は本文へ足し、modelとmessagesは上書きさせない", async () => {
+    const { bodies } = await sendOnce(
+      new OpenAiGateway("https://example.test/v1", "k", "claude-haiku-5-5", {
+        thinking: { type: "disabled" },
+        model: "other-model",
+        messages: [],
+      }),
+      okResponse,
+    );
+    expect(parsedBodies(bodies)).toEqual([
+      {
+        thinking: { type: "disabled" },
+        model: "claude-haiku-5-5",
+        messages: [{ role: "user", content: "こんにちは" }],
+      },
+    ]);
+  });
+
+  it("Anthropicの互換の接続先の応答（OpenAIに無い項目つき）から本文を取り出す", async () => {
+    // https://platform.claude.com/docs/en/api/openai-sdk の応答の形。
+    const anthropicBody = {
+      id: "msg_01AbCdEf",
+      object: "chat.completion",
+      created: 1_791_590_400,
+      model: "claude-haiku-5-5",
+      choices: [
+        {
+          index: 0,
+          finish_reason: "stop",
+          message: { role: "assistant", content: "承知しました。" },
+        },
+      ],
+      usage: {
+        prompt_tokens: 20,
+        completion_tokens: 8,
+        total_tokens: 28,
+        prompt_tokens_details: { cached_tokens: 0 },
+      },
+    };
+    const { result } = await sendOnce(
+      new OpenAiGateway("https://api.anthropic.test/v1", "k", "claude-haiku-5-5"),
+      () => new Response(JSON.stringify(anthropicBody), { status: 200 }),
+    );
+    expect(result).toBe("承知しました。");
+  });
+
+  it("互換の接続先が空の本文を返したら、応答の形の不一致として失敗にする", async () => {
+    const { result } = await sendOnce(
+      new OpenAiGateway("https://api.anthropic.test/v1", "k", "claude-haiku-5-5"),
+      () =>
+        new Response(
+          JSON.stringify({
+            choices: [{ index: 0, finish_reason: "stop", message: { content: "" } }],
+          }),
+          { status: 200 },
+        ),
+    );
+    expect(result).toBeInstanceOf(OpenAiRequestError);
+    if (!(result instanceof OpenAiRequestError)) throw new Error("unexpected");
+    expect(result.failure.reason).toBe("invalid_response");
+  });
+});

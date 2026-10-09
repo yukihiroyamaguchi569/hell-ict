@@ -581,7 +581,7 @@ describe("ヘルスチェックのguards", () => {
           allowedOrigins: true,
           chatRateLimitPerMinute: 20,
         },
-        ai: { route: "primary", backupKey: false, backupModel: false },
+        ai: { route: "primary", backupKey: false, backupModel: false, fallbackConfigured: false },
       });
       expect(JSON.stringify(body)).not.toContain("07");
       expect(JSON.stringify(body)).not.toContain(OTHER_ORIGIN);

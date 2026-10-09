@@ -118,15 +118,29 @@ const extractContent = (body: unknown): string => {
   return message.content;
 };
 
+/** リクエスト本文へ足せるJSONの値。 */
+export type JsonValue =
+  | string
+  | number
+  | boolean
+  | null
+  | readonly JsonValue[]
+  | { readonly [key: string]: JsonValue };
+
+/** `model`・`messages`のほかに本文へ足す指定（他社の互換の接続先で思考を抑えるなど）。 */
+export type ExtraRequestBody = Readonly<Record<string, JsonValue>>;
+
 /**
  * `AiGateway`のOpenAI adapter。domainからCloudflare/OpenAIを直接importさせないため、
  * ここWorker側だけに置く。APIキーはこの呼び出しの外へは出さない。
+ * OpenAI互換のChat Completionsの接続先（Anthropicの互換の接続先など）にもそのまま使える。
  */
 export class OpenAiGateway implements AiGateway {
   constructor(
     private readonly baseUrl: string,
     private readonly apiKey: string,
     private readonly model: string,
+    private readonly extraBody: ExtraRequestBody = {},
   ) {}
 
   async complete(request: AiRequest): Promise<AiResponse> {
@@ -167,7 +181,10 @@ export class OpenAiGateway implements AiGateway {
         "content-type": "application/json",
         authorization: `Bearer ${this.apiKey}`,
       },
+      // 追加の指定は先に広げ、`model`・`messages`を上書きさせない。何も足さない経路の
+      // 本文は`{ model, messages }`のまま変わらない。
       body: JSON.stringify({
+        ...this.extraBody,
         model: this.model,
         messages: request.messages.map((message: AiMessage) => ({
           role: message.role,

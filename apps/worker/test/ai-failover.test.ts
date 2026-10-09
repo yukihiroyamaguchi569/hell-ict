@@ -4,10 +4,12 @@ import { z } from "zod";
 
 import {
   AI_ROUTE_HOLD_MS,
+  aiRouteMeta,
   aiRouteStatus,
   AiRouteState,
   createAiGateway,
   FailoverAiGateway,
+  FallbackAiGateway,
   switchCauseOf,
 } from "../src/ai-failover.js";
 import type { AiEnv, AiRouteMeta } from "../src/ai-failover.js";
@@ -487,12 +489,26 @@ describe("AiRouteState", () => {
 
 /** envを一時的に差し替えて実行する（healthと設定の読み取り用）。 */
 const withBackupEnv = async <T>(
-  overrides: Partial<Pick<Env, "OPENAI_API_KEY_BACKUP" | "OPENAI_MODEL_BACKUP">>,
+  overrides: Partial<
+    Pick<
+      Env,
+      | "OPENAI_API_KEY_BACKUP"
+      | "OPENAI_MODEL_BACKUP"
+      | "AI_ROUTE"
+      | "AI_FALLBACK_BASE_URL"
+      | "AI_FALLBACK_API_KEY"
+      | "AI_FALLBACK_MODEL"
+    >
+  >,
   run: () => Promise<T>,
 ): Promise<T> => {
   const saved = {
     OPENAI_API_KEY_BACKUP: env.OPENAI_API_KEY_BACKUP,
     OPENAI_MODEL_BACKUP: env.OPENAI_MODEL_BACKUP,
+    AI_ROUTE: env.AI_ROUTE,
+    AI_FALLBACK_BASE_URL: env.AI_FALLBACK_BASE_URL,
+    AI_FALLBACK_API_KEY: env.AI_FALLBACK_API_KEY,
+    AI_FALLBACK_MODEL: env.AI_FALLBACK_MODEL,
   };
   Object.assign(env, overrides);
   try {
@@ -582,6 +598,217 @@ describe("/api/healthのai", () => {
       route: "backup-key",
       backupKey: true,
       backupModel: false,
+      fallbackConfigured: false,
+    });
+  });
+});
+
+describe("手で切り替える他社の予備（AI_ROUTE=fallback）", () => {
+  const FALLBACK_BASE_URL = "https://api.anthropic.test/v1";
+  const FALLBACK_KEY = "sk-ant-fallback-secret";
+  const FALLBACK_MODEL = "claude-haiku-5-5";
+
+  const FALLBACK: Partial<AiEnv> = {
+    AI_ROUTE: "fallback",
+    AI_FALLBACK_BASE_URL: FALLBACK_BASE_URL,
+    AI_FALLBACK_API_KEY: FALLBACK_KEY,
+    AI_FALLBACK_MODEL: FALLBACK_MODEL,
+  };
+
+  const testEnv = (overrides: Partial<AiEnv>): AiEnv => ({
+    OPENAI_BASE_URL: BASE_URL,
+    OPENAI_API_KEY: PRIMARY_KEY,
+    OPENAI_MODEL: PRIMARY_MODEL,
+    OPENAI_API_KEY_BACKUP: BACKUP_KEY,
+    OPENAI_MODEL_BACKUP: BACKUP_MODEL,
+    ...overrides,
+  });
+
+  /** fetchへ届いた1回の呼び出しの宛先・キー・本文。 */
+  type Sent = { readonly url: string; readonly key: string; readonly body: unknown };
+  let sent: Sent[] = [];
+
+  const stubSent = (respond: () => Promise<Response>) => {
+    sent = [];
+    globalThis.fetch = ((url: string, init?: RequestInit) => {
+      sent.push({
+        url: String(url),
+        key: new Headers(init?.headers).get("authorization")?.replace("Bearer ", "") ?? "",
+        body: JSON.parse(String(init?.body)),
+      });
+      return respond();
+    }) as typeof fetch;
+  };
+
+  /** envから組んだ経路で1回送り、結果と活動ログへ足すmetaを返す。 */
+  const sendWith = async (
+    overrides: Partial<AiEnv>,
+    state = new AiRouteState(),
+  ): Promise<{ result: unknown; meta: Partial<AiRouteMeta> }> => {
+    const gateway = createAiGateway(testEnv(overrides), state);
+    const result = await gateway
+      .complete(REQUEST)
+      .then((response) => response.text)
+      .catch((caught: unknown) => caught);
+    return { result, meta: aiRouteMeta(gateway) };
+  };
+
+  const PRIMARY_SENT: Sent = {
+    url: `${BASE_URL}/chat/completions`,
+    key: PRIMARY_KEY,
+    body: { model: PRIMARY_MODEL, messages: [{ role: "user", content: "患者メモ本文" }] },
+  };
+
+  it("3つがそろっていれば予備だけを呼び、思考を切る指定を足して経路をfallbackとする", async () => {
+    stubSent(() => ok("予備の応答"));
+    const { result, meta } = await sendWith(FALLBACK);
+    expect(result).toBe("予備の応答");
+    expect(sent).toEqual([
+      {
+        url: `${FALLBACK_BASE_URL}/chat/completions`,
+        key: FALLBACK_KEY,
+        body: {
+          thinking: { type: "disabled" },
+          model: FALLBACK_MODEL,
+          messages: [{ role: "user", content: "患者メモ本文" }],
+        },
+      },
+    ]);
+    expect(meta).toEqual({ aiRoute: "fallback" });
+  });
+
+  it("createAiGatewayはfallbackのときFallbackAiGatewayを返す", () => {
+    expect(createAiGateway(testEnv(FALLBACK), new AiRouteState())).toBeInstanceOf(
+      FallbackAiGateway,
+    );
+  });
+
+  it("接続先の末尾の/は落としてつなぐ", async () => {
+    stubSent(() => ok("ok"));
+    await sendWith({ ...FALLBACK, AI_FALLBACK_BASE_URL: `${FALLBACK_BASE_URL}/` });
+    expect(sent.map((call) => call.url)).toEqual([`${FALLBACK_BASE_URL}/chat/completions`]);
+  });
+
+  it.each([
+    ["429", () => errorResponse(429, "rate_limit_exceeded")],
+    ["401", () => errorResponse(401, "invalid_api_key")],
+    ["500", () => errorResponse(500, null)],
+    ["通信断", () => Promise.reject(new TypeError("fetch failed"))],
+  ])("予備が%sで失敗しても、OpenAI（主系・予備キー・予備モデル）へは送らない", async (_l, fail) => {
+    stubSent(fail);
+    const state = new AiRouteState();
+    const { result, meta } = await sendWith(FALLBACK, state);
+    expect(result).toBeInstanceOf(OpenAiRequestError);
+    expect(sent.map((call) => call.key)).toEqual([FALLBACK_KEY]);
+    expect(meta).toEqual({ aiRoute: "fallback" });
+    // 自動の切り替えの保持にも触れない。
+    expect(state.current(0)).toBe("primary");
+  });
+
+  it("自動の切り替えを保持中でも、fallbackなら予備だけを呼ぶ", async () => {
+    const state = new AiRouteState();
+    state.hold("backup-key", 0);
+    stubSent(() => ok("予備の応答"));
+    await sendWith(FALLBACK, state);
+    expect(sent.map((call) => call.key)).toEqual([FALLBACK_KEY]);
+  });
+
+  it.each([
+    ["未設定", undefined],
+    ["空文字", ""],
+    ["primary", "primary"],
+    ["大文字の書き損じ", "Fallback"],
+    ["末尾に改行", "fallback\n"],
+    ["別の語", "anthropic"],
+  ])("AI_ROUTEが%sなら主系のまま動き、本文も変えない", async (_label, route) => {
+    stubSent(() => ok("主系の応答"));
+    const { result, meta } = await sendWith({ ...FALLBACK, AI_ROUTE: route });
+    expect(result).toBe("主系の応答");
+    expect(sent).toEqual([PRIMARY_SENT]);
+    expect(meta).toEqual({ aiRoute: "primary" });
+  });
+
+  it.each([
+    ["接続先が未設定", { AI_FALLBACK_BASE_URL: undefined }],
+    ["接続先が空文字", { AI_FALLBACK_BASE_URL: "" }],
+    ["キーが未設定", { AI_FALLBACK_API_KEY: undefined }],
+    ["キーが空文字", { AI_FALLBACK_API_KEY: "" }],
+    ["モデルが未設定", { AI_FALLBACK_MODEL: undefined }],
+    ["モデルが空文字", { AI_FALLBACK_MODEL: "" }],
+    ["接続先がhttp", { AI_FALLBACK_BASE_URL: "http://api.anthropic.test/v1" }],
+    ["接続先がURLでない", { AI_FALLBACK_BASE_URL: "api.anthropic.test/v1" }],
+    ["接続先が資格情報入り", { AI_FALLBACK_BASE_URL: "https://u:p@api.anthropic.test/v1" }],
+    ["接続先がhttps以外のスキーム", { AI_FALLBACK_BASE_URL: "ftp://api.anthropic.test/v1" }],
+    // `/chat/completions`をつなぐと、クエリやフラグメントの中に入って意図したパスへ届かない。
+    ["接続先がクエリ付き", { AI_FALLBACK_BASE_URL: "https://api.anthropic.test/v1?x=1" }],
+    ["接続先が空のクエリ付き", { AI_FALLBACK_BASE_URL: "https://api.anthropic.test/v1?" }],
+    ["接続先がフラグメント付き", { AI_FALLBACK_BASE_URL: "https://api.anthropic.test/v1#top" }],
+    ["接続先が空のフラグメント付き", { AI_FALLBACK_BASE_URL: "https://api.anthropic.test/v1#" }],
+  ] as const)("fallbackでも%sなら主系のまま動く", async (_label, broken) => {
+    stubSent(() => ok("主系の応答"));
+    const overrides = { ...FALLBACK, ...broken };
+    const { result, meta } = await sendWith(overrides);
+    expect(result).toBe("主系の応答");
+    expect(sent).toEqual([PRIMARY_SENT]);
+    expect(meta).toEqual({ aiRoute: "primary" });
+    expect(aiRouteStatus(testEnv(overrides), new AiRouteState(), 0)).toMatchObject({
+      route: "primary",
+      fallbackConfigured: false,
+    });
+  });
+
+  it("主系のまま（予備は登録済み）なら、主系の自動の切り替えは従来どおり働く", async () => {
+    stubSent(() => quota());
+    const { meta } = await sendWith({ ...FALLBACK, AI_ROUTE: undefined });
+    expect(sent.map((call) => call.key)).toEqual([PRIMARY_KEY, BACKUP_KEY]);
+    expect(meta).toEqual({ aiRoute: "backup-key", aiSwitchCause: "key" });
+  });
+
+  describe("health", () => {
+    it("登録済みで切り替え前はprimary・fallbackConfigured: true", () => {
+      expect(
+        aiRouteStatus(testEnv({ ...FALLBACK, AI_ROUTE: undefined }), new AiRouteState(), 0),
+      ).toEqual({ route: "primary", backupKey: true, backupModel: true, fallbackConfigured: true });
+    });
+
+    it("切り替え中はfallback。自動の切り替えを保持中のisolateでもfallbackと出す", () => {
+      const state = new AiRouteState();
+      state.hold("backup-key", 0);
+      expect(aiRouteStatus(testEnv(FALLBACK), state, 1)).toMatchObject({
+        route: "fallback",
+        fallbackConfigured: true,
+      });
+    });
+
+    it("/api/healthは経路と登録の有無だけを出し、キー・接続先・モデルは出さない", async () => {
+      await withBackupEnv(
+        {
+          AI_ROUTE: "fallback",
+          AI_FALLBACK_BASE_URL: "https://api.anthropic.com/v1",
+          AI_FALLBACK_API_KEY: "sk-ant-api03-fallbackSECRET9876",
+          AI_FALLBACK_MODEL: FALLBACK_MODEL,
+        },
+        async () => {
+          const response = await exports.default.fetch(
+            new Request("https://example.test/api/health"),
+          );
+          const text = await response.text();
+          expect(JSON.parse(text)).toMatchObject({
+            status: "ok",
+            ai: { route: "fallback", fallbackConfigured: true },
+          });
+          for (const leaked of ["sk-", "fallbackSECRET", "9876", "anthropic", FALLBACK_MODEL]) {
+            expect(text).not.toContain(leaked);
+          }
+        },
+      );
+    });
+
+    it("/api/healthは未登録ならfallbackConfigured: false", async () => {
+      const response = await exports.default.fetch(new Request("https://example.test/api/health"));
+      await expect(response.json()).resolves.toMatchObject({
+        ai: { route: "primary", fallbackConfigured: false },
+      });
     });
   });
 });
