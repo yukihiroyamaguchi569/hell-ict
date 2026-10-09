@@ -69,6 +69,8 @@ team_code="${event_no}$(printf '%04d' $((RANDOM % 9999 + 1)))"
 echo "wrangler dev を予備の設定で起動する（ポート ${port}、モデル ${model}）..."
 (
   cd "$worker_dir"
+  # Keep the key out of wrangler's environment too: it reads it only from $key_file.
+  unset ANTHROPIC_API_KEY
   exec "$wrangler" dev --local --ip 127.0.0.1 --port "$port" --persist-to "$state_dir/state" \
     --var "AI_ROUTE:fallback" \
     --var "AI_FALLBACK_BASE_URL:https://api.anthropic.com/v1" \
