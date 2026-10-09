@@ -65,12 +65,12 @@ event_no=99
 team_code="${event_no}$(printf '%04d' $((RANDOM % 9999 + 1)))"
 
 (umask 077 && printf 'AI_FALLBACK_API_KEY=%s\n' "$ANTHROPIC_API_KEY" >"$key_file")
+# From here on, no child process (wrangler dev, d1 execute, curl) inherits the key: it is read only from $key_file.
+unset ANTHROPIC_API_KEY
 
 echo "wrangler dev を予備の設定で起動する（ポート ${port}、モデル ${model}）..."
 (
   cd "$worker_dir"
-  # Keep the key out of wrangler's environment too: it reads it only from $key_file.
-  unset ANTHROPIC_API_KEY
   exec "$wrangler" dev --local --ip 127.0.0.1 --port "$port" --persist-to "$state_dir/state" \
     --var "AI_ROUTE:fallback" \
     --var "AI_FALLBACK_BASE_URL:https://api.anthropic.com/v1" \
