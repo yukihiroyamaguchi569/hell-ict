@@ -1,0 +1,106 @@
+import { describe, expect, it } from "vitest";
+
+import { baseUrlOf, parseProviderName, PROVIDERS, readEndpoints } from "./providers.ts";
+
+describe("PROVIDERS", () => {
+  it("points each provider at its OpenAI-compatible endpoint and its own key variable", () => {
+    expect(
+      Object.values(PROVIDERS).map(({ name, baseUrl, keyEnv }) => [name, baseUrl, keyEnv]),
+    ).toEqual([
+      ["openai", "https://api.openai.com/v1", "OPENAI_API_KEY"],
+      ["gemini", "https://generativelanguage.googleapis.com/v1beta/openai", "GEMINI_API_KEY"],
+      ["anthropic", "https://api.anthropic.com/v1", "ANTHROPIC_API_KEY"],
+    ]);
+  });
+
+  it("reads no rate-limit header for Gemini, which documents none", () => {
+    expect(PROVIDERS.gemini).toMatchObject({
+      rateLimitHeaders: [],
+      remainingRequestsHeader: null,
+      remainingTokensHeader: null,
+    });
+  });
+});
+
+describe("parseProviderName", () => {
+  it("accepts the three names, trimmed", () => {
+    expect(parseProviderName(" anthropic ")).toBe("anthropic");
+    expect(parseProviderName("gemini")).toBe("gemini");
+  });
+
+  it.each([["google"], ["Gemini"], [""], ["constructor"]])("rejects %j", (raw) => {
+    expect(() => parseProviderName(raw)).toThrow(/--provider must be one of/);
+  });
+});
+
+describe("baseUrlOf", () => {
+  it("defaults to the provider and drops trailing slashes from an override", () => {
+    expect(baseUrlOf({}, "openai")).toBe("https://api.openai.com/v1");
+    expect(baseUrlOf({ OPENAI_BASE_URL: " " }, "openai")).toBe("https://api.openai.com/v1");
+    expect(baseUrlOf({ OPENAI_BASE_URL: "http://localhost:9/v1//" }, "openai")).toBe(
+      "http://localhost:9/v1",
+    );
+    expect(baseUrlOf({ GEMINI_BASE_URL: "http://localhost:8/g/" }, "gemini")).toBe(
+      "http://localhost:8/g",
+    );
+  });
+
+  it("does not take one provider's override for another", () => {
+    expect(baseUrlOf({ OPENAI_BASE_URL: "http://localhost:9/v1" }, "anthropic")).toBe(
+      "https://api.anthropic.com/v1",
+    );
+  });
+});
+
+describe("readEndpoints", () => {
+  const env = {
+    OPENAI_API_KEY: " sk-openai \n",
+    GEMINI_API_KEY: "AIza-gemini",
+    ANTHROPIC_API_KEY: "sk-ant-x",
+  };
+
+  it("reads the trimmed key and the endpoint of each provider in use, once each", () => {
+    const endpoints = readEndpoints(env, ["gemini", "openai", "gemini"]);
+    expect([...endpoints.entries()]).toEqual([
+      [
+        "gemini",
+        {
+          baseUrl: "https://generativelanguage.googleapis.com/v1beta/openai",
+          apiKey: "AIza-gemini",
+        },
+      ],
+      ["openai", { baseUrl: "https://api.openai.com/v1", apiKey: "sk-openai" }],
+    ]);
+  });
+
+  it("asks only for the keys of the providers in use", () => {
+    expect(readEndpoints({ ANTHROPIC_API_KEY: "sk-ant-x" }, ["anthropic"]).size).toBe(1);
+  });
+
+  it.each([[undefined], [""], ["  "]])(
+    "stops with a clear error when a key is missing (%j)",
+    (geminiKey) => {
+      expect(() =>
+        readEndpoints({ ...env, GEMINI_API_KEY: geminiKey }, ["openai", "gemini"]),
+      ).toThrow(
+        "GEMINI_API_KEY is not set. Run `read -s GEMINI_API_KEY; export GEMINI_API_KEY` first",
+      );
+    },
+  );
+
+  it("names every missing key at once and never the value of a key that is set", () => {
+    let message = "";
+    try {
+      readEndpoints({ OPENAI_API_KEY: "sk-openai-secret" }, ["openai", "gemini", "anthropic"]);
+    } catch (caught) {
+      message = caught instanceof Error ? caught.message : "";
+    }
+    expect(message).toContain("GEMINI_API_KEY, ANTHROPIC_API_KEY are not set");
+    expect(message).not.toContain("sk-openai-secret");
+    expect(message).not.toContain("OPENAI_API_KEY");
+  });
+
+  it("needs nothing for no providers", () => {
+    expect(readEndpoints({}, []).size).toBe(0);
+  });
+});
