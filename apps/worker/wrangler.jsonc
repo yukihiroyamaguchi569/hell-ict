@@ -29,7 +29,7 @@
   //   受け付けるのは1〜600の整数のみで、範囲外・非数値は既定の20へ倒す。
   "vars": {
     "OPENAI_BASE_URL": "https://api.openai.com/v1",
-    "OPENAI_MODEL": "gpt-4o",
+    "OPENAI_MODEL": "gpt-4.1-mini",
   },
   // テストプレイ用の静的配信。/api/* と /sounds/* は必ずWorkerへ届かせ、それ以外の
   // パスだけAssetsから返す（scripts/build-testplay.shが生成するpublic/を配信対象とする）。
