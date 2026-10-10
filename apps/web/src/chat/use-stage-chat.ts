@@ -11,7 +11,7 @@ import {
   storedPendingText,
 } from "@hell-ict/domain";
 import type { ChatSnapshot, PendingCommands, StageAi, TeamCode } from "@hell-ict/domain";
-import { computed, effectScope, ref, shallowRef, watch } from "vue";
+import { computed, effectScope, readonly, ref, shallowRef, watch } from "vue";
 import type { ComputedRef, Ref } from "vue";
 
 import type { ChatApi } from "../api/chat-api.js";
@@ -42,6 +42,11 @@ export interface StageChat {
   readonly sending: ComputedRef<boolean>;
   /** The stage's conversation is being prepared again ([再試行] after `failed`). */
   readonly preparing: ComputedRef<boolean>;
+  /**
+   * How many times the pane has said the PII gate blocked a message (its notice shown). Only
+   * counts up: a stage watches it to sound the block (Stage 5, Issue #29).
+   */
+  readonly piiBlocks: Readonly<Ref<number>>;
   /** Sends the draft to the current stage's AI (live stages only). Never resends by itself. */
   send(): Promise<void>;
   /** After `ai.status=failed`: asks the server again to prepare the stage's conversation. */
@@ -86,6 +91,7 @@ export const createStageChat = (deps: StageChatDeps): StageChat => {
   const preparing = ref(false);
   const inFlight = shallowRef<InFlightMessage | null>(null);
   const notices = shallowRef<readonly ChatNotice[]>([]);
+  const piiBlocks = ref(0);
   let pending: PendingCommands = new Map();
   let noticeSeq = 0;
   /** The join whose chat the pane shows (0: none). */
@@ -213,6 +219,7 @@ export const createStageChat = (deps: StageChatDeps): StageChat => {
     if (outcome.kind !== "ok") draft.value = context.text;
     const notice = chatNoticeText(outcome);
     if (notice !== null) addNotice(context.threadId, notice);
+    if (outcome.kind === "unsaved" && outcome.reason === "pii-blocked") piiBlocks.value += 1;
   };
 
   /**
@@ -308,6 +315,7 @@ export const createStageChat = (deps: StageChatDeps): StageChat => {
     draft,
     sending: computed(() => sending.value),
     preparing: computed(() => preparing.value),
+    piiBlocks: readonly(piiBlocks),
     send,
     retryPrepare,
     dispose: () => {

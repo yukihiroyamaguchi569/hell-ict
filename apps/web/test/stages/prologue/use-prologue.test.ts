@@ -131,6 +131,7 @@ const start = async (opened = true, storage = new FakeKeyValueStorage()) => {
     ...{
       sfx: { play: () => undefined, tone: () => undefined },
       karubeRead: ref(new Set<string>()),
+      chatPiiBlocks: ref(0),
       teamName: ref(""),
     },
   };

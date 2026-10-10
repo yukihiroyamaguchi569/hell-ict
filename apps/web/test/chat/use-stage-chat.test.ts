@@ -364,6 +364,38 @@ describe("失敗", () => {
     expect(posts().map((post) => post.commandId)).toEqual([CHAT_IDS[0], CHAT_IDS[1]]);
   });
 
+  it("piiBlocks はブロックを告げるたびに1つ増え、ほかの失敗や応答では増えない", async () => {
+    const { server, chat, type } = await setup();
+    expect(chat.piiBlocks.value).toBe(0);
+    server.onMessage = () => error(422, { message: "検知", code: "pii_blocked" });
+    await type(`${stage5Patient.name}さんの件`);
+    expect(chat.piiBlocks.value).toBe(1);
+    await chat.send();
+    await flush();
+    expect(chat.piiBlocks.value).toBe(2);
+    server.onMessage = () => error(422, { message: "答えられません。", code: "ai_refusal" });
+    await type("質問");
+    server.onMessage = unavailable;
+    await type("質問2");
+    expect(chat.piiBlocks.value).toBe(2);
+  });
+
+  it("ブロックの応答が来たとき別ステージにいれば、piiBlocks は増えない（告げていない）", async () => {
+    const { server, session, chat } = await setup();
+    const answer = deferred();
+    server.onMessage = () => answer.promise;
+    chat.draft.value = `${stage5Patient.name}さんの件`;
+    const sent = chat.send();
+    await flush();
+    server.threads[S4] = [];
+    server.ai = ready(S4);
+    await session.refresh();
+    answer.resolve(error(422, { message: "検知", code: "pii_blocked" }));
+    await sent;
+    await flush();
+    expect(chat.piiBlocks.value).toBe(0);
+  });
+
   it("429 は待ち時間を告げるだけで、自分からは送り直さない", async () => {
     const { server, type, posts, texts } = await setup();
     server.onMessage = () => error(429, { message: "多すぎます。" }, "17");

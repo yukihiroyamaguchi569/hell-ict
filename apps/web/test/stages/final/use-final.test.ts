@@ -92,6 +92,7 @@ const setup = async (options: Options = {}) => {
     mail: useMailSelection(),
     sfx: { play: () => undefined, tone: () => undefined },
     karubeRead: ref(new Set<string>()),
+    chatPiiBlocks: ref(0),
     teamName: ref("チームA"),
   };
   const scope = effectScope();

@@ -93,6 +93,7 @@ const mount = (initial: GameView) => {
           tone: () => undefined,
         },
         karubeRead: ref(new Set<string>()),
+        chatPiiBlocks: ref(0),
         teamName: ref(""),
       },
     );

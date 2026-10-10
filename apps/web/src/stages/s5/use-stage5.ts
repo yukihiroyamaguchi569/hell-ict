@@ -17,6 +17,7 @@ import {
   submitVerdict,
   type Stage5Overlay,
 } from "./s5-view.js";
+import { PII_BLOCK_TONE } from "./s5-sounds.js";
 import { useSubmission } from "./use-submission.js";
 
 /** How long the alarm stays before the head of administration calls (mock `wait(1600)`). */
@@ -33,6 +34,8 @@ export interface Stage5Deps {
   readonly sfx: Sfx;
   /** The report's 「送信しました」 is still showing (`RedactPenalty.holding`). */
   readonly penaltyHeld: () => boolean;
+  /** Counts up each time the AI pane says the PII gate blocked a message. */
+  readonly piiBlocks: Readonly<Ref<number>>;
 }
 
 export interface Stage5 {
@@ -71,6 +74,13 @@ export const useStage5 = (deps: Stage5Deps): Stage5 => {
       }, ALARM_MS);
     },
   );
+
+  // Each block the pane shows sounds low (Issue #29): the trap's, and every one after the penalty,
+  // which the screen otherwise only says in the chat. Only a block made while the stage is on
+  // screen: the count is the whole tab's, and it never counts down.
+  watch(deps.piiBlocks, (now, before) => {
+    if (now > before) deps.sfx.tone(PII_BLOCK_TONE);
+  });
 
   // The deadline's call: once per stay, never again once closed (`hellVueS5Call:<code>`).
   const callRecord = sessionRecord(
