@@ -55,6 +55,7 @@ describe("clearSheets", () => {
       art: {
         src: "/assets/images/production/stage3-ward-3b-head-nurse-clear.webp",
         position: DEFAULT_ART_POSITION,
+        fit: "cover",
       },
       name: "3B病棟 看護師長",
       lines: stageClears.s3.field.lines,
@@ -64,6 +65,7 @@ describe("clearSheets", () => {
       art: {
         src: "/assets/images/production/stage3-nursing-director-clear.webp",
         position: DEFAULT_ART_POSITION,
+        fit: "cover",
       },
       name: "看護部長",
       lines: stageClears.s3.exec,
