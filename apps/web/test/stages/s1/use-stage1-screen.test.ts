@@ -60,6 +60,7 @@ const mount = (
       mail,
       sfx: { play: () => undefined, tone: () => undefined },
       karubeRead: ref(new Set<string>()),
+      chatPiiBlocks: ref(0),
       teamName: ref(""),
     };
     return useStage1Screen({ context, stage: useStage1(context), draft, clipboard });

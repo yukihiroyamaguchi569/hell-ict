@@ -7,9 +7,9 @@ import { enterButton, enterTeam, uniqueTeamCode, welcomeHeading } from "./helper
  * バーを重ね、画像と効果音をまとめて先読みする。全部終わるか15秒で、クリックを待たずに入室
  * 画面へ進む。保存済みのチームで再読み込みしたときは出さずに裏で読む。
  *
- * 先読みは production の画像23枚と効果音7種の30件。wrangler dev --local の R2 は空なので、
+ * 先読みは production の画像27枚と効果音7種の34件。wrangler dev --local の R2 は空なので、
  * 効果音はすぐ 404 で終わる（失敗も1件として数える）。下では画像を1枚だけ止めて、残り1件の
- * 状態（29/30 ＝ 96%）を作る。
+ * 状態（33/34 ＝ 97%）を作る。
  * 止めた画像はページの load を止めるので、goto と reload は domcontentloaded までしか待たない。
  */
 
@@ -43,8 +43,8 @@ test("読み込み中は病院の外観と割合を出し、読み終わった�
   await page.goto("/", { waitUntil: "domcontentloaded" });
 
   await expect(opening(page)).toBeVisible();
-  await expect(opening(page).getByRole("status")).toHaveText("読み込み中 96%");
-  await expect(progress(page)).toHaveAttribute("aria-valuenow", "96");
+  await expect(opening(page).getByRole("status")).toHaveText("読み込み中 97%");
+  await expect(progress(page)).toHaveAttribute("aria-valuenow", "97");
   const art = opening(page).getByRole("img", { name: "聖クロノス総合病院の外観" });
   await expect
     .poll(() => art.evaluate((element: HTMLImageElement) => element.naturalWidth))
@@ -70,7 +70,7 @@ test("読み終わらなくても15秒で入室画面へ進む（残りは裏で
   const health = page.waitForResponse("**/api/health");
   await page.goto("/", { waitUntil: "domcontentloaded" });
   await health;
-  await expect(opening(page).getByRole("status")).toHaveText("読み込み中 96%");
+  await expect(opening(page).getByRole("status")).toHaveText("読み込み中 97%");
 
   await page.clock.fastForward(14_000);
   await expect(opening(page)).toBeVisible();

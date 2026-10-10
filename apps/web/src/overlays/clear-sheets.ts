@@ -11,8 +11,8 @@ import type { SfxName } from "../composables/use-sfx.js";
  * what this returns.
  */
 
-/** The picture laid over the whole screen behind the subtitles of ② or ③. */
-export interface ClearArt {
+/** The picture laid over the whole screen behind the subtitles (② or ③, or a scold call). */
+export interface SceneArt {
   /** `/assets/images/production/<file>` (the Worker serves the production art). */
   readonly src: string;
   /** The CSS object-position: where the picture is anchored when the screen crops it. */
@@ -21,7 +21,7 @@ export interface ClearArt {
 
 /** One sheet of ② or ③: a full-screen picture, the speaker's name plate and the lines. */
 export interface ClearCard {
-  readonly art: ClearArt;
+  readonly art: SceneArt;
   /** The name plate: "所属 役職", or the role alone when there is no 所属. Also the picture's alt. */
   readonly name: string;
   readonly lines: readonly string[];
@@ -47,12 +47,14 @@ export const portraitSrc = (file: string): string => `/assets/images/production/
  */
 export const DEFAULT_ART_POSITION = "50% 20%";
 
-const art = (fullscreen: FullscreenArt): ClearArt => ({
+/** A full-screen picture as content gives it (② ③ of a clear, or a scold call) to draw. */
+export const fullscreenArt = (fullscreen: FullscreenArt): SceneArt => ({
   src: portraitSrc(fullscreen.img),
   position: fullscreen.position ?? DEFAULT_ART_POSITION,
 });
 
-const speakerName = (who: { readonly org: string; readonly role: string }): string =>
+/** The name plate: "所属 役職", or the role alone when there is no 所属. */
+export const speakerName = (who: { readonly org: string; readonly role: string }): string =>
   who.org === "" ? who.role : `${who.org} ${who.role}`;
 
 /**
@@ -82,12 +84,12 @@ export const clearSheets = (
     sub: clear.sub,
     sfx: clear.sfx === "" ? null : clear.sfx,
     field: {
-      art: art(clear.field.fullscreen),
+      art: fullscreenArt(clear.field.fullscreen),
       name: speakerName(clear.field),
       lines: clear.field.lines,
     },
     exec: {
-      art: art(clear.execFullscreen),
+      art: fullscreenArt(clear.execFullscreen),
       name: speakerName(clear.voice),
       lines: execLines(stage, s1Result),
     },

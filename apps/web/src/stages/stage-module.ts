@@ -39,6 +39,8 @@ export interface StageContext {
   readonly karubeRead: Readonly<Ref<ReadonlySet<string>>>;
   /** The team's name kept on this PC (`useTeamName`; "" while unknown). */
   readonly teamName: Readonly<Ref<string>>;
+  /** Counts up each time the AI pane says the PII gate blocked a message (`StageChat.piiBlocks`). */
+  readonly chatPiiBlocks: Readonly<Ref<number>>;
 }
 
 /**

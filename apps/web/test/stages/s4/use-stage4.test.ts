@@ -124,6 +124,7 @@ const setup = async (prepare: (server: Stage4Server, storage: FakeKeyValueStorag
     mail: useMailSelection(),
     sfx: { play: (name) => played.push(name), tone: () => undefined },
     karubeRead: ref(new Set<string>()),
+    chatPiiBlocks: ref(0),
     teamName: ref(""),
   };
   const scope = effectScope();

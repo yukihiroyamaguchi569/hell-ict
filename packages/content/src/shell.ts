@@ -122,8 +122,8 @@ export const stageClears = {
     voice: execVoices.incho,
     execFullscreen: { img: "stage4-hospital-director-clear.webp" },
     exec: [
-      "読んだ。海外の速報が、今日の面会受付の手順に変わったわけだ。",
-      "結構。この病院は、報告を上げても、そこで止まることのほうが多い。",
+      "あの論文ひとつで、院内に発熱の集団が広がるのを防げたわけだ。",
+      "結構。この病院では、気づいても誰も動かないことのほうが多いのだがね。",
     ],
     title: "Stage 4 をクリアしました",
     sub: "報告 — 保健所への発熱患者一覧",

@@ -7,6 +7,7 @@ import type { Sfx } from "../../composables/use-sfx.js";
 import type { Scheduler } from "../../ports.js";
 import type { Verdict } from "../../verdict/verdict.js";
 import { PENALTY_DONE_MS } from "../penalty/penalty-done.js";
+import { REDACT_CLICK_TONE, REDACT_DONE_CHIME } from "./s5-sounds.js";
 import { reportResult, submitVerdict } from "./s5-view.js";
 import { useSubmission } from "./use-submission.js";
 
@@ -59,9 +60,23 @@ export const useRedactPenalty = (deps: RedactPenaltyDeps): RedactPenalty => {
   /** Server epoch ms the clock counts from, or `null` until the first redraw after the start. */
   const startedAt = ref<number | null>(null);
   let cancelHold: () => void = () => undefined;
+  let cancelChime: (() => void)[] = [];
+  const stopChime = (): void => {
+    for (const cancel of cancelChime) cancel();
+    cancelChime = [];
+  };
   onScopeDispose(() => {
     cancelHold();
+    stopChime();
   });
+  const playDoneChime = (): void => {
+    stopChime();
+    cancelChime = REDACT_DONE_CHIME.map(({ atMs, tone }) =>
+      deps.scheduler.schedule(() => {
+        deps.sfx.tone(tone);
+      }, atMs),
+    );
+  };
 
   const box = useSubmission({
     newCommandId: deps.newCommandId,
@@ -69,6 +84,7 @@ export const useRedactPenalty = (deps: RedactPenaltyDeps): RedactPenalty => {
     onResult: (result) => {
       if (result.kind === "sent-back") deps.sfx.play("cancel");
       if (result.kind !== "passed") return;
+      playDoneChime();
       holding.value = true;
       cancelHold = deps.scheduler.schedule(() => {
         holding.value = false;
@@ -82,6 +98,7 @@ export const useRedactPenalty = (deps: RedactPenaltyDeps): RedactPenalty => {
     (running) => {
       if (!running) return;
       cancelHold();
+      stopChime();
       box.reset();
       masked.value = new Set();
       holding.value = false;
@@ -114,6 +131,7 @@ export const useRedactPenalty = (deps: RedactPenaltyDeps): RedactPenalty => {
       const next = new Set(masked.value);
       if (!next.delete(index)) next.add(index);
       masked.value = next;
+      deps.sfx.tone(REDACT_CLICK_TONE);
     },
     submit() {
       if (!open()) return;

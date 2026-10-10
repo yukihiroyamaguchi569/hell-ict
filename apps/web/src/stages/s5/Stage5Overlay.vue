@@ -9,7 +9,9 @@ import {
 } from "@hell-ict/content";
 import { nextTick, useTemplateRef, watch } from "vue";
 
+import FullscreenScene from "../../overlays/FullscreenScene.vue";
 import VerdictBox from "../../verdict/VerdictBox.vue";
+import { callScene } from "../common/call-scene.js";
 import CallWindow from "../common/CallWindow.vue";
 import PenaltyLock from "../penalty/PenaltyLock.vue";
 import type { RedactPenalty } from "./use-redact-penalty.js";
@@ -17,13 +19,14 @@ import type { Stage5 } from "./use-stage5.js";
 
 /*
  * Stage 5's windows in the stage layer: the trap's alarm (facts only, no blame and no comfort)
- * and the head of administration's scold, the blacked-out report (mock startS5Penalty), and the
+ * and the head of administration's scold (over the whole screen, Issue #29), the blacked-out report (mock startS5Penalty), and the
  * deadline's call. Which one shows is `Stage5.overlay`'s; the report covers the AI chat, which
  * is the penalty's lock (mock .pane-r.locked).
  */
 const props = defineProps<{ stage: Stage5; penalty: RedactPenalty }>();
 const { overlay } = props.stage;
 const { masked, sending, verdict, elapsedMs, holding } = props.penalty;
+const scold = callScene(stage5Call, stage5Call.scoldFullscreen);
 
 const verdictEl = useTemplateRef<HTMLElement>("verdictEl");
 // The verdict is under the report, below the fold of the penalty's box: scroll the box (the
@@ -42,14 +45,15 @@ watch(verdict, () => {
     <div class="t">{{ stage5Alarm.title }}</div>
     <div class="s">{{ stage5Alarm.sub }}</div>
   </div>
-  <CallWindow
+  <FullscreenScene
     v-else-if="overlay === 'scold'"
     testid="s5-scold"
-    :call="stage5Call"
-    :org="stage5Call.org"
+    :art="scold.art"
+    :name="scold.name"
+    :caption="scold.caption"
     :lines="stage5ScoldLines"
-    :close-label="stage5Call.close"
-    @close="stage.dismissScold"
+    :button-label="stage5Call.close"
+    @next="stage.dismissScold"
   />
   <PenaltyLock
     v-else-if="overlay === 'penalty'"

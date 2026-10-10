@@ -56,6 +56,7 @@ import ViewerOverlay from "./viewer/ViewerOverlay.vue";
 
 const {
   session,
+  stageChat,
   http,
   probeHttp,
   clock,
@@ -113,6 +114,7 @@ const frame = useStageFrame(
     sfx,
     karubeRead: karubeRecord.read,
     teamName: teamName.name,
+    chatPiiBlocks: stageChat.piiBlocks,
   },
 );
 const karube = useKarube({

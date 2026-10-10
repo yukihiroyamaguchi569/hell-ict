@@ -59,6 +59,7 @@ export const s2Context = (
       },
     },
     karubeRead: ref(new Set<string>()),
+    chatPiiBlocks: ref(0),
     teamName: ref(""),
   };
   return { ...fake, context, serverNow, scheduler, storage, sounds, tones };

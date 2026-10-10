@@ -8,6 +8,8 @@ import {
 import { computed } from "vue";
 
 import { portraitSrc } from "../../overlays/clear-sheets.js";
+import FullscreenScene from "../../overlays/FullscreenScene.vue";
+import { callScene } from "../common/call-scene.js";
 import CallWindow from "../common/CallWindow.vue";
 import PenaltyLock from "../penalty/PenaltyLock.vue";
 import { shelfCount, shelfWards } from "./bottles.js";
@@ -16,13 +18,15 @@ import type { Stage3 } from "./use-stage3.js";
 
 /*
  * Stage 3's windows in the stage layer: the director's notice, the trap's blackout (no words:
- * the dermatologist says what happened) and call, and the bottle penalty (mock drawBottles).
+ * the dermatologist says what happened) and her call over the whole screen (Issue #29), and the
+ * bottle penalty (mock drawBottles).
  */
 const props = defineProps<{ stage: Stage3; penalty: BottlePenalty }>();
 const { overlay, penaltyDoneShown } = props.stage;
 const { shelf, note, freshWard, elapsedMs, failed, fill, retry } = props.penalty;
 const wards = computed(() => shelfWards(shelf.value));
 const bottleSrc = portraitSrc(stage3Penalty.bottleImg);
+const scold = callScene(stage3Calls.scold, stage3Calls.scoldFullscreen);
 const tag = (state: string, ward: string): string => {
   if (state === "done") return "済";
   return state === "filling" ? "…" : ward;
@@ -38,12 +42,15 @@ const tag = (state: string, ward: string): string => {
     @close="stage.dismissNotice"
   />
   <div v-else-if="overlay === 'blackout'" class="veil blackout" data-testid="s3-blackout"></div>
-  <CallWindow
+  <FullscreenScene
     v-else-if="overlay === 'scold'"
-    :call="stage3Calls.scold"
+    testid="s3-call"
+    :art="scold.art"
+    :name="scold.name"
+    :caption="scold.caption"
     :lines="stage3TrapDoctorLines"
-    :close-label="stage3Calls.close"
-    @close="stage.dismissScold"
+    :button-label="stage3Calls.close"
+    @next="stage.dismissScold"
   />
   <PenaltyLock
     v-else-if="overlay === 'penalty'"

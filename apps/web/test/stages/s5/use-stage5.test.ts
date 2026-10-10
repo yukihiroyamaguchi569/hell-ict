@@ -4,6 +4,8 @@ import { describe, expect, it } from "vitest";
 import { effectScope, nextTick, ref, shallowRef } from "vue";
 
 import type { GameCommandInput, SendOutcome } from "../../../src/composables/use-game-session.js";
+import type { Tone } from "../../../src/ports.js";
+import { PII_BLOCK_TONE } from "../../../src/stages/s5/s5-sounds.js";
 import { ALARM_MS, useStage5 } from "../../../src/stages/s5/use-stage5.js";
 import { FakeKeyValueStorage, FakeScheduler, flush } from "../../fakes.js";
 import { answer, ENTERED, ENTERED_MS, s5State } from "./s5-fixtures.js";
@@ -14,14 +16,21 @@ const PII_ROW = `${stage5FeverRows[0].id}\t${stage5FeverRows[0].name}`;
 const CALL_KEY = "hellVueS5Call:123456";
 const DEADLINE = stage5DeadlineAt(ENTERED);
 
-const mount = (initial = s5State(), storage = new FakeKeyValueStorage(), now = ENTERED_MS) => {
+const mount = (
+  initial = s5State(),
+  storage = new FakeKeyValueStorage(),
+  now = ENTERED_MS,
+  initialBlocks = 0,
+) => {
   const state = shallowRef<TeamGameViewState>(initial);
   const sent: { command: GameCommandInput; commandId: string }[] = [];
   const sounds: string[] = [];
+  const tones: Tone[] = [];
   const outcomes: SendOutcome[] = [];
   const scheduler = new FakeScheduler();
   const serverNow = ref(now);
   const penaltyHeld = ref(false);
+  const piiBlocks = ref(initialBlocks);
   let ids = 0;
   const scope = effectScope();
   const stage = scope.run(() =>
@@ -36,8 +45,9 @@ const mount = (initial = s5State(), storage = new FakeKeyValueStorage(), now = E
       serverNow,
       storage,
       scheduler,
-      sfx: { play: (name) => sounds.push(name), tone: () => undefined },
+      sfx: { play: (name) => sounds.push(name), tone: (tone) => tones.push(tone) },
       penaltyHeld: () => penaltyHeld.value,
+      piiBlocks,
     }),
   );
   if (stage === undefined) throw new Error("the scope did not run");
@@ -46,6 +56,8 @@ const mount = (initial = s5State(), storage = new FakeKeyValueStorage(), now = E
     state,
     sent,
     sounds,
+    tones,
+    piiBlocks,
     outcomes,
     scheduler,
     serverNow,
@@ -97,6 +109,35 @@ describe("useStage5: 罠を見たときの演出", () => {
     expect(stage.overlay.value).toBeNull();
     scope.stop();
     expect(scheduler.pending).toBe(0);
+  });
+});
+
+describe("useStage5: 個人情報のブロックの低い音", () => {
+  it("チャットがブロックを告げるたびに低い音を1回（罠のときも、罰の後のときも）", async () => {
+    const { piiBlocks, tones } = mount();
+    piiBlocks.value += 1;
+    await nextTick();
+    expect(tones).toEqual([PII_BLOCK_TONE]);
+    piiBlocks.value += 1;
+    await nextTick();
+    expect(tones).toEqual([PII_BLOCK_TONE, PII_BLOCK_TONE]);
+    expect(PII_BLOCK_TONE.frequencyHz).toBeLessThan(300);
+  });
+
+  it("入ったときに数が既にあっても鳴らさない（前のステージの分）。ブロックが無ければ鳴らさない", async () => {
+    const { tones, state } = mount(s5State(), new FakeKeyValueStorage(), ENTERED_MS, 3);
+    await nextTick();
+    state.value = s5State("in-progress");
+    await nextTick();
+    expect(tones).toEqual([]);
+  });
+
+  it("スコープを捨てた後（ステージを離れた後）のブロックでは鳴らさない", async () => {
+    const { piiBlocks, tones, scope } = mount();
+    scope.stop();
+    piiBlocks.value += 1;
+    await nextTick();
+    expect(tones).toEqual([]);
   });
 });
 

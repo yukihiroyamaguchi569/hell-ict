@@ -43,6 +43,7 @@ export const stage5: StageModule | null = {
       // Held from the send on: the answer's state (penalty done) is shown before the answer is
       // read, and the window must not close and open again in between.
       penaltyHeld: () => penalty.sending.value || penalty.holding.value,
+      piiBlocks: context.chatPiiBlocks,
     });
     return {
       center: markRaw(defineComponent(() => () => h(Stage5Center, { stage }))),
