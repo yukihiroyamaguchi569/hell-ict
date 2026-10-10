@@ -49,7 +49,6 @@ const onButton = (): void => {
     <img
       :key="art.src"
       class="art"
-      :class="art.fit"
       :src="art.src"
       :alt="name"
       :style="{ objectPosition: art.position }"
@@ -85,10 +84,6 @@ const onButton = (): void => {
   height: 100%;
   object-fit: cover;
   display: block;
-}
-/* 縦長の肖像（内線の窓の絵）は切らずに収める。余白は背景の黒。 */
-.scene .art.contain {
-  object-fit: contain;
 }
 .scene .band {
   position: absolute;

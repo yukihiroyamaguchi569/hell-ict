@@ -26,7 +26,7 @@ import type { Stage5 } from "./use-stage5.js";
 const props = defineProps<{ stage: Stage5; penalty: RedactPenalty }>();
 const { overlay } = props.stage;
 const { masked, sending, verdict, elapsedMs, holding } = props.penalty;
-const scold = callScene(stage5Call);
+const scold = callScene(stage5Call, stage5Call.scoldFullscreen);
 
 const verdictEl = useTemplateRef<HTMLElement>("verdictEl");
 // The verdict is under the report, below the fold of the penalty's box: scroll the box (the

@@ -121,6 +121,8 @@ export const stage3FieldLabels = {
 export const stage3Calls = {
   notice: { tb: "📞 内線 — 看護部長", img: "stage3-nursing-director.png", role: "看護部長" },
   scold: { tb: "📞 内線 — 皮膚科", img: "stage3-dermatologist.png", role: "皮膚科医" },
+  /** 叱責は内線の窓ではなく全画面で出す（Issue #29）。そのときの 16:9 の一枚絵。 */
+  scoldFullscreen: { img: "stage3-dermatologist-scold.webp" },
   close: "了解しました",
 } as const;
 

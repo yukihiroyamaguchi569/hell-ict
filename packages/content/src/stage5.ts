@@ -497,6 +497,8 @@ export const stage5Call = {
   img: "stage1-administrative-director.png",
   role: "事務長",
   org: "病院執行部",
+  /** 罠の初回の叱責は窓ではなく全画面で出す（Issue #29）。そのときの 16:9 の一枚絵。督促は窓のまま。 */
+  scoldFullscreen: { img: "stage5-administrative-director-scold.webp" },
   close: "了解しました",
 } as const;
 

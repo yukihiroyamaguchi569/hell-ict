@@ -26,7 +26,7 @@ const { overlay, penaltyDoneShown } = props.stage;
 const { shelf, note, freshWard, elapsedMs, failed, fill, retry } = props.penalty;
 const wards = computed(() => shelfWards(shelf.value));
 const bottleSrc = portraitSrc(stage3Penalty.bottleImg);
-const scold = callScene(stage3Calls.scold);
+const scold = callScene(stage3Calls.scold, stage3Calls.scoldFullscreen);
 const tag = (state: string, ward: string): string => {
   if (state === "done") return "済";
   return state === "filling" ? "…" : ward;
