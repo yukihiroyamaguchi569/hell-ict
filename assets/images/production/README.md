@@ -1,6 +1,6 @@
 # 本番画像の出典
 
-ここに列挙していない PNG と WebP は本プロジェクトで生成した肖像。`*-clear.webp`（クリア演出の全画面）は `assets/images/test/stage-clear/*-clear-fullscreen-v1.png` を WebP（quality 90）に変換したもの。`opening-saint-chronos-hospital-exterior.webp`（入室前の読み込み画面の背景）は `assets/images/test/trailer/01-saint-chronos-hospital-exterior-v1.png` を同じく WebP（quality 90、1672×941 のまま）に変換したもの。`final-goal-ceremony.webp`（Final のゴール画面の背景）と `final-certificate-frame.webp`（感謝状の枠）は、本プロジェクトで生成した `assets/images/test/final/final-goal-ceremony-v1.png`・`final-certificate-frame-v1.png` を同じく WebP（quality 90、原本の 1672×941・1586×992 のまま）に変換したもの。どちらも文字を含まず、文字はアプリが重ねる。
+ここに列挙していない PNG と WebP は本プロジェクトで生成した肖像。`*-clear.webp`（クリア演出の全画面）は `assets/images/test/stage-clear/*-clear-fullscreen-v1.png` を WebP（quality 90）に変換したもの。`*-scold.webp`（Stage 3・5 の叱責の内線の全画面）は、本プロジェクトで生成した `assets/images/test/stage-scold/*-scold-v1.png` を同じく WebP（quality 90、1672×941 のまま）に変換したもの。`opening-saint-chronos-hospital-exterior.webp`（入室前の読み込み画面の背景）は `assets/images/test/trailer/01-saint-chronos-hospital-exterior-v1.png` を同じく WebP（quality 90、1672×941 のまま）に変換したもの。`final-goal-ceremony.webp`（Final のゴール画面の背景）と `final-certificate-frame.webp`（感謝状の枠）は、本プロジェクトで生成した `assets/images/test/final/final-goal-ceremony-v1.png`・`final-certificate-frame-v1.png` を同じく WebP（quality 90、原本の 1672×941・1586×992 のまま）に変換したもの。どちらも文字を含まず、文字はアプリが重ねる。
 
 | ファイル | 出典 | 作者 | ライセンス | 加工 |
 |---|---|---|---|---|
@@ -20,7 +20,7 @@
 |---|---|---|
 | 肖像（`.sysdlg .por .frame`。`object-fit: cover` で幅が効く） | 138×150 固定（`--fs-scale` を掛けない） | 幅280前後 |
 | 罰ゲームの消毒液（`.lock .note.icon img`） | 高さ54 固定 | 108×120 |
-| クリア演出②③の全画面（`*-clear.webp`。`object-fit: cover`） | 1280×720（画面全体） | 1672×941 の原本のまま（DPR 2 には届かないが、原本より大きくはしない） |
+| クリア演出②③と叱責の全画面（`*-clear.webp`・`*-scold.webp`。`object-fit: cover`） | 1280×720（画面全体） | 1672×941 の原本のまま（DPR 2 には届かないが、原本より大きくはしない） |
 | 読み込み画面の背景（`opening-*.webp`。`object-fit: cover`） | 1280×720（画面全体） | 1672×941 の原本のまま（同上） |
 | ゴール画面の背景（`final-goal-ceremony.webp`。`background-size: cover`） | 1280×720（画面全体） | 1672×941 の原本のまま（同上） |
 | 感謝状の枠（`final-certificate-frame.webp`。縦横比 1586:992 の箱いっぱい） | 1280×720 で幅 820 前後 | 1586×992 の原本のまま（DPR 2 にはわずかに届かないが、原本より大きくはしない） |
