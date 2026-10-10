@@ -3,7 +3,9 @@ import { describe, expect, it } from "vitest";
 import { effectScope, nextTick, ref } from "vue";
 
 import type { GameCommandInput, SendOutcome } from "../../../src/composables/use-game-session.js";
+import type { Tone } from "../../../src/ports.js";
 import { PENALTY_DONE_MS } from "../../../src/stages/penalty/penalty-done.js";
+import { REDACT_CLICK_TONE, REDACT_DONE_CHIME } from "../../../src/stages/s5/s5-sounds.js";
 import {
   STAGE5_PENALTY_HOLD_MS,
   useRedactPenalty,
@@ -30,6 +32,7 @@ const mount = () => {
   const serverNow = ref(1_000_000);
   const sent: { command: GameCommandInput; commandId: string }[] = [];
   const sounds: string[] = [];
+  const tones: Tone[] = [];
   const outcomes: SendOutcome[] = [];
   let ids = 0;
   const scope = effectScope();
@@ -43,14 +46,14 @@ const mount = () => {
       newCommandId: () => `id-${String((ids += 1))}`,
       serverNow,
       scheduler,
-      sfx: { play: (name) => sounds.push(name), tone: () => undefined },
+      sfx: { play: (name) => sounds.push(name), tone: (tone) => tones.push(tone) },
     }),
   );
   if (penalty === undefined) throw new Error("the scope did not run");
   const maskAll = () => {
     for (const i of PII) penalty.toggle(i);
   };
-  return { penalty, active, scheduler, serverNow, sent, sounds, outcomes, scope, maskAll };
+  return { penalty, active, scheduler, serverNow, sent, sounds, tones, outcomes, scope, maskAll };
 };
 
 describe("useRedactPenalty", () => {
@@ -64,6 +67,60 @@ describe("useRedactPenalty", () => {
     expect([...penalty.masked.value]).toEqual([NOT_PII]);
     penalty.toggle(NOT_PII);
     expect(penalty.masked.value.size).toBe(0);
+  });
+
+  it("塗るたび・戻すたびにクリック音を1回。塗れない語や受け付けない間は鳴らさない", async () => {
+    const { penalty, tones, outcomes, maskAll } = mount();
+    penalty.toggle(PLAIN);
+    penalty.toggle(-1);
+    expect(tones).toEqual([]);
+    penalty.toggle(NOT_PII);
+    penalty.toggle(NOT_PII);
+    expect(tones).toEqual([REDACT_CLICK_TONE, REDACT_CLICK_TONE]);
+    tones.length = 0;
+    maskAll();
+    expect(tones).toHaveLength(PII.length);
+    tones.length = 0;
+    outcomes.push(answer({ judgement: { outcome: "pass" } }, s5State("done")));
+    penalty.submit();
+    penalty.toggle(NOT_PII); // sending
+    await flush();
+    penalty.toggle(NOT_PII); // holding
+    expect(tones).not.toContainEqual(REDACT_CLICK_TONE);
+  });
+
+  it("通ったときだけ控えめなクリア音（上がる2音）を1回。差し戻しでは鳴らさない", async () => {
+    const { penalty, active, tones, scheduler, outcomes, maskAll } = mount();
+    outcomes.push(incomplete(true, false));
+    penalty.submit();
+    await flush();
+    scheduler.advanceBy(1_000);
+    expect(tones).toEqual([]);
+    maskAll();
+    tones.length = 0;
+    outcomes.push(answer({ judgement: { outcome: "pass" } }, s5State("done")));
+    penalty.submit();
+    active.value = false;
+    await flush();
+    scheduler.advanceBy(0);
+    expect(tones).toEqual([REDACT_DONE_CHIME[0]?.tone]);
+    scheduler.advanceBy(STAGE5_PENALTY_HOLD_MS);
+    expect(tones).toEqual(REDACT_DONE_CHIME.map((note) => note.tone));
+    const [first, second] = REDACT_DONE_CHIME;
+    expect(second?.tone.frequencyHz).toBeGreaterThan(first?.tone.frequencyHz ?? Infinity);
+    for (const note of REDACT_DONE_CHIME) expect(note.tone.volume).toBeLessThanOrEqual(0.12);
+  });
+
+  it("クリア音の途中でスコープを捨てたら、残りの音は鳴らない", async () => {
+    const { penalty, tones, scope, scheduler, outcomes } = mount();
+    outcomes.push(answer({ judgement: { outcome: "pass" } }, s5State("done")));
+    penalty.submit();
+    await flush();
+    scheduler.advanceBy(0);
+    scope.stop();
+    scheduler.advanceBy(1_000);
+    expect(tones).toHaveLength(1);
+    expect(scheduler.pending).toBe(0);
   });
 
   it("差し戻しは文と cancel。塗り残しと塗りすぎは両方言い、何度でも出し直せる", async () => {
