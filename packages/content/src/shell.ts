@@ -123,7 +123,7 @@ export const stageClears = {
     execFullscreen: { img: "stage4-hospital-director-clear.webp" },
     exec: [
       "あの論文ひとつで、院内に発熱の集団が広がるのを防げたわけだ。",
-      "結構。この病院は、報告を上げても、そこで止まることのほうが多い。",
+      "結構。この病院では、気づいても誰も動かないことのほうが多いのだがね。",
     ],
     title: "Stage 4 をクリアしました",
     sub: "報告 — 保健所への発熱患者一覧",
