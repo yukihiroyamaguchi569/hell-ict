@@ -122,7 +122,7 @@ export const stageClears = {
     voice: execVoices.incho,
     execFullscreen: { img: "stage4-hospital-director-clear.webp" },
     exec: [
-      "その手でいこう。海外の速報が、今日の面会受付の手順に変わったわけだ。",
+      "読んだ。海外の速報が、今日の面会受付の手順に変わったわけだ。",
       "結構。この病院は、報告を上げても、そこで止まることのほうが多い。",
     ],
     title: "Stage 4 をクリアしました",
