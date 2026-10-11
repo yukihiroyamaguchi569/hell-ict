@@ -7,6 +7,7 @@
 # - `/assets/images/production/`: production画像（Vueが参照する）
 # - `/dashboard.html`: 会場前面ディスプレイ用の進捗ボード
 # - `/ranking.html`: デブリーフィングで会場前面へ映す番付と申し送り（GMトークンで守る）
+# - `_headers`: Assetsのレスポンスヘッダー（配信はされない。apps/worker/_headers）
 #
 # Vueのビルドをここで行うのは、デプロイ（scripts/deploy-prod.sh）とE2Eの
 # webServer（playwright.config.ts）がこのスクリプトしか呼ばないためである。
@@ -21,6 +22,7 @@ repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 assets_src="${repo_root}/assets/images/production"
 dashboard_html="${repo_root}/apps/worker/dashboard/index.html"
 ranking_html="${repo_root}/apps/worker/dashboard/ranking.html"
+assets_headers="${repo_root}/apps/worker/_headers"
 public_dir="${repo_root}/apps/worker/public"
 
 web_dist="${repo_root}/apps/web/dist"
@@ -44,5 +46,9 @@ cp -R "${assets_src}"/. "${public_dir}/assets/images/production/"
 # ソースはapps/worker/dashboard/に置き、生成のたびにコピーする。
 cp "${dashboard_html}" "${public_dir}/dashboard.html"
 cp "${ranking_html}" "${public_dir}/ranking.html"
+
+# Assetsのレスポンスヘッダー（production画像のキャッシュ。Issue #33）。Cloudflareは
+# 配信物のルートにある _headers だけを読み、それ自体は配信しない。
+cp "${assets_headers}" "${public_dir}/_headers"
 
 echo "built: ${public_dir}"

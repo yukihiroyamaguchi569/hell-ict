@@ -1,0 +1,9 @@
+# Workers Static Assets のレスポンスヘッダー（Issue #33）。scripts/build-testplay.sh が
+# 配信物のルート（apps/worker/public/_headers）へコピーする。_headers 自体は配信されない。
+#
+# production の画像は、既定の `max-age=0, must-revalidate` だと表示の直前に条件付きGET
+# （304）の往復が入り、クリア演出の全画面の絵が遅れる。当日の直前に絵を差し替えることは
+# 無いので、1日はサーバへ確認しない。差し替えるなら開催の1日以上前に出す。
+# immutable は付けない（同じURLのまま差し替える運用のため）。
+/assets/images/production/*
+  Cache-Control: public, max-age=86400
