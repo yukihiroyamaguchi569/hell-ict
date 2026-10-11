@@ -497,3 +497,22 @@ node scripts/ranking-board/server.mjs 99 --local   # 手元のD1（上の端末1
   - 「この端末の状態は古くなっています」と出る → そのPCを再読み込みする。
   - 同じコードに2チームが入ったなど、進行そのものが壊れた → GMリセット（「事故が起きたときの手順」）。
 
+
+#### 無料枠の見張り（`scripts/cf-usage-watch.sh`）
+
+Cloudflareのアカウントは無料プランで、1日の上限を超えるとその種類の操作がエラーになり、アプリが止まる。本番の最中は次を定期的に実行し、止まる前にWorkers Paidへ上げるかを判断する。読み取り（GraphQL Analytics API）だけで、Cloudflareには何も書かない。
+
+```bash
+bash scripts/cf-usage-watch.sh                              # 今日（09:00 JST〜今）
+CF_USAGE_DATE=2026-10-11 bash scripts/cf-usage-watch.sh     # 過去の1日（UTCの0時〜24時）
+```
+
+- 認証は`apps/worker`のwranglerのログインを使う（`pnpm exec wrangler login`済みであること）。トークンは表示しない。
+- 見る指標は、Workersのリクエスト（`hell-ict`）、D1の読み取り行・書き込み行（`hell-ict-testplay`）、Durable Objectsのリクエスト・実行時間（GB-s）・SQLiteの読み取り行・書き込み行。DOの実行時間とSQLiteの行はスクリプト名で絞れないので、アカウント全体の値を出す（上限もアカウント全体にかかる）。
+- 無料枠は**毎日09:00 JST（00:00 UTC）にリセット**される。集計は数分遅れて反映されるので、直前の数分の伸びはまだ入っていない。急な伸びは、表の下の1時間ごとのWorkersリクエストで見る。
+- 判定と終了コード:
+  - `OK`（0）: どの指標も閾値以下。
+  - `WARN`（2）: Workersのリクエストが30,000、D1の書き込み行が70,000を超えた。ほかの指標は上限の30%を超えた。
+  - `DANGER`（3）: どれかが上限の80%に達した。
+  - エラー（1）: APIの失敗（ネットワーク、HTTPのエラー、GraphQLの`errors`）や、curl・jqが無いとき。0件として扱わずに止まる。
+- `WARN`が出たら、その日のうちに上限へ届くかを1時間ごとの件数から見積もり、届きそうならWorkers Paidへ上げる。`DANGER`が出たら、すぐ上げる。上げ方: ダッシュボードの**Workers & Pages → Plans**でWorkers Paidを選ぶ。Paidにすると1日の上限が無くなり、含まれる量を超えた分は従量で課金される。Budget alertsは通知だけで、使用を止めも上限を外しもしない。
