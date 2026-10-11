@@ -148,7 +148,8 @@ test("サーバの会話の準備に失敗していても、台本の返答と�
 test("45 秒で鳴るまで AI は出ず、鳴っても開くまでは出ない。再読み込みで右ペインと表は戻り、会話は挨拶だけ", async ({
   page,
 }) => {
-  await fakeStage2(page, 43_000);
+  // 鳴るまで7秒残す。入室の前にオープニングが最低3秒出るため（Issue #31）。
+  await fakeStage2(page, 38_000);
   await page.goto("/");
   await enterTeam(page, uniqueTeamCode(), "再読込班");
 
