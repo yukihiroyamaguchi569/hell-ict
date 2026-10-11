@@ -16,6 +16,23 @@ import { enterButton, enterTeam, uniqueTeamCode, welcomeHeading } from "./helper
 
 const HELD_IMAGE = "**/assets/images/production/stage5-poster-default.png";
 
+/** A 1×1 transparent PNG: a valid image the browser decodes at once. */
+const TINY_PNG = Buffer.from(
+  "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNkYAAAAAYAAjCB0C8AAAAASUVORK5CYII=",
+  "base64",
+);
+
+/**
+ * Answers every preloaded asset at once, off the network: images with `TINY_PNG`, sound effects
+ * with 404 (as wrangler dev's empty R2 does; a failure counts as settled too).
+ */
+const answerAssetsAtOnce = async (page: Page): Promise<void> => {
+  await page.route("**/assets/images/production/**", (route) =>
+    route.fulfill({ status: 200, contentType: "image/png", body: TINY_PNG }),
+  );
+  await page.route("**/sounds/**", (route) => route.fulfill({ status: 404, body: "" }));
+};
+
 const opening = (page: Page) => page.getByTestId("opening");
 const progress = (page: Page) => page.getByRole("progressbar", { name: "読み込み中" });
 
@@ -65,6 +82,8 @@ test("読み終わっても表示から3秒までは出し続け、3秒で入室
   // 時計を止めたままページを開き、読み込みが一瞬で終わる（キャッシュが効いた）場面を作る。
   await page.clock.install({ time: new Date("2026-10-11T09:00:00") });
   await page.clock.pauseAt(new Date("2026-10-11T09:00:01"));
+  // 時計が止まっていて15秒の上限も進まないため、実アセットの応答には頼らない。
+  await answerAssetsAtOnce(page);
   await page.goto("/");
   await expect(opening(page).getByRole("status")).toHaveText("読み込み中 100%");
   await expect(progress(page)).toHaveAttribute("aria-valuenow", "100");
