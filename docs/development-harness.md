@@ -237,6 +237,8 @@ bash scripts/ai-fallback-smoke.sh
 
 **`https://<worker>/`は新アプリ（Vue。Issue #238）**（ローカルの`wrangler dev`なら`http://127.0.0.1:8787/`）。`pnpm build:testplay`が`apps/web`のViteビルド（`index.html`と`app/`）を`apps/worker/public/`へ組み立てる。
 
+**production の画像（`/assets/images/production/*`）は、ブラウザが1日キャッシュする**（`Cache-Control: public, max-age=86400`。Issue #33）。表示の直前の確認（304）で演出の絵が遅れるのを防ぐためである。設定は`apps/worker/_headers`にあり、`pnpm build:testplay`が配信物のルートへコピーする（`_headers`自体は配信されない）。**画像を差し替えるときは、開催の1日以上前にデプロイする。** 直前に差し替えざるを得ないときは、ファイル名を変えて参照側も直す。Vueアプリ本体（`/`と`/app/`）・ダッシュボード・効果音・APIのキャッシュは変えていない。
+
 **参加者が進行中のあいだはデプロイしない。デプロイしたら全端末をリロードさせる。** 開いたままの旧タブは旧い版の画面のまま動き続け、サーバとの取り決め（画面id・チェックポイントの形）が食い違いうる。サーバ側は旧形式を受け取れるよう読み替えを入れてあるが（`packages/domain/src/legacy-ids.ts`）、旧UIは保存が拒否されても参加者に何も伝えず進むので、拒否されるとリロードした時点でデプロイ前の状態まで巻き戻る。リロードの伝え方はGMリセットの手順（後述）と同じでよい。
 
 **その端末で初めてデプロイするときは、先に`cd apps/worker && pnpm exec wrangler login`で認証しておく。** `pnpm deploy:prod`はさらに`main`のCI結果を`gh`で読むので、`gh auth login`も済ませておく（未導入・未認証なら止まる）。**CloudflareのAPIトークンはGitHub Secretsに置かない**——本番Workerを書き換えられるトークンをGitHubとワークフロー内の第三者Actionへ預けないため、デプロイは手元からに限り、認証は手元の`wrangler login`だけに置く（Issue #366）。GitHub Actionsはテスト（`verify.yml`）にだけ使う。
