@@ -18,11 +18,15 @@ export interface OpeningFacts {
   readonly savedTeam: boolean;
   /** The preload is over (everything settled or the time limit passed). */
   readonly finished: boolean;
+  /** The opening has been up for `OPENING_MIN_MS`. */
+  readonly minimumShown: boolean;
 }
 
 /**
  * Whether the opening covers the screen. Only on a first visit, before the entry screen: a reload
  * with a saved team goes straight back to its game (the race clock is running) and the assets load
- * behind it.
+ * behind it. It goes, without a click, once the preload is over and it has been up for the
+ * minimum time, so that a cached load still shows the hospital.
  */
-export const openingWanted = (facts: OpeningFacts): boolean => !facts.savedTeam && !facts.finished;
+export const openingWanted = (facts: OpeningFacts): boolean =>
+  !facts.savedTeam && !(facts.finished && facts.minimumShown);

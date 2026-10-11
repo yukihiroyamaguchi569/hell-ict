@@ -35,6 +35,7 @@ import OverlayHost from "./overlays/OverlayHost.vue";
 import { openingWanted, progressPercent } from "./opening/opening-view.js";
 import OpeningScreen from "./opening/OpeningScreen.vue";
 import { OPENING_BACKDROP, PRELOAD_ASSETS } from "./opening/preload-manifest.js";
+import { useOpeningMinimum } from "./opening/use-opening-minimum.js";
 import { useOpeningPreload } from "./opening/use-opening-preload.js";
 import KarubePhone from "./phs/KarubePhone.vue";
 import { useKarube, useKarubeRecord } from "./phs/use-karube.js";
@@ -84,8 +85,13 @@ const assets = useOpeningPreload({
   audio,
   scheduler,
 });
+const openingMinimumShown = useOpeningMinimum(scheduler);
 const opening = computed(() =>
-  openingWanted({ savedTeam: savedTeamAtOpen, finished: assets.finished.value }),
+  openingWanted({
+    savedTeam: savedTeamAtOpen,
+    finished: assets.finished.value,
+    minimumShown: openingMinimumShown.value,
+  }),
 );
 const openingPercent = computed(() => progressPercent(assets.settled.value, assets.total));
 const teamNames = createTeamNameStore(storage);

@@ -31,16 +31,26 @@ describe("loadingText", () => {
 });
 
 describe("openingWanted", () => {
-  it("保存済みのチームが無く、読み込みが終わっていない間だけ出す", () => {
-    expect(openingWanted({ savedTeam: false, finished: false })).toBe(true);
+  const wanted = (savedTeam: boolean, finished: boolean, minimumShown: boolean): boolean =>
+    openingWanted({ savedTeam, finished, minimumShown });
+
+  it("読み込み中は出し続ける（最低時間が過ぎていても）", () => {
+    expect(wanted(false, false, false)).toBe(true);
+    expect(wanted(false, false, true)).toBe(true);
   });
 
-  it("読み込みが終わったら（全部 or 15秒）入室画面へ進む", () => {
-    expect(openingWanted({ savedTeam: false, finished: true })).toBe(false);
+  it("読み終わっても（全部 or 15秒）、最低表示時間が過ぎるまでは出し続ける", () => {
+    expect(wanted(false, true, false)).toBe(true);
+  });
+
+  it("読み終わり、最低表示時間も過ぎたら、クリックなしで入室画面へ進む", () => {
+    expect(wanted(false, true, true)).toBe(false);
   });
 
   it("保存済みのチームの再読み込みでは出さない（復帰を待たせない）", () => {
-    expect(openingWanted({ savedTeam: true, finished: false })).toBe(false);
-    expect(openingWanted({ savedTeam: true, finished: true })).toBe(false);
+    expect(wanted(true, false, false)).toBe(false);
+    expect(wanted(true, false, true)).toBe(false);
+    expect(wanted(true, true, false)).toBe(false);
+    expect(wanted(true, true, true)).toBe(false);
   });
 });
