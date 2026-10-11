@@ -508,7 +508,7 @@ CF_USAGE_DATE=2026-10-11 bash scripts/cf-usage-watch.sh     # 過去の1日（UT
 ```
 
 - 認証は`apps/worker`のwranglerのログインを使う（`pnpm exec wrangler login`済みであること）。トークンは表示しない。照会するアカウントは、環境変数`CLOUDFLARE_ACCOUNT_ID`があればそれを、無ければ`wrangler whoami`のアカウントを使う。ログイン中のアカウントが複数あるときは、`CLOUDFLARE_ACCOUNT_ID`を求めて止まる。
-- 見る指標は、Workersのリクエスト（`hell-ict`）、D1の読み取り行・書き込み行（`hell-ict-testplay`）、Durable Objectsのリクエスト・実行時間（GB-s）・SQLiteの読み取り行・書き込み行。DOの実行時間とSQLiteの行はスクリプト名で絞れないので、アカウント全体の値を出す（上限もアカウント全体にかかる）。
+- 見る指標は、Workersのリクエスト、D1の読み取り行・書き込み行、Durable Objectsのリクエスト・実行時間（GB-s）・SQLiteの読み取り行・書き込み行。無料枠の上限はアカウント全体にかかるので、どれも`hell-ict`やD1の`hell-ict-testplay`に絞らず、アカウント全体の合計を出す。
 - 無料枠は**毎日09:00 JST（00:00 UTC）にリセット**される。集計は数分遅れて反映されるので、直前の数分の伸びはまだ入っていない。急な伸びは、表の下の1時間ごとのWorkersリクエストで見る。
 - 判定と終了コード:
   - `OK`（0）: どの指標も閾値以下。

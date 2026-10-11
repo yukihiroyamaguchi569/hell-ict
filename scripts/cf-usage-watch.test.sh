@@ -106,8 +106,8 @@ expect_run() { # $1 description, $2 expected exit code, $3 expected text, rest: 
 }
 
 expect_run "使用量が少なければ OK で 0" 0 "OK" FAKE_BODY="$(response 1077 3214 4.3)"
-expect_run "Workers 30001 で WARN・2" 2 "WARN: Workers リクエスト（hell-ict） 30.0%" FAKE_BODY="$(response 30001 0 0)"
-expect_run "D1 書き込み 80000 で DANGER・3" 3 "DANGER: D1 書き込み行（hell-ict-testplay） 80.0%" FAKE_BODY="$(response 0 80000 0)"
+expect_run "Workers 30001 で WARN・2" 2 "WARN: Workers リクエスト（アカウント全体） 30.0%" FAKE_BODY="$(response 30001 0 0)"
+expect_run "D1 書き込み 80000 で DANGER・3" 3 "DANGER: D1 書き込み行（アカウント全体） 80.0%" FAKE_BODY="$(response 0 80000 0)"
 expect_run "DANGER と WARN が混ざれば DANGER" 3 "DANGER: DO 実行時間" FAKE_BODY="$(response 30001 0 10400)"
 expect_run "時間ごとの件数を出す" 0 "10-11 10:00 UTC（19:00 JST） 1077" FAKE_BODY="$(response 1077 0 0)"
 expect_run "データが無い日は 0 で OK" 0 "（この期間のリクエストは無い）" \
@@ -147,6 +147,12 @@ else
   ng "トークンは curl の引数に載らず、標準入力で渡る"
 fi
 if ! grep -qF secret-token <<<"${out}"; then ok "トークンを表示しない"; else ng "トークンを表示しない"; fi
+# Free limits are account-wide: the query must not narrow to one script or database.
+if ! grep -qE 'scriptName|databaseId' "${work}/curl.args"; then
+  ok "スクリプト名・データベースで絞らず、アカウント全体を照会する"
+else
+  ng "スクリプト名・データベースで絞らず、アカウント全体を照会する"
+fi
 
 if [ "${failures}" -gt 0 ]; then
   echo "${failures} 件失敗" >&2

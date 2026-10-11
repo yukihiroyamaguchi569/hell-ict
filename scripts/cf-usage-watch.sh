@@ -32,9 +32,6 @@ done
 
 root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 worker_dir="$root/apps/worker"
-script_name="hell-ict"
-# D1 database hell-ict-testplay (apps/worker/wrangler.jsonc).
-database_id="cac14ad2-c5d1-44de-9a5a-c644cabbc146"
 graphql_url="https://api.cloudflare.com/client/v4/graphql"
 
 # --- period (UTC)
@@ -67,17 +64,15 @@ else
 fi
 
 # --- query
-# DO の periodic（実行時間・SQLite の行）はスクリプト名で絞れないので、アカウント全体の値。
-# 無料枠の上限もアカウント全体にかかる。
-query='query($a:String!,$s:Time!,$e:Time!,$db:String!,$w:String!){viewer{accounts(filter:{accountTag:$a}){
-workers:workersInvocationsAdaptive(limit:100,filter:{datetime_geq:$s,datetime_lt:$e,scriptName:$w}){sum{requests} dimensions{datetimeHour}}
-d1:d1AnalyticsAdaptiveGroups(limit:100,filter:{datetime_geq:$s,datetime_lt:$e,databaseId:$db}){sum{rowsRead rowsWritten}}
-doRequests:durableObjectsInvocationsAdaptiveGroups(limit:100,filter:{datetime_geq:$s,datetime_lt:$e,scriptName:$w}){sum{requests}}
+# 無料枠の上限はアカウント全体にかかるので、スクリプトやデータベースで絞らずに合計する。
+query='query($a:String!,$s:Time!,$e:Time!){viewer{accounts(filter:{accountTag:$a}){
+workers:workersInvocationsAdaptive(limit:100,filter:{datetime_geq:$s,datetime_lt:$e}){sum{requests} dimensions{datetimeHour}}
+d1:d1AnalyticsAdaptiveGroups(limit:100,filter:{datetime_geq:$s,datetime_lt:$e}){sum{rowsRead rowsWritten}}
+doRequests:durableObjectsInvocationsAdaptiveGroups(limit:100,filter:{datetime_geq:$s,datetime_lt:$e}){sum{requests}}
 doPeriodic:durableObjectsPeriodicGroups(limit:100,filter:{datetime_geq:$s,datetime_lt:$e}){sum{duration rowsRead rowsWritten}}
 }}}'
 body=$(jq -nc --arg q "$query" --arg a "$account_id" --arg s "$start" --arg e "$end" \
-  --arg db "$database_id" --arg w "$script_name" \
-  '{query: $q, variables: {a: $a, s: $s, e: $e, db: $db, w: $w}}')
+  '{query: $q, variables: {a: $a, s: $s, e: $e}}')
 
 response_file="$(mktemp "${TMPDIR:-/tmp}/cf-usage-watch.XXXXXX")"
 trap 'rm -f "$response_file"' EXIT
@@ -107,10 +102,10 @@ total() { echo "$acct" | jq -r "[.$1[].sum.$2] | add // 0"; }
 # Free plan limits: developers.cloudflare.com/workers/platform/limits/,
 # /d1/platform/pricing/, /durable-objects/platform/pricing/.
 metrics=(
-  "Workers リクエスト（${script_name}）|$(total workers requests)|100000|30000"
-  "D1 読み取り行（hell-ict-testplay）|$(total d1 rowsRead)|5000000|1500000"
-  "D1 書き込み行（hell-ict-testplay）|$(total d1 rowsWritten)|100000|70000"
-  "DO リクエスト（${script_name}）|$(total doRequests requests)|100000|30000"
+  "Workers リクエスト（アカウント全体）|$(total workers requests)|100000|30000"
+  "D1 読み取り行（アカウント全体）|$(total d1 rowsRead)|5000000|1500000"
+  "D1 書き込み行（アカウント全体）|$(total d1 rowsWritten)|100000|70000"
+  "DO リクエスト（アカウント全体）|$(total doRequests requests)|100000|30000"
   "DO 実行時間 GB-s（アカウント全体）|$(total doPeriodic duration)|13000|3900"
   "DO SQLite 読み取り行（アカウント全体）|$(total doPeriodic rowsRead)|5000000|1500000"
   "DO SQLite 書き込み行（アカウント全体）|$(total doPeriodic rowsWritten)|100000|30000"
