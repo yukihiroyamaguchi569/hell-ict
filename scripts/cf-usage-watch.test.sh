@@ -121,6 +121,15 @@ expect_run "JSON でない応答は 1" 1 "JSON でない" FAKE_BODY='<html>'
 expect_run "アカウントのデータが無ければ 1" 1 "データが無い" FAKE_BODY='{"data":{"viewer":{"accounts":[]}}}'
 expect_run "データセットが欠ければ 1" 1 "形が想定と違う" \
   FAKE_BODY='{"data":{"viewer":{"accounts":[{"workers":[],"d1":null,"doRequests":[],"doPeriodic":[]}]}}}'
+body_with() { # $1 replaces the d1 dataset
+  echo "{\"data\":{\"viewer\":{\"accounts\":[{\"workers\":[],\"d1\":$1,\"doRequests\":[],\"doPeriodic\":[]}]}}}"
+}
+expect_run "行の sum が null なら 0 とせず 1" 1 "数値でない" FAKE_BODY="$(body_with '[{"sum":null}]')"
+expect_run "行のフィールドが欠ければ 0 とせず 1" 1 "数値でない" FAKE_BODY="$(body_with '[{"sum":{"rowsRead":5}}]')"
+expect_run "フィールドが数値でなければ 1" 1 "数値でない" \
+  FAKE_BODY="$(body_with '[{"sum":{"rowsRead":5,"rowsWritten":"9"}}]')"
+expect_run "2行目だけ欠けても 1" 1 "数値でない" \
+  FAKE_BODY="$(body_with '[{"sum":{"rowsRead":5,"rowsWritten":9}},{"sum":{"rowsRead":5}}]')"
 expect_run "トークンが取れなければ 1" 1 "トークンが空" FAKE_TOKEN= FAKE_BODY="$(response 0 0 0)"
 two_accounts='[{"id":"acct-1","name":"a"},{"id":"acct-2","name":"b"}]'
 expect_run "アカウントが複数で指定が無ければ 1" 1 "CLOUDFLARE_ACCOUNT_ID" \

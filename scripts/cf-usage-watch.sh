@@ -96,6 +96,18 @@ acct=$(jq -c '.data.viewer.accounts[0] // empty' "$response_file")
 echo "$acct" | jq -e '[.workers, .d1, .doRequests, .doPeriodic] | all(type == "array")' >/dev/null ||
   fail "GraphQL API の応答の形が想定と違う: $(echo "$acct" | head -c 500)"
 
+# Every row must carry a number for each field we sum; a null or missing value would
+# otherwise be added as 0 and give a false OK. (Checked here, not inside total():
+# a failure in the $(...) of the array literal below would not stop the script.)
+bad_fields=$(echo "$acct" | jq -r '
+  [["workers","requests"],["d1","rowsRead"],["d1","rowsWritten"],["doRequests","requests"],
+   ["doPeriodic","duration"],["doPeriodic","rowsRead"],["doPeriodic","rowsWritten"]]
+  | map(. as [$d, $f] | select(any($acct_root[$d][]; (.sum[$f] | type) != "number")) | "\($d).\($f)")
+  | join(", ")' --argjson acct_root "$acct")
+[ -z "$bad_fields" ] ||
+  fail "GraphQL API の応答に数値でない値がある（${bad_fields}）: $(echo "$acct" | head -c 500)"
+
+# An empty dataset means no traffic in the period: genuinely zero.
 total() { echo "$acct" | jq -r "[.$1[].sum.$2] | add // 0"; }
 
 # --- metrics: label, value, free daily limit, WARN threshold (strictly above)
