@@ -12,6 +12,8 @@
 #
 # 認証は apps/worker の wrangler のログイン（wrangler login 済みであること）を使う。
 # トークンは表示しない。curl の引数にも載せず、ヘッダーを標準入力（-H @-）で渡す。
+# 照会するアカウントは CLOUDFLARE_ACCOUNT_ID があればそれ、無ければ wrangler whoami の
+# アカウント（1つだけのとき。複数あれば CLOUDFLARE_ACCOUNT_ID を求めて止まる）。
 #
 # 終了コード: 0 OK、1 エラー（API の失敗、道具が無い）、2 WARN、3 DANGER。
 set -euo pipefail
@@ -52,9 +54,17 @@ start="${day}T00:00:00Z"
 token=$(cd "$worker_dir" && pnpm exec wrangler auth token --json 2>/dev/null | jq -r '.token // empty') ||
   fail "wrangler のトークンが取れない。cd apps/worker && pnpm exec wrangler login してから実行する。"
 [ -n "$token" ] || fail "wrangler のトークンが空。cd apps/worker && pnpm exec wrangler login してから実行する。"
-account_id=$(cd "$worker_dir" && pnpm exec wrangler whoami --json 2>/dev/null | jq -r '.accounts[0].id // empty') ||
-  fail "wrangler whoami が失敗した。"
-[ -n "$account_id" ] || fail "アカウントIDが取れない（wrangler whoami --json の accounts が空）。"
+if [ -n "${CLOUDFLARE_ACCOUNT_ID:-}" ]; then
+  account_id="$CLOUDFLARE_ACCOUNT_ID"
+else
+  account_ids=$(cd "$worker_dir" && pnpm exec wrangler whoami --json 2>/dev/null | jq -r '.accounts[].id') ||
+    fail "wrangler whoami が失敗した。"
+  case "$(printf '%s' "$account_ids" | grep -c .)" in
+    0) fail "アカウントが無い（wrangler whoami --json の accounts が空）。" ;;
+    1) account_id="$account_ids" ;;
+    *) fail "ログイン中のアカウントが複数ある。照会するアカウントIDを CLOUDFLARE_ACCOUNT_ID に入れてから実行する。" ;;
+  esac
+fi
 
 # --- query
 # DO の periodic（実行時間・SQLite の行）はスクリプト名で絞れないので、アカウント全体の値。

@@ -52,7 +52,10 @@ cat >"${fake_bin}/pnpm" <<'EOF'
 #!/usr/bin/env bash
 case "$*" in
   *"auth token"*) jq -nc --arg t "${FAKE_TOKEN-secret-token}" '{type: "oauth"} + (if $t == "" then {} else {token: $t} end)' ;;
-  *whoami*) echo '{"accounts":[{"id":"acct-1","name":"test"}]}' ;;
+  *whoami*)
+    one='[{"id":"acct-1","name":"test"}]'
+    echo "{\"accounts\":${FAKE_ACCOUNTS:-$one}}"
+    ;;
   *) exit 1 ;;
 esac
 EOF
@@ -94,7 +97,7 @@ run_script() {
 expect_run() { # $1 description, $2 expected exit code, $3 expected text, rest: env assignments
   local desc="$1" want="$2" text="$3"
   shift 3
-  run_script env "$@"
+  run_script env -u CLOUDFLARE_ACCOUNT_ID "$@"
   if [ "${code}" = "${want}" ] && grep -qF -- "${text}" <<<"${out}"; then
     ok "${desc}"
   else
@@ -119,10 +122,20 @@ expect_run "アカウントのデータが無ければ 1" 1 "データが無い"
 expect_run "データセットが欠ければ 1" 1 "形が想定と違う" \
   FAKE_BODY='{"data":{"viewer":{"accounts":[{"workers":[],"d1":null,"doRequests":[],"doPeriodic":[]}]}}}'
 expect_run "トークンが取れなければ 1" 1 "トークンが空" FAKE_TOKEN= FAKE_BODY="$(response 0 0 0)"
+two_accounts='[{"id":"acct-1","name":"a"},{"id":"acct-2","name":"b"}]'
+expect_run "アカウントが複数で指定が無ければ 1" 1 "CLOUDFLARE_ACCOUNT_ID" \
+  FAKE_ACCOUNTS="${two_accounts}" FAKE_BODY="$(response 0 0 0)"
+run_script env CLOUDFLARE_ACCOUNT_ID=acct-2 FAKE_ACCOUNTS="${two_accounts}" FAKE_BODY="$(response 0 0 0)"
+if [ "${code}" = 0 ] && grep -qF '"a":"acct-2"' "${work}/curl.args"; then
+  ok "CLOUDFLARE_ACCOUNT_ID のアカウントを照会する"
+else
+  ng "CLOUDFLARE_ACCOUNT_ID のアカウントを照会する（終了コード ${code}、出力: ${out}）"
+fi
+expect_run "アカウントが無ければ 1" 1 "アカウントが無い" FAKE_ACCOUNTS='[]' FAKE_BODY="$(response 0 0 0)"
 expect_run "CF_USAGE_DATE の書式違いは 1" 1 "YYYY-MM-DD" CF_USAGE_DATE=2026/10/11 FAKE_BODY="$(response 0 0 0)"
 
 # The past day covers the whole UTC day, and the token goes via stdin, not argv.
-run_script env CF_USAGE_DATE=2026-10-11 FAKE_BODY="$(response 0 0 0)"
+run_script env -u CLOUDFLARE_ACCOUNT_ID CF_USAGE_DATE=2026-10-11 FAKE_BODY="$(response 0 0 0)"
 if grep -qF '"s":"2026-10-11T00:00:00Z","e":"2026-10-12T00:00:00Z"' "${work}/curl.args"; then
   ok "CF_USAGE_DATE はその日の 00:00〜24:00 UTC"
 else
