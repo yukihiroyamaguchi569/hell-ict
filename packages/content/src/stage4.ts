@@ -86,3 +86,22 @@ export const stage4Labels = {
 
 /** 提出が届いたか分からない（通信断・503・読めない応答）ときの一行。 */
 export const stage4SendFailed = "送信できませんでした。もう一度押してください。";
+
+/*
+ * 行動提案の差し戻しが続いたときの苅部さん（Issue #38）。どれを出すかは domain の
+ * stage4ActionHint が差し戻しの通算回数で決める（3回目 who-hint、5回目 final-push、ほかはなし）。
+ * 院長の差し戻しの後に電話で届く。行動提案へ貼っても通らないよう、判定の対象語と内容語
+ * （stage4Rules.actionTarget・actionContent）を含めない。
+ */
+
+/** 差し戻し3回目の苅部さん。患者以外の、熱が出る前に気づける相手へ目を向けさせる。 */
+export const stage4KarubeWhoHint = [
+  "〔苅部〕院長、患者さんは全員見たって言ってましたよね。熱が出た人はもう手遅れなんです。",
+  "〔苅部〕患者さん以外で、熱が出る前の様子に気づけるのは誰でしょう。……毎日病室に通ってくる人たちとか。",
+] as const satisfies Lines;
+
+/** 差し戻し5回目だけに出す苅部さんのだめ押し。論文のどこを読み、誰に確かめさせるかまで言う。 */
+export const stage4KarubeFinalPush = [
+  "〔苅部〕AIに頼る前に、論文の Clinical Course の節を見てください。熱の何時間前に何が起きていたか、書いてあります。",
+  "〔苅部〕それを、病室に通ってくる人たちに確かめてもらう指示にしてみては。",
+] as const satisfies Lines;
