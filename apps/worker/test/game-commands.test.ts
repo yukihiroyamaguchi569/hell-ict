@@ -1,6 +1,8 @@
 import { exports } from "cloudflare:workers";
+import { stage4Answers } from "@hell-ict/content/answers";
 import { DEADLINE_GRACE_MS, INBOX_LIMIT_MS, S5_FEVER_IDS } from "@hell-ict/domain";
 import { beforeEach, describe, expect, it } from "vitest";
+import { z } from "zod";
 
 import {
   advance,
@@ -227,6 +229,77 @@ describe("同じcommandIdの再送", () => {
     expect(await send(teamCode, body)).toMatchObject({ status: "rejected", reason: "not-cleared" });
     await CLEAR.s3?.(teamCode);
     await applied(teamCode, body);
+  });
+});
+
+describe("Stage 4 の行動提案の差し戻し回数（Issue #38）", () => {
+  const s4Schema = z.object({ summaryAccepted: z.boolean(), actionRejects: z.number() }).strict();
+  const s4Of = (reply: { state: Record<string, unknown> }) => s4Schema.parse(reply.state.s4);
+  const reject = (i: number) =>
+    command("s4.submit-action", { text: `${stage4Answers.actionMissingBoth}${String(i)}` });
+
+  const summarized = async (teamCode: string): Promise<void> => {
+    await playTo(teamCode, "s4");
+    await applied(teamCode, command("s4.submit-summary", { text: stage4Answers.summaryOk }));
+  };
+
+  it("差し戻しごとに1つ増え、再読み込み（GET）でも同じ回数を返す", async () => {
+    const teamCode = "875001";
+    await summarized(teamCode);
+    const counts: number[] = [];
+    for (let i = 0; i < 5; i++) {
+      const reply = await applied(teamCode, reject(i));
+      expect(reply.events?.map((event) => event.type)).toEqual(["submission-rejected"]);
+      counts.push(s4Of(reply).actionRejects);
+    }
+    expect(counts).toEqual([1, 2, 3, 4, 5]);
+    expect(s4Of(await gameOf(teamCode))).toEqual({ summaryAccepted: true, actionRejects: 5 });
+  });
+
+  it("要約の差し戻しと、要約より先の行動提案は数えない", async () => {
+    const teamCode = "875002";
+    await playTo(teamCode, "s4");
+    expect(await send(teamCode, reject(0))).toMatchObject({
+      status: "rejected",
+      reason: "summary-first",
+    });
+    expect(
+      await send(teamCode, command("s4.submit-summary", { text: stage4Answers.summaryNg })),
+    ).toMatchObject({ status: "rejected", reason: "no-ocular-symptom" });
+    expect(s4Of(await gameOf(teamCode))).toEqual({ summaryAccepted: false, actionRejects: 0 });
+  });
+
+  it("同じcommandIdの再送（順に・同時に）は1回しか数えない", async () => {
+    const teamCode = "875003";
+    await summarized(teamCode);
+    const once = reject(0);
+    await applied(teamCode, once);
+    expect((await send(teamCode, once)).status).toBe("duplicate");
+    const twice = reject(1);
+    const replies = await Promise.all([send(teamCode, twice), send(teamCode, twice)]);
+    expect(replies.map((reply) => reply.status).sort()).toEqual(["applied", "duplicate"]);
+    expect(s4Of(await gameOf(teamCode)).actionRejects).toBe(2);
+  });
+
+  it("クリアでは増えず、クリア後の行動提案は拒否されて数えない", async () => {
+    const teamCode = "875004";
+    await summarized(teamCode);
+    await applied(teamCode, reject(0));
+    await applied(teamCode, command("s4.submit-action", { text: stage4Answers.actionOk }));
+    expect(await send(teamCode, reject(1))).toMatchObject({
+      status: "rejected",
+      reason: "already-cleared",
+    });
+    expect(s4Of(await gameOf(teamCode)).actionRejects).toBe(1);
+  });
+
+  it("GMリセットで0に戻る", async () => {
+    const teamCode = "875005";
+    await session(teamCode);
+    await summarized(teamCode);
+    await applied(teamCode, reject(0));
+    expect((await gmReset(teamCode)).status).toBe(200);
+    expect(s4Of(await gameOf(teamCode))).toEqual({ summaryAccepted: false, actionRejects: 0 });
   });
 });
 
