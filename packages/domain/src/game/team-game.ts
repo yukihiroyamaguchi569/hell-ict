@@ -27,7 +27,7 @@ import {
 import type { Stage1ReplyResult, Stage1State } from "../stages/s1.js";
 import { judgeStage2, startStage2, takeStage2Addendum } from "../stages/s2.js";
 import { countStage3TrapJudgements, judgeStage3 } from "../stages/s3.js";
-import { judgeStage4Action, judgeStage4Summary } from "../stages/s4.js";
+import { countStage4ActionRejects, judgeStage4Action, judgeStage4Summary } from "../stages/s4.js";
 import { judgeS5Report } from "../stages/s5-report.js";
 import { judgeS5AiMessage, judgeS5Submission } from "../stages/s5.js";
 import { isS6PromptCopiedFromMail, judgeS6Submission, selectS6PosterType } from "../stages/s6.js";
@@ -70,7 +70,7 @@ export const initialTeamGameState = (now: GameInstant): TeamGameState => ({
   s1: null,
   s2: null,
   s3: { trapJudgements: 0 },
-  s4: { summaryAccepted: false },
+  s4: { summaryAccepted: false, actionRejects: 0 },
   s6: { promptLog: [], candidates: [] },
 });
 
@@ -364,10 +364,15 @@ const submitStage4Summary = (
   if (blocker !== null) return rejected(blocker);
   const summary = judgeStage4Summary(command.text);
   if (summary.outcome === "reject") return rejected(summary.reason, summary);
-  return applied({ ...ctx.state, s4: { summaryAccepted: true } }, summary);
+  return applied({ ...ctx.state, s4: { ...ctx.state.s4, summaryAccepted: true } }, summary);
 };
 
-/** The director asks for an action only after the summary passed (the mock's order). */
+/**
+ * The director asks for an action only after the summary passed (the mock's order). A reject
+ * that D1 recorded is counted (Issue #38); the screen reads the hint with
+ * `stage4ActionHint(state.s4.actionRejects)`. A pass, a resend and a command D1 refuses record
+ * no reject, so the count does not move.
+ */
 const submitStage4Action = (
   ctx: Context,
   command: Extract<TeamGameCommand, { type: "s4.submit-action" }>,
@@ -375,7 +380,12 @@ const submitStage4Action = (
   const blocker = stageBlocker(ctx.state, "s4");
   if (blocker !== null) return rejected(blocker);
   if (!ctx.state.s4.summaryAccepted) return rejected("summary-first");
-  return recordJudgement(ctx, "s4", judgeStage4Action(command.text));
+  const result = recordJudgement(ctx, "s4", judgeStage4Action(command.text));
+  if (result.status !== "applied") return result;
+  const rejects = countStage4ActionRejects(result.events);
+  if (rejects === 0) return result;
+  const s4 = { ...result.state.s4, actionRejects: result.state.s4.actionRejects + rejects };
+  return { ...result, state: { ...result.state, s4 } };
 };
 
 // ---- Stage 5 ----

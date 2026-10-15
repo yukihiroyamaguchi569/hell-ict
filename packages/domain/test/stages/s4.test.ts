@@ -1,4 +1,4 @@
-import { stage4ActionRejects } from "@hell-ict/content";
+import { stage4ActionRejects, stage4KarubeFinalPush, stage4KarubeWhoHint } from "@hell-ict/content";
 import { stage4Answers } from "@hell-ict/content/answers";
 import { describe, expect, it } from "vitest";
 
@@ -103,6 +103,19 @@ describe("Stage 4 の差し戻し文（content）と差し戻し理由の対応"
       expect(judgeStage4Action(stage4ActionRejects[reason]).outcome).toBe("reject");
     },
   );
+});
+
+describe("Stage 4 の苅部さんのヒント（content）は行動提案の判定を通らない（#38）", () => {
+  const hints = [...stage4KarubeWhoHint, ...stage4KarubeFinalPush];
+
+  it.each([
+    ...hints.map((line) => [line, line] as const),
+    ["3回目のヒント全体", stage4KarubeWhoHint.join("")],
+    ["5回目のヒント全体", stage4KarubeFinalPush.join("")],
+    ["ヒントすべて", hints.join("")],
+  ])("%s を行動提案へ貼っても通らない", (_name, text) => {
+    expect(judgeStage4Action(text).outcome).toBe("reject");
+  });
 });
 
 describe("Stage 4 の判定: Pure Function", () => {

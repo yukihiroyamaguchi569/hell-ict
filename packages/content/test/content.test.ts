@@ -259,6 +259,19 @@ describe("Stage 4", () => {
     },
   );
 
+  // The hints point at whom and where to read, but pasted into the action box they must not pass:
+  // no line, nor all of them together, holds a target word or a content word (#38).
+  it.each([
+    ["差し戻し3回目の苅部さん（#38）", content.stage4KarubeWhoHint],
+    ["差し戻し5回目のだめ押し（#38）", content.stage4KarubeFinalPush],
+  ] as const)("%sは〔苅部〕の台詞で、判定の対象語にも内容語にも当たらない", (_name, lines) => {
+    for (const line of [...lines, lines.join("")]) {
+      expect(line.startsWith("〔苅部〕")).toBe(true);
+      expect(content.stage4Rules.actionTarget.test(line)).toBe(false);
+      expect(content.stage4Rules.actionContent.test(line)).toBe(false);
+    }
+  });
+
   it("患者向けの差し戻しも対象語を言わない", () => {
     const text = content.stage4ActionRejects["aimed-at-patients"];
     expect(content.stage4Rules.actionTarget.test(text)).toBe(false);
