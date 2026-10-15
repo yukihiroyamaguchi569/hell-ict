@@ -306,11 +306,15 @@ export {
 } from "./stages/s3.js";
 export type { Stage3FieldId, Stage3Judgement, Stage3Submission } from "./stages/s3.js";
 export {
+  countStage4ActionRejects,
   judgeStage4Action,
   judgeStage4Summary,
+  STAGE4_ACTION_HINTS,
   STAGE4_ACTION_REJECT_REASONS,
+  stage4ActionHint,
 } from "./stages/s4.js";
 export type {
+  Stage4ActionHint,
   Stage4ActionJudgement,
   Stage4ActionRejectReason,
   Stage4SummaryJudgement,

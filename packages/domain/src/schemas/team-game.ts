@@ -58,7 +58,16 @@ const teamGameStateFields = {
     .object({ trapJudgements: z.number().int().nonnegative() })
     .strict()
     .default({ trapJudgements: 0 }),
-  s4: z.object({ summaryAccepted: z.boolean() }).strict(),
+  /**
+   * s4.actionRejects: how many times the action was sent back (Issue #38: which of Karube's
+   * hints to give). Missing in states saved before it existed: read as 0.
+   */
+  s4: z
+    .object({
+      summaryAccepted: z.boolean(),
+      actionRejects: z.number().int().nonnegative().default(0),
+    })
+    .strict(),
 };
 
 /**
@@ -70,6 +79,7 @@ const teamGameStateFields = {
  * - enteredAt: when the team entered each later stage. `final` is the goal time of the race.
  * - inbox / s1 / s2: the timed stages, `null` until the team opens them (the clock starts then).
  * - s4.summaryAccepted: the summary of the foreign report came first and passed.
+ * - s4.actionRejects: the action is judged only after the summary, so none come before it.
  * - s6: every instruction sent to the image AI in this stage, and the candidates it made. The
  *   judge reads the whole log (teams add requirements one instruction at a time).
  *
@@ -87,6 +97,9 @@ export const teamGameStateSchema = z
   .refine(entriesMatchStage, { message: "enteredAt does not match the current stage" })
   .refine((state) => state.s3.trapJudgements === 0 || state.game.penalties.s3 !== "none", {
     message: "Stage 3 trap judgements without the trap having fired",
+  })
+  .refine((state) => state.s4.actionRejects === 0 || state.s4.summaryAccepted, {
+    message: "Stage 4 action rejects before the summary passed",
   });
 
 export type TeamGameState = z.infer<typeof teamGameStateSchema>;

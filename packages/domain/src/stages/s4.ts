@@ -1,6 +1,6 @@
 import { stage4Rules } from "@hell-ict/content";
 
-import type { StageJudgement } from "../schemas/game.js";
+import type { GameEvent, StageJudgement } from "../schemas/game.js";
 
 /**
  * Stage 4 (reading the new report): two judges in sequence, no trap.
@@ -74,3 +74,42 @@ export const judgeStage4Action = (text: string): Stage4ActionJudgement => {
   if (hasContent) return rejectAction(hasPatient ? "aimed-at-patients" : "missing-whom");
   return rejectAction(hasTarget ? "missing-what" : "missing-both");
 };
+
+/**
+ * Issue #38: which of Karube's hints a Stage 4 action reject brings, by how many action rejects
+ * the team has had, this one included (1st, 2nd, …). Any reject reason counts; a summary reject
+ * does not (it never reaches the state machine).
+ * - 1st, 2nd: none. The director's line is enough.
+ * - 3rd: `who-hint` — he points at people other than the patients, who see the ward every day.
+ * - 4th: none.
+ * - 5th: `final-push` — he names where in the report to look and whom to have it checked by.
+ * - 6th onwards: none. Repeating it would only nag (as Stage 3's #219).
+ * The wording lives in content and contains no word the action judge accepts.
+ */
+export const STAGE4_ACTION_HINTS = ["none", "who-hint", "final-push"] as const;
+
+export type Stage4ActionHint = (typeof STAGE4_ACTION_HINTS)[number];
+
+/** The hint of each action reject (1st, 2nd, …). Later ones than listed bring none. */
+const HINT_BY_ACTION_REJECT: readonly Stage4ActionHint[] = [
+  "none",
+  "none",
+  "who-hint",
+  "none",
+  "final-push",
+];
+
+/**
+ * The hint the `actionRejects`-th action reject brought (1st, 2nd, …). The screen reads it for
+ * every reject so far, so a reload still finds each hint.
+ */
+export const stage4ActionHint = (actionRejects: number): Stage4ActionHint =>
+  HINT_BY_ACTION_REJECT[actionRejects - 1] ?? "none";
+
+/**
+ * The number of Stage 4 rejects that one applied command recorded (0 or 1). Only the action is
+ * recorded by the state machine, so this counts action rejects alone. A resent command
+ * (`duplicate`) has no events and is not counted again.
+ */
+export const countStage4ActionRejects = (events: readonly GameEvent[]): number =>
+  events.filter((event) => event.type === "submission-rejected" && event.stage === "s4").length;
