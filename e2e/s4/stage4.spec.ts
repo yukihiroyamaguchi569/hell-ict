@@ -4,6 +4,8 @@ import {
   stage4ActionRejects,
   stage4DirectorMail,
   stage4DirectorPages,
+  stage4KarubeFinalPush,
+  stage4KarubeWhoHint,
   stage4QuestionLines,
   stage4SummaryReject,
   stage4ReportText,
@@ -111,6 +113,59 @@ test("要約と行動提案の差し戻しは理由ごとの文言。4種とも�
     "s4.submit-summary",
     ...cases.map(() => "s4.submit-action"),
   ]);
+});
+
+const badge = (page: Page) => page.getByTestId("karube-badge");
+const karubeLog = (page: Page) => page.getByTestId("karube-log");
+const togglePhone = (page: Page) =>
+  page
+    .getByTestId("karube-phone")
+    .getByRole("button", { name: /メッセージ/ })
+    .click();
+
+/** Opens the phone, checks that it ends with `last`, and closes it again. */
+const readPhone = async (page: Page, last: string): Promise<void> => {
+  await togglePhone(page);
+  await expect(karubeLog(page).locator("p").last()).toHaveText(last);
+  await togglePhone(page);
+  await expect(badge(page)).toHaveCount(0);
+};
+
+test("苅部さん: 行動提案の差し戻しの3回目に誰に聞くかのヒント、5回目にだめ押し。院長の差し戻しはそのまま出る", async ({
+  page,
+}) => {
+  await enterStage4(page);
+  await sendSummary(page, SUMMARY_OK);
+  await expect(talk(page)).toBeVisible();
+
+  const sendBack = async (i: number): Promise<void> => {
+    // A different text each time: the same text would be resent under the same commandId.
+    await actionBox(page).fill(`${stage4Answers.actionMissingBoth}${String(i)}`);
+    await talk(page).getByRole("button", { name: "送信する" }).click();
+    await expect(talk(page).getByTestId("verdict")).toContainText(
+      stage4ActionRejects["missing-both"],
+    );
+  };
+
+  await sendBack(1);
+  await sendBack(2);
+  await expect(page.getByTestId("karube-phone")).toHaveCount(0);
+  await sendBack(3);
+  await expect(badge(page)).toHaveText("1");
+  await readPhone(page, stage4KarubeWhoHint[1]);
+
+  // Read calls neither ring nor badge again after a reload.
+  await page.reload();
+  await expect(page.getByTestId("karube-phone")).toBeVisible();
+  await expect(badge(page)).toHaveCount(0);
+
+  await sendBack(4);
+  await expect(badge(page)).toHaveCount(0);
+  await sendBack(5);
+  await expect(badge(page)).toHaveText("2");
+  await readPhone(page, stage4KarubeFinalPush[1]);
+  await sendBack(6);
+  await expect(badge(page)).toHaveCount(0);
 });
 
 test("要約の受理後に再読み込みすると、要約の本文と院長との一往復が戻り、窓は出ない", async ({

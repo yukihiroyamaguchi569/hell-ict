@@ -17,6 +17,8 @@ import { gameView, serverNow } from "../shell/game-view";
 export interface FakeStage4 {
   accepted: boolean;
   cleared: boolean;
+  /** The action rejects so far, as the server counts them (#38). */
+  actionRejects: number;
   /** Past Stage 4 (`advance` applied): the team is in Stage 5. */
   advanced: boolean;
   /** Every command the screen posted, in order. */
@@ -39,6 +41,7 @@ export const fakeStage4 = async (page: Page): Promise<FakeStage4> => {
   const fake: FakeStage4 = {
     accepted: false,
     cleared: false,
+    actionRejects: 0,
     advanced: false,
     commands: [],
     unexpected: [],
@@ -49,7 +52,10 @@ export const fakeStage4 = async (page: Page): Promise<FakeStage4> => {
     const shown = gameView("s4", fake.cleared, base);
     return gameViewResponseSchema.parse({
       ...shown,
-      state: { ...shown.state, s4: { summaryAccepted: fake.accepted } },
+      state: {
+        ...shown.state,
+        s4: { summaryAccepted: fake.accepted, actionRejects: fake.actionRejects },
+      },
       serverNow: serverNow(),
     });
   };
@@ -67,6 +73,7 @@ export const fakeStage4 = async (page: Page): Promise<FakeStage4> => {
     if (body.type === "s4.submit-action") {
       const judgement = judgeStage4Action(text);
       if (judgement.outcome === "pass") fake.cleared = true;
+      else fake.actionRejects += 1;
       return { status: "applied", events: [], judgement, ...view() };
     }
     // Only the clear effect's advance out of a cleared Stage 4 is expected besides the two above.
