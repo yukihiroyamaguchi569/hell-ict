@@ -7,7 +7,8 @@ import type { SendOutcome } from "../../composables/use-game-session.js";
 import { sessionRecord, sessionRecordKey, type SessionRecord } from "../../session-record.js";
 import type { Verdict } from "../../verdict/verdict.js";
 import { submitResult, type SubmitResult } from "../common/submit-result.js";
-import type { StageContext } from "../stage-module.js";
+import type { KarubeCall, StageContext } from "../stage-module.js";
+import { stage4KarubeCalls } from "./karube-calls.js";
 import {
   actionSentBackLine,
   DIRECTOR_DELAY_MS,
@@ -80,6 +81,8 @@ export interface Stage4 {
   /** The stage is cleared: the action box goes, the clear takes over. */
   readonly cleared: ComputedRef<boolean>;
   readonly submitAction: () => void;
+  /** 苅部さん's calls that should have rung by now, oldest first (`stage4KarubeCalls`). */
+  readonly karubeCalls: ComputedRef<readonly KarubeCall[]>;
 }
 
 export const useStage4 = (context: StageContext): Stage4 => {
@@ -201,5 +204,6 @@ export const useStage4 = (context: StageContext): Stage4 => {
       if (!summaryAccepted.value || cleared.value) return;
       actionBox.submit(action.value);
     },
+    karubeCalls: computed(() => (state.value === null ? [] : stage4KarubeCalls(state.value))),
   };
 };

@@ -14,7 +14,7 @@ const DirectorWindow = defineAsyncComponent(() => import("./DirectorWindow.vue")
 /**
  * Stage 4 「新情報の解釈」: the director asks for a summary of the foreign report, then what the
  * team will do about it. No trap and no deadline; the right pane keeps the frame's default (the
- * AI is out).
+ * AI is out). 苅部さん calls when the action keeps being sent back (#38).
  */
 export const stage4: StageModule | null = {
   setup(context) {
@@ -24,6 +24,7 @@ export const stage4: StageModule | null = {
       overlay: markRaw(defineComponent(() => () => h(DirectorWindow, { director: s4.director }))),
       overlayWanted: s4.director.visible,
       inbox: { rows: computed(() => STAGE4_ROWS) },
+      karube: s4.karubeCalls,
     };
   },
 };

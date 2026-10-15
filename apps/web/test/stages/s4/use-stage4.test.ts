@@ -1,6 +1,8 @@
 import {
   stage4ActionRejects,
   stage4DirectorMail,
+  stage4KarubeFinalPush,
+  stage4KarubeWhoHint,
   stage4Labels,
   stage4SendFailed,
   stage4SummaryReject,
@@ -50,6 +52,8 @@ const ids = Array.from(
 class Stage4Server {
   accepted = false;
   cleared = false;
+  /** The action rejects so far, as the server counts them (#38). */
+  actionRejects = 0;
   readonly commands: Record<string, unknown>[] = [];
   /** Replaces the answer to the next commands (a lost connection throws). */
   override: ((body: Record<string, unknown>) => HttpResponse) | null = null;
@@ -66,7 +70,7 @@ class Stage4Server {
           clearedAt: this.cleared ? { s4: new Date(START_MS + 120_000).toISOString() } : {},
         },
         enteredAt: { s4: ENTERED },
-        s4: { summaryAccepted: this.accepted },
+        s4: { summaryAccepted: this.accepted, actionRejects: this.actionRejects },
       },
     };
   }
@@ -96,6 +100,7 @@ class Stage4Server {
     }
     const judgement = judgeStage4Action(text);
     if (judgement.outcome === "pass") this.cleared = true;
+    else this.actionRejects += 1;
     return ok({ status: "applied", events: [], judgement, ...this.view() });
   }
 }
@@ -338,6 +343,59 @@ describe("行動提案", () => {
     s4.submitAction();
     await settle();
     expect(server.commands).toHaveLength(1);
+  });
+});
+
+describe("苅部さんのヒント（#38）", () => {
+  const callNames = (calls: readonly { callId: string }[]) =>
+    calls.map((call) => call.callId.replace(`s4:${ENTERED}:`, ""));
+
+  it("差し戻しの3回目と5回目に電話が増え、院長の差し戻しの文言はそのまま出る", async () => {
+    const { s4, settle } = await setup((server) => {
+      server.accepted = true;
+    });
+    const seen: string[][] = [];
+    for (let i = 0; i < 6; i++) {
+      // A different text each time: the same text would be resent under the same commandId.
+      s4.action.value = `${stage4Answers.actionMissingBoth}${String(i)}`;
+      s4.submitAction();
+      await settle();
+      expect(s4.actionVerdict.value).toEqual({
+        kind: "rejected",
+        lines: [stage4ActionRejects["missing-both"]],
+      });
+      seen.push(callNames(s4.karubeCalls.value));
+    }
+    expect(seen).toEqual([
+      [],
+      [],
+      ["who-hint:3"],
+      ["who-hint:3"],
+      ["who-hint:3", "final-push:5"],
+      ["who-hint:3", "final-push:5"],
+    ]);
+    expect(s4.karubeCalls.value.map((call) => call.lines)).toEqual([
+      stage4KarubeWhoHint,
+      stage4KarubeFinalPush,
+    ]);
+  });
+
+  it("再読み込み（サーバの回数から作り直し）でも同じ電話が並ぶ", async () => {
+    const { s4 } = await setup((server) => {
+      server.accepted = true;
+      server.actionRejects = 5;
+    });
+    expect(callNames(s4.karubeCalls.value)).toEqual(["who-hint:3", "final-push:5"]);
+  });
+
+  it("要約の差し戻しでは電話は鳴らない", async () => {
+    const { s4, settle } = await setup(noop);
+    for (let i = 0; i < 5; i++) {
+      s4.summary.value = `${stage4Answers.summaryNg}${String(i)}`;
+      s4.submitSummary();
+      await settle();
+    }
+    expect(s4.karubeCalls.value).toEqual([]);
   });
 });
 
