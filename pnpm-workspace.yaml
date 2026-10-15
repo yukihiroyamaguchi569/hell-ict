@@ -5,13 +5,16 @@ engineStrict: true
 overrides:
   qs: ">=6.16.0"
   fast-uri: "^3.1.8"
-  sharp: "^0.35.4"
+  sharp: "^0.35.5"
   js-yaml: "^4.3.2"
   # @cloudflare/vitest-pool-workers 0.22.0（最新）が wrangler 4.124.0 と miniflare 5.20260815.0-alpha を
   # 厳密固定し、その miniflare が undici 7.29.0（GHSA-8436-99hf-9mmv ほか high を含む）を厳密指定している。
   # 直接依存の更新では外せないため、7.x の脆弱な版だけを patched 版へ寄せる（5.x・6.x は巻き込まない）。
   # miniflare が 7.29.1 以上を指すようになればこの行は効かなくなるので、その時点で消してよい。
   "undici@>=7.0.0 <7.29.1": "7.29.1"
+  # source-map-js 1.2.1 以前（GHSA-68fv-2mgg-jv7q、high）を間接依存で引いているため、脆弱な範囲だけを patched 版へ寄せる。
+  # 依存元が 1.2.2 以上を指すようになればこの行は効かなくなるので、その時点で消してよい。
+  "source-map-js@>=1.0.0 <1.2.2": "1.2.2"
 allowBuilds:
   esbuild: true
   workerd: true
