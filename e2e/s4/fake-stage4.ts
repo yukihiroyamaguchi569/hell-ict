@@ -19,6 +19,8 @@ export interface FakeStage4 {
   cleared: boolean;
   /** The action rejects so far, as the server counts them (#38). */
   actionRejects: number;
+  /** Of them, the ones for asking the patients. */
+  patientRejects: number;
   /** Past Stage 4 (`advance` applied): the team is in Stage 5. */
   advanced: boolean;
   /** Every command the screen posted, in order. */
@@ -36,12 +38,25 @@ const bodyOf = (value: unknown): Record<string, unknown> =>
 const isAdvanceOutOfStage4 = (body: Record<string, unknown>): boolean =>
   body.type === "advance" && body.from === "s4" && body.to === "s5";
 
+/** Judges an action and counts it as the server does (#38, and the patient rejects apart). */
+const judgeAction = (fake: FakeStage4, text: string) => {
+  const judgement = judgeStage4Action(text);
+  if (judgement.outcome === "pass") {
+    fake.cleared = true;
+    return judgement;
+  }
+  fake.actionRejects += 1;
+  if (judgement.reason === "aimed-at-patients") fake.patientRejects += 1;
+  return judgement;
+};
+
 export const fakeStage4 = async (page: Page): Promise<FakeStage4> => {
   const base = serverNow();
   const fake: FakeStage4 = {
     accepted: false,
     cleared: false,
     actionRejects: 0,
+    patientRejects: 0,
     advanced: false,
     commands: [],
     unexpected: [],
@@ -54,7 +69,11 @@ export const fakeStage4 = async (page: Page): Promise<FakeStage4> => {
       ...shown,
       state: {
         ...shown.state,
-        s4: { summaryAccepted: fake.accepted, actionRejects: fake.actionRejects },
+        s4: {
+          summaryAccepted: fake.accepted,
+          actionRejects: fake.actionRejects,
+          patientRejects: fake.patientRejects,
+        },
       },
       serverNow: serverNow(),
     });
@@ -71,9 +90,7 @@ export const fakeStage4 = async (page: Page): Promise<FakeStage4> => {
       return { status: "applied", events: [], judgement, ...view() };
     }
     if (body.type === "s4.submit-action") {
-      const judgement = judgeStage4Action(text);
-      if (judgement.outcome === "pass") fake.cleared = true;
-      else fake.actionRejects += 1;
+      const judgement = judgeAction(fake, text);
       return { status: "applied", events: [], judgement, ...view() };
     }
     // Only the clear effect's advance out of a cleared Stage 4 is expected besides the two above.

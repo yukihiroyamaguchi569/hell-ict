@@ -18,7 +18,7 @@ describe("submitResult", () => {
       status: "duplicate",
       original: { events: [], judgement: { outcome: "reject", reason: "missing-whom" } },
     });
-    expect(submitResult(outcome, actionSentBackLine)).toEqual({
+    expect(submitResult(outcome, (judgement) => actionSentBackLine(judgement, 0))).toEqual({
       kind: "sent-back",
       line: stage4ActionRejects["missing-whom"],
     });
@@ -47,7 +47,9 @@ describe("submitResult", () => {
       events: [],
       judgement: { outcome: "reject", reason: "unknown" },
     });
-    expect(submitResult(outcome, actionSentBackLine)).toEqual({ kind: "accepted" });
+    expect(submitResult(outcome, (judgement) => actionSentBackLine(judgement, 0))).toEqual({
+      kind: "accepted",
+    });
   });
 
   it.each(["unavailable", "failed"] as const)("%s は送り直せる", (kind) => {
@@ -56,5 +58,37 @@ describe("submitResult", () => {
 
   it.each(["stale", "not-ready", "superseded"] as const)("%s は何も言わない", (kind) => {
     expect(submitResult({ kind }, summarySentBackLine)).toEqual({ kind: "none" });
+  });
+});
+
+describe("actionSentBackLine: 患者に向けた差し戻しの2回目以降は、より直接に言う", () => {
+  const patients = { outcome: "reject", reason: "aimed-at-patients" };
+
+  it.each([
+    [1, "aimed-at-patients"],
+    [2, "aimed-at-patients-again"],
+    [5, "aimed-at-patients-again"],
+  ] as const)("患者向けの差し戻し%i回目は %s の文", (patientRejects, key) => {
+    expect(actionSentBackLine(patients, patientRejects)).toBe(stage4ActionRejects[key]);
+  });
+
+  it("ほかの理由は、患者向けの回数があっても理由どおりの文", () => {
+    expect(actionSentBackLine({ outcome: "reject", reason: "missing-both" }, 3)).toBe(
+      stage4ActionRejects["missing-both"],
+    );
+  });
+
+  it("送り直しで返った duplicate も、画面の回数で文を選ぶ", () => {
+    const outcome = done({ status: "duplicate", original: { events: [], judgement: patients } });
+    expect(submitResult(outcome, (judgement) => actionSentBackLine(judgement, 2))).toEqual({
+      kind: "sent-back",
+      line: stage4ActionRejects["aimed-at-patients-again"],
+    });
+  });
+
+  it("差し戻しでない判定や、判定の返さない理由には何も言わない", () => {
+    expect(actionSentBackLine({ outcome: "pass" }, 2)).toBeNull();
+    const again = { outcome: "reject", reason: "aimed-at-patients-again" };
+    expect(actionSentBackLine(again, 2)).toBeNull();
   });
 });

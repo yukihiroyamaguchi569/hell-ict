@@ -115,6 +115,29 @@ test("要約と行動提案の差し戻しは理由ごとの文言。4種とも�
   ]);
 });
 
+test("患者に向けた差し戻しは、間にほかの理由が挟まっても2回目から直接の文言になり、再読み込み後も続く", async ({
+  page,
+}) => {
+  await enterStage4(page);
+  await sendSummary(page, SUMMARY_OK);
+  await expect(talk(page)).toBeVisible();
+
+  const sendAction = async (text: string, reason: keyof typeof stage4ActionRejects) => {
+    await actionBox(page).fill(text);
+    await talk(page).getByRole("button", { name: "送信する" }).click();
+    await expect(talk(page).getByTestId("verdict")).toContainText(stage4ActionRejects[reason]);
+  };
+
+  const patients = stage4Answers.actionAimedAtPatients;
+  await sendAction(patients, "aimed-at-patients");
+  await sendAction(stage4Answers.actionMissingBoth, "missing-both");
+  // A different text each time: the same text would be resent under the same commandId.
+  await sendAction(`${patients}。`, "aimed-at-patients-again");
+  await page.reload();
+  await expect(talk(page)).toBeVisible();
+  await sendAction(`${patients}。。`, "aimed-at-patients-again");
+});
+
 const badge = (page: Page) => page.getByTestId("karube-badge");
 const karubeLog = (page: Page) => page.getByTestId("karube-log");
 const togglePhone = (page: Page) =>

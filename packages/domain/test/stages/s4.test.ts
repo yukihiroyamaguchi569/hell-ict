@@ -6,6 +6,7 @@ import { stageJudgementSchema } from "../../src/schemas/game.js";
 import {
   judgeStage4Action,
   judgeStage4Summary,
+  STAGE4_ACTION_REJECT_LINES,
   STAGE4_ACTION_REJECT_REASONS,
 } from "../../src/stages/s4.js";
 import type { Stage4ActionJudgement } from "../../src/stages/s4.js";
@@ -86,10 +87,8 @@ describe("judgeStage4Action: 差し戻しの理由は欠けている要素で分
 });
 
 describe("Stage 4 の差し戻し文（content）と差し戻し理由の対応", () => {
-  it("理由ごとに院長の差し戻し文が1つずつある（過不足なし）", () => {
-    expect(Object.keys(stage4ActionRejects).sort()).toEqual(
-      [...STAGE4_ACTION_REJECT_REASONS].sort(),
-    );
+  it("文の種類（理由と、患者向けの2回目以降）ごとに院長の差し戻し文が1つずつある（過不足なし）", () => {
+    expect(Object.keys(stage4ActionRejects).sort()).toEqual([...STAGE4_ACTION_REJECT_LINES].sort());
   });
 
   it("理由ごとに文言が違う（同じ文言を返し続けない）", () => {
@@ -97,7 +96,7 @@ describe("Stage 4 の差し戻し文（content）と差し戻し理由の対応"
     expect(new Set(texts).size).toBe(texts.length);
   });
 
-  it.each(STAGE4_ACTION_REJECT_REASONS)(
+  it.each(STAGE4_ACTION_REJECT_LINES)(
     "差し戻し文 %s をそのまま行動提案へ貼っても通らない",
     (reason) => {
       expect(judgeStage4Action(stage4ActionRejects[reason]).outcome).toBe("reject");

@@ -150,7 +150,8 @@ export const useStage4 = (context: StageContext): Stage4 => {
   const actionBox = useSubmission({
     send: (text, id) => session.send({ type: "s4.submit-action", text }, id),
     newCommandId,
-    sentBackLine: actionSentBackLine,
+    // The answer's state is on screen by now: its count includes this reject.
+    sentBackLine: (judgement) => actionSentBackLine(judgement, state.value?.s4.patientRejects ?? 0),
     onSentBack: warnWithSound,
   });
 

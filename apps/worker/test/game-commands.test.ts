@@ -1,4 +1,5 @@
-import { exports } from "cloudflare:workers";
+import { env, exports } from "cloudflare:workers";
+import { runInDurableObject } from "cloudflare:test";
 import { stage4Answers } from "@hell-ict/content/answers";
 import { DEADLINE_GRACE_MS, INBOX_LIMIT_MS, S5_FEVER_IDS } from "@hell-ict/domain";
 import { beforeEach, describe, expect, it } from "vitest";
@@ -233,7 +234,9 @@ describe("同じcommandIdの再送", () => {
 });
 
 describe("Stage 4 の行動提案の差し戻し回数（Issue #38）", () => {
-  const s4Schema = z.object({ summaryAccepted: z.boolean(), actionRejects: z.number() }).strict();
+  const s4Schema = z
+    .object({ summaryAccepted: z.boolean(), actionRejects: z.number(), patientRejects: z.number() })
+    .strict();
   const s4Of = (reply: { state: Record<string, unknown> }) => s4Schema.parse(reply.state.s4);
   const reject = (i: number) =>
     command("s4.submit-action", { text: `${stage4Answers.actionMissingBoth}${String(i)}` });
@@ -253,7 +256,11 @@ describe("Stage 4 の行動提案の差し戻し回数（Issue #38）", () => {
       counts.push(s4Of(reply).actionRejects);
     }
     expect(counts).toEqual([1, 2, 3, 4, 5]);
-    expect(s4Of(await gameOf(teamCode))).toEqual({ summaryAccepted: true, actionRejects: 5 });
+    expect(s4Of(await gameOf(teamCode))).toEqual({
+      summaryAccepted: true,
+      actionRejects: 5,
+      patientRejects: 0,
+    });
   });
 
   it("要約の差し戻しと、要約より先の行動提案は数えない", async () => {
@@ -266,7 +273,11 @@ describe("Stage 4 の行動提案の差し戻し回数（Issue #38）", () => {
     expect(
       await send(teamCode, command("s4.submit-summary", { text: stage4Answers.summaryNg })),
     ).toMatchObject({ status: "rejected", reason: "no-ocular-symptom" });
-    expect(s4Of(await gameOf(teamCode))).toEqual({ summaryAccepted: false, actionRejects: 0 });
+    expect(s4Of(await gameOf(teamCode))).toEqual({
+      summaryAccepted: false,
+      actionRejects: 0,
+      patientRejects: 0,
+    });
   });
 
   it("同じcommandIdの再送（順に・同時に）は1回しか数えない", async () => {
@@ -299,7 +310,82 @@ describe("Stage 4 の行動提案の差し戻し回数（Issue #38）", () => {
     await summarized(teamCode);
     await applied(teamCode, reject(0));
     expect((await gmReset(teamCode)).status).toBe(200);
-    expect(s4Of(await gameOf(teamCode))).toEqual({ summaryAccepted: false, actionRejects: 0 });
+    expect(s4Of(await gameOf(teamCode))).toEqual({
+      summaryAccepted: false,
+      actionRejects: 0,
+      patientRejects: 0,
+    });
+  });
+});
+
+describe("Stage 4 の患者に向けた差し戻しの回数", () => {
+  const countsSchema = z.object({ actionRejects: z.number(), patientRejects: z.number() });
+  const countsOf = (reply: { state: Record<string, unknown> }) =>
+    countsSchema.parse(reply.state.s4);
+  const toPatients = (i: number) =>
+    command("s4.submit-action", {
+      text: `${stage4Answers.actionAimedAtPatients}${"。".repeat(i)}`,
+    });
+  const other = command("s4.submit-action", { text: stage4Answers.actionMissingBoth });
+
+  const summarized = async (teamCode: string): Promise<void> => {
+    await playTo(teamCode, "s4");
+    await applied(teamCode, command("s4.submit-summary", { text: stage4Answers.summaryOk }));
+  };
+
+  it("患者向けの差し戻しだけを数えて保存し、再読み込み（GET）でも同じ回数を返す", async () => {
+    const teamCode = "876001";
+    await summarized(teamCode);
+    const seen = [];
+    for (const cmd of [toPatients(0), other, toPatients(1)]) {
+      seen.push(countsOf(await applied(teamCode, cmd)));
+    }
+    expect(seen).toEqual([
+      { actionRejects: 1, patientRejects: 1 },
+      { actionRejects: 2, patientRejects: 1 },
+      { actionRejects: 3, patientRejects: 2 },
+    ]);
+    expect(countsOf(await gameOf(teamCode))).toEqual({ actionRejects: 3, patientRejects: 2 });
+  });
+
+  it("同じcommandIdの再送（順に・同時に）は1回しか数えず、最初の判定を返す", async () => {
+    const teamCode = "876002";
+    await summarized(teamCode);
+    const once = toPatients(0);
+    await applied(teamCode, once);
+    expect(await send(teamCode, once)).toMatchObject({
+      status: "duplicate",
+      original: { judgement: { outcome: "reject", reason: "aimed-at-patients" } },
+    });
+    const twice = toPatients(1);
+    const replies = await Promise.all([send(teamCode, twice), send(teamCode, twice)]);
+    expect(replies.map((reply) => reply.status).sort()).toEqual(["applied", "duplicate"]);
+    expect(countsOf(await gameOf(teamCode))).toEqual({ actionRejects: 2, patientRejects: 2 });
+  });
+
+  it("回数の無い保存済み状態は0回として読み、次の患者向けの差し戻しで1回になる", async () => {
+    const teamCode = "876003";
+    await summarized(teamCode);
+    await applied(teamCode, other);
+    await runInDurableObject(env.TEAM_ROOM.getByName(teamCode), (_instance, state) => {
+      state.storage.sql.exec(
+        "UPDATE game_state SET state = json_remove(state, '$.s4.patientRejects') WHERE id = 1",
+      );
+    });
+    expect(countsOf(await gameOf(teamCode))).toEqual({ actionRejects: 1, patientRejects: 0 });
+    expect(countsOf(await applied(teamCode, toPatients(0)))).toEqual({
+      actionRejects: 2,
+      patientRejects: 1,
+    });
+  });
+
+  it("GMリセットで0に戻る", async () => {
+    const teamCode = "876004";
+    await session(teamCode);
+    await summarized(teamCode);
+    await applied(teamCode, toPatients(0));
+    expect((await gmReset(teamCode)).status).toBe(200);
+    expect(countsOf(await gameOf(teamCode))).toEqual({ actionRejects: 0, patientRejects: 0 });
   });
 });
 

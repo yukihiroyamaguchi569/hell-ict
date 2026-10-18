@@ -60,12 +60,15 @@ const teamGameStateFields = {
     .default({ trapJudgements: 0 }),
   /**
    * s4.actionRejects: how many times the action was sent back (Issue #38: which of Karube's
-   * hints to give). Missing in states saved before it existed: read as 0.
+   * hints to give). s4.patientRejects: how many of them were `aimed-at-patients` (from the 2nd
+   * on, the director says it more bluntly). Missing in states saved before they existed: read
+   * as 0.
    */
   s4: z
     .object({
       summaryAccepted: z.boolean(),
       actionRejects: z.number().int().nonnegative().default(0),
+      patientRejects: z.number().int().nonnegative().default(0),
     })
     .strict(),
 };
@@ -80,6 +83,7 @@ const teamGameStateFields = {
  * - inbox / s1 / s2: the timed stages, `null` until the team opens them (the clock starts then).
  * - s4.summaryAccepted: the summary of the foreign report came first and passed.
  * - s4.actionRejects: the action is judged only after the summary, so none come before it.
+ *   s4.patientRejects are some of them.
  * - s6: every instruction sent to the image AI in this stage, and the candidates it made. The
  *   judge reads the whole log (teams add requirements one instruction at a time).
  *
@@ -100,6 +104,9 @@ export const teamGameStateSchema = z
   })
   .refine((state) => state.s4.actionRejects === 0 || state.s4.summaryAccepted, {
     message: "Stage 4 action rejects before the summary passed",
+  })
+  .refine((state) => state.s4.patientRejects <= state.s4.actionRejects, {
+    message: "Stage 4 patient rejects outnumber the action rejects",
   });
 
 export type TeamGameState = z.infer<typeof teamGameStateSchema>;

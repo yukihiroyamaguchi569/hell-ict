@@ -18,7 +18,7 @@ const s4State = (actionRejects: number, entered = ENTERED): TeamGameViewState =>
     ...state,
     game: { ...state.game, stage: "s4" },
     enteredAt: { s4: entered },
-    s4: { summaryAccepted: true, actionRejects },
+    s4: { summaryAccepted: true, actionRejects, patientRejects: 0 },
   };
 };
 

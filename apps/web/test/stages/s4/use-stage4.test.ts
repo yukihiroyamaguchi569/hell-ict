@@ -54,6 +54,8 @@ class Stage4Server {
   cleared = false;
   /** The action rejects so far, as the server counts them (#38). */
   actionRejects = 0;
+  /** Of them, the ones for asking the patients. */
+  patientRejects = 0;
   readonly commands: Record<string, unknown>[] = [];
   /** Replaces the answer to the next commands (a lost connection throws). */
   override: ((body: Record<string, unknown>) => HttpResponse) | null = null;
@@ -70,7 +72,11 @@ class Stage4Server {
           clearedAt: this.cleared ? { s4: new Date(START_MS + 120_000).toISOString() } : {},
         },
         enteredAt: { s4: ENTERED },
-        s4: { summaryAccepted: this.accepted, actionRejects: this.actionRejects },
+        s4: {
+          summaryAccepted: this.accepted,
+          actionRejects: this.actionRejects,
+          patientRejects: this.patientRejects,
+        },
       },
     };
   }
@@ -101,6 +107,9 @@ class Stage4Server {
     const judgement = judgeStage4Action(text);
     if (judgement.outcome === "pass") this.cleared = true;
     else this.actionRejects += 1;
+    if (judgement.outcome === "reject" && judgement.reason === "aimed-at-patients") {
+      this.patientRejects += 1;
+    }
     return ok({ status: "applied", events: [], judgement, ...this.view() });
   }
 }
@@ -329,6 +338,34 @@ describe("行動提案", () => {
     expect(s4.actionWarn.value).toBe(true);
     expect(played).toEqual(["cancel"]);
     expect(s4.cleared.value).toBe(false);
+  });
+
+  it("患者に向けた差し戻しは、間にほかの理由が挟まっても2回目から直接の文言になる", async () => {
+    const { s4, settle } = await setup((server) => {
+      server.accepted = true;
+    });
+    const texts = [
+      stage4Answers.actionAimedAtPatients,
+      stage4Answers.actionMissingBoth,
+      // A different text: the same text would be resent under the same commandId.
+      `${stage4Answers.actionAimedAtPatients}。`,
+      `${stage4Answers.actionAimedAtPatients}。。`,
+    ];
+    const lines: unknown[] = [];
+    for (const text of texts) {
+      s4.action.value = text;
+      s4.submitAction();
+      await settle();
+      lines.push(s4.actionVerdict.value);
+    }
+    expect(lines).toEqual(
+      [
+        stage4ActionRejects["aimed-at-patients"],
+        stage4ActionRejects["missing-both"],
+        stage4ActionRejects["aimed-at-patients-again"],
+        stage4ActionRejects["aimed-at-patients-again"],
+      ].map((line) => ({ kind: "rejected", lines: [line] })),
+    );
   });
 
   it("通ればクリア。判定表示は出さず、以後は送らない", async () => {
