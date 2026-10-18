@@ -310,6 +310,12 @@ export const stage1CurtVoices = [
   "お忙しいですよね。こちらこそすみません。",
 ] as const satisfies Lines;
 
+/** 引き継ぎメモをそのまま貼った返信を受けた相手の反応（#44）。そっけない返信の反応と同じ扱いで出す。 */
+export const stage1PastedVoices = [
+  "……引き継ぎメモが丸ごと届きました。で、どこに申請すれば……？",
+  "長っ……。すみません、私の質問の答えはどこでしょうか。",
+] as const satisfies Lines;
+
 /** R1失敗（そっけない返信が主因）のときの苅部さん（モック S1_KARUBE_R1_CURT）。 */
 export const stage1KarubeRound1Curt = [
   "〔苅部〕……見てました。急いで書いた短い返事、ぜんぶ相手に届いてますからね。",
@@ -418,22 +424,31 @@ export const stage1Briefing = {
 export const stage1ResultText = {
   title: "院内連絡システム　v3.1 ── 処理結果",
   heading: (attempt: number): string => `${String(attempt)}回目、終了`,
-  /** timeout は時間切れがあった回、curt は全通返したがそっけない返信があった回。 */
+  /**
+   * timeout は時間切れがあった回、curt は全通返したがそっけない返信があった回、pasted は全通返したが
+   * 引き継ぎメモをそのまま貼った返信があった回（#44。curt より優先）。
+   */
   notes: {
     1: {
       timeout: (done: number, total: number): string =>
         `${String(done)} / ${String(total)} 件。……皆さん方の実力は、そんなものですか。優秀な派遣の方だと伺っていたのですが。`,
       curt: "数だけは揃いましたが、あれで返信と言えますか。先方から困惑の声が届いております。",
+      pasted:
+        "全通に返信はできましたが、前任のメモをそのまま貼り付けた返信がありました。先方は、どこを読めばよいか分からず困っております。",
     },
     2: {
       timeout: (done: number, total: number): string =>
         `${String(done)} / ${String(total)} 件しか返せませんでした。要点を毎回書いていては間に合いません。`,
       curt: "全通に返信はできましたが、AIの下書きを使わずに送った分が短すぎたようです。",
+      pasted:
+        "全通に返信はできましたが、前任のメモをそのまま貼り付けた返信がありました。先方は、どこを読めばよいか分からず困っております。",
     },
     3: {
       timeout: (done: number, total: number): string =>
         `${String(done)} / ${String(total)} 件。返事が無いので、先方が同じ用件をもう一度送ってきております。`,
       curt: "数は揃いましたが、あれでは答えになっていないと、先方が同じ用件をもう一度送ってきております。",
+      pasted:
+        "全通に返信はできましたが、前任のメモをそのまま貼り付けた返信がありました。先方は、どこを読めばよいか分からず困っております。",
     },
   },
   admin: {
@@ -442,6 +457,7 @@ export const stage1ResultText = {
     missed: (missed: number): string =>
       `${String(missed)}件、返信が来ていないと苦情が来ています。派遣の方だからと言い訳はできませんよ。`,
     curt: "全部返していただいたのは結構ですが……何件か、先方が困惑しておられます。",
+    pasted: "メモを丸ごと送りつけられても、先方は読みませんよ。",
   },
   rest: (count: number): string => `……ほか ${String(count)}件、同じような返事が届いています。`,
   yourReply: "あなたの返信",

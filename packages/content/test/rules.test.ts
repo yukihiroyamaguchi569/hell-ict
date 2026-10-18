@@ -2,9 +2,10 @@ import { describe, expect, it } from "vitest";
 
 import * as content from "../src/index.js";
 import { systemPrompts } from "../src/prompts.js";
-import { stage3Rules, stage4Rules, stage6Rules } from "../src/rules.js";
+import { stage1Rules, stage3Rules, stage4Rules, stage6Rules } from "../src/rules.js";
 import { scenarioId } from "../src/scenario.js";
 import {
+  stage1RulesSchema,
   stage3RulesSchema,
   stage4RulesSchema,
   stage6RulesSchema,
@@ -13,6 +14,7 @@ import {
 
 describe("シナリオの境界", () => {
   it("判定の語と system prompt が schema を満たす", () => {
+    expect(stage1RulesSchema.safeParse(stage1Rules).success).toBe(true);
     expect(stage3RulesSchema.safeParse(stage3Rules).success).toBe(true);
     expect(stage4RulesSchema.safeParse(stage4Rules).success).toBe(true);
     expect(stage6RulesSchema.safeParse(stage6Rules).success).toBe(true);
@@ -26,6 +28,20 @@ describe("シナリオの境界", () => {
   it("system prompt は index から export されない（web のバンドルに入れない）", () => {
     expect(Object.values(content)).not.toContain(systemPrompts);
     expect(Object.keys(content)).not.toContain("systemPrompts");
+  });
+});
+
+describe("stage1Rules", () => {
+  it("貼り付けの判定は、引き継ぎメモの本文と比べる", () => {
+    expect(stage1Rules.pastedMemo.text).toBe(content.stage1MemoText);
+  });
+
+  it.each([
+    ["本文が空の", { pastedMemo: { ...stage1Rules.pastedMemo, text: "" } }],
+    ["字数が0の", { pastedMemo: { ...stage1Rules.pastedMemo, minRun: 0 } }],
+    ["字数が整数でない", { pastedMemo: { ...stage1Rules.pastedMemo, minRun: 39.5 } }],
+  ])("%sものを拒否する", (_label, value) => {
+    expect(stage1RulesSchema.safeParse(value).success).toBe(false);
   });
 });
 
