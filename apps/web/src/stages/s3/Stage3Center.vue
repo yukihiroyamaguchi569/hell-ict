@@ -115,7 +115,8 @@ const onSubmit = (): void => {
 }
 /*
  * Stage 3's verdict rows are read from a projector or a few seats away (2026-10 test play: the
- * shared 15px went unread), so here they are larger and bold. The checking line keeps its size.
+ * shared 15px went unread), so here they are larger, bold and in the warn orange. The checking
+ * line keeps its size and colour.
  */
 .work :deep(.verdict) {
   gap: 12px;
@@ -124,9 +125,11 @@ const onSubmit = (): void => {
   font-size: calc(20px * var(--fs-scale));
   font-weight: 700;
   line-height: 1.5;
+  color: var(--warn);
 }
 .work :deep(.verdict > .done) {
   font-size: calc(22px * var(--fs-scale));
   line-height: 1.5;
+  color: var(--warn);
 }
 </style>
