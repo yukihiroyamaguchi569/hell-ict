@@ -113,6 +113,23 @@ test("苅部さんのバーは画面の下端に付き、開いた窓はバー�
   expect(await rect(bar)).toEqual(closed);
 });
 
+test("苅部さんの窓は、窓の中の［閉じる］でも閉じ、バーからまた開ける", async ({ page }) => {
+  await fakeStage2(page, 50_000);
+  await page.goto("/");
+  await enterTeam(page, uniqueTeamCode(), "閉じる班");
+  await expect(page.getByTestId("karube-badge")).toHaveText("1");
+
+  const win = page.getByTestId("karube-window");
+  await openKarube(page).click();
+  await expect(page.getByTestId("karube-log")).toContainText("また師長のExcelですか");
+
+  await win.getByRole("button", { name: "閉じる", exact: true }).click();
+  await expect(win).toHaveCount(0);
+
+  await openKarube(page).click();
+  await expect(page.getByTestId("karube-log")).toContainText("また師長のExcelですか");
+});
+
 test("締切を過ぎてから頼むと、台本の表は追加分込みの30行で、［表に追加］を押さずにそのまま提出できる", async ({
   page,
 }) => {

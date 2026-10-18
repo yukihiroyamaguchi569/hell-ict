@@ -41,7 +41,10 @@ const onKeydown = (event: KeyboardEvent): void => {
 <template>
   <div class="phs" data-testid="karube-phone">
     <div v-if="open" class="win" data-testid="karube-window">
-      <div class="who">{{ who }}</div>
+      <div class="who">
+        <span>{{ who }}</span>
+        <button type="button" class="close" @click="emit('toggle')">閉じる</button>
+      </div>
       <div ref="logEl" class="log" data-testid="karube-log">
         <p v-for="line in log" :key="line.key" :class="line.kind">
           {{ line.kind === "me" ? `〔あなた〕${line.text}` : line.text }}
@@ -121,10 +124,25 @@ const onKeydown = (event: KeyboardEvent): void => {
   border-top: 0;
 }
 .who {
-  padding: 8px 12px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 4px 4px 4px 12px;
   font-size: calc(13px * var(--fs-scale));
   border-bottom: 1px solid #cfd6d1;
   background: #eef3ef;
+}
+/* Some players could not tell how to close the window (only the bar toggled it): a plain,
+   labelled button, large enough to hit with a trackpad. It does what the bar does. */
+.close {
+  min-width: 80px;
+  min-height: 36px;
+  border: 1px solid #9aa59e;
+  background: #fff;
+  color: #16181a;
+  font-family: var(--font-legacy);
+  font-size: calc(14px * var(--fs-scale));
+  cursor: pointer;
 }
 .log {
   height: 232px;
