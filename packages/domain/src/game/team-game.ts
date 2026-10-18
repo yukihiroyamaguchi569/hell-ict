@@ -235,19 +235,20 @@ const startStage1Command = (ctx: Context): TeamGameResult => {
 };
 
 /**
- * The curt replies are kept for the round's result window. They are stored on the server and
- * sent back by GET, so personal data in them is blacked out first (as the chat stores AI
- * answers). Judging has already run on the original text.
+ * The curt and pasted replies are kept for the round's result window. They are stored on the
+ * server and sent back by GET, so personal data in them is blacked out first (as the chat stores
+ * AI answers). Judging has already run on the original text.
  */
-const withRedactedCurt = (s1: Stage1State): Stage1State => ({
+const withRedactedReplies = (s1: Stage1State): Stage1State => ({
   ...s1,
   curt: s1.curt.map((entry) => ({ ...entry, reply: redactPii(entry.reply) })),
+  pasted: s1.pasted.map((entry) => ({ ...entry, reply: redactPii(entry.reply) })),
 });
 
 const afterStage1Reply = (ctx: Context, reply: Stage1ReplyResult): TeamGameResult => {
   if (reply.judgement.outcome === "reject")
     return rejected(reply.judgement.reason, reply.judgement);
-  const settled = settleStage1Round(withRedactedCurt(reply.state), ctx.now.ms);
+  const settled = settleStage1Round(withRedactedReplies(reply.state), ctx.now.ms);
   return finishStage1IfCleared(ctx, settled.state, {
     ...reply.judgement,
     settlement: settled.settlement,

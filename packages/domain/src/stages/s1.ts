@@ -1,3 +1,4 @@
+import { stage1Rules } from "@hell-ict/content";
 import { z } from "zod";
 
 import type { StageJudgement } from "../schemas/game.js";
@@ -11,10 +12,11 @@ import { DEADLINE_GRACE_MS, epochMsSchema, isPastDeadline, secondsToMs } from ".
  * `s1AttemptNo`, `s1MemoLive` and the draft gate of `s1Draft` (hell-ict-archive:docs/ui/mock/index.html).
  *
  * - R1 (no AI), R2 (AI drafts), R3 (context): a round ends once every mail has landed and none
- *   is still open. All five answered, none curt → cleared; otherwise the next round.
+ *   is still open. All five answered, none curt or pasted → cleared; otherwise the next round.
  * - R3 repeats with the same five mails until it is cleared, with no limit.
- * - A reply is judged only on length and politeness, never on content, and a curt reply is not
- *   refused: it counts against the round when the round ends.
+ * - A reply is judged on length and politeness, and on whether it copies the handover memo
+ *   (#44, not in the mock), never on what it answers. A curt or pasted reply is not refused: it
+ *   counts against the round when the round ends.
  * - The handover memo expires once, 60 s after the stage started, whatever the round. Replying
  *   to it is never judged and does not count for the round.
  *
@@ -36,6 +38,9 @@ export const STAGE1_MIN_REPLY_LENGTH = 70;
 
 /** The mock's `S1_POLITE`: a reply with none of these is curt. */
 const POLITE = /(ます|ください|いたし|ございま|よろしく|お願い|存じ)/;
+
+/** The memo and the run that makes a reply a paste of it live in content (`stage1Rules`). */
+const PASTED_MEMO: { text: string; minRun: number } = stage1Rules.pastedMemo;
 
 export const STAGE1_ROUNDS = [1, 2, 3] as const;
 
@@ -127,7 +132,14 @@ const phaseSchema = z.discriminatedUnion("phase", [
  * - doneIds: every mail answered so far, over all rounds (the mock's `s1.doneIds`). An R3 retry
  *   removes the R3 mails, or the last try's replies would count for this one.
  * - curt: this round's curt replies with their text, for the result window (the mock's `s1.curt`).
+ * - pasted: this round's replies that copy the handover memo (#44), kept like `curt`. A reply is
+ *   in one of the two at most. Missing in states saved before it existed: read as empty.
  */
+/** A reply kept for the result window (curt or pasted). */
+const stage1JudgedReplySchema = z
+  .object({ mailId: stage1MailIdSchema, reply: z.string() })
+  .strict();
+
 const stage1StateShapeSchema = z
   .object({
     stageStartedAt: epochMsSchema,
@@ -135,7 +147,8 @@ const stage1StateShapeSchema = z
     roundStartedAt: epochMsSchema,
     r3Try: z.number().int().nonnegative(),
     doneIds: z.array(stage1MailIdSchema),
-    curt: z.array(z.object({ mailId: stage1MailIdSchema, reply: z.string() }).strict()),
+    curt: z.array(stage1JudgedReplySchema),
+    pasted: z.array(stage1JudgedReplySchema).default([]),
     memoReplied: z.boolean(),
     status: phaseSchema,
   })
@@ -148,9 +161,11 @@ const ROUND_FAILURES = { 1: "round1", 2: "round2", 3: "round3" } as const;
 const roundMailIds = (round: Stage1Round): readonly Stage1MailId[] =>
   STAGE1_SCHEDULES[round].map((mail) => mail.id);
 
-/** All five of this round answered and none of them curt (the mock's `clean`). */
+/** All five of this round answered and none of them curt or pasted (the mock's `clean`). */
 const isCleanRound = (state: Stage1StateShape): boolean =>
-  roundMailIds(state.round).every((id) => state.doneIds.includes(id)) && state.curt.length === 0;
+  roundMailIds(state.round).every((id) => state.doneIds.includes(id)) &&
+  state.curt.length === 0 &&
+  state.pasted.length === 0;
 
 /** Replies can only have gone to the rounds played so far, and a round starts after the stage. */
 const historyIsPlayed = (state: Stage1StateShape): boolean => {
@@ -160,11 +175,17 @@ const historyIsPlayed = (state: Stage1StateShape): boolean => {
   );
 };
 
-/** A curt reply is a reply of this round (the list is emptied when a round starts). */
-const curtIsThisRound = (state: Stage1StateShape): boolean =>
-  state.curt.every(
-    ({ mailId }) => roundMailIds(state.round).includes(mailId) && state.doneIds.includes(mailId),
+/**
+ * A curt or pasted reply is a reply of this round (the lists are emptied when a round starts),
+ * and no reply is in both.
+ */
+const judgedRepliesAreThisRound = (state: Stage1StateShape): boolean => {
+  const ids = [...state.curt, ...state.pasted].map(({ mailId }) => mailId);
+  return (
+    new Set(ids).size === ids.length &&
+    ids.every((id) => roundMailIds(state.round).includes(id) && state.doneIds.includes(id))
   );
+};
 
 /**
  * The phase agrees with the round: a failed round's window names that round and the round is
@@ -194,7 +215,7 @@ export const stage1StateSchema = stage1StateShapeSchema
     message: "r3Try must be positive exactly in round 3",
   })
   .refine(historyIsPlayed, { message: "doneIds or the round start is ahead of the round" })
-  .refine(curtIsThisRound, { message: "curt holds a reply outside this round" })
+  .refine(judgedRepliesAreThisRound, { message: "curt or pasted holds a reply outside this round" })
   .refine(phaseMatchesRound, { message: "phase does not match the round" });
 
 export type Stage1State = z.infer<typeof stage1StateSchema>;
@@ -217,6 +238,7 @@ export const startStage1 = (now: number): Stage1State => ({
   r3Try: 0,
   doneIds: [],
   curt: [],
+  pasted: [],
   memoReplied: false,
   status: { phase: "playing" },
 });
@@ -266,6 +288,37 @@ export const isCurtReply = (text: string): boolean =>
   text.length < STAGE1_MIN_REPLY_LENGTH || !POLITE.test(text);
 
 /**
+ * The longest run of characters `a` and `b` share (longest common substring), by dynamic
+ * programming over one row: O(|a|·|b|) time, O(|b|) memory. A reply is at most 4,000 characters
+ * and the memo under 1,000, so this stays within a few million steps.
+ */
+const longestSharedRun = (a: string, b: string): number => {
+  let previous = new Array<number>(b.length + 1).fill(0);
+  let longest = 0;
+  for (let i = 0; i < a.length; i++) {
+    const current = new Array<number>(b.length + 1).fill(0);
+    for (let j = 1; j <= b.length; j++) {
+      if (a[i] !== b[j - 1]) continue;
+      const run = (previous[j - 1] ?? 0) + 1;
+      current[j] = run;
+      longest = Math.max(longest, run);
+    }
+    previous = current;
+  }
+  return longest;
+};
+
+/** How many characters in a row the reply shares with the handover memo. */
+export const stage1MemoOverlap = (text: string): number => longestSharedRun(text, PASTED_MEMO.text);
+
+/**
+ * A reply that copies a long enough run of the handover memo (#44): it is the memo, not an
+ * answer to the mail. Checked before `isCurtReply`, so a short scrap of the memo is pasted.
+ */
+export const isPastedMemoReply = (text: string): boolean =>
+  stage1MemoOverlap(text) >= PASTED_MEMO.minRun;
+
+/**
  * Why a reply is refused. Only `empty` is a judgement of the text (「本文が空です」); the others
  * are replies to a mail the screen would not have let the team open.
  */
@@ -280,9 +333,12 @@ export const STAGE1_REPLY_REJECT_REASONS = [
 
 export type Stage1ReplyRejectReason = (typeof STAGE1_REPLY_REJECT_REASONS)[number];
 
-/** Replying clears nothing by itself, so this is deliberately not a `StageJudgement`. */
+/**
+ * Replying clears nothing by itself, so this is deliberately not a `StageJudgement`. `curt` and
+ * `pasted` are never both true: a reply that is both counts as pasted.
+ */
 export type Stage1ReplyJudgement =
-  | { outcome: "accepted"; curt: boolean }
+  | { outcome: "accepted"; curt: boolean; pasted: boolean }
   | { outcome: "reject"; reason: Stage1ReplyRejectReason };
 
 export interface Stage1ReplyResult {
@@ -312,8 +368,8 @@ const reject = (state: Stage1State, reason: Stage1ReplyRejectReason): Stage1Repl
 });
 
 /**
- * The mock's `s1Send`. A curt reply is sent all the same — the team learns it only when the
- * round ends. The text is judged after trimming, as the mock trims the box.
+ * The mock's `s1Send`. A curt or pasted reply is sent all the same — the team learns it only
+ * when the round ends. The text is judged after trimming, as the mock trims the box.
  */
 export const sendStage1Reply = (
   state: Stage1State,
@@ -325,20 +381,22 @@ export const sendStage1Reply = (
   if (blocker !== null) return reject(state, blocker);
   const reply = text.trim();
   if (reply === "") return reject(state, "empty");
-  const curt = isCurtReply(reply);
+  const pasted = isPastedMemoReply(reply);
+  const curt = !pasted && isCurtReply(reply);
   return {
     state: {
       ...state,
       doneIds: [...state.doneIds, mailId],
       curt: curt ? [...state.curt, { mailId, reply }] : state.curt,
+      pasted: pasted ? [...state.pasted, { mailId, reply }] : state.pasted,
     },
-    judgement: { outcome: "accepted", curt },
+    judgement: { outcome: "accepted", curt, pasted },
   };
 };
 
 /**
  * The mock's `s1SendMemo`: only an empty reply is refused. It is not judged, not counted in
- * `doneIds` and never curt, so it cannot move the round's clear condition. Once a round has
+ * `doneIds` and never curt or pasted (pasting the memo back to its author is harmless), so it cannot move the round's clear condition. Once a round has
  * ended, the mock's result window covers the whole screen, so nothing can be sent then.
  */
 export const sendStage1MemoReply = (
@@ -352,7 +410,7 @@ export const sendStage1MemoReply = (
   if (text.trim() === "") return reject(state, "empty");
   return {
     state: { ...state, memoReplied: true },
-    judgement: { outcome: "accepted", curt: false },
+    judgement: { outcome: "accepted", curt: false, pasted: false },
   };
 };
 
@@ -399,6 +457,7 @@ const newRound = (state: Stage1State, round: Stage1Round, now: number): Stage1St
   round,
   roundStartedAt: now,
   curt: [],
+  pasted: [],
   status: { phase: "playing" },
 });
 
@@ -446,12 +505,13 @@ export const judgeStage1 = (state: Stage1State): Stage1Judgement =>
     ? { outcome: "pass", result: state.status.result }
     : { outcome: "reject", reason: "not-cleared" };
 
-/** What the result window counts (the mock's `done` / `missed` / `s1.curt.length`). */
+/** What the result window counts (the mock's `done` / `missed` / `s1.curt.length`, and #44's pasted). */
 export interface Stage1RoundSummary {
   total: number;
   done: number;
   missed: number;
   curt: number;
+  pasted: number;
 }
 
 export const stage1RoundSummary = (state: Stage1State, now: number): Stage1RoundSummary => {
@@ -461,6 +521,7 @@ export const stage1RoundSummary = (state: Stage1State, now: number): Stage1Round
     done: mails.filter((mail) => mail.status === "done").length,
     missed: mails.filter((mail) => mail.status === "missed").length,
     curt: state.curt.length,
+    pasted: state.pasted.length,
   };
 };
 

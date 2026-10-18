@@ -1,4 +1,4 @@
-import { stage5IncidentReport } from "@hell-ict/content";
+import { stage1MemoText, stage5IncidentReport } from "@hell-ict/content";
 import { stage4Answers, stage5Answers, stage6Answers } from "@hell-ict/content/answers";
 import { describe, expect, it } from "vitest";
 
@@ -593,6 +593,18 @@ describe("サーバに残す本文の個人情報", () => {
     expect(result).toMatchObject({ status: "applied", judgement: { curt: true } });
     if (result.status !== "applied") throw new Error("unreachable");
     expect(result.state.s1?.curt).toEqual([{ mailId: "m1", reply: redactPii(text) }]);
+    expect(JSON.stringify(result.state)).not.toContain(stage5Patient.name);
+  });
+
+  it("S1の引き継ぎメモを貼った返信も、個人情報を伏せ字にしてから残す（#44。判定は元の本文で行う）", () => {
+    const { state, t } = enteredStage("s1");
+    const started = applied(state, command("s1.start"), t);
+    const text = `${stage5Patient.name}さんの件です。\n${stage1MemoText}`;
+    const result = apply(started, command("s1.reply", { mailId: "m1", text }), t + 1_000);
+    expect(result).toMatchObject({ status: "applied", judgement: { curt: false, pasted: true } });
+    if (result.status !== "applied") throw new Error("unreachable");
+    expect(result.state.s1?.curt).toEqual([]);
+    expect(result.state.s1?.pasted).toEqual([{ mailId: "m1", reply: redactPii(text) }]);
     expect(JSON.stringify(result.state)).not.toContain(stage5Patient.name);
   });
 

@@ -28,6 +28,7 @@ export const stage1 = (patch: Partial<Stage1State> = {}): Stage1State => ({
   r3Try: 0,
   doneIds: [],
   curt: [],
+  pasted: [],
   memoReplied: false,
   status: { phase: "playing" },
   ...patch,

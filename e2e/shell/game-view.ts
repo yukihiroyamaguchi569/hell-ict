@@ -59,6 +59,7 @@ const teamState = (stage: GameStageId, cleared: boolean, base: number) => {
       r3Try: 0,
       doneIds: s1Cleared ? ["m1", "m2", "m3", "m4", "m8"] : [],
       curt: [],
+      pasted: [],
       memoReplied: false,
       status: s1Cleared ? { phase: "cleared", result: "manual" } : { phase: "playing" },
     },

@@ -71,6 +71,7 @@ describe("raceElapsedMs（レースの時計はStage 1のブリーフィング�
     r3Try: 0,
     doneIds: [],
     curt: [],
+    pasted: [],
     memoReplied: false,
     status: { phase: "playing" },
   };
