@@ -113,4 +113,20 @@ const onSubmit = (): void => {
   display: flex;
   justify-content: flex-end;
 }
+/*
+ * Stage 3's verdict rows are read from a projector or a few seats away (2026-10 test play: the
+ * shared 15px went unread), so here they are larger and bold. The checking line keeps its size.
+ */
+.work :deep(.verdict) {
+  gap: 12px;
+}
+.work :deep(.verdict > .lead:not(.checking)) {
+  font-size: calc(20px * var(--fs-scale));
+  font-weight: 700;
+  line-height: 1.5;
+}
+.work :deep(.verdict > .done) {
+  font-size: calc(22px * var(--fs-scale));
+  line-height: 1.5;
+}
 </style>
