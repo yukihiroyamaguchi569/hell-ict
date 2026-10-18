@@ -272,11 +272,37 @@ describe("useStage1: R1 の原因と苅部さん", () => {
     });
   });
 
+  it("R1 が貼り付けだけで落ちたら pasted と記録し、R2 では R1 の失敗の台詞を出さない（#44）", async () => {
+    const pastedOnly = stage1({
+      doneIds: ["m1", "m2", "m3", "m4", "m8"],
+      pasted: (["m1", "m2", "m3", "m4", "m8"] as const).map((mailId) => ({
+        mailId,
+        reply: "（引き継ぎメモ）",
+      })),
+      status: { phase: "round-result", failure: "round1" },
+    });
+    const { stage, view, sessionStorage } = mount(pastedOnly, undefined, { now: SETTLE_AT });
+    expect(JSON.parse(sessionStorage.values.get(CAUSE_KEY) ?? "null")).toEqual({
+      stageStartedAt: T0,
+      cause: "pasted",
+    });
+    view.value = viewIn(stage1({ round: 2, roundStartedAt: T0 + 90_000 }));
+    await nextTick();
+    expect(stage.karubeCalls.value).toEqual([]);
+  });
+
   it("再読み込みで R2 から始まっても記録から出し分ける", () => {
     const storage = new FakeKeyValueStorage();
     storage.values.set(CAUSE_KEY, JSON.stringify({ stageStartedAt: T0, cause: "curt" }));
     const { stage } = mount(stage1({ round: 2 }), undefined, { storage });
     expect(stage.karubeCalls.value.map((c) => c.lines)).toEqual([stage1KarubeRound1Curt]);
+  });
+
+  it("再読み込みで R2 から始まっても、貼り付けだけの記録なら R1 の失敗の台詞を出さない（#44）", () => {
+    const storage = new FakeKeyValueStorage();
+    storage.values.set(CAUSE_KEY, JSON.stringify({ stageStartedAt: T0, cause: "pasted" }));
+    const { stage } = mount(stage1({ round: 2 }), undefined, { storage });
+    expect(stage.karubeCalls.value).toEqual([]);
   });
 
   it.each([

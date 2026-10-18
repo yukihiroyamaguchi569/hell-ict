@@ -62,6 +62,17 @@ describe("stage1KarubeCalls: R1 と R2", () => {
     ]);
   });
 
+  it("R1 が引き継ぎメモの貼り付けだけで落ちたなら、R2 では R1 の失敗の台詞を出さない（#44）", () => {
+    const round2 = s1({ round: 2, roundStartedAt: T0 + 90_000 });
+    expect(stage1KarubeCalls(round2, "pasted")).toEqual([]);
+  });
+
+  it("R1 が貼り付けだけで落ちても、R3 の台詞は従来どおり", () => {
+    expect(stage1KarubeCalls(round3(1), "pasted")).toEqual([
+      { callId: id("context"), lines: stage1KarubeContext },
+    ]);
+  });
+
   it("呼び出しの ID はステージの開始時刻を含む（リセット後はもう一度鳴る）", () => {
     const before = ids(stage1KarubeCalls(s1({ round: 2 }), null));
     const after = ids(stage1KarubeCalls(s1({ round: 2, stageStartedAt: T0 + 1 }), null));

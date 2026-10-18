@@ -51,7 +51,7 @@ export const STAGE1_SETTLE_RETRY_MS = 1_000;
 export const STAGE1_SETTLE_MAX_TRIES = 10;
 
 const causeSchema = z
-  .object({ stageStartedAt: z.number(), cause: z.enum(["curt", "missed"]) })
+  .object({ stageStartedAt: z.number(), cause: z.enum(["curt", "missed", "pasted"]) })
   .strict();
 
 type CauseRecord = z.infer<typeof causeSchema>;

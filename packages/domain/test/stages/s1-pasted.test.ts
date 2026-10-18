@@ -14,6 +14,7 @@ import {
   sendStage1Reply,
   settleStage1Round,
   STAGE1_SCHEDULES,
+  stage1FirstFailureCause,
   stage1MemoOverlap,
   stage1RoundSummary,
   stage1StateSchema,
@@ -198,6 +199,37 @@ describe("Stage 1: pasted があるラウンドはクリアしない", () => {
     const retry = acknowledgeStage1RoundResult(failedR3, failedR3.roundStartedAt + 30_000);
     expect(retry?.pasted).toEqual([]);
     expect(retry?.r3Try).toBe(2);
+  });
+});
+
+describe("Stage 1: R1 が pasted だけで落ちたときの原因（苅部さんの R1 の台詞）", () => {
+  const ended = (replies: Partial<Record<Stage1MailId, string>>): Stage1State => {
+    const sent = STAGE1_SCHEDULES[1].reduce((acc, { id }) => {
+      const text = replies[id];
+      return text === undefined ? acc : reply(acc, id, text, T0 + 23_000);
+    }, startStage1(T0));
+    return settleStage1Round(sent, T0 + 85_001).state;
+  };
+  const allFive = (text: string, patch: Partial<Record<Stage1MailId, string>> = {}) => ({
+    m1: text,
+    m2: GOOD,
+    m3: GOOD,
+    m4: GOOD,
+    m8: GOOD,
+    ...patch,
+  });
+
+  it("pasted だけ（そっけない返信も時間切れも無い）なら pasted", () => {
+    expect(stage1FirstFailureCause(ended(allFive(stage1MemoText)), T0 + 85_001)).toBe("pasted");
+  });
+
+  it("pasted とそっけない返信が混ざれば従来どおり curt", () => {
+    const state = ended(allFive(stage1MemoText, { m2: "了解" }));
+    expect(stage1FirstFailureCause(state, T0 + 85_001)).toBe("curt");
+  });
+
+  it("pasted と時間切れが混ざれば従来どおり missed", () => {
+    expect(stage1FirstFailureCause(ended({ m1: stage1MemoText }), T0 + 85_001)).toBe("missed");
   });
 });
 

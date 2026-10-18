@@ -527,10 +527,15 @@ export const stage1RoundSummary = (state: Stage1State, now: number): Stage1Round
 
 /**
  * What 苅部さん opens with after R1 fails (the mock's `s1DeliverAIAndRetry`): the curt replies
- * when there were at least as many of them as missed mails, the missed mails otherwise.
+ * when there were at least as many of them as missed mails, the missed mails otherwise. A round
+ * failed by pasted replies alone (#44) is `pasted`, for which he has no R1 words.
  */
-export const stage1FirstFailureCause = (state: Stage1State, now: number): "curt" | "missed" => {
-  const { curt, missed } = stage1RoundSummary(state, now);
+export const stage1FirstFailureCause = (
+  state: Stage1State,
+  now: number,
+): "curt" | "missed" | "pasted" => {
+  const { curt, missed, pasted } = stage1RoundSummary(state, now);
+  if (curt === 0 && missed === 0 && pasted > 0) return "pasted";
   return curt >= missed ? "curt" : "missed";
 };
 

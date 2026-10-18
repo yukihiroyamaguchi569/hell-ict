@@ -20,7 +20,7 @@ import type { KarubeCall } from "../stage-module.js";
  */
 
 /** What made R1 fail, as recorded when its result window came up. */
-export type Stage1FirstFailureCause = "curt" | "missed";
+export type Stage1FirstFailureCause = "curt" | "missed" | "pasted";
 
 /** The first R3 attempt whose again-voice is `stage1KarubeRound3Again[0]`. */
 const FIRST_RETRY_TRY = 2;
@@ -65,6 +65,16 @@ const round3Calls = (state: Stage1State): readonly KarubeCall[] => {
   return [...calls, call(state, `hint:${String(state.r3Try)}`, stage1KarubeRound3Hint)];
 };
 
+/** R2's opening: R1's failure in his words, or nothing when pasted replies alone failed it (#44). */
+const round2Calls = (
+  state: Stage1State,
+  firstFailure: Stage1FirstFailureCause | null,
+): readonly KarubeCall[] => {
+  if (firstFailure === "pasted") return [];
+  const lines = firstFailure === "curt" ? stage1KarubeRound1Curt : stage1KarubeRound1Miss;
+  return [call(state, "round1", lines)];
+};
+
 /**
  * The calls that should have rung by now, oldest first (empty when he has nothing to say).
  * `firstFailure` is R1's cause (kept in sessionStorage: the state no longer shows it once R2
@@ -79,13 +89,7 @@ export const stage1KarubeCalls = (
       // R1 cleared by hand: the punch line. A failed R1 speaks only once R2 starts.
       return state.status.phase === "cleared" ? [call(state, "manual", [stage1KarubeManual])] : [];
     case 2:
-      return [
-        call(
-          state,
-          "round1",
-          firstFailure === "curt" ? stage1KarubeRound1Curt : stage1KarubeRound1Miss,
-        ),
-      ];
+      return round2Calls(state, firstFailure);
     case 3:
       return round3Calls(state);
   }
