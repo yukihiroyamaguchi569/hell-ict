@@ -39,14 +39,18 @@ export const stage4QuestionLines = [
 ] as const satisfies Lines;
 
 /**
- * 行動提案の差し戻し。キーは domain の差し戻し理由（STAGE4_ACTION_REJECT_REASONS）。
+ * 行動提案の差し戻し。キーは domain の差し戻しの文の種類（STAGE4_ACTION_REJECT_LINES）。
  * 欠けている要素ごとに言い分ける（#220）。画面に出た文言を行動提案へ貼っても通らないよう、
- * 判定の対象語と内容語を含めない（aimed-at-patients は症状を言うが、対象語が無いので通らない）。
+ * 判定の対象語と内容語を含めない（aimed-at-patients と aimed-at-patients-again は症状を言うが、
+ * 対象語が無いので通らない）。
  */
 export const stage4ActionRejects = {
   /** 確認する相手が既に発熱している患者を向いている。 */
   "aimed-at-patients":
     "〔院長〕調べさせた。患者は皆すでに発熱していて、耳鳴りを訴える者はいなかった。……論文が言っているのは、熱が出る前の話だ。先回りできる相手は誰だ。",
+  /** 患者に向けた差し戻しの2回目以降。1回目を読んでも患者を対象にし続けるチームへ、より直接に言う。 */
+  "aimed-at-patients-again":
+    "〔院長〕もう一度言う。患者に新たな発熱患者はいなかった。耳鳴りの患者もいなかった。患者以外で、先回りできる相手は誰だ。",
   /** 相手はあるが、何を確認するかが無い。 */
   "missing-what":
     "〔院長〕で、何を確かめさせる気だ。熱が出てからでは、もう遅い。論文では、熱が出る前に何が起きていた？",

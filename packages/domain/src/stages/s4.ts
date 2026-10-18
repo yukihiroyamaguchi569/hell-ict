@@ -113,3 +113,33 @@ export const stage4ActionHint = (actionRejects: number): Stage4ActionHint =>
  */
 export const countStage4ActionRejects = (events: readonly GameEvent[]): number =>
   events.filter((event) => event.type === "submission-rejected" && event.stage === "s4").length;
+
+/**
+ * Which of the director's lines a Stage 4 action reject brings: the reason's own, except that
+ * from the 2nd `aimed-at-patients` reject on (this one included) he says it more bluntly, since
+ * teams kept asking the patients after the first line. Only the patient rejects are counted;
+ * the other reasons in between neither add to it nor reset it.
+ */
+export const STAGE4_ACTION_REJECT_LINES = [
+  ...STAGE4_ACTION_REJECT_REASONS,
+  "aimed-at-patients-again",
+] as const;
+
+export type Stage4ActionRejectLine = (typeof STAGE4_ACTION_REJECT_LINES)[number];
+
+/**
+ * The line of a reject for `reason`, when the team has had `patientRejects` `aimed-at-patients`
+ * rejects so far, this one included. The wording lives in content (`stage4ActionRejects`).
+ */
+export const stage4ActionRejectLine = (
+  reason: Stage4ActionRejectReason,
+  patientRejects: number,
+): Stage4ActionRejectLine =>
+  reason === "aimed-at-patients" && patientRejects >= 2 ? "aimed-at-patients-again" : reason;
+
+/** How many of a command's recorded rejects were `aimed-at-patients` (0 for any other reason). */
+export const countStage4PatientRejects = (
+  judgement: Stage4ActionJudgement,
+  actionRejects: number,
+): number =>
+  judgement.outcome === "reject" && judgement.reason === "aimed-at-patients" ? actionRejects : 0;

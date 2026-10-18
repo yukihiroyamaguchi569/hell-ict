@@ -5,7 +5,7 @@ import {
   stage4SendFailed,
   stage4SummaryReject,
 } from "@hell-ict/content";
-import { STAGE4_ACTION_REJECT_REASONS } from "@hell-ict/domain";
+import { STAGE4_ACTION_REJECT_REASONS, stage4ActionRejectLine } from "@hell-ict/domain";
 import { z } from "zod";
 
 import type { Verdict } from "../../verdict/verdict.js";
@@ -52,10 +52,16 @@ const actionRejectSchema = z.object({
 export const summarySentBackLine = (judgement: unknown): string | null =>
   summaryRejectSchema.safeParse(judgement).success ? stage4SummaryReject : null;
 
-/** The director's words for an action sent back, by what it lacks (#220). */
-export const actionSentBackLine = (judgement: unknown): string | null => {
+/**
+ * The director's words for an action sent back, by what it lacks (#220). `patientRejects` is the
+ * server's count after this reject (`state.s4.patientRejects`): from the 2nd reject for asking the
+ * patients, he says it more bluntly (`stage4ActionRejectLine`).
+ */
+export const actionSentBackLine = (judgement: unknown, patientRejects: number): string | null => {
   const parsed = actionRejectSchema.safeParse(judgement);
-  return parsed.success ? stage4ActionRejects[parsed.data.reason] : null;
+  return parsed.success
+    ? stage4ActionRejects[stage4ActionRejectLine(parsed.data.reason, patientRejects)]
+    : null;
 };
 
 /**

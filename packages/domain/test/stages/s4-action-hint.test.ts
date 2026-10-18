@@ -6,7 +6,12 @@ import type { TeamGameResult } from "../../src/game/team-game.js";
 import type { GameEvent } from "../../src/schemas/game.js";
 import { teamGameStateSchema } from "../../src/schemas/team-game.js";
 import type { TeamGameCommand, TeamGameState } from "../../src/schemas/team-game.js";
-import { countStage4ActionRejects, stage4ActionHint } from "../../src/stages/s4.js";
+import {
+  countStage4ActionRejects,
+  countStage4PatientRejects,
+  stage4ActionHint,
+  stage4ActionRejectLine,
+} from "../../src/stages/s4.js";
 import { enteredStage, NOW } from "../game/helpers.js";
 import { at, command, STAGE4_ACTION_OK, STAGE4_SUMMARY_OK } from "../game/team-game-fixtures.js";
 
@@ -85,6 +90,7 @@ describe("applyTeamGameCommand: Stage 4 の行動提案の差し戻しを数え�
     expect(initialTeamGameState(at(0).at).s4).toEqual({
       summaryAccepted: false,
       actionRejects: 0,
+      patientRejects: 0,
     });
   });
 
@@ -105,7 +111,7 @@ describe("applyTeamGameCommand: Stage 4 の行動提案の差し戻しを数え�
     const result = step(state, summary(stage4Answers.summaryNg));
     expect(result).toMatchObject({ status: "rejected", reason: "no-ocular-symptom" });
     const passed = play(state, [summary()]);
-    expect(passed.s4).toEqual({ summaryAccepted: true, actionRejects: 0 });
+    expect(passed.s4).toEqual({ summaryAccepted: true, actionRejects: 0, patientRejects: 0 });
   });
 
   it("要約より先の行動提案は拒否され、数えない", () => {
@@ -121,7 +127,7 @@ describe("applyTeamGameCommand: Stage 4 の行動提案の差し戻しを数え�
     const rejected = play(atStage4(), [summary(), action(stage4Answers.actionMissingBoth)]);
     // The screen sends no second summary, but the server takes one: it must not reset the count.
     const again = play(rejected, [summary()]);
-    expect(again.s4).toEqual({ summaryAccepted: true, actionRejects: 1 });
+    expect(again.s4).toEqual({ summaryAccepted: true, actionRejects: 1, patientRejects: 0 });
   });
 
   it("クリアでは増えない", () => {
@@ -158,7 +164,7 @@ describe("teamGameStateSchema: s4.actionRejects の後方互換と整合", () =>
   it("actionRejects の無い保存済み状態は0回として読める", () => {
     const passed = play(atStage4(), [summary()]);
     const legacy = teamGameStateSchema.parse({ ...passed, s4: { summaryAccepted: true } });
-    expect(legacy.s4).toEqual({ summaryAccepted: true, actionRejects: 0 });
+    expect(legacy.s4).toEqual({ summaryAccepted: true, actionRejects: 0, patientRejects: 0 });
     expect(play(legacy, [action(stage4Answers.actionMissingBoth)]).s4.actionRejects).toBe(1);
   });
 
@@ -178,5 +184,130 @@ describe("teamGameStateSchema: s4.actionRejects の後方互換と整合", () =>
     ["要約の可否なし", { actionRejects: 0 }],
   ])("s4 の形が不正（%s）なら拒否する", (_, s4) => {
     expect(teamGameStateSchema.safeParse({ ...atStage4(), s4 }).success).toBe(false);
+  });
+});
+
+describe("stage4ActionRejectLine: 患者に向けた差し戻しの2回目以降は別の文", () => {
+  it.each([
+    [1, "aimed-at-patients"],
+    [2, "aimed-at-patients-again"],
+    [3, "aimed-at-patients-again"],
+    [20, "aimed-at-patients-again"],
+  ] as const)("患者向けの差し戻し%i回目は %s", (patientRejects, line) => {
+    expect(stage4ActionRejectLine("aimed-at-patients", patientRejects)).toBe(line);
+  });
+
+  it.each(["missing-what", "missing-whom", "missing-both"] as const)(
+    "%s は患者向けの回数によらず理由どおり",
+    (reason) => {
+      for (const patientRejects of [0, 1, 2, 5]) {
+        expect(stage4ActionRejectLine(reason, patientRejects)).toBe(reason);
+      }
+    },
+  );
+
+  it.each([0, -1, Number.NaN])("ありえない回数（%s）では1回目の文", (patientRejects) => {
+    expect(stage4ActionRejectLine("aimed-at-patients", patientRejects)).toBe("aimed-at-patients");
+  });
+});
+
+describe("countStage4PatientRejects", () => {
+  it.each([
+    ["患者向けの差し戻し", { outcome: "reject", reason: "aimed-at-patients" }, 1, 1],
+    ["ほかの理由の差し戻し", { outcome: "reject", reason: "missing-both" }, 1, 0],
+    ["通過", { outcome: "pass" }, 0, 0],
+    [
+      "患者向けでも D1 が記録しなかった（再送）",
+      { outcome: "reject", reason: "aimed-at-patients" },
+      0,
+      0,
+    ],
+  ] as const)("%s は %i 件の差し戻しのうち %i", (_, judgement, rejects, count) => {
+    expect(countStage4PatientRejects(judgement, rejects)).toBe(count);
+  });
+});
+
+describe("applyTeamGameCommand: 患者に向けた差し戻しを別に数える", () => {
+  const PATIENTS = stage4Answers.actionAimedAtPatients;
+
+  it("患者向けの差し戻しだけを数え、ほかの理由が挟まっても2回目から別の文になる", () => {
+    let state = play(atStage4(), [summary()]);
+    const texts = [
+      stage4Answers.actionMissingBoth,
+      PATIENTS,
+      stage4Answers.actionMissingWhat,
+      stage4Answers.actionMissingWhom,
+      PATIENTS,
+      PATIENTS,
+    ];
+    const seen: [number, number, string][] = [];
+    for (const text of texts) {
+      state = play(state, [action(text)]);
+      const line =
+        text === PATIENTS
+          ? stage4ActionRejectLine("aimed-at-patients", state.s4.patientRejects)
+          : "-";
+      seen.push([state.s4.actionRejects, state.s4.patientRejects, line]);
+    }
+    expect(seen).toEqual([
+      [1, 0, "-"],
+      [2, 1, "aimed-at-patients"],
+      [3, 1, "-"],
+      [4, 1, "-"],
+      [5, 2, "aimed-at-patients-again"],
+      [6, 3, "aimed-at-patients-again"],
+    ]);
+  });
+
+  it("同じ commandId の再送は数えない", () => {
+    const once = action(PATIENTS);
+    const first = play(atStage4(), [summary(), once]);
+    expect(first.s4.patientRejects).toBe(1);
+    const resent = step(first, once);
+    expect(resent).toMatchObject({ status: "applied", events: [] });
+    if (resent.status !== "applied") throw new Error("unreachable");
+    expect(resent.state.s4).toEqual({ summaryAccepted: true, actionRejects: 1, patientRejects: 1 });
+  });
+
+  it("要約より先の患者向けの提案、クリア、クリア後の提案は数えない", () => {
+    const early = step(atStage4(), action(PATIENTS));
+    expect(early).toMatchObject({ status: "rejected", reason: "summary-first" });
+    const cleared = play(atStage4(), [summary(), action(PATIENTS), action(STAGE4_ACTION_OK)]);
+    expect(cleared.s4.patientRejects).toBe(1);
+    expect(step(cleared, action(`${PATIENTS}。`))).toMatchObject({
+      status: "rejected",
+      reason: "already-cleared",
+    });
+  });
+
+  it("要約の再提出は患者向けの回数を保つ", () => {
+    const state = play(atStage4(), [summary(), action(PATIENTS), summary()]);
+    expect(state.s4).toEqual({ summaryAccepted: true, actionRejects: 1, patientRejects: 1 });
+  });
+});
+
+describe("teamGameStateSchema: s4.patientRejects の後方互換と整合", () => {
+  it("patientRejects の無い保存済み状態は0回として読め、次の患者向けの差し戻しは1回目の文", () => {
+    const rejected = play(atStage4(), [summary(), action(stage4Answers.actionAimedAtPatients)]);
+    const legacy = teamGameStateSchema.parse({
+      ...rejected,
+      s4: { summaryAccepted: true, actionRejects: 1 },
+    });
+    expect(legacy.s4).toEqual({ summaryAccepted: true, actionRejects: 1, patientRejects: 0 });
+    const next = play(legacy, [action(`${stage4Answers.actionAimedAtPatients}。`)]);
+    expect(next.s4).toEqual({ summaryAccepted: true, actionRejects: 2, patientRejects: 1 });
+  });
+
+  it.each([
+    ["差し戻しの通算より多い", { summaryAccepted: true, actionRejects: 1, patientRejects: 2 }],
+    ["負の数", { summaryAccepted: true, actionRejects: 1, patientRejects: -1 }],
+    ["小数", { summaryAccepted: true, actionRejects: 2, patientRejects: 1.5 }],
+  ])("s4.patientRejects が不正（%s）なら拒否する", (_, s4) => {
+    expect(teamGameStateSchema.safeParse({ ...atStage4(), s4 }).success).toBe(false);
+  });
+
+  it("通算と同じ数までは受け入れる", () => {
+    const s4 = { summaryAccepted: true, actionRejects: 2, patientRejects: 2 };
+    expect(teamGameStateSchema.safeParse({ ...atStage4(), s4 }).success).toBe(true);
   });
 });

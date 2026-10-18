@@ -272,8 +272,25 @@ describe("Stage 4", () => {
     }
   });
 
-  it("患者向けの差し戻しも対象語を言わない", () => {
-    const text = content.stage4ActionRejects["aimed-at-patients"];
+  it.each(["aimed-at-patients", "aimed-at-patients-again"] as const)(
+    "患者向けの差し戻し %s も対象語を言わない",
+    (key) => {
+      const text = content.stage4ActionRejects[key];
+      expect(content.stage4Rules.actionTarget.test(text)).toBe(false);
+    },
+  );
+
+  // Teams kept asking the patients after the first line: the second one says it differently.
+  it("患者向けの2回目以降の差し戻しは、1回目と違う文", () => {
+    expect(content.stage4ActionRejects["aimed-at-patients-again"]).not.toBe(
+      content.stage4ActionRejects["aimed-at-patients"],
+    );
+  });
+
+  it("患者向けの差し戻しを2つ続けて貼っても対象語を言わない", () => {
+    const text =
+      content.stage4ActionRejects["aimed-at-patients"] +
+      content.stage4ActionRejects["aimed-at-patients-again"];
     expect(content.stage4Rules.actionTarget.test(text)).toBe(false);
   });
 
