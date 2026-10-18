@@ -1,3 +1,10 @@
+import {
+  stage1CurtVoices,
+  stage1MailsRound1,
+  stage1MemoText,
+  stage1PastedVoices,
+  stage1ResultText,
+} from "@hell-ict/content";
 import { DEADLINE_GRACE_MS, sendStage1Reply, settleStage1Round } from "@hell-ict/domain";
 import type { Stage1State, TeamGameViewState } from "@hell-ict/domain";
 import { describe, expect, it } from "vitest";
@@ -204,6 +211,94 @@ describe("stage1RoundEnd", () => {
     expect(end?.rest).toBe("……ほか 1件、同じような返事が届いています。");
     expect(end?.threads).toEqual([]);
     expect(end?.button).toBe("もう一度挑戦する");
+  });
+});
+
+describe("stage1RoundEnd: 引き継ぎメモの貼り付け（pasted、#44）", () => {
+  const { notes, admin } = stage1ResultText;
+  const ALL_POLITE = { m2: POLITE, m3: POLITE, m4: POLITE, m8: POLITE };
+
+  it("R1 で全通返したが1通メモを貼った：貼り付けの一言、事務長、スレッドの相手は困惑の声", () => {
+    const end = stage1RoundEnd(endedRound1({ m1: stage1MemoText, ...ALL_POLITE }), AFTER_ROUND);
+    expect(end).toMatchObject({
+      note: notes[1].pasted,
+      admin: admin.pasted,
+      rest: null,
+      voices: [],
+      threads: [
+        {
+          heading: "3B病棟 看護師　サージカルマスクの在庫について",
+          reply: stage1MemoText,
+          answer: stage1PastedVoices[0],
+        },
+      ],
+    });
+  });
+
+  it("R1 で pasted とそっけない返信が両方：pasted が先。そっけない側の相手は従来の sad", () => {
+    const end = stage1RoundEnd(
+      endedRound1({ m1: "了解", m2: stage1MemoText, m3: POLITE, m4: POLITE, m8: POLITE }),
+      AFTER_ROUND,
+    );
+    expect(end?.note).toBe(notes[1].pasted);
+    expect(end?.admin).toBe(admin.pasted);
+    expect(end?.threads.map((thread) => [thread.reply, thread.answer])).toEqual([
+      [stage1MemoText, stage1PastedVoices[0]],
+      ["了解", stage1MailsRound1[0].sad],
+    ]);
+  });
+
+  it("時間切れと pasted だけ（そっけない返信なし）：件数の一言、事務長は未返信だけを言う", () => {
+    const end = stage1RoundEnd(endedRound1({ m1: stage1MemoText }), AFTER_ROUND);
+    expect(end?.note).toBe(notes[1].timeout(1, 5));
+    expect(end?.admin).toBe(admin.missed(4));
+  });
+
+  it("時間切れ・pasted・そっけない返信が全部：事務長は未返信とそっけない返信を言う", () => {
+    const end = stage1RoundEnd(endedRound1({ m1: stage1MemoText, m2: "了解" }), AFTER_ROUND);
+    expect(end?.admin).toBe(admin.missedAndCurt(3));
+  });
+
+  it("R2・R3 の声は pasted が先で、貼り付けの声を順に回す。「ほか」は両方を数える", () => {
+    const r3: Stage1State = {
+      ...stage1({ round: 3, r3Try: 1 }),
+      doneIds: ["t1", "t3", "t4", "t5", "t6"],
+      curt: [{ mailId: "t6", reply: "はい" }],
+      pasted: (["t1", "t3", "t4", "t5"] as const).map((mailId) => ({
+        mailId,
+        reply: stage1MemoText,
+      })),
+      status: { phase: "round-result", failure: "round3" },
+    };
+    const end = stage1RoundEnd(r3, AFTER_ROUND);
+    expect(end?.note).toBe(notes[3].pasted);
+    expect(end?.admin).toBe(admin.pasted);
+    expect(end?.voices).toEqual([
+      `〔給食課〕${stage1PastedVoices[0]}`,
+      `〔外来〕${stage1PastedVoices[1]}`,
+      `〔施設課〕${stage1PastedVoices[0]}`,
+      `〔総務課〕${stage1PastedVoices[1]}`,
+    ]);
+    expect(end?.rest).toBe(stage1ResultText.rest(1));
+  });
+
+  it("R2 の pasted とそっけない返信：そっけない側は従来の声を最初から使う", () => {
+    let r2 = stage1({ round: 2 });
+    const replies = [
+      ["r1", stage1MemoText, 1],
+      ["r2", "はい", 6],
+      ["r3", POLITE, 12],
+      ["r7", POLITE, 18],
+      ["r9", POLITE, 24],
+    ] as const;
+    for (const [id, text, sec] of replies)
+      r2 = sendStage1Reply(r2, id, text, T0 + sec * 1_000).state;
+    const end = stage1RoundEnd(settleStage1Round(r2, T0 + 24_000).state, T0 + 24_000);
+    expect(end?.note).toBe(notes[2].pasted);
+    expect(end?.voices).toEqual([
+      `〔3B病棟 看護師〕${stage1PastedVoices[0]}`,
+      `〔事務当直〕${stage1CurtVoices[0]}`,
+    ]);
   });
 });
 

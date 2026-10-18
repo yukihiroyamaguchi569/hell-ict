@@ -166,6 +166,7 @@ export type {
 export {
   acknowledgeStage1RoundResult,
   isCurtReply,
+  isPastedMemoReply,
   judgeStage1,
   judgeStage1DraftRequest,
   sendStage1MemoReply,

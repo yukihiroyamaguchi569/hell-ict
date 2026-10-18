@@ -1,9 +1,18 @@
-import type { Stage3Rules, Stage4Rules, Stage6Rules } from "./schemas.js";
+import type { Stage1Rules, Stage3Rules, Stage4Rules, Stage6Rules } from "./schemas.js";
+import { stage1MemoText } from "./stage1.js";
 
 /*
  * 判定の語（ダミーシナリオの答え）。判定の順序・差し戻しの理由・ヒントは domain が持ち、
  * ここは語だけを持つ。語は書かれたとおりに当てる（正規化はしない）。
  */
+
+/**
+ * Stage 1（返信）。引き継ぎメモを返信欄へそのまま貼った返信は、相手の質問に答えていない（#44）。
+ * 正規の返信は、メモと続けて一致してもせいぜい17字だった（event 91/92 の46件）。
+ */
+export const stage1Rules = {
+  pastedMemo: { text: stage1MemoText, minRun: 40 },
+} as const satisfies Stage1Rules;
 
 /** Stage 3（架空の皮膚感染症「斑紋症」）。正解は「足さない」側で、罠は過剰対応。 */
 export const stage3Rules = {

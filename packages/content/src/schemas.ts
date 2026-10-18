@@ -233,6 +233,19 @@ export const stage3FieldIds = ["ppe", "release", "clean"] as const;
 
 const stage3FieldIdSchema = z.enum(stage3FieldIds);
 
+/** Stage 1（返信の判定）。 */
+export const stage1RulesSchema = z
+  .object({
+    /** 返信がこの本文と `minRun` 字以上続けて一致すれば、引き継ぎメモの貼り付け（pasted）。 */
+    pastedMemo: z
+      .object({ text: textSchema, minRun: z.number().int().positive() })
+      .strict()
+      .readonly(),
+  })
+  .strict()
+  .readonly();
+export type Stage1Rules = z.infer<typeof stage1RulesSchema>;
+
 /** 罠の語: `words` に当たり、かつ `unless`（正しい語）に当たらなければ罠。 */
 const stage3TrapSchema = z
   .object({ words: regExpSchema, unless: regExpSchema })

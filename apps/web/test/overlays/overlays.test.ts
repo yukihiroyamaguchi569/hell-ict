@@ -179,6 +179,7 @@ describe("stage1ClearResult", () => {
       r3Try: 0,
       doneIds: [],
       curt: [],
+      pasted: [],
       memoReplied: false,
       status,
     },

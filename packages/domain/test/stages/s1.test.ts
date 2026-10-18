@@ -97,6 +97,7 @@ describe("Stage 1: 定数（モックの S1_* と同じ）", () => {
       r3Try: 0,
       doneIds: [],
       curt: [],
+      pasted: [],
       memoReplied: false,
       status: { phase: "playing" },
     });
@@ -199,7 +200,7 @@ describe("Stage 1: 返信の判定（モックの s1Send）", () => {
 
   it("そっけない返信も送れる。本文（前後の空白を落とした形）を記録する", () => {
     const result = sendStage1Reply(state, "m1", `  ${CURT}  `, at(1_000));
-    expect(result.judgement).toEqual({ outcome: "accepted", curt: true });
+    expect(result.judgement).toEqual({ outcome: "accepted", curt: true, pasted: false });
     expect(result.state.doneIds).toEqual(["m1"]);
     expect(result.state.curt).toEqual([{ mailId: "m1", reply: CURT }]);
   });
@@ -209,12 +210,13 @@ describe("Stage 1: 返信の判定（モックの s1Send）", () => {
     expect(sendStage1Reply(state, "m1", padded, at(1_000)).judgement).toEqual({
       outcome: "accepted",
       curt: true,
+      pasted: false,
     });
   });
 
   it("丁寧で十分な返信は curt に入らない", () => {
     const result = sendStage1Reply(state, "m1", GOOD, at(1_000));
-    expect(result.judgement).toEqual({ outcome: "accepted", curt: false });
+    expect(result.judgement).toEqual({ outcome: "accepted", curt: false, pasted: false });
     expect(result.state.curt).toEqual([]);
   });
 
@@ -331,6 +333,7 @@ describe("Stage 1: 3ラウンドの流れと R3 のやり直し（Fake Clock の
       done: 3,
       missed: 2,
       curt: 0,
+      pasted: 0,
     });
     expect(stage1FirstFailureCause(state, at(85_001))).toBe("missed");
 
@@ -371,6 +374,7 @@ describe("Stage 1: 3ラウンドの流れと R3 のやり直し（Fake Clock の
       done: 0,
       missed: 0,
       curt: 0,
+      pasted: 0,
     });
     expect(stage1Mails(state, retryStart)[0]).toMatchObject({
       id: "t1",
@@ -480,7 +484,7 @@ describe("Stage 1: 引き継ぎメモ（モックの s1MemoLive / s1SendMemo）"
       reason: "empty",
     });
     const result = sendStage1MemoReply(state, "ありがとう", at(1_000));
-    expect(result.judgement).toEqual({ outcome: "accepted", curt: false });
+    expect(result.judgement).toEqual({ outcome: "accepted", curt: false, pasted: false });
     expect(result.state).toEqual({ ...state, memoReplied: true });
     expect(stage1MemoStatus(result.state, at(999_999))).toBe("done");
   });

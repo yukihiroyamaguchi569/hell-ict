@@ -31,6 +31,7 @@ const S1: NonNullable<TeamGameViewState["s1"]> = {
   r3Try: 0,
   doneIds: [],
   curt: [],
+  pasted: [],
   memoReplied: false,
   status: { phase: "playing" },
 };

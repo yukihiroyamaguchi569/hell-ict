@@ -18,7 +18,7 @@ import {
 import { describe, expect, it } from "vitest";
 
 import { detectPii } from "../src/pii.js";
-import { isCurtReply, STAGE1_SCHEDULES } from "../src/stages/s1.js";
+import { isCurtReply, isPastedMemoReply, STAGE1_SCHEDULES } from "../src/stages/s1.js";
 import { STAGE2_ADDENDUM_ROW_COUNT, STAGE2_BASE_ROW_COUNT } from "../src/stages/s2.js";
 import { normalizeStage2Rows } from "../src/stages/s2-table.js";
 import type { Stage2Row } from "../src/stages/s2-table.js";
@@ -36,6 +36,10 @@ import { judgeS6Submission, S6_POSTER_TYPES, selectS6PosterType } from "../src/s
 describe("契約: Stage 1", () => {
   it("丁寧な返信の例は、そっけない返信と判定されない", () => {
     expect(isCurtReply(stage1Answers.politeReply)).toBe(false);
+  });
+
+  it("丁寧な返信の例は、引き継ぎメモの貼り付けと判定されない（#44）", () => {
+    expect(isPastedMemoReply(stage1Answers.politeReply)).toBe(false);
   });
 
   it.each([

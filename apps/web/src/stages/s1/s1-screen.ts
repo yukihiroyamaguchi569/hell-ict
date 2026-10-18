@@ -1,4 +1,9 @@
-import { stage1CurtVoices, stage1ResultText, stage1ScreenText } from "@hell-ict/content";
+import {
+  stage1CurtVoices,
+  stage1PastedVoices,
+  stage1ResultText,
+  stage1ScreenText,
+} from "@hell-ict/content";
 import {
   STAGE1_REPLY_LIMIT_MS,
   stage1AttemptNo,
@@ -6,7 +11,12 @@ import {
   stage1MemoDeadlineAt,
   stage1RoundSummary,
 } from "@hell-ict/domain";
-import type { Stage1State, TeamGameViewState } from "@hell-ict/domain";
+import type {
+  Stage1MailId,
+  Stage1RoundSummary,
+  Stage1State,
+  TeamGameViewState,
+} from "@hell-ict/domain";
 
 import { countdown } from "../../shell/mission-bar-view.js";
 import type { MissionDeadline, StageFocus } from "../../shell/mission-bar-view.js";
@@ -90,7 +100,10 @@ export const stage1LogAfter = (
   return added.length === 0 ? log : [...added.reverse(), ...log].slice(0, LOG_SHOWN);
 };
 
-/** One curt reply as the R1 window threads it: their mail, the reply, their puzzled answer. */
+/**
+ * One curt or pasted reply as the R1 window threads it: their mail, the reply, their puzzled
+ * answer.
+ */
 export interface Stage1Thread {
   readonly heading: string;
   readonly mail: string;
@@ -105,9 +118,9 @@ export interface Stage1RoundEnd {
   /** 「……ほか N件」 under the note (R1) or under the voices (R2・R3), or `null`. */
   readonly rest: string | null;
   readonly admin: string;
-  /** R1: the curt replies as threads (two at most). */
+  /** R1: the pasted, then the curt replies as threads (two at most). */
   readonly threads: readonly Stage1Thread[];
-  /** R2・R3: one puzzled voice per curt reply (four at most). */
+  /** R2・R3: one puzzled voice per pasted, then per curt reply (four at most). */
   readonly voices: readonly string[];
   readonly button: string;
 }
@@ -115,32 +128,66 @@ export interface Stage1RoundEnd {
 const THREADS_SHOWN = 2;
 const VOICES_SHOWN = 4;
 
-const adminLine = (missed: number, curt: number): string => {
+/**
+ * The director's line. A pasted reply is not a curt one, so `missedAndCurt` needs a curt reply;
+ * missed mails come first, then pasted over curt (#44).
+ */
+const adminLine = ({ missed, curt, pasted }: Stage1RoundSummary): string => {
   const { admin } = stage1ResultText;
   if (missed > 0) return curt > 0 ? admin.missedAndCurt(missed) : admin.missed(missed);
-  return admin.curt;
+  return pasted > 0 ? admin.pasted : admin.curt;
 };
 
+const noteOf = (round: Stage1State["round"], summary: Stage1RoundSummary): string => {
+  const notes = stage1ResultText.notes[round];
+  if (summary.missed > 0) return notes.timeout(summary.done, summary.total);
+  return summary.pasted > 0 ? notes.pasted : notes.curt;
+};
+
+/**
+ * A judged reply with their answer: to a pasted reply one of `stage1PastedVoices`, to a curt one
+ * the mail's own `sad` in R1 and one of `stage1CurtVoices` in R2・R3, each cycled in order.
+ */
+interface JudgedReply {
+  readonly mailId: Stage1MailId;
+  readonly reply: string;
+  readonly voice: string | null;
+}
+
+const judgedReplies = (s1: Stage1State): JudgedReply[] => [
+  ...s1.pasted.map(({ mailId, reply }, i) => ({
+    mailId,
+    reply,
+    voice: stage1PastedVoices[i % stage1PastedVoices.length] ?? "",
+  })),
+  ...s1.curt.map(({ mailId, reply }, i) => ({
+    mailId,
+    reply,
+    voice: s1.round === 1 ? null : (stage1CurtVoices[i % stage1CurtVoices.length] ?? ""),
+  })),
+];
+
 const threadsOf = (s1: Stage1State): Stage1Thread[] =>
-  s1.curt.slice(0, THREADS_SHOWN).flatMap(({ mailId, reply }) => {
-    const mail = stage1MailText(mailId);
-    if (mail === null) return [];
-    return [
-      {
-        heading: mail.from + "　" + mail.subj,
-        mail: mail.body[0] ?? "",
-        reply,
-        answerFrom: stage1ResultText.theirReply(mail.from),
-        answer: mail.sad ?? "",
-      },
-    ];
-  });
+  judgedReplies(s1)
+    .slice(0, THREADS_SHOWN)
+    .flatMap(({ mailId, reply, voice }) => {
+      const mail = stage1MailText(mailId);
+      if (mail === null) return [];
+      return [
+        {
+          heading: mail.from + "　" + mail.subj,
+          mail: mail.body[0] ?? "",
+          reply,
+          answerFrom: stage1ResultText.theirReply(mail.from),
+          answer: voice ?? mail.sad ?? "",
+        },
+      ];
+    });
 
 const voicesOf = (s1: Stage1State): string[] =>
-  s1.curt.slice(0, VOICES_SHOWN).map(({ mailId }, i) => {
-    const from = stage1MailText(mailId)?.from ?? "";
-    return `〔${from}〕${stage1CurtVoices[i % stage1CurtVoices.length] ?? ""}`;
-  });
+  judgedReplies(s1)
+    .slice(0, VOICES_SHOWN)
+    .map(({ mailId, voice }) => `〔${stage1MailText(mailId)?.from ?? ""}〕${voice ?? ""}`);
 
 /**
  * A failed round's window (the mock's s1ShowResultWin for round1〜3), or `null` while no round
@@ -148,14 +195,14 @@ const voicesOf = (s1: Stage1State): string[] =>
  */
 export const stage1RoundEnd = (s1: Stage1State, now: number): Stage1RoundEnd | null => {
   if (s1.status.phase !== "round-result") return null;
-  const { total, done, missed, curt } = stage1RoundSummary(s1, now);
-  const notes = stage1ResultText.notes[s1.round];
+  const summary = stage1RoundSummary(s1, now);
+  const judged = summary.curt + summary.pasted;
   const shown = s1.round === 1 ? THREADS_SHOWN : VOICES_SHOWN;
   return {
     heading: stage1ResultText.heading(stage1AttemptNo(s1)),
-    note: missed > 0 ? notes.timeout(done, total) : notes.curt,
-    rest: curt > shown ? stage1ResultText.rest(curt - shown) : null,
-    admin: adminLine(missed, curt),
+    note: noteOf(s1.round, summary),
+    rest: judged > shown ? stage1ResultText.rest(judged - shown) : null,
+    admin: adminLine(summary),
     threads: s1.round === 1 ? threadsOf(s1) : [],
     voices: s1.round === 1 ? [] : voicesOf(s1),
     button: s1.round === 3 ? stage1ResultText.again : stage1ResultText.next,
