@@ -45,9 +45,10 @@ git init -q -b main "${scenario}"
 put "${scenario}/README.md" "scenario readme"
 put "${scenario}/.gitignore" "node_modules/"
 put "${scenario}/docs/public-banned-words.txt" "word"
-# 設計文書（docs/**）と素材（assets/**）は overlay の対象外として読み飛ばす。
+# 設計文書（docs/**）、素材（assets/**）、フォームの GAS（forms/**）は overlay の対象外として読み飛ばす。
 put "${scenario}/docs/scenario/stage1.md" "design"
 put "${scenario}/assets/video/clip.mp4" "video"
+put "${scenario}/forms/2026-10-31/.clasp.json" "{}"
 put "${scenario}/packages/content/src/scenario.ts" 'export const scenarioId = "real-1";'
 put "${scenario}/packages/content/src/stage1.ts" "real stage1"
 put "${scenario}/packages/content/test/scenario/new.test.ts" "real test"

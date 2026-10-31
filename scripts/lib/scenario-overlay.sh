@@ -19,10 +19,10 @@ scenario_fail() {
   exit 1
 }
 
-# overlay の対象外として読み飛ばすファイル（private repo の運用ファイルと、設計文書・素材）。
+# overlay の対象外として読み飛ばすファイル（private repo の運用ファイルと、設計文書・素材・アンケートのフォームを作る GAS）。
 scenario_ignored_path() {
   case "$1" in
-    README.md | .gitignore | docs/* | assets/*) return 0 ;;
+    README.md | .gitignore | docs/* | assets/* | forms/*) return 0 ;;
     *) return 1 ;;
   esac
 }
