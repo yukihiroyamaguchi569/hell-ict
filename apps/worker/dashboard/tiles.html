@@ -90,6 +90,77 @@
         font-size: 1.3em;
         letter-spacing: 0.04em;
       }
+      /*
+        残り時間のカウントダウン。会場の進行役がこの画面で操作する。
+        状態はこのブラウザの localStorage にだけ置き、サーバーとは同期しない。
+      */
+      .timer {
+        margin: 0 auto;
+        display: flex;
+        align-items: center;
+        gap: 0.8em;
+        font-variant-numeric: tabular-nums;
+      }
+      .timer-label {
+        color: var(--ink-dim);
+        letter-spacing: 0.14em;
+      }
+      .timer-display {
+        font-size: 2.4em;
+        font-weight: 700;
+        letter-spacing: 0.04em;
+        min-width: 3.4em;
+        text-align: center;
+      }
+      .timer.warning .timer-display {
+        color: var(--alert);
+        animation: blink 1.1s steps(2, start) infinite;
+      }
+      .timer.finished .timer-display {
+        color: var(--ink-dim);
+      }
+      .timer-end {
+        display: none;
+        color: var(--alert);
+        font-weight: 700;
+      }
+      .timer.finished .timer-end {
+        display: inline;
+      }
+      .timer-controls {
+        display: flex;
+        align-items: center;
+        gap: 0.4em;
+        font-size: 0.85em;
+      }
+      .timer-controls input {
+        width: 4em;
+        padding: 0.25em 0.4em;
+        border-radius: 6px;
+        border: 1px solid var(--panel-edge);
+        background: var(--panel);
+        color: var(--ink);
+        font: inherit;
+        text-align: right;
+      }
+      .timer-controls button {
+        padding: 0.3em 0.8em;
+        border-radius: 6px;
+        border: 1px solid var(--panel-edge);
+        background: var(--panel);
+        color: var(--ink-dim);
+        font: inherit;
+        cursor: pointer;
+      }
+      .timer-controls button:not([disabled]):hover {
+        border-color: var(--ink-dim);
+        color: var(--ink);
+      }
+      .timer-controls button[disabled],
+      .timer-controls input[disabled] {
+        opacity: 0.5;
+        cursor: default;
+      }
       .link {
         display: none;
         align-items: center;
@@ -249,6 +320,25 @@
   <body>
     <header>
       <h1><span class="sign">聖クロノス総合病院</span>感染制御<span class="em">対策本部</span></h1>
+      <div class="timer" id="timer">
+        <span class="timer-label">残り</span>
+        <span class="timer-display" id="timer-display">80:00</span>
+        <span class="timer-end">時間切れ</span>
+        <div class="timer-controls">
+          <input
+            id="timer-minutes"
+            type="number"
+            min="1"
+            max="999"
+            step="1"
+            value="80"
+            aria-label="制限時間（分）"
+          />
+          <span>分</span>
+          <button type="button" id="timer-toggle">スタート</button>
+          <button type="button" id="timer-reset">初期値に戻す</button>
+        </div>
+      </div>
       <div class="status">
         <div class="link" id="link">接続断</div>
         <div class="clock" id="clock">--:--:--</div>
@@ -417,6 +507,222 @@
           }
         };
 
+        /**
+         * 残り時間のタイマー。走っている間は「終わる時刻」を持ち、残りは毎秒そこから引き直す。
+         * 1秒ずつ減らす方式だと、タブが裏に回ってsetIntervalが間引かれたときに遅れるため。
+         * 状態は localStorage に置き、再読み込みしても続きから動く（保存できなくても動き続ける）。
+         * 進捗ボード（dashboard.html）と同じキーを使うので、同じオリジンならどちらのページで
+         * 操作しても同じ残り時間が出る。両方を同時に開くとアナウンスが二重に鳴るが、許容する。
+         */
+        const TIMER_KEY = "hellIctDashboardTimer";
+        const DEFAULT_MINUTES = 80;
+        const MAX_MINUTES = 999;
+        const WARNING_MS = 10 * 60 * 1000;
+
+        const isMinutes = (value) => Number.isInteger(value) && value >= 1 && value <= MAX_MINUTES;
+
+        const initialTimer = (minutes) => ({ minutes, remainingMs: minutes * 60000, endsAt: null });
+
+        /** localStorage から読んだ値は形を確かめてから使う。壊れていれば初期値へ戻す。 */
+        const parseTimer = (raw) => {
+          try {
+            const data = JSON.parse(raw);
+            if (!data || !isMinutes(data.minutes)) return null;
+            if (!Number.isFinite(data.remainingMs) || data.remainingMs < 0) return null;
+            if (data.endsAt !== null && !Number.isFinite(data.endsAt)) return null;
+            return { minutes: data.minutes, remainingMs: data.remainingMs, endsAt: data.endsAt };
+          } catch {
+            return null;
+          }
+        };
+
+        const remainingOf = (state, now) =>
+          state.endsAt === null ? state.remainingMs : Math.max(0, state.endsAt - now);
+
+        const formatRemaining = (ms) => {
+          const total = Math.ceil(ms / 1000);
+          return (
+            String(Math.floor(total / 60)).padStart(2, "0") +
+            ":" +
+            String(total % 60).padStart(2, "0")
+          );
+        };
+
+        const timerBox = document.getElementById("timer");
+        const timerDisplay = document.getElementById("timer-display");
+        const timerMinutes = document.getElementById("timer-minutes");
+        const timerToggle = document.getElementById("timer-toggle");
+        const timerReset = document.getElementById("timer-reset");
+
+        const loadTimer = () => {
+          try {
+            return parseTimer(localStorage.getItem(TIMER_KEY)) || initialTimer(DEFAULT_MINUTES);
+          } catch {
+            return initialTimer(DEFAULT_MINUTES);
+          }
+        };
+        let timerState = loadTimer();
+
+        /**
+         * 残り時間が10分の倍数（…, 20:00, 10:00, 00:00）に達するたびに流すアナウンス。「鳴らし済みの区切り」を持ち、
+         * 走行中に残りが新しい区切りを下向きにまたいだら1回だけ読み上げる（スタート時点の残りがちょうど倍数でも読まない）。
+         * 読み込み直後・初期値に戻す・分数変更では現在の残りに合わせるだけで、過ぎた区切りは遡って読まない。
+         * 読み上げはブラウザ内蔵の Web Speech API。使えない環境では Web Audio で合成したチャイムに替える。
+         * どちらもクリックが無いと鳴らせないため、ページ上のクリックで用意する
+         * （再読み込み後は、どこかを一度クリックするまで鳴らない）。音が出せなくてもタイマーは止めない。
+         */
+        const CHIME_INTERVAL_MS = 10 * 60 * 1000;
+        // 残りが減って区切りをまたぐと1増える（残り10:00ちょうどで増え、10:01ではまだ増えない）。
+        const chimeMarkOf = (state, now) => -Math.ceil(remainingOf(state, now) / CHIME_INTERVAL_MS);
+        let chimedMark = chimeMarkOf(timerState, Date.now());
+        let audioContext = null;
+
+        let speechUnlocked = false;
+
+        const prepareAudio = () => {
+          // 読み上げもユーザー操作の後でないと無視されるため、最初のクリックで空の発話を1回流して解錠する。
+          if (!speechUnlocked && canSpeak()) {
+            speechUnlocked = true;
+            try {
+              window.speechSynthesis.speak(new window.SpeechSynthesisUtterance(""));
+            } catch {
+              // 解錠できなくても、タイマーはそのまま動く。
+            }
+          }
+          try {
+            const AudioContextClass = window.AudioContext || window.webkitAudioContext;
+            if (!AudioContextClass) return;
+            if (!audioContext) audioContext = new AudioContextClass();
+            if (audioContext.state === "suspended") audioContext.resume().catch(() => {});
+          } catch {
+            // 音が出せない環境でも、タイマーはそのまま動く。
+          }
+        };
+
+        const playChime = () => {
+          // 止まったままの AudioContext に予約すると、再開した瞬間に溜まった分がまとめて鳴るので飛ばす。
+          if (!audioContext || audioContext.state !== "running") return;
+          try {
+            const start = audioContext.currentTime;
+            const oscillator = audioContext.createOscillator();
+            const gain = audioContext.createGain();
+            oscillator.type = "sine";
+            oscillator.frequency.value = 880;
+            // 立ち上がりは短く、1.4秒かけて指数的に消える「ピーン」。
+            gain.gain.setValueAtTime(0.0001, start);
+            gain.gain.exponentialRampToValueAtTime(0.3, start + 0.02);
+            gain.gain.exponentialRampToValueAtTime(0.0001, start + 1.4);
+            oscillator.connect(gain).connect(audioContext.destination);
+            oscillator.start(start);
+            oscillator.stop(start + 1.4);
+          } catch {
+            // 鳴らせなくても、タイマーはそのまま動く。
+          }
+        };
+
+        const announcementText = (minutes, remainingMin) =>
+          remainingMin > 0
+            ? `${minutes - remainingMin}分経過、のこり${remainingMin}分です`
+            : `${minutes}分経過、ゲーム終了です`;
+
+        const canSpeak = () =>
+          Boolean(window.speechSynthesis) && typeof window.SpeechSynthesisUtterance === "function";
+
+        // 声は Kyoko を優先し、無ければ日本語の声、それも無ければ lang 指定だけでブラウザに任せる。
+        let speechVoice = null;
+        const pickVoice = () => {
+          try {
+            const voices = window.speechSynthesis.getVoices();
+            speechVoice =
+              voices.find((voice) => voice.name.includes("Kyoko")) ||
+              voices.find((voice) => voice.lang.replace("_", "-") === "ja-JP") ||
+              null;
+          } catch {
+            speechVoice = null;
+          }
+        };
+        // 声の一覧は後から届くことがあるので、届いたら選び直す。
+        if (canSpeak()) {
+          pickVoice();
+          try {
+            window.speechSynthesis.addEventListener("voiceschanged", pickVoice);
+          } catch {
+            // 取り直せなくても、lang 指定だけで読み上げる。
+          }
+        }
+
+        const announce = (text) => {
+          if (!canSpeak()) {
+            playChime();
+            return;
+          }
+          try {
+            const utterance = new window.SpeechSynthesisUtterance(text);
+            utterance.lang = "ja-JP";
+            if (speechVoice) utterance.voice = speechVoice;
+            // 前の読み上げが残っていても重ねない。
+            window.speechSynthesis.cancel();
+            window.speechSynthesis.speak(utterance);
+          } catch {
+            playChime();
+          }
+        };
+
+        const setTimer = (next) => {
+          timerState = next;
+          try {
+            localStorage.setItem(TIMER_KEY, JSON.stringify(next));
+          } catch {
+            // 保存できなくても、このタブを開いている間は動く。
+          }
+          renderTimer();
+        };
+
+        const renderTimer = () => {
+          const now = Date.now();
+          const remaining = remainingOf(timerState, now);
+          // 時間切れと区切りが重なっても、止める前にここで1回だけ読み上げる（止めた後は走っていないので読まない）。
+          const mark = chimeMarkOf(timerState, now);
+          if (timerState.endsAt !== null && mark > chimedMark)
+            announce(announcementText(timerState.minutes, -mark * 10));
+          chimedMark = mark;
+          // 0に達したら止まった状態へ落とす（再読み込みしても時間切れのまま）。
+          if (timerState.endsAt !== null && remaining === 0) {
+            setTimer({ minutes: timerState.minutes, remainingMs: 0, endsAt: null });
+            return;
+          }
+          const running = timerState.endsAt !== null;
+          timerDisplay.textContent = formatRemaining(remaining);
+          timerBox.classList.toggle("finished", remaining === 0);
+          timerBox.classList.toggle("warning", remaining > 0 && remaining <= WARNING_MS);
+          timerToggle.textContent = running ? "一時停止" : "スタート";
+          timerToggle.disabled = remaining === 0;
+          timerMinutes.disabled = running;
+          if (document.activeElement !== timerMinutes)
+            timerMinutes.value = String(timerState.minutes);
+        };
+
+        document.addEventListener("click", prepareAudio);
+        timerToggle.addEventListener("click", () => {
+          const now = Date.now();
+          const remaining = remainingOf(timerState, now);
+          setTimer(
+            timerState.endsAt === null
+              ? { minutes: timerState.minutes, remainingMs: remaining, endsAt: now + remaining }
+              : { minutes: timerState.minutes, remainingMs: remaining, endsAt: null },
+          );
+        });
+        timerReset.addEventListener("click", () => setTimer(initialTimer(timerState.minutes)));
+        // 分を変えたら、止まっているタイマーをその分数で置き直す。走っている間は入力できない。
+        timerMinutes.addEventListener("change", () => {
+          const minutes = Number(timerMinutes.value);
+          if (timerState.endsAt === null && isMinutes(minutes)) {
+            setTimer(initialTimer(minutes));
+          } else {
+            timerMinutes.value = String(timerState.minutes);
+          }
+        });
+
         const tickClock = () => {
           const now = new Date();
           clock.textContent = [now.getHours(), now.getMinutes(), now.getSeconds()]
@@ -428,7 +734,11 @@
         render({ teams: [] });
         window.addEventListener("resize", layoutTiles);
         tickClock();
-        setInterval(tickClock, 1000);
+        renderTimer();
+        setInterval(() => {
+          tickClock();
+          renderTimer();
+        }, 1000);
 
         /**
          * ポーリングはタブが見えている間だけ回す（hell-ict#22）。裏に回ったタブでも
