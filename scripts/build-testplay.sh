@@ -6,6 +6,7 @@
 # - `/`（public/index.html と public/app/）: 本番のVueアプリ（apps/web のViteビルド。Issue #238）
 # - `/assets/images/production/`: production画像（Vueが参照する）
 # - `/dashboard.html`: 会場前面ディスプレイ用の進捗ボード
+# - `/tiles.html`: 会場前面ディスプレイ用の進捗タイル（40チームまで1画面。色で現在地を示す）
 # - `/ranking.html`: デブリーフィングで会場前面へ映す番付と申し送り（GMトークンで守る）
 # - `_headers`: Assetsのレスポンスヘッダー（配信はされない。apps/worker/_headers）
 #
@@ -22,6 +23,7 @@ repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 assets_src="${repo_root}/assets/images/production"
 dashboard_html="${repo_root}/apps/worker/dashboard/index.html"
 ranking_html="${repo_root}/apps/worker/dashboard/ranking.html"
+tiles_html="${repo_root}/apps/worker/dashboard/tiles.html"
 assets_headers="${repo_root}/apps/worker/_headers"
 public_dir="${repo_root}/apps/worker/public"
 
@@ -46,6 +48,7 @@ cp -R "${assets_src}"/. "${public_dir}/assets/images/production/"
 # ソースはapps/worker/dashboard/に置き、生成のたびにコピーする。
 cp "${dashboard_html}" "${public_dir}/dashboard.html"
 cp "${ranking_html}" "${public_dir}/ranking.html"
+cp "${tiles_html}" "${public_dir}/tiles.html"
 
 # Assetsのレスポンスヘッダー（production画像のキャッシュ。Issue #33）。Cloudflareは
 # 配信物のルートにある _headers だけを読み、それ自体は配信しない。
